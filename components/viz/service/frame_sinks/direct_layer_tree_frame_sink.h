@@ -6,6 +6,7 @@
 #define COMPONENTS_VIZ_SERVICE_FRAME_SINKS_DIRECT_LAYER_TREE_FRAME_SINK_H_
 
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "cc/trees/layer_tree_frame_sink.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
@@ -16,14 +17,10 @@
 #include "services/viz/privileged/interfaces/compositing/display_private.mojom.h"
 #include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom.h"
 
-namespace cc {
-class LocalSurfaceIdAllocator;
-class FrameSinkManagerImpl;
-}  // namespace cc
-
 namespace viz {
 class CompositorFrameSinkSupportManager;
 class Display;
+class FrameSinkManagerImpl;
 
 // This class submits compositor frames to an in-process Display, with the
 // client's frame being the root surface of the Display.
@@ -33,6 +30,26 @@ class VIZ_SERVICE_EXPORT DirectLayerTreeFrameSink
       public ExternalBeginFrameSourceClient,
       public DisplayClient {
  public:
+  // This class is used to handle the graphics pipeline related metrics
+  // reporting.
+  class PipelineReporting {
+   public:
+    PipelineReporting(BeginFrameArgs args, base::TimeTicks now);
+    ~PipelineReporting();
+
+    void Report();
+
+    int64_t trace_id() const { return trace_id_; }
+
+   private:
+    // The trace id of a BeginFrame which is used to track its progress on the
+    // client side.
+    int64_t trace_id_;
+
+    // The time stamp for the begin frame to arrive on client side.
+    base::TimeTicks frame_time_;
+  };
+
   // The underlying Display, FrameSinkManagerImpl, and LocalSurfaceIdAllocator
   // must outlive this class.
   DirectLayerTreeFrameSink(
@@ -45,7 +62,6 @@ class VIZ_SERVICE_EXPORT DirectLayerTreeFrameSink
       scoped_refptr<RasterContextProvider> worker_context_provider,
       scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-      SharedBitmapManager* shared_bitmap_manager,
       bool use_viz_hit_test);
   ~DirectLayerTreeFrameSink() override;
 
@@ -65,16 +81,17 @@ class VIZ_SERVICE_EXPORT DirectLayerTreeFrameSink
   void DisplayDidDrawAndSwap() override;
   void DisplayDidReceiveCALayerParams(
       const gfx::CALayerParams& ca_layer_params) override;
+  void DisplayDidCompleteSwapWithSize(const gfx::Size& pixel_size) override;
+  void DidSwapAfterSnapshotRequestReceived(
+      const std::vector<ui::LatencyInfo>& latency_info) override;
 
  private:
   // mojom::CompositorFrameSinkClient implementation:
   void DidReceiveCompositorFrameAck(
       const std::vector<ReturnedResource>& resources) override;
-  void DidPresentCompositorFrame(uint32_t presentation_token,
-                                 base::TimeTicks time,
-                                 base::TimeDelta refresh,
-                                 uint32_t flags) override;
-  void DidDiscardCompositorFrame(uint32_t presentation_token) override;
+  void DidPresentCompositorFrame(
+      uint32_t presentation_token,
+      const gfx::PresentationFeedback& feedback) override;
   void OnBeginFrame(const BeginFrameArgs& args) override;
   void ReclaimResources(
       const std::vector<ReturnedResource>& resources) override;
@@ -86,8 +103,6 @@ class VIZ_SERVICE_EXPORT DirectLayerTreeFrameSink
   // ContextLostObserver implementation:
   void OnContextLost() override;
 
-  mojom::HitTestRegionListPtr CreateHitTestData(
-      const CompositorFrame& frame) const;
   void DidReceiveCompositorFrameAckInternal(
       const std::vector<ReturnedResource>& resources);
 
@@ -97,7 +112,6 @@ class VIZ_SERVICE_EXPORT DirectLayerTreeFrameSink
   std::unique_ptr<CompositorFrameSinkSupport> support_;
 
   const FrameSinkId frame_sink_id_;
-  LocalSurfaceId local_surface_id_;
   CompositorFrameSinkSupportManager* const support_manager_;
   FrameSinkManagerImpl* frame_sink_manager_;
   ParentLocalSurfaceIdAllocator parent_local_surface_id_allocator_;
@@ -109,6 +123,8 @@ class VIZ_SERVICE_EXPORT DirectLayerTreeFrameSink
   float device_scale_factor_ = 1.f;
   bool is_lost_ = false;
   std::unique_ptr<ExternalBeginFrameSource> begin_frame_source_;
+  // Use this map to record the time when client received the BeginFrameArgs.
+  base::flat_map<int64_t, PipelineReporting> pipeline_reporting_frame_times_;
   base::WeakPtrFactory<DirectLayerTreeFrameSink> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DirectLayerTreeFrameSink);

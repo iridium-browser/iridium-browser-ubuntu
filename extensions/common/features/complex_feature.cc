@@ -44,8 +44,7 @@ Feature::Availability ComplexFeature::IsAvailableToManifest(
   if (first_availability.is_available())
     return first_availability;
 
-  for (FeatureList::const_iterator it = features_.begin() + 1;
-       it != features_.end(); ++it) {
+  for (auto it = features_.cbegin() + 1; it != features_.cend(); ++it) {
     Availability availability = (*it)->IsAvailableToManifest(
         hashed_id, type, location, manifest_version, platform);
     if (availability.is_available())
@@ -66,8 +65,7 @@ Feature::Availability ComplexFeature::IsAvailableToContext(
   if (first_availability.is_available())
     return first_availability;
 
-  for (FeatureList::const_iterator it = features_.begin() + 1;
-       it != features_.end(); ++it) {
+  for (auto it = features_.cbegin() + 1; it != features_.cend(); ++it) {
     Availability availability =
         (*it)->IsAvailableToContext(extension, context, url, platform);
     if (availability.is_available())
@@ -84,8 +82,7 @@ Feature::Availability ComplexFeature::IsAvailableToEnvironment() const {
   if (first_availability.is_available())
     return first_availability;
 
-  for (FeatureList::const_iterator iter = features_.begin() + 1;
-       iter != features_.end(); ++iter) {
+  for (auto iter = features_.cbegin() + 1; iter != features_.cend(); ++iter) {
     Availability availability = (*iter)->IsAvailableToEnvironment();
     if (availability.is_available())
       return availability;
@@ -95,21 +92,17 @@ Feature::Availability ComplexFeature::IsAvailableToEnvironment() const {
   return first_availability;
 }
 
-bool ComplexFeature::IsIdInBlacklist(const HashedExtensionId& hashed_id) const {
-  for (FeatureList::const_iterator it = features_.begin();
-       it != features_.end();
-       ++it) {
-    if ((*it)->IsIdInBlacklist(hashed_id))
+bool ComplexFeature::IsIdInBlocklist(const HashedExtensionId& hashed_id) const {
+  for (auto it = features_.cbegin(); it != features_.cend(); ++it) {
+    if ((*it)->IsIdInBlocklist(hashed_id))
       return true;
   }
   return false;
 }
 
-bool ComplexFeature::IsIdInWhitelist(const HashedExtensionId& hashed_id) const {
-  for (FeatureList::const_iterator it = features_.begin();
-       it != features_.end();
-       ++it) {
-    if ((*it)->IsIdInWhitelist(hashed_id))
+bool ComplexFeature::IsIdInAllowlist(const HashedExtensionId& hashed_id) const {
+  for (auto it = features_.cbegin(); it != features_.cend(); ++it) {
+    if ((*it)->IsIdInAllowlist(hashed_id))
       return true;
   }
   return false;

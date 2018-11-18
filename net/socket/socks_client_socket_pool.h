@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
 #include "net/dns/host_resolver.h"
@@ -107,7 +108,6 @@ class SOCKSConnectJob : public ConnectJob {
   HostResolver* const resolver_;
 
   State next_state_;
-  CompletionCallback callback_;
   std::unique_ptr<ClientSocketHandle> transport_socket_handle_;
   std::unique_ptr<StreamSocket> socket_;
 
@@ -135,14 +135,13 @@ class NET_EXPORT_PRIVATE SOCKSClientSocketPool
                     const SocketTag& socket_tag,
                     RespectLimits respect_limits,
                     ClientSocketHandle* handle,
-                    const CompletionCallback& callback,
+                    CompletionOnceCallback callback,
                     const NetLogWithSource& net_log) override;
 
   void RequestSockets(const std::string& group_name,
                       const void* params,
                       int num_sockets,
-                      const NetLogWithSource& net_log,
-                      HttpRequestInfo::RequestMotivation motivation) override;
+                      const NetLogWithSource& net_log) override;
 
   void SetPriority(const std::string& group_name,
                    ClientSocketHandle* handle,

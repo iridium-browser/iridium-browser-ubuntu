@@ -23,10 +23,7 @@ RegExpMacroAssembler::RegExpMacroAssembler(Isolate* isolate, Zone* zone)
       isolate_(isolate),
       zone_(zone) {}
 
-
-RegExpMacroAssembler::~RegExpMacroAssembler() {
-}
-
+RegExpMacroAssembler::~RegExpMacroAssembler() = default;
 
 int RegExpMacroAssembler::CaseInsensitiveCompareUC16(Address byte_offset1,
                                                      Address byte_offset2,
@@ -117,10 +114,7 @@ NativeRegExpMacroAssembler::NativeRegExpMacroAssembler(Isolate* isolate,
                                                        Zone* zone)
     : RegExpMacroAssembler(isolate, zone) {}
 
-
-NativeRegExpMacroAssembler::~NativeRegExpMacroAssembler() {
-}
-
+NativeRegExpMacroAssembler::~NativeRegExpMacroAssembler() = default;
 
 bool NativeRegExpMacroAssembler::CanReadUnaligned() {
   return FLAG_enable_regexp_unaligned_accesses && !slow_safe();
@@ -166,8 +160,8 @@ int NativeRegExpMacroAssembler::CheckStackGuardState(
   int return_value = 0;
   // Prepare for possible GC.
   HandleScope handles(isolate);
-  Handle<Code> code_handle(re_code);
-  Handle<String> subject_handle(*subject);
+  Handle<Code> code_handle(re_code, isolate);
+  Handle<String> subject_handle(*subject, isolate);
   bool is_one_byte = subject_handle->IsOneByteRepresentationUnderneath();
 
   StackLimitCheck check(isolate);
@@ -359,8 +353,8 @@ Address NativeRegExpMacroAssembler::GrowStack(Address stack_pointer,
   DCHECK(stack_pointer <= old_stack_base);
   DCHECK(static_cast<size_t>(old_stack_base - stack_pointer) <= size);
   Address new_stack_base = regexp_stack->EnsureCapacity(size * 2);
-  if (new_stack_base == nullptr) {
-    return nullptr;
+  if (new_stack_base == kNullAddress) {
+    return kNullAddress;
   }
   *stack_base = new_stack_base;
   intptr_t stack_content_size = old_stack_base - stack_pointer;

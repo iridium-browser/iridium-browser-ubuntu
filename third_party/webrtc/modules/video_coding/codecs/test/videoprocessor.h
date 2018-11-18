@@ -16,10 +16,11 @@
 #include <string>
 #include <vector>
 
+#include "api/test/videocodec_test_fixture.h"
+#include "api/test/videocodec_test_stats.h"
+#include "api/video/video_bitrate_allocator.h"
 #include "api/video/video_frame.h"
-#include "common_video/include/video_bitrate_allocator.h"
-#include "modules/video_coding/codecs/test/stats.h"
-#include "modules/video_coding/codecs/test/test_config.h"
+#include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/utility/ivf_file_writer.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/constructormagic.h"
@@ -45,8 +46,8 @@ class VideoProcessor {
   VideoProcessor(webrtc::VideoEncoder* encoder,
                  VideoDecoderList* decoders,
                  FrameReader* input_frame_reader,
-                 const TestConfig& config,
-                 Stats* stats,
+                 const VideoCodecTestFixture::Config& config,
+                 VideoCodecTestStats* stats,
                  IvfFileWriterList* encoded_frame_writers,
                  FrameWriterList* decoded_frame_writers);
   ~VideoProcessor();
@@ -132,17 +133,7 @@ class VideoProcessor {
       RTC_DCHECK(task_queue_);
     }
 
-    int32_t Decoded(webrtc::VideoFrame& image) override {
-      // Post the callback to the right task queue, if needed.
-      if (!task_queue_->IsCurrent()) {
-        task_queue_->PostTask([this, image]() {
-          video_processor_->FrameDecoded(image, simulcast_svc_idx_);
-        });
-        return 0;
-      }
-      video_processor_->FrameDecoded(image, simulcast_svc_idx_);
-      return 0;
-    }
+    int32_t Decoded(webrtc::VideoFrame& image) override;
 
     int32_t Decoded(webrtc::VideoFrame& image,
                     int64_t decode_time_ms) override {
@@ -150,8 +141,8 @@ class VideoProcessor {
     }
 
     void Decoded(webrtc::VideoFrame& image,
-                 rtc::Optional<int32_t> decode_time_ms,
-                 rtc::Optional<uint8_t> qp) override {
+                 absl::optional<int32_t> decode_time_ms,
+                 absl::optional<uint8_t> qp) override {
       Decoded(image);
     }
 
@@ -180,15 +171,15 @@ class VideoProcessor {
       bool inter_layer_predicted) RTC_RUN_ON(sequence_checker_);
 
   // Test input/output.
-  TestConfig config_ RTC_GUARDED_BY(sequence_checker_);
+  VideoCodecTestFixture::Config config_ RTC_GUARDED_BY(sequence_checker_);
   const size_t num_simulcast_or_spatial_layers_;
-  Stats* const stats_;
+  VideoCodecTestStats* const stats_;
 
   // Codecs.
   webrtc::VideoEncoder* const encoder_;
   VideoDecoderList* const decoders_;
   const std::unique_ptr<VideoBitrateAllocator> bitrate_allocator_;
-  BitrateAllocation bitrate_allocation_ RTC_GUARDED_BY(sequence_checker_);
+  VideoBitrateAllocation bitrate_allocation_ RTC_GUARDED_BY(sequence_checker_);
   uint32_t framerate_fps_ RTC_GUARDED_BY(sequence_checker_);
 
   // Adapters for the codec callbacks.
@@ -221,7 +212,6 @@ class VideoProcessor {
   // and decoded bitstreams. Each frame writer is enabled by being non-null.
   IvfFileWriterList* const encoded_frame_writers_;
   FrameWriterList* const decoded_frame_writers_;
-  rtc::Buffer tmp_i420_buffer_;  // Temp storage for format conversion.
 
   // Metadata for inputed/encoded/decoded frames. Used for frame identification,
   // frame drop detection, etc. We assume that encoded/decoded frames are
@@ -237,6 +227,9 @@ class VideoProcessor {
   std::vector<bool> first_decoded_frame_ RTC_GUARDED_BY(sequence_checker_);
   // simulcast_svc_idx -> frame_number.
   std::vector<size_t> last_decoded_frame_num_ RTC_GUARDED_BY(sequence_checker_);
+  // simulcast_svc_idx -> buffer.
+  std::vector<rtc::Buffer> decoded_frame_buffer_
+      RTC_GUARDED_BY(sequence_checker_);
 
   // Time spent in frame encode callback. It is accumulated for layers and
   // reset when frame encode starts. When next layer is encoded post-encode time

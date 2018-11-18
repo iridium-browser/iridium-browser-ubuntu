@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/containers/flat_map.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
 #include "base/synchronization/lock.h"
@@ -128,14 +129,6 @@ void ClientProcessImpl::RequestGlobalMemoryDump_NoCallback(
       mojom::Coordinator::RequestGlobalMemoryDumpAndAppendToTraceCallback());
 }
 
-void ClientProcessImpl::EnableHeapProfiling(
-    base::trace_event::HeapProfilingMode mode,
-    EnableHeapProfilingCallback callback) {
-  std::move(callback).Run(
-      base::trace_event::MemoryDumpManager::GetInstance()->EnableHeapProfiling(
-          mode));
-}
-
 void ClientProcessImpl::RequestOSMemoryDump(
     mojom::MemoryMapOption mmap_option,
     const std::vector<base::ProcessId>& pids,
@@ -162,7 +155,7 @@ void ClientProcessImpl::RequestOSMemoryDump(
 
 void ClientProcessImpl::PerformOSMemoryDump(OSMemoryDumpArgs args) {
   bool global_success = true;
-  std::unordered_map<base::ProcessId, mojom::RawOSMemDumpPtr> results;
+  base::flat_map<base::ProcessId, mojom::RawOSMemDumpPtr> results;
   for (const base::ProcessId& pid : args.pids) {
     mojom::RawOSMemDumpPtr result = mojom::RawOSMemDump::New();
     result->platform_private_footprint = mojom::PlatformPrivateFootprint::New();

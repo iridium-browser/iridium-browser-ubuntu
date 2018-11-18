@@ -6,12 +6,16 @@
 
 #include <memory>
 
+#include "components/download/internal/background_service/scheduler/battery_status_listener_impl.h"
+#include "components/download/internal/background_service/scheduler/network_status_listener_impl.h"
+#include "services/network/test/test_network_connection_tracker.h"
+
 namespace download {
 namespace test {
 
-class FakeBatteryStatusListener : public BatteryStatusListener {
+class FakeBatteryStatusListener : public BatteryStatusListenerImpl {
  public:
-  FakeBatteryStatusListener() : BatteryStatusListener(base::TimeDelta()) {}
+  FakeBatteryStatusListener() : BatteryStatusListenerImpl(base::TimeDelta()) {}
   ~FakeBatteryStatusListener() override = default;
 
   // BatteryStatusListener implementation.
@@ -22,9 +26,12 @@ class FakeBatteryStatusListener : public BatteryStatusListener {
 };
 
 TestDeviceStatusListener::TestDeviceStatusListener()
-    : DeviceStatusListener(base::TimeDelta(), /* startup_delay */
-                           base::TimeDelta(), /* online_delay */
-                           std::make_unique<FakeBatteryStatusListener>()),
+    : DeviceStatusListener(
+          base::TimeDelta(), /* startup_delay */
+          base::TimeDelta(), /* online_delay */
+          std::make_unique<FakeBatteryStatusListener>(),
+          std::make_unique<NetworkStatusListenerImpl>(
+              network::TestNetworkConnectionTracker::GetInstance())),
       weak_ptr_factory_(this) {}
 
 TestDeviceStatusListener::~TestDeviceStatusListener() {
@@ -50,8 +57,8 @@ void TestDeviceStatusListener::Start(DeviceStatusListener::Observer* observer) {
 
   // Simulates the delay after start up.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&TestDeviceStatusListener::StartAfterDelay,
-                            weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&TestDeviceStatusListener::StartAfterDelay,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
 void TestDeviceStatusListener::StartAfterDelay() {

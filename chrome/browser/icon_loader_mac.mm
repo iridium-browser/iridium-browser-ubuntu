@@ -8,9 +8,8 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_util_mac.h"

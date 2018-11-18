@@ -22,15 +22,14 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
+#include "components/gcm_driver/account_tracker.h"
 #include "components/gcm_driver/gcm_account_tracker.h"
 #include "components/gcm_driver/gcm_channel_status_syncer.h"
 #include "components/gcm_driver/gcm_client_factory.h"
 #include "components/gcm_driver/gcm_desktop_utils.h"
 #include "components/gcm_driver/gcm_driver_desktop.h"
-#include "components/signin/core/browser/signin_manager.h"
-#include "google_apis/gaia/account_tracker.h"
-#include "google_apis/gaia/identity_provider.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "services/identity/public/cpp/identity_manager.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #endif
 
 namespace gcm {
@@ -38,22 +37,26 @@ namespace gcm {
 #if !BUILDFLAG(USE_GCM_FROM_PLATFORM)
 // Identity observer only has actual work to do when the user is actually signed
 // in. It ensures that account tracker is taking
-class GCMProfileService::IdentityObserver : public IdentityProvider::Observer {
+class GCMProfileService::IdentityObserver
+    : public identity::IdentityManager::Observer {
  public:
-  IdentityObserver(ProfileIdentityProvider* identity_provider,
-                   net::URLRequestContextGetter* request_context,
-                   GCMDriver* driver);
+  IdentityObserver(
+      identity::IdentityManager* identity_manager,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      GCMDriver* driver);
   ~IdentityObserver() override;
 
-  // IdentityProvider::Observer:
-  void OnActiveAccountLogin() override;
-  void OnActiveAccountLogout() override;
+  // identity::IdentityManager::Observer:
+  void OnPrimaryAccountSet(const AccountInfo& primary_account_info) override;
+  void OnPrimaryAccountCleared(
+      const AccountInfo& previous_primary_account_info) override;
 
  private:
-  void StartAccountTracker(net::URLRequestContextGetter* request_context);
+  void StartAccountTracker(
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
   GCMDriver* driver_;
-  IdentityProvider* identity_provider_;
+  identity::IdentityManager* identity_manager_;
   std::unique_ptr<GCMAccountTracker> gcm_account_tracker_;
 
   // The account ID that this service is responsible for. Empty when the service
@@ -66,36 +69,37 @@ class GCMProfileService::IdentityObserver : public IdentityProvider::Observer {
 };
 
 GCMProfileService::IdentityObserver::IdentityObserver(
-    ProfileIdentityProvider* identity_provider,
-    net::URLRequestContextGetter* request_context,
+    identity::IdentityManager* identity_manager,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     GCMDriver* driver)
     : driver_(driver),
-      identity_provider_(identity_provider),
+      identity_manager_(identity_manager),
       weak_ptr_factory_(this) {
-  identity_provider_->AddObserver(this);
+  identity_manager_->AddObserver(this);
 
-  OnActiveAccountLogin();
-  StartAccountTracker(request_context);
+  OnPrimaryAccountSet(identity_manager_->GetPrimaryAccountInfo());
+  StartAccountTracker(std::move(url_loader_factory));
 }
 
 GCMProfileService::IdentityObserver::~IdentityObserver() {
   if (gcm_account_tracker_)
     gcm_account_tracker_->Shutdown();
-  identity_provider_->RemoveObserver(this);
+  identity_manager_->RemoveObserver(this);
 }
 
-void GCMProfileService::IdentityObserver::OnActiveAccountLogin() {
+void GCMProfileService::IdentityObserver::OnPrimaryAccountSet(
+    const AccountInfo& primary_account_info) {
   // This might be called multiple times when the password changes.
-  const std::string account_id = identity_provider_->GetActiveAccountId();
-  if (account_id == account_id_)
+  if (primary_account_info.account_id == account_id_)
     return;
-  account_id_ = account_id;
+  account_id_ = primary_account_info.account_id;
 
   // Still need to notify GCMDriver for UMA purpose.
   driver_->OnSignedIn();
 }
 
-void GCMProfileService::IdentityObserver::OnActiveAccountLogout() {
+void GCMProfileService::IdentityObserver::OnPrimaryAccountCleared(
+    const AccountInfo& previous_primary_account_info) {
   account_id_.clear();
 
   // Still need to notify GCMDriver for UMA purpose.
@@ -103,15 +107,15 @@ void GCMProfileService::IdentityObserver::OnActiveAccountLogout() {
 }
 
 void GCMProfileService::IdentityObserver::StartAccountTracker(
-    net::URLRequestContextGetter* request_context) {
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
   if (gcm_account_tracker_)
     return;
 
-  std::unique_ptr<gaia::AccountTracker> gaia_account_tracker(
-      new gaia::AccountTracker(identity_provider_, request_context));
+  std::unique_ptr<AccountTracker> gaia_account_tracker(
+      new AccountTracker(identity_manager_, std::move(url_loader_factory)));
 
-  gcm_account_tracker_.reset(
-      new GCMAccountTracker(std::move(gaia_account_tracker), driver_));
+  gcm_account_tracker_.reset(new GCMAccountTracker(
+      std::move(gaia_account_tracker), identity_manager_, driver_));
 
   gcm_account_tracker_->Start();
 }
@@ -138,24 +142,32 @@ GCMProfileService::GCMProfileService(
 GCMProfileService::GCMProfileService(
     PrefService* prefs,
     base::FilePath path,
-    net::URLRequestContextGetter* request_context,
+    base::RepeatingCallback<
+        void(base::WeakPtr<GCMProfileService>,
+             network::mojom::ProxyResolvingSocketFactoryRequest)>
+        get_socket_factory_callback,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    network::NetworkConnectionTracker* network_connection_tracker,
     version_info::Channel channel,
     const std::string& product_category_for_subtypes,
-    std::unique_ptr<ProfileIdentityProvider> identity_provider,
+    identity::IdentityManager* identity_manager,
     std::unique_ptr<GCMClientFactory> gcm_client_factory,
     const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
     const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,
     scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner)
-    : profile_identity_provider_(std::move(identity_provider)),
-      request_context_(request_context) {
+    : identity_manager_(identity_manager),
+      url_loader_factory_(url_loader_factory) {
   driver_ = CreateGCMDriverDesktop(
       std::move(gcm_client_factory), prefs,
-      path.Append(gcm_driver::kGCMStoreDirname), request_context_, channel,
+      path.Append(gcm_driver::kGCMStoreDirname),
+      base::BindRepeating(get_socket_factory_callback,
+                          weak_ptr_factory_.GetWeakPtr()),
+      url_loader_factory, network_connection_tracker, channel,
       product_category_for_subtypes, ui_task_runner, io_task_runner,
       blocking_task_runner);
 
   identity_observer_.reset(new IdentityObserver(
-      profile_identity_provider_.get(), request_context_, driver_.get()));
+      identity_manager_, url_loader_factory, driver_.get()));
 }
 #endif  // BUILDFLAG(USE_GCM_FROM_PLATFORM)
 
@@ -179,7 +191,7 @@ void GCMProfileService::SetDriverForTesting(std::unique_ptr<GCMDriver> driver) {
 #if !BUILDFLAG(USE_GCM_FROM_PLATFORM)
   if (identity_observer_) {
     identity_observer_ = std::make_unique<IdentityObserver>(
-        profile_identity_provider_.get(), request_context_, driver_.get());
+        identity_manager_, url_loader_factory_, driver.get());
   }
 #endif  // !BUILDFLAG(USE_GCM_FROM_PLATFORM)
 }

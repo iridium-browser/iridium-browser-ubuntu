@@ -6,10 +6,10 @@
 #define CONTENT_RENDERER_MEDIA_WEBRTC_RTC_CERTIFICATE_GENERATOR_H_
 
 #include "base/macros.h"
-#include "third_party/blink/public/platform/web_rtc_certificate.h"
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/web_rtc_certificate_generator.h"
 #include "third_party/blink/public/platform/web_rtc_key_params.h"
-#include "third_party/webrtc/api/optional.h"
+#include "third_party/webrtc/api/peerconnectioninterface.h"
 
 namespace content {
 
@@ -32,17 +32,11 @@ class RTCCertificateGenerator : public blink::WebRTCCertificateGenerator {
       std::unique_ptr<blink::WebRTCCertificateCallback> observer,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner) override;
   bool IsSupportedKeyParams(const blink::WebRTCKeyParams& key_params) override;
-  std::unique_ptr<blink::WebRTCCertificate> FromPEM(
+  rtc::scoped_refptr<rtc::RTCCertificate> FromPEM(
       blink::WebString pem_private_key,
       blink::WebString pem_certificate) override;
 
  private:
-  void generateCertificateWithOptionalExpiration(
-      const blink::WebRTCKeyParams& key_params,
-      const rtc::Optional<uint64_t>& expires_ms,
-      std::unique_ptr<blink::WebRTCCertificateCallback> observer,
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
-
   DISALLOW_COPY_AND_ASSIGN(RTCCertificateGenerator);
 };
 

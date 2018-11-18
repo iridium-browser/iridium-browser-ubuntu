@@ -31,9 +31,6 @@ public:
 
     ~GrMockTexture() override {}
 
-    GrBackendObject getTextureHandle() const override {
-        return reinterpret_cast<GrBackendObject>(&fInfo);
-    }
     GrBackendTexture getBackendTexture() const override {
         return GrBackendTexture(this->width(), this->height(), this->texturePriv().mipMapped(),
                                 fInfo);
@@ -49,8 +46,7 @@ protected:
     GrMockTexture(GrMockGpu* gpu, const GrSurfaceDesc& desc, GrMipMapsStatus mipMapsStatus,
                   const GrMockTextureInfo& info)
             : GrSurface(gpu, desc)
-            , INHERITED(gpu, desc, kTexture2DSampler_GrSLType, GrSamplerState::Filter::kMipMap,
-                        mipMapsStatus)
+            , INHERITED(gpu, desc, GrTextureType::k2D, mipMapsStatus)
             , fInfo(info) {}
 
     void onRelease() override {
@@ -118,10 +114,6 @@ public:
         return {this->width(), this->height(), this->numColorSamples(), numStencilBits, fInfo};
     }
 
-    GrBackendObject getRenderTargetHandle() const override {
-        return reinterpret_cast<GrBackendObject>(&fInfo);
-    }
-
 protected:
     // constructor for subclasses
     GrMockRenderTarget(GrMockGpu* gpu, const GrSurfaceDesc& desc,
@@ -155,8 +147,6 @@ public:
             , GrMockRenderTarget(gpu, desc, rtInfo) {
         this->registerWithCacheWrapped();
     }
-
-    GrBackendObject getRenderTargetHandle() const override { return 0; }
 
     GrTexture* asTexture() override { return this; }
     GrRenderTarget* asRenderTarget() override { return this; }

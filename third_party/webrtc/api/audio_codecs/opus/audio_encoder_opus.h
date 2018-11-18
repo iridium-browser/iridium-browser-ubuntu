@@ -14,11 +14,12 @@
 #include <memory>
 #include <vector>
 
+#include "absl/types/optional.h"
 #include "api/audio_codecs/audio_codec_pair_id.h"
 #include "api/audio_codecs/audio_encoder.h"
 #include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/opus/audio_encoder_opus_config.h"
-#include "api/optional.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
@@ -26,16 +27,16 @@ namespace webrtc {
 // CreateAudioEncoderFactory<...>().
 //
 // NOTE: This struct is still under development and may change without notice.
-struct AudioEncoderOpus {
+struct RTC_EXPORT AudioEncoderOpus {
   using Config = AudioEncoderOpusConfig;
-  static rtc::Optional<AudioEncoderOpusConfig> SdpToConfig(
+  static absl::optional<AudioEncoderOpusConfig> SdpToConfig(
       const SdpAudioFormat& audio_format);
   static void AppendSupportedEncoders(std::vector<AudioCodecSpec>* specs);
   static AudioCodecInfo QueryAudioEncoder(const AudioEncoderOpusConfig& config);
   static std::unique_ptr<AudioEncoder> MakeAudioEncoder(
       const AudioEncoderOpusConfig& config,
       int payload_type,
-      rtc::Optional<AudioCodecPairId> codec_pair_id = rtc::nullopt);
+      absl::optional<AudioCodecPairId> codec_pair_id = absl::nullopt);
 };
 
 }  // namespace webrtc

@@ -23,14 +23,19 @@ namespace test {
 
 void SanityCheckContext(const NativeCPUContext& context) {
 #if defined(ARCH_CPU_X86)
-  // Nothing to do here yet.
+  // TODO(jperaza): fpregs is nullptr until CaptureContext() supports capturing
+  // floating point context.
+  EXPECT_EQ(context.uc_mcontext.fpregs, nullptr);
 #elif defined(ARCH_CPU_X86_64)
   EXPECT_EQ(context.uc_mcontext.gregs[REG_RDI],
             FromPointerCast<intptr_t>(&context));
+  EXPECT_EQ(context.uc_mcontext.fpregs, nullptr);
 #elif defined(ARCH_CPU_ARMEL)
   EXPECT_EQ(context.uc_mcontext.arm_r0, FromPointerCast<uintptr_t>(&context));
 #elif defined(ARCH_CPU_ARM64)
   EXPECT_EQ(context.uc_mcontext.regs[0], FromPointerCast<uintptr_t>(&context));
+#elif defined(ARCH_CPU_MIPS_FAMILY)
+  EXPECT_EQ(context.uc_mcontext.gregs[4], FromPointerCast<uintptr_t>(&context));
 #endif
 }
 
@@ -42,6 +47,8 @@ uintptr_t ProgramCounterFromContext(const NativeCPUContext& context) {
 #elif defined(ARCH_CPU_ARMEL)
   return context.uc_mcontext.arm_pc;
 #elif defined(ARCH_CPU_ARM64)
+  return context.uc_mcontext.pc;
+#elif defined(ARCH_CPU_MIPS_FAMILY)
   return context.uc_mcontext.pc;
 #endif
 }
@@ -55,6 +62,8 @@ uintptr_t StackPointerFromContext(const NativeCPUContext& context) {
   return context.uc_mcontext.arm_sp;
 #elif defined(ARCH_CPU_ARM64)
   return context.uc_mcontext.sp;
+#elif defined(ARCH_CPU_MIPS_FAMILY)
+  return context.uc_mcontext.gregs[29];
 #endif
 }
 

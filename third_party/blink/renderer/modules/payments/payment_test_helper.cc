@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/modules/payments/payment_method_data.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
 namespace {
@@ -27,14 +28,6 @@ void SetValues(PaymentItemOrPaymentShippingOption& original,
       item_amount.setCurrency(value_to_use);
   } else {
     item_amount.setCurrency("USD");
-  }
-
-  // Currency system is "urn:iso:std:iso:4217" by default.
-  if (data == kPaymentTestDataCurrencySystem) {
-    if (modification_type == kPaymentTestOverwriteValue)
-      item_amount.setCurrencySystem(value_to_use);
-    else
-      item_amount.setCurrencySystem(String());  // null string.
   }
 
   if (data == kPaymentTestDataValue) {
@@ -135,9 +128,7 @@ PaymentDetailsModifier BuildPaymentDetailsModifierForTest(
     item = BuildPaymentItemForTest();
 
   PaymentDetailsModifier modifier;
-  StringOrStringSequence supportedMethods;
-  supportedMethods.SetStringSequence(Vector<String>(1, "foo"));
-  modifier.setSupportedMethods(supportedMethods);
+  modifier.setSupportedMethod("foo");
   modifier.setTotal(total);
   modifier.setAdditionalDisplayItems(HeapVector<PaymentItem>(1, item));
   return modifier;
@@ -193,15 +184,14 @@ PaymentDetailsUpdate BuildPaymentDetailsErrorMsgForTest(
 
 HeapVector<PaymentMethodData> BuildPaymentMethodDataForTest() {
   HeapVector<PaymentMethodData> method_data(1, PaymentMethodData());
-  StringOrStringSequence supportedMethods;
-  supportedMethods.SetStringSequence(Vector<String>(1, "foo"));
-  method_data[0].setSupportedMethods(supportedMethods);
+  method_data[0].setSupportedMethod("foo");
   return method_data;
 }
 
 payments::mojom::blink::PaymentResponsePtr BuildPaymentResponseForTest() {
   payments::mojom::blink::PaymentResponsePtr result =
       payments::mojom::blink::PaymentResponse::New();
+  result->payer = payments::mojom::blink::PayerDetail::New();
   return result;
 }
 

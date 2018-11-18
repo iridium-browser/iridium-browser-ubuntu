@@ -39,6 +39,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/frame/viewport_data.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
 #include "third_party/blink/renderer/core/layout/layout_block.h"
@@ -50,6 +51,8 @@
 #include "third_party/blink/renderer/core/layout/layout_table.h"
 #include "third_party/blink/renderer/core/layout/layout_table_cell.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/layout/ng/list/layout_ng_list_item.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_block_node.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
@@ -98,9 +101,9 @@ static bool IsPotentialClusterRoot(const LayoutObject* layout_object) {
   if (!layout_object->IsLayoutBlock())
     return false;
   if (layout_object->IsInline() &&
-      !layout_object->Style()->IsDisplayReplacedType())
+      !layout_object->StyleRef().IsDisplayReplacedType())
     return false;
-  if (layout_object->IsListItem())
+  if (layout_object->IsListItemIncludingNG())
     return (layout_object->IsFloating() ||
             layout_object->IsOutOfFlowPositioned());
 
@@ -117,9 +120,9 @@ static bool IsIndependentDescendant(const LayoutBlock* layout_object) {
          layout_object->IsFlexibleBoxIncludingDeprecated() ||
          (containing_block && containing_block->IsHorizontalWritingMode() !=
                                   layout_object->IsHorizontalWritingMode()) ||
-         layout_object->Style()->IsDisplayReplacedType() ||
+         layout_object->StyleRef().IsDisplayReplacedType() ||
          layout_object->IsTextArea() ||
-         layout_object->Style()->UserModify() != EUserModify::kReadOnly;
+         layout_object->StyleRef().UserModify() != EUserModify::kReadOnly;
 }
 
 static bool BlockIsRowOfLinks(const LayoutBlock* block) {
@@ -142,12 +145,12 @@ static bool BlockIsRowOfLinks(const LayoutBlock* block) {
       if (!layout_object->IsInline() || layout_object->IsBR())
         return false;
     }
-    if (layout_object->Style()->IsLink()) {
+    if (layout_object->StyleRef().IsLink()) {
       link_count++;
       if (matching_font_size < 0)
-        matching_font_size = layout_object->Style()->SpecifiedFontSize();
+        matching_font_size = layout_object->StyleRef().SpecifiedFontSize();
       else if (matching_font_size !=
-               layout_object->Style()->SpecifiedFontSize())
+               layout_object->StyleRef().SpecifiedFontSize())
         return false;
 
       // Skip traversing descendants of the link.
@@ -208,7 +211,7 @@ static bool BlockSuppressesAutosizing(const LayoutBlock* block) {
 
   // Don't autosize block-level text that can't wrap (as it's likely to
   // expand sideways and break the page's layout).
-  if (!block->Style()->AutoWrap())
+  if (!block->StyleRef().AutoWrap())
     return true;
 
   if (BlockHeightConstrained(block))
@@ -220,7 +223,7 @@ static bool BlockSuppressesAutosizing(const LayoutBlock* block) {
 static bool HasExplicitWidth(const LayoutBlock* block) {
   // FIXME: This heuristic may need to be expanded to other ways a block can be
   // wider or narrower than its parent containing block.
-  return block->Style() && block->Style()->Width().IsSpecified();
+  return block->Style() && block->StyleRef().Width().IsSpecified();
 }
 
 static LayoutObject* GetParent(const LayoutObject* object) {
@@ -351,14 +354,14 @@ void TextAutosizer::BeginLayout(LayoutBlock* block,
   // Cells in auto-layout tables are handled separately by inflateAutoTable.
   bool is_auto_table_cell =
       block->IsTableCell() &&
-      !ToLayoutTableCell(block)->Table()->Style()->IsFixedTableLayout();
+      !ToLayoutTableCell(block)->Table()->StyleRef().IsFixedTableLayout();
   if (!is_auto_table_cell && !cluster_stack_.IsEmpty())
     Inflate(block, layouter);
 }
 
 void TextAutosizer::InflateAutoTable(LayoutTable* table) {
   DCHECK(table);
-  DCHECK(!table->Style()->IsFixedTableLayout());
+  DCHECK(!table->StyleRef().IsFixedTableLayout());
   DCHECK(table->ContainingBlock());
 
   Cluster* cluster = CurrentCluster();
@@ -457,13 +460,13 @@ float TextAutosizer::Inflate(LayoutObject* parent,
   if (has_text_child) {
     ApplyMultiplier(parent, multiplier,
                     layouter);  // Parent handles line spacing.
-  } else if (!parent->IsListItem()) {
+  } else if (!parent->IsListItemIncludingNG()) {
     // For consistency, a block with no immediate text child should always have
     // a multiplier of 1.
     ApplyMultiplier(parent, 1, layouter);
   }
 
-  if (parent->IsListItem()) {
+  if (parent->IsListItemIncludingNG()) {
     float multiplier = ClusterMultiplier(cluster);
     ApplyMultiplier(parent, multiplier, layouter);
 
@@ -471,10 +474,18 @@ float TextAutosizer::Inflate(LayoutObject* parent,
     // that you have a list item for a form inside it. The list marker then ends
     // up inside the form and when we try to get the clusterMultiplier we have
     // the wrong cluster root to work from and get the wrong value.
-    LayoutListItem* item = ToLayoutListItem(parent);
-    if (LayoutListMarker* marker = item->Marker()) {
-      ApplyMultiplier(marker, multiplier, layouter);
-      marker->SetPreferredLogicalWidthsDirty(kMarkOnlyThis);
+    LayoutObject* marker = nullptr;
+    if (parent->IsListItem())
+      marker = ToLayoutListItem(parent)->Marker();
+    else if (parent->IsLayoutNGListItem())
+      marker = ToLayoutNGListItem(parent)->Marker();
+
+    // A LayoutNGListMarker has a text child that needs its font multiplier
+    // updated. Just mark the entire subtree, to make sure we get to it.
+    for (LayoutObject* walker = marker; walker;
+         walker = walker->NextInPreOrder(marker)) {
+      ApplyMultiplier(walker, multiplier, layouter);
+      walker->SetPreferredLogicalWidthsDirty(kMarkOnlyThis);
     }
   }
 
@@ -592,7 +603,8 @@ void TextAutosizer::UpdatePageInfo() {
     // If the page has a meta viewport or @viewport, don't apply the device
     // scale adjustment.
     if (!main_frame.GetDocument()
-             ->GetViewportDescription()
+             ->GetViewportData()
+             .GetViewportDescription()
              .IsSpecifiedByAuthor()) {
       page_info_.device_scale_adjustment_ =
           document_->GetSettings()->GetDeviceScaleAdjustment();
@@ -715,7 +727,7 @@ bool TextAutosizer::ClusterHasEnoughTextToAutosize(
 
   // TextAreas and user-modifiable areas get a free pass to autosize regardless
   // of text content.
-  if (root->IsTextArea() || (root->Style() && root->Style()->UserModify() !=
+  if (root->IsTextArea() || (root->Style() && root->StyleRef().UserModify() !=
                                                   EUserModify::kReadOnly)) {
     cluster->has_enough_text_to_autosize_ = kHasEnoughText;
     return true;
@@ -751,7 +763,7 @@ bool TextAutosizer::ClusterHasEnoughTextToAutosize(
       // layout. These values can be different.
       // Note: This is an approximation assuming each character is 1em wide.
       length += ToLayoutText(descendant)->GetText().StripWhiteSpace().length() *
-                descendant->Style()->SpecifiedFontSize();
+                descendant->StyleRef().SpecifiedFontSize();
 
       if (length >= minimum_text_length_to_autosize) {
         cluster->has_enough_text_to_autosize_ = kHasEnoughText;
@@ -962,7 +974,8 @@ float TextAutosizer::WidthFromBlock(const LayoutBlock* block) const {
   CHECK(block);
   CHECK(block->Style());
 
-  if (!(block->IsTable() || block->IsTableCell() || block->IsListItem()))
+  if (!(block->IsTable() || block->IsTableCell() ||
+        block->IsListItemIncludingNG()))
     return block->ContentLogicalWidth().ToFloat();
 
   if (!block->ContainingBlock())
@@ -975,7 +988,7 @@ float TextAutosizer::WidthFromBlock(const LayoutBlock* block) const {
     Length specified_width =
         block->IsTableCell()
             ? ToLayoutTableCell(block)->StyleOrColLogicalWidth()
-            : block->Style()->LogicalWidth();
+            : block->StyleRef().LogicalWidth();
     if (specified_width.IsFixed()) {
       if ((width = specified_width.Value()) > 0)
         return width;
@@ -1080,7 +1093,7 @@ const LayoutObject* TextAutosizer::FindTextLeaf(
     size_t& depth,
     TextLeafSearch first_or_last) const {
   // List items are treated as text due to the marker.
-  if (parent->IsListItem())
+  if (parent->IsListItemIncludingNG())
     return parent;
 
   if (parent->IsText())
@@ -1130,10 +1143,8 @@ void TextAutosizer::ApplyMultiplier(LayoutObject* layout_object,
   if (current_style.TextAutosizingMultiplier() == multiplier)
     return;
 
-  // We need to clone the layoutObject style to avoid breaking style sharing.
   scoped_refptr<ComputedStyle> style = ComputedStyle::Clone(current_style);
   style->SetTextAutosizingMultiplier(multiplier);
-  style->SetUnique();
 
   switch (relayout_behavior) {
     case kAlreadyInLayout:
@@ -1149,6 +1160,7 @@ void TextAutosizer::ApplyMultiplier(LayoutObject* layout_object,
       layout_object->SetNeedsLayoutAndFullPaintInvalidation(
           LayoutInvalidationReason::kTextAutosizing, kMarkContainerChain,
           layouter);
+      layout_object->MarkContainerNeedsCollectInlines();
       break;
 
     case kLayoutNeeded:
@@ -1334,6 +1346,35 @@ TextAutosizer::DeferUpdatePageInfo::DeferUpdatePageInfo(Page* page)
   }
 }
 
+TextAutosizer::NGLayoutScope::NGLayoutScope(const NGBlockNode& node,
+                                            LayoutUnit inline_size)
+    : text_autosizer_(node.GetLayoutBox()->GetDocument().GetTextAutosizer()),
+      block_(ToLayoutBlockFlow(node.GetLayoutBox())) {
+  if (!text_autosizer_ || !text_autosizer_->ShouldHandleLayout() ||
+      block_->IsLayoutNGListMarker()) {
+    // Bail if text autosizing isn't enabled, but also if this is a
+    // IsLayoutNGListMarker. They are super-small blocks, and using them to
+    // determine if we should autosize the text will typically always yield
+    // false, overriding whatever its parent (typically the list item) has
+    // already correctly determined.
+    text_autosizer_ = nullptr;
+    return;
+  }
+
+  // In order for the text autosizer to do anything useful at all, it needs to
+  // know the inline size of the block. So set it. LayoutNG normally writes back
+  // to the legacy tree *after* layout, but this one must be set before, at
+  // least if the autosizer is enabled.
+  block_->SetLogicalWidth(inline_size);
+
+  text_autosizer_->BeginLayout(block_, nullptr);
+}
+
+TextAutosizer::NGLayoutScope::~NGLayoutScope() {
+  if (text_autosizer_)
+    text_autosizer_->EndLayout(block_);
+}
+
 TextAutosizer::DeferUpdatePageInfo::~DeferUpdatePageInfo() {
   if (TextAutosizer* text_autosizer =
           main_frame_->GetDocument()->GetTextAutosizer()) {
@@ -1343,12 +1384,13 @@ TextAutosizer::DeferUpdatePageInfo::~DeferUpdatePageInfo() {
   }
 }
 
-float TextAutosizer::ComputeAutosizedFontSize(float specified_size,
-                                              float multiplier) {
+float TextAutosizer::ComputeAutosizedFontSize(float computed_size,
+                                              float multiplier,
+                                              float effective_zoom) {
   DCHECK_GE(multiplier, 0);
 
   // Somewhat arbitrary "pleasant" font size.
-  const float kPleasantSize = 16;
+  const float kPleasantSize = 16 * effective_zoom;
 
   // Multiply fonts that the page author has specified to be larger than
   // pleasantSize by less and less, until huge fonts are not increased at all.
@@ -1362,19 +1404,19 @@ float TextAutosizer::ComputeAutosizedFontSize(float specified_size,
   // then every 1px increase in specifiedSize increases computedSize by 1px).
   const float kGradientAfterPleasantSize = 0.5;
 
-  float computed_size;
+  float auto_sized_size;
   // Skip linear backoff for multipliers that shrink the size or when the font
   // sizes are small.
-  if (multiplier <= 1 || specified_size <= kPleasantSize) {
-    computed_size = multiplier * specified_size;
+  if (multiplier <= 1 || computed_size <= kPleasantSize) {
+    auto_sized_size = multiplier * computed_size;
   } else {
-    computed_size =
+    auto_sized_size =
         multiplier * kPleasantSize +
-        kGradientAfterPleasantSize * (specified_size - kPleasantSize);
-    if (computed_size < specified_size)
-      computed_size = specified_size;
+        kGradientAfterPleasantSize * (computed_size - kPleasantSize);
+    if (auto_sized_size < computed_size)
+      auto_sized_size = computed_size;
   }
-  return computed_size;
+  return auto_sized_size;
 }
 
 void TextAutosizer::CheckSuperclusterConsistency() {

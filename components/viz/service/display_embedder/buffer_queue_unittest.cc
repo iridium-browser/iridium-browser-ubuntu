@@ -12,10 +12,9 @@
 
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
-#include "components/viz/common/gl_helper.h"
 #include "components/viz/test/test_context_provider.h"
+#include "components/viz/test/test_gles2_interface.h"
 #include "components/viz/test/test_gpu_memory_buffer_manager.h"
-#include "components/viz/test/test_web_graphics_context_3d.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -43,18 +42,26 @@ class StubGpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
     return gfx::BufferFormat::BGRX_8888;
   }
   int stride(size_t plane) const override { return 0; }
+  gfx::GpuMemoryBufferType GetType() const override {
+    return gfx::EMPTY_BUFFER;
+  }
   gfx::GpuMemoryBufferId GetId() const override {
     return gfx::GpuMemoryBufferId(0);
   }
   void SetColorSpace(const gfx::ColorSpace& color_space) override {
     *set_color_space_count_ += 1;
   }
-  gfx::GpuMemoryBufferHandle GetHandle() const override {
+  gfx::GpuMemoryBufferHandle CloneHandle() const override {
     return gfx::GpuMemoryBufferHandle();
   }
   ClientBuffer AsClientBuffer() override {
     return reinterpret_cast<ClientBuffer>(this);
   }
+  void OnMemoryDump(
+      base::trace_event::ProcessMemoryDump* pmd,
+      const base::trace_event::MemoryAllocatorDumpGuid& buffer_dump_guid,
+      uint64_t tracing_process_id,
+      int importance) const override {}
 
   size_t* set_color_space_count_;
 };
@@ -107,7 +114,6 @@ class MockBufferQueue : public BufferQueue {
                     target,
                     kBufferQueueInternalformat,
                     kBufferQueueFormat,
-                    nullptr,
                     gpu_memory_buffer_manager,
                     kFakeSurfaceHandle) {}
   MOCK_METHOD4(CopyBufferDamage,
@@ -118,9 +124,11 @@ class BufferQueueTest : public ::testing::Test {
  public:
   BufferQueueTest() : doublebuffering_(true), first_frame_(true) {}
 
-  void SetUp() override { InitWithContext(TestWebGraphicsContext3D::Create()); }
+  void SetUp() override {
+    InitWithContext(std::make_unique<TestGLES2Interface>());
+  }
 
-  void InitWithContext(std::unique_ptr<TestWebGraphicsContext3D> context) {
+  void InitWithContext(std::unique_ptr<TestGLES2Interface> context) {
     context_provider_ = TestContextProvider::Create(std::move(context));
     context_provider_->BindToCurrentThread();
     gpu_memory_buffer_manager_.reset(new StubGpuMemoryBufferManager);
@@ -225,19 +233,19 @@ GLuint CreateImageDefault() {
   return ++id;
 }
 
-class MockedContext : public TestWebGraphicsContext3D {
+class MockedContext : public TestGLES2Interface {
  public:
   MockedContext() {
-    ON_CALL(*this, createImageCHROMIUM(_, _, _, _))
+    ON_CALL(*this, CreateImageCHROMIUM(_, _, _, _))
         .WillByDefault(testing::InvokeWithoutArgs(&CreateImageDefault));
   }
-  MOCK_METHOD2(bindFramebuffer, void(GLenum, GLuint));
-  MOCK_METHOD2(bindTexture, void(GLenum, GLuint));
-  MOCK_METHOD2(bindTexImage2DCHROMIUM, void(GLenum, GLint));
-  MOCK_METHOD4(createImageCHROMIUM,
+  MOCK_METHOD2(BindFramebuffer, void(GLenum, GLuint));
+  MOCK_METHOD2(BindTexture, void(GLenum, GLuint));
+  MOCK_METHOD2(BindTexImage2DCHROMIUM, void(GLenum, GLint));
+  MOCK_METHOD4(CreateImageCHROMIUM,
                GLuint(ClientBuffer, GLsizei, GLsizei, GLenum));
-  MOCK_METHOD1(destroyImageCHROMIUM, void(GLuint));
-  MOCK_METHOD5(framebufferTexture2D,
+  MOCK_METHOD1(DestroyImageCHROMIUM, void(GLuint));
+  MOCK_METHOD5(FramebufferTexture2D,
                void(GLenum, GLenum, GLenum, GLuint, GLint));
 };
 
@@ -245,7 +253,7 @@ class BufferQueueMockedContextTest : public BufferQueueTest {
  public:
   void SetUp() override {
     context_ = new MockedContext();
-    InitWithContext(std::unique_ptr<TestWebGraphicsContext3D>(context_));
+    InitWithContext(base::WrapUnique<TestGLES2Interface>(context_));
   }
 
  protected:
@@ -267,7 +275,7 @@ std::unique_ptr<BufferQueue> CreateBufferQueue(
     gpu::gles2::GLES2Interface* gl,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager) {
   std::unique_ptr<BufferQueue> buffer_queue(new BufferQueue(
-      gl, target, kBufferQueueInternalformat, kBufferQueueFormat, nullptr,
+      gl, target, kBufferQueueInternalformat, kBufferQueueFormat,
       gpu_memory_buffer_manager, kFakeSurfaceHandle));
   buffer_queue->Initialize();
   return buffer_queue;
@@ -283,8 +291,8 @@ TEST(BufferQueueStandaloneTest, FboInitialization) {
       CreateBufferQueue(GL_TEXTURE_2D, context_provider->ContextGL(),
                         gpu_memory_buffer_manager.get());
 
-  EXPECT_CALL(*context, bindFramebuffer(GL_FRAMEBUFFER, Ne(0U)));
-  ON_CALL(*context, framebufferTexture2D(_, _, _, _, _))
+  EXPECT_CALL(*context, BindFramebuffer(GL_FRAMEBUFFER, Ne(0U)));
+  ON_CALL(*context, FramebufferTexture2D(_, _, _, _, _))
       .WillByDefault(Return());
 
   output_surface->Reshape(gfx::Size(10, 20), 1.0f, gfx::ColorSpace(), false);
@@ -303,20 +311,20 @@ TEST(BufferQueueStandaloneTest, FboBinding) {
     std::unique_ptr<BufferQueue> output_surface = CreateBufferQueue(
         target, context_provider->ContextGL(), gpu_memory_buffer_manager.get());
 
-    EXPECT_CALL(*context, bindTexture(target, Ne(0U)));
-    EXPECT_CALL(*context, destroyImageCHROMIUM(1));
+    EXPECT_CALL(*context, BindTexture(target, Ne(0U)));
+    EXPECT_CALL(*context, DestroyImageCHROMIUM(1));
     Expectation image =
         EXPECT_CALL(*context,
-                    createImageCHROMIUM(_, 0, 0, kBufferQueueInternalformat))
+                    CreateImageCHROMIUM(_, 0, 0, kBufferQueueInternalformat))
             .WillOnce(Return(1));
     Expectation fb =
-        EXPECT_CALL(*context, bindFramebuffer(GL_FRAMEBUFFER, Ne(0U)));
-    Expectation tex = EXPECT_CALL(*context, bindTexture(target, Ne(0U)));
+        EXPECT_CALL(*context, BindFramebuffer(GL_FRAMEBUFFER, Ne(0U)));
+    Expectation tex = EXPECT_CALL(*context, BindTexture(target, Ne(0U)));
     Expectation bind_tex =
-        EXPECT_CALL(*context, bindTexImage2DCHROMIUM(target, 1))
+        EXPECT_CALL(*context, BindTexImage2DCHROMIUM(target, 1))
             .After(tex, image);
     EXPECT_CALL(*context,
-                framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                                      target, Ne(0U), _))
         .After(fb, bind_tex);
 
@@ -332,14 +340,9 @@ TEST(BufferQueueStandaloneTest, CheckBoundFramebuffer) {
   std::unique_ptr<BufferQueue> output_surface;
   gpu_memory_buffer_manager.reset(new StubGpuMemoryBufferManager);
 
-  std::unique_ptr<GLHelper> gl_helper;
-  gl_helper.reset(new GLHelper(context_provider->ContextGL(),
-                               context_provider->ContextSupport()));
-
   output_surface.reset(new BufferQueue(
       context_provider->ContextGL(), GL_TEXTURE_2D,
       kBufferQueueInternalformat, kBufferQueueFormat,
-      gl_helper.get(),
       gpu_memory_buffer_manager.get(), kFakeSurfaceHandle));
   output_surface->Initialize();
   output_surface->Reshape(screen_size, 1.0f, gfx::ColorSpace(), false);
@@ -627,9 +630,9 @@ TEST_F(BufferQueueMockedContextTest, RecreateBuffers) {
 
   // Expect all 4 images to be destroyed, 3 of the existing textures to be
   // copied from and 3 new images to be created.
-  EXPECT_CALL(*context_, createImageCHROMIUM(_, screen_size.width(),
-                                             screen_size.height(),
-                                             kBufferQueueInternalformat))
+  EXPECT_CALL(*context_,
+              CreateImageCHROMIUM(_, screen_size.width(), screen_size.height(),
+                                  kBufferQueueInternalformat))
       .Times(3);
   Expectation copy1 = EXPECT_CALL(*mock_output_surface_,
                                   CopyBufferDamage(_, displayed->texture, _, _))
@@ -641,22 +644,22 @@ TEST_F(BufferQueueMockedContextTest, RecreateBuffers) {
                                   CopyBufferDamage(_, in_flight->texture, _, _))
                           .Times(1);
 
-  EXPECT_CALL(*context_, destroyImageCHROMIUM(displayed->image))
+  EXPECT_CALL(*context_, DestroyImageCHROMIUM(displayed->image))
       .Times(1)
       .After(copy1);
-  EXPECT_CALL(*context_, destroyImageCHROMIUM(current->image))
+  EXPECT_CALL(*context_, DestroyImageCHROMIUM(current->image))
       .Times(1)
       .After(copy2);
-  EXPECT_CALL(*context_, destroyImageCHROMIUM(in_flight->image))
+  EXPECT_CALL(*context_, DestroyImageCHROMIUM(in_flight->image))
       .Times(1)
       .After(copy3);
-  EXPECT_CALL(*context_, destroyImageCHROMIUM(available->image)).Times(1);
+  EXPECT_CALL(*context_, DestroyImageCHROMIUM(available->image)).Times(1);
   // After copying, we expect the framebuffer binding to be updated.
-  EXPECT_CALL(*context_, bindFramebuffer(_, _))
+  EXPECT_CALL(*context_, BindFramebuffer(_, _))
       .After(copy1)
       .After(copy2)
       .After(copy3);
-  EXPECT_CALL(*context_, framebufferTexture2D(_, _, _, _, _))
+  EXPECT_CALL(*context_, FramebufferTexture2D(_, _, _, _, _))
       .After(copy1)
       .After(copy2)
       .After(copy3);

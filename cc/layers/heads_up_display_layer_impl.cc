@@ -11,8 +11,10 @@
 #include <vector>
 
 #include "base/numerics/safe_conversions.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/debug/debug_colors.h"
@@ -28,8 +30,12 @@
 #include "components/viz/common/quads/solid_color_draw_quad.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "components/viz/common/resources/bitmap_allocation.h"
+#include "components/viz/common/resources/platform_color.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "gpu/command_buffer/client/shared_image_interface.h"
+#include "gpu/command_buffer/common/shared_image_trace_utils.h"
+#include "gpu/command_buffer/common/shared_image_usage.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -98,24 +104,29 @@ std::unique_ptr<LayerImpl> HeadsUpDisplayLayerImpl::CreateLayerImpl(
 class HudGpuBacking : public ResourcePool::GpuBacking {
  public:
   ~HudGpuBacking() override {
-    gpu::gles2::GLES2Interface* gl = compositor_context_provider->ContextGL();
+    if (mailbox.IsZero())
+      return;
+    auto* sii = compositor_context_provider->SharedImageInterface();
     if (returned_sync_token.HasData())
-      gl->WaitSyncTokenCHROMIUM(returned_sync_token.GetConstData());
-    if (mailbox_sync_token.HasData())
-      gl->WaitSyncTokenCHROMIUM(mailbox_sync_token.GetConstData());
-    gl->DeleteTextures(1, &texture_id);
+      sii->DestroySharedImage(returned_sync_token, mailbox);
+    else if (mailbox_sync_token.HasData())
+      sii->DestroySharedImage(mailbox_sync_token, mailbox);
   }
 
-  base::trace_event::MemoryAllocatorDumpGuid MemoryDumpGuid(
-      uint64_t tracing_process_id) override {
-    return gl::GetGLTextureClientGUIDForTracing(
-        compositor_context_provider->ContextSupport()->ShareGroupTracingGUID(),
-        texture_id);
+  void OnMemoryDump(
+      base::trace_event::ProcessMemoryDump* pmd,
+      const base::trace_event::MemoryAllocatorDumpGuid& buffer_dump_guid,
+      uint64_t tracing_process_id,
+      int importance) const override {
+    if (mailbox.IsZero())
+      return;
+
+    auto tracing_guid = gpu::GetSharedImageGUIDForTracing(mailbox);
+    pmd->CreateSharedGlobalAllocatorDump(tracing_guid);
+    pmd->AddOwnershipEdge(buffer_dump_guid, tracing_guid, importance);
   }
-  base::UnguessableToken SharedMemoryGuid() override { return {}; }
 
   viz::ContextProvider* compositor_context_provider;
-  GLuint texture_id;
 };
 
 class HudSoftwareBacking : public ResourcePool::SoftwareBacking {
@@ -124,8 +135,13 @@ class HudSoftwareBacking : public ResourcePool::SoftwareBacking {
     layer_tree_frame_sink->DidDeleteSharedBitmap(shared_bitmap_id);
   }
 
-  base::UnguessableToken SharedMemoryGuid() override {
-    return shared_memory->mapped_id();
+  void OnMemoryDump(
+      base::trace_event::ProcessMemoryDump* pmd,
+      const base::trace_event::MemoryAllocatorDumpGuid& buffer_dump_guid,
+      uint64_t tracing_process_id,
+      int importance) const override {
+    pmd->CreateSharedMemoryOwnershipEdge(
+        buffer_dump_guid, shared_memory->mapped_id(), importance);
   }
 
   LayerTreeFrameSink* layer_tree_frame_sink;
@@ -134,18 +150,20 @@ class HudSoftwareBacking : public ResourcePool::SoftwareBacking {
 
 bool HeadsUpDisplayLayerImpl::WillDraw(
     DrawMode draw_mode,
-    LayerTreeResourceProvider* resource_provider) {
-  if (draw_mode == DRAW_MODE_RESOURCELESS_SOFTWARE)
+    viz::ClientResourceProvider* resource_provider) {
+  if (draw_mode == DRAW_MODE_RESOURCELESS_SOFTWARE &&
+      !LayerImpl::WillDraw(draw_mode, resource_provider)) {
     return false;
+  }
 
+  int max_texture_size = layer_tree_impl()->max_texture_size();
   internal_contents_scale_ = GetIdealContentsScale();
   internal_content_bounds_ =
       gfx::ScaleToCeiledSize(bounds(), internal_contents_scale_);
   internal_content_bounds_.SetToMin(
-      gfx::Size(resource_provider->max_texture_size(),
-                resource_provider->max_texture_size()));
+      gfx::Size(max_texture_size, max_texture_size));
 
-  return LayerImpl::WillDraw(draw_mode, resource_provider);
+  return true;
 }
 
 void HeadsUpDisplayLayerImpl::AppendQuads(viz::RenderPass* render_pass,
@@ -171,7 +189,7 @@ void HeadsUpDisplayLayerImpl::AppendQuads(viz::RenderPass* render_pass,
 void HeadsUpDisplayLayerImpl::UpdateHudTexture(
     DrawMode draw_mode,
     LayerTreeFrameSink* layer_tree_frame_sink,
-    LayerTreeResourceProvider* resource_provider,
+    viz::ClientResourceProvider* resource_provider,
     bool gpu_raster,
     const viz::RenderPassList& list) {
   if (draw_mode == DRAW_MODE_RESOURCELESS_SOFTWARE)
@@ -185,17 +203,10 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
         layer_tree_impl()->task_runner_provider()->HasImplThread()
             ? layer_tree_impl()->task_runner_provider()->ImplThreadTaskRunner()
             : layer_tree_impl()->task_runner_provider()->MainThreadTaskRunner();
-    if (draw_mode == DRAW_MODE_HARDWARE) {
-      pool_ = std::make_unique<ResourcePool>(
-          resource_provider, std::move(task_runner),
-          ResourcePool::kDefaultExpirationDelay, ResourcePool::Mode::kGpu,
-          layer_tree_impl()->settings().disallow_non_exact_resource_reuse);
-    } else {
-      pool_ = std::make_unique<ResourcePool>(
-          resource_provider, std::move(task_runner),
-          ResourcePool::kDefaultExpirationDelay, ResourcePool::Mode::kSoftware,
-          layer_tree_impl()->settings().disallow_non_exact_resource_reuse);
-    }
+    pool_ = std::make_unique<ResourcePool>(
+        resource_provider, layer_tree_frame_sink->context_provider(),
+        std::move(task_runner), ResourcePool::kDefaultExpirationDelay,
+        layer_tree_impl()->settings().disallow_non_exact_resource_reuse);
   }
 
   // Return ownership of the previous frame's resource to the pool, so we
@@ -205,37 +216,39 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
   if (in_flight_resource_)
     pool_->ReleaseResource(std::move(in_flight_resource_));
 
-  ResourcePool::InUsePoolResource pool_resource = pool_->AcquireResource(
-      internal_content_bounds_, resource_provider->best_render_buffer_format(),
-      gfx::ColorSpace());
-
   // Allocate a backing for the resource if needed, either for gpu or software
   // compositing.
+  ResourcePool::InUsePoolResource pool_resource;
   if (draw_mode == DRAW_MODE_HARDWARE) {
     viz::ContextProvider* context_provider =
         layer_tree_impl()->context_provider();
     DCHECK(context_provider);
 
+    viz::ResourceFormat format =
+        viz::PlatformColor::BestSupportedRenderBufferFormat(
+            context_provider->ContextCapabilities());
+    pool_resource = pool_->AcquireResource(internal_content_bounds_, format,
+                                           gfx::ColorSpace());
+
     if (!pool_resource.gpu_backing()) {
       auto backing = std::make_unique<HudGpuBacking>();
       backing->compositor_context_provider = context_provider;
-      auto alloc = viz::TextureAllocation::MakeTextureId(
-          context_provider->ContextGL(),
-          context_provider->ContextCapabilities(), pool_resource.format(),
+      backing->InitOverlayCandidateAndTextureTarget(
+          pool_resource.format(), context_provider->ContextCapabilities(),
           layer_tree_impl()
               ->settings()
-              .resource_settings.use_gpu_memory_buffer_resources,
-          gpu_raster);
-      viz::TextureAllocation::AllocateStorage(
-          context_provider->ContextGL(),
-          context_provider->ContextCapabilities(), pool_resource.format(),
-          pool_resource.size(), alloc, pool_resource.color_space());
-      backing->texture_id = alloc.texture_id;
-      backing->texture_target = alloc.texture_target;
-      backing->overlay_candidate = alloc.overlay_candidate;
-      backing->mailbox = gpu::Mailbox::Generate();
-      context_provider->ContextGL()->ProduceTextureDirectCHROMIUM(
-          backing->texture_id, backing->mailbox.name);
+              .resource_settings.use_gpu_memory_buffer_resources);
+      auto* sii = context_provider->SharedImageInterface();
+      uint32_t flags = gpu::SHARED_IMAGE_USAGE_GLES2;
+      if (gpu_raster)
+        flags |= gpu::SHARED_IMAGE_USAGE_GLES2_FRAMEBUFFER_HINT;
+      if (backing->overlay_candidate)
+        flags |= gpu::SHARED_IMAGE_USAGE_SCANOUT;
+      backing->mailbox =
+          sii->CreateSharedImage(pool_resource.format(), pool_resource.size(),
+                                 pool_resource.color_space(), flags);
+      gpu::gles2::GLES2Interface* gl = context_provider->ContextGL();
+      gl->WaitSyncTokenCHROMIUM(sii->GenUnverifiedSyncToken().GetConstData());
       pool_resource.set_gpu_backing(std::move(backing));
     } else if (pool_resource.gpu_backing()->returned_sync_token.HasData()) {
       context_provider->ContextGL()->WaitSyncTokenCHROMIUM(
@@ -244,6 +257,9 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
     }
   } else {
     DCHECK_EQ(draw_mode, DRAW_MODE_SOFTWARE);
+
+    pool_resource = pool_->AcquireResource(internal_content_bounds_,
+                                           viz::RGBA_8888, gfx::ColorSpace());
 
     if (!pool_resource.software_backing()) {
       auto backing = std::make_unique<HudSoftwareBacking>();
@@ -272,11 +288,13 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
     viz::ContextProvider* context_provider =
         layer_tree_impl()->context_provider();
     gpu::gles2::GLES2Interface* gl = context_provider->ContextGL();
+    GLuint mailbox_texture_id =
+        gl->CreateAndConsumeTextureCHROMIUM(backing->mailbox.name);
 
     {
       ScopedGpuRaster gpu_raster(context_provider);
-      LayerTreeResourceProvider::ScopedSkSurface scoped_surface(
-          context_provider->GrContext(), backing->texture_id,
+      viz::ClientResourceProvider::ScopedSkSurface scoped_surface(
+          context_provider->GrContext(), mailbox_texture_id,
           backing->texture_target, pool_resource.size(), pool_resource.format(),
           false /* can_use_lcd_text */, 0 /* msaa_sample_count */);
       SkSurface* surface = scoped_surface.surface();
@@ -287,8 +305,9 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
       DrawHudContents(surface->getCanvas());
     }
 
+    gl->DeleteTextures(1, &mailbox_texture_id);
     backing->mailbox_sync_token =
-        LayerTreeResourceProvider::GenerateSyncTokenHelper(gl);
+        viz::ClientResourceProvider::GenerateSyncTokenHelper(gl);
   } else if (draw_mode == DRAW_MODE_HARDWARE) {
     // If not using |gpu_raster| but using gpu compositing, we DrawHudContents()
     // into a software bitmap and upload it to a texture for compositing.
@@ -310,13 +329,17 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
     TRACE_EVENT0("cc", "UploadHudTexture");
     SkPixmap pixmap;
     staging_surface_->peekPixels(&pixmap);
-    gl->BindTexture(backing->texture_target, backing->texture_id);
+    GLuint mailbox_texture_id =
+        gl->CreateAndConsumeTextureCHROMIUM(backing->mailbox.name);
+    gl->BindTexture(backing->texture_target, mailbox_texture_id);
+    DCHECK(GLSupportsFormat(pool_resource.format()));
     gl->TexSubImage2D(
         backing->texture_target, 0, 0, 0, pool_resource.size().width(),
         pool_resource.size().height(), GLDataFormat(pool_resource.format()),
         GLDataType(pool_resource.format()), pixmap.addr());
+    gl->DeleteTextures(1, &mailbox_texture_id);
     backing->mailbox_sync_token =
-        LayerTreeResourceProvider::GenerateSyncTokenHelper(gl);
+        viz::ClientResourceProvider::GenerateSyncTokenHelper(gl);
   } else {
     // If not using gpu compositing, we DrawHudContents() directly into a shared
     // memory bitmap, wrapped in an SkSurface, that can be shared to the display

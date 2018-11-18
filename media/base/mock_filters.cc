@@ -46,8 +46,7 @@ std::string MockDemuxer::GetDisplayName() const {
 }
 
 MockDemuxerStream::MockDemuxerStream(DemuxerStream::Type type)
-    : type_(type), liveness_(LIVENESS_UNKNOWN) {
-}
+    : type_(type), liveness_(LIVENESS_UNKNOWN) {}
 
 MockDemuxerStream::~MockDemuxerStream() = default;
 
@@ -195,42 +194,6 @@ MockCdm::MockCdm(const std::string& key_system,
 
 MockCdm::~MockCdm() = default;
 
-void MockCdm::SetServerCertificate(const std::vector<uint8_t>& certificate,
-                                   std::unique_ptr<SimpleCdmPromise> promise) {
-  OnSetServerCertificate(certificate, promise);
-}
-
-void MockCdm::CreateSessionAndGenerateRequest(
-    CdmSessionType session_type,
-    EmeInitDataType init_data_type,
-    const std::vector<uint8_t>& init_data,
-    std::unique_ptr<NewSessionCdmPromise> promise) {
-  OnCreateSessionAndGenerateRequest(session_type, init_data_type, init_data,
-                                    promise);
-}
-
-void MockCdm::LoadSession(CdmSessionType session_type,
-                          const std::string& session_id,
-                          std::unique_ptr<NewSessionCdmPromise> promise) {
-  OnLoadSession(session_type, session_id, promise);
-}
-
-void MockCdm::UpdateSession(const std::string& session_id,
-                            const std::vector<uint8_t>& response,
-                            std::unique_ptr<SimpleCdmPromise> promise) {
-  OnUpdateSession(session_id, response, promise);
-}
-
-void MockCdm::CloseSession(const std::string& session_id,
-                           std::unique_ptr<SimpleCdmPromise> promise) {
-  OnCloseSession(session_id, promise);
-}
-
-void MockCdm::RemoveSession(const std::string& session_id,
-                            std::unique_ptr<SimpleCdmPromise> promise) {
-  OnRemoveSession(session_id, promise);
-}
-
 void MockCdm::CallSessionMessageCB(const std::string& session_id,
                                    CdmMessageType message_type,
                                    const std::vector<uint8_t>& message) {
@@ -273,7 +236,7 @@ void MockCdmFactory::Create(
   }
 
   // Since there is a CDM, call |before_creation_cb_| first.
-  if (!before_creation_cb_.is_null())
+  if (before_creation_cb_)
     before_creation_cb_.Run();
 
   // Create and return a new MockCdm. Keep a pointer to the created CDM so

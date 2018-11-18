@@ -16,7 +16,7 @@
 #include "components/payments/core/journey_logger.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "third_party/blink/public/platform/modules/payments/payment_request.mojom.h"
+#include "third_party/blink/public/mojom/payments/payment_request.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -66,6 +66,7 @@ class PaymentRequest : public mojom::PaymentRequest,
             mojom::PaymentDetailsPtr details,
             mojom::PaymentOptionsPtr options) override;
   void Show(bool is_user_gesture) override;
+  void Retry(mojom::PaymentValidationErrorsPtr errors) override;
   void UpdateWith(mojom::PaymentDetailsPtr details) override;
   void NoUpdatedPaymentDetails() override;
   void Abort() override;
@@ -79,6 +80,7 @@ class PaymentRequest : public mojom::PaymentRequest,
   void OnPaymentResponseAvailable(mojom::PaymentResponsePtr response) override;
   void OnShippingOptionIdSelected(std::string shipping_option_id) override;
   void OnShippingAddressSelected(mojom::PaymentAddressPtr address) override;
+  void OnPayerInfoSelected(mojom::PayerDetailPtr payer_info) override;
 
   // Called when the user explicitly cancelled the flow. Will send a message
   // to the renderer which will indirectly destroy this object (through
@@ -101,14 +103,14 @@ class PaymentRequest : public mojom::PaymentRequest,
   // Hide this Payment Request if it's already showing.
   void HideIfNecessary();
 
+  // Record the "dialog shown" event in the journey logger.
+  void RecordDialogShownEventInJourneyLogger();
+
   bool IsIncognito() const;
 
-  // Returns true if this payment request supports skipping the Payment Sheet.
-  // Typically, this means only one payment method is supported, it's a URL
-  // based method, and no other info is requested from the user.
-  bool SatisfiesSkipUIConstraints() const;
-
   content::WebContents* web_contents() { return web_contents_; }
+
+  bool skipped_payment_request_ui() { return skipped_payment_request_ui_; }
 
   PaymentRequestSpec* spec() { return spec_.get(); }
   PaymentRequestState* state() { return state_.get(); }
@@ -117,6 +119,11 @@ class PaymentRequest : public mojom::PaymentRequest,
   PaymentRequestState* state() const { return state_.get(); }
 
  private:
+  // Returns true if this payment request supports skipping the Payment Sheet.
+  // Typically, this means only one payment method is supported, it's a URL
+  // based method, and no other info is requested from the user.
+  bool SatisfiesSkipUIConstraints() const;
+
   // Only records the abort reason if it's the first completion for this Payment
   // Request. This is necessary since the aborts cascade into one another with
   // the first one being the most precise.
@@ -167,6 +174,9 @@ class PaymentRequest : public mojom::PaymentRequest,
 
   // Whether PaymentRequest.show() was invoked with a user gesture.
   bool is_show_user_gesture_ = false;
+
+  // Whether PaymentRequest.show() was invoked by skipping payment request UI.
+  bool skipped_payment_request_ui_ = false;
 
   base::WeakPtrFactory<PaymentRequest> weak_ptr_factory_;
 

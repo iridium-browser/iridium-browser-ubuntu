@@ -18,8 +18,7 @@ namespace internal {
 // can.
 class CustomArgumentsBase : public Relocatable {
  protected:
-  explicit inline CustomArgumentsBase(Isolate* isolate)
-      : Relocatable(isolate) {}
+  explicit inline CustomArgumentsBase(Isolate* isolate);
 };
 
 template <typename T>
@@ -27,12 +26,12 @@ class CustomArguments : public CustomArgumentsBase {
  public:
   static const int kReturnValueOffset = T::kReturnValueIndex;
 
-  ~CustomArguments() {
+  ~CustomArguments() override {
     this->begin()[kReturnValueOffset] =
         reinterpret_cast<Object*>(kHandleZapValue);
   }
 
-  virtual inline void IterateInstance(RootVisitor* v) {
+  inline void IterateInstance(RootVisitor* v) override {
     v->VisitRootPointers(Root::kRelocatable, nullptr, values_,
                          values_ + T::kArgsLength);
   }
@@ -52,18 +51,6 @@ class CustomArguments : public CustomArgumentsBase {
   Object* values_[T::kArgsLength];
 };
 
-template <typename T>
-template <typename V>
-Handle<V> CustomArguments<T>::GetReturnValue(Isolate* isolate) {
-  // Check the ReturnValue.
-  Object** handle = &this->begin()[kReturnValueOffset];
-  // Nothing was set, return empty handle as per previous behaviour.
-  if ((*handle)->IsTheHole(isolate)) return Handle<V>();
-  Handle<V> result = Handle<V>::cast(Handle<Object>(handle));
-  result->VerifyApiCallResultType();
-  return result;
-}
-
 // Note: Calling args.Call() sets the return value on args. For multiple
 // Call()'s, a new args should be used every time.
 class PropertyCallbackArguments
@@ -81,24 +68,7 @@ class PropertyCallbackArguments
   static const int kShouldThrowOnErrorIndex = T::kShouldThrowOnErrorIndex;
 
   PropertyCallbackArguments(Isolate* isolate, Object* data, Object* self,
-                            JSObject* holder, ShouldThrow should_throw)
-      : Super(isolate) {
-    Object** values = this->begin();
-    values[T::kThisIndex] = self;
-    values[T::kHolderIndex] = holder;
-    values[T::kDataIndex] = data;
-    values[T::kIsolateIndex] = reinterpret_cast<Object*>(isolate);
-    values[T::kShouldThrowOnErrorIndex] =
-        Smi::FromInt(should_throw == kThrowOnError ? 1 : 0);
-
-    // Here the hole is set as default value.
-    // It cannot escape into js as it's removed in Call below.
-    values[T::kReturnValueDefaultValueIndex] =
-        isolate->heap()->the_hole_value();
-    values[T::kReturnValueIndex] = isolate->heap()->the_hole_value();
-    DCHECK(values[T::kHolderIndex]->IsHeapObject());
-    DCHECK(values[T::kIsolateIndex]->IsSmi());
-  }
+                            JSObject* holder, ShouldThrow should_throw);
 
   // -------------------------------------------------------------------------
   // Accessor Callbacks
@@ -163,11 +133,10 @@ class PropertyCallbackArguments
       IndexedPropertyGetterCallback f, uint32_t index, Handle<Object> info);
   inline Handle<Object> BasicCallNamedGetterCallback(
       GenericNamedPropertyGetterCallback f, Handle<Name> name,
-      Handle<Object> info);
+      Handle<Object> info, Handle<Object> receiver = Handle<Object>());
 
-  inline JSObject* holder() {
-    return JSObject::cast(this->begin()[T::kHolderIndex]);
-  }
+  inline JSObject* holder();
+  inline Object* receiver();
 
   // Don't copy PropertyCallbackArguments, because they would both have the
   // same prev_ pointer.
@@ -191,21 +160,7 @@ class FunctionCallbackArguments
                             internal::HeapObject* callee,
                             internal::Object* holder,
                             internal::HeapObject* new_target,
-                            internal::Object** argv, int argc)
-      : Super(isolate), argv_(argv), argc_(argc) {
-    Object** values = begin();
-    values[T::kDataIndex] = data;
-    values[T::kHolderIndex] = holder;
-    values[T::kNewTargetIndex] = new_target;
-    values[T::kIsolateIndex] = reinterpret_cast<internal::Object*>(isolate);
-    // Here the hole is set as default value.
-    // It cannot escape into js as it's remove in Call below.
-    values[T::kReturnValueDefaultValueIndex] =
-        isolate->heap()->the_hole_value();
-    values[T::kReturnValueIndex] = isolate->heap()->the_hole_value();
-    DCHECK(values[T::kHolderIndex]->IsHeapObject());
-    DCHECK(values[T::kIsolateIndex]->IsSmi());
-  }
+                            internal::Object** argv, int argc);
 
   /*
    * The following Call function wraps the calling of all callbacks to handle
@@ -218,9 +173,7 @@ class FunctionCallbackArguments
   inline Handle<Object> Call(CallHandlerInfo* handler);
 
  private:
-  inline JSObject* holder() {
-    return JSObject::cast(this->begin()[T::kHolderIndex]);
-  }
+  inline JSObject* holder();
 
   internal::Object** argv_;
   int argc_;

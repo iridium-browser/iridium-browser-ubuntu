@@ -66,6 +66,33 @@ std::wstring GetChromeInstallSubDirectory();
 // their browsing data.
 std::wstring GetRegistryPath();
 
+// The next set of registry paths are generally for integration with an Omaha
+// updater (see https://github.com/google/omaha); Google Chrome builds integrate
+// with Google Update. For all accesses, HKLM or HKCU must be used based on
+// IsSystemInstall(). Additionally, KEY_WOW64_32KEY must be used for all
+// accesses, as Omaha updaters exclusively use the 32-bit view of the registry.
+
+// Returns the path "Software\Google\Update\Clients\<guid>" where "<guid>" is
+// the current install mode's appguid. This key is primarily used for
+// registering the browser as an app managed by the updater.
+std::wstring GetClientsKeyPath();
+
+// Returns the path "Software\Google\Update\ClientState\<guid>" where "<guid>"
+// is the current install mode's appguid. This key is primarily (but not
+// exclusively) used for holding install-wide state that is used by both the
+// updater and the browser.
+std::wstring GetClientStateKeyPath();
+
+// Returns the path "Software\Google\Update\ClientStateMedium\<guid>" where
+// "<guid>" is the current install mode's appguid. This is is used exclusively
+// for system-wide installs to hold values written by the browser.
+std::wstring GetClientStateMediumKeyPath();
+
+// Returns the path to the ClientState{,Medium} key for the deprecated Chrome
+// binaries.
+std::wstring GetClientStateKeyPathForBinaries();
+std::wstring GetClientStateMediumKeyPathForBinaries();
+
 // Returns the path
 // "Software\Microsoft\Windows\CurrentVersion\Uninstall\[kCompanyPathName ]
 // kProductPathName[install_suffix]. This is the key used for the browser's
@@ -81,6 +108,11 @@ const wchar_t* GetAppGuid();
 // Returns the toast activator CLSID with which Chrome is registered with the
 // the Windows OS.
 const CLSID& GetToastActivatorClsid();
+
+// Return the Elevation Service CLSID, Name, and Display Name respectively.
+const CLSID& GetElevatorClsid();
+std::wstring GetElevationServiceName();
+std::wstring GetElevationServiceDisplayName();
 
 // Returns the unsuffixed application name of this program. This is the base of
 // the name registered with Default Programs. IMPORTANT: This must only be
@@ -126,6 +158,12 @@ bool SupportsRetentionExperiments();
 
 // Returns the index of the icon resource in the main executable for the mode.
 int GetIconResourceIndex();
+
+// Get sandbox id of current install mode.
+const wchar_t* GetSandboxSidPrefix();
+
+// Returns the brand-specific safe browsing client name.
+std::string GetSafeBrowsingName();
 
 // Returns true if usage stats collecting is enabled for this user for the
 // current executable.

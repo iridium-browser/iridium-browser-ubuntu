@@ -8,6 +8,7 @@
 #include "base/strings/string_piece.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/browser_extension_window_controller.h"
 #include "chrome/browser/extensions/extension_view.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/file_select_helper.h"
@@ -18,6 +19,7 @@
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
@@ -161,21 +163,6 @@ WebContents* ExtensionViewHost::OpenURLFromTab(
       Browser* browser = view_->GetBrowser();
       return browser ? browser->OpenURL(params) : nullptr;
     }
-    case WindowOpenDisposition::CURRENT_TAB: {
-      // Only allow these from hosts that are bound to a browser (e.g. popups).
-      // Otherwise they are not driven by a user gesture.
-      Browser* browser = view_->GetBrowser();
-      if (!browser)
-        return nullptr;
-
-      // Only allow navigations that will surely result in a download.
-      if (!params.suggested_filename.has_value() ||
-          !(params.url.SchemeIsBlob() || params.url.SchemeIsFileSystem() ||
-            params.url.SchemeIs(url::kDataScheme))) {
-        return nullptr;
-      }
-      return browser->OpenURL(params);
-    }
     default:
       return nullptr;
   }
@@ -238,10 +225,12 @@ content::ColorChooser* ExtensionViewHost::OpenColorChooser(
 
 void ExtensionViewHost::RunFileChooser(
     content::RenderFrameHost* render_frame_host,
-    const content::FileChooserParams& params) {
+    std::unique_ptr<content::FileSelectListener> listener,
+    const blink::mojom::FileChooserParams& params) {
   // For security reasons opening a file picker requires a visible <input>
   // element to click on, so this code only exists for extensions with a view.
-  FileSelectHelper::RunFileChooser(render_frame_host, params);
+  FileSelectHelper::RunFileChooser(render_frame_host, std::move(listener),
+                                   params);
 }
 
 

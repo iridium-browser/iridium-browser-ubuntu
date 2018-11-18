@@ -18,17 +18,10 @@
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
 #include "net/log/net_log_with_source.h"
-#include "net/spdy/core/spdy_header_block.h"
-#include "net/ssl/token_binding.h"
+#include "net/third_party/spdy/core/spdy_header_block.h"
 #include "net/websockets/websocket_basic_stream_adapters.h"
 #include "net/websockets/websocket_handshake_stream_base.h"
 #include "net/websockets/websocket_stream.h"
-
-namespace crypto {
-
-class ECPrivateKey;
-
-}  // namespace crypto
 
 namespace net {
 
@@ -58,7 +51,7 @@ class NET_EXPORT_PRIVATE WebSocketHttp2HandshakeStream
       WebSocketStream::ConnectDelegate* connect_delegate,
       std::vector<std::string> requested_sub_protocols,
       std::vector<std::string> requested_extensions,
-      WebSocketStreamRequest* request);
+      WebSocketStreamRequestAPI* request);
 
   ~WebSocketHttp2HandshakeStream() override;
 
@@ -88,9 +81,6 @@ class NET_EXPORT_PRIVATE WebSocketHttp2HandshakeStream
   void GetSSLInfo(SSLInfo* ssl_info) override;
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override;
   bool GetRemoteEndpoint(IPEndPoint* endpoint) override;
-  Error GetTokenBindingSignature(crypto::ECPrivateKey* key,
-                                 TokenBindingType tb_type,
-                                 std::vector<uint8_t>* out) override;
   void Drain(HttpNetworkSession* session) override;
   void SetPriority(RequestPriority priority) override;
   void PopulateNetErrorDetails(NetErrorDetails* details) override;
@@ -106,7 +96,8 @@ class NET_EXPORT_PRIVATE WebSocketHttp2HandshakeStream
 
   // WebSocketSpdyStreamAdapter::Delegate methods.
   void OnHeadersSent() override;
-  void OnHeadersReceived(const SpdyHeaderBlock& response_headers) override;
+  void OnHeadersReceived(
+      const spdy::SpdyHeaderBlock& response_headers) override;
   void OnClose(int status) override;
 
   // Called by |spdy_stream_request_| when requested stream is ready.
@@ -135,7 +126,7 @@ class NET_EXPORT_PRIVATE WebSocketHttp2HandshakeStream
 
   HttpResponseInfo* http_response_info_;
 
-  SpdyHeaderBlock http2_request_headers_;
+  spdy::SpdyHeaderBlock http2_request_headers_;
 
   // The sub-protocols we requested.
   std::vector<std::string> requested_sub_protocols_;
@@ -143,7 +134,7 @@ class NET_EXPORT_PRIVATE WebSocketHttp2HandshakeStream
   // The extensions we requested.
   std::vector<std::string> requested_extensions_;
 
-  WebSocketStreamRequest* const stream_request_;
+  WebSocketStreamRequestAPI* const stream_request_;
 
   const HttpRequestInfo* request_info_;
 

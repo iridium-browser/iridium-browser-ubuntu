@@ -14,11 +14,7 @@ namespace {
 template <class T>
 const T& ReturnOverriddenValue(const base::Optional<T>& value,
                                const T& default_value) {
-  if (value) {
-    return *value;
-  } else {
-    return default_value;
-  }
+  return value ? *value : default_value;
 }
 
 }  // namespace
@@ -56,11 +52,6 @@ const net::ProxyConfig* HeadlessBrowserContextOptions::proxy_config() const {
   return browser_options_->proxy_config.get();
 }
 
-const std::string& HeadlessBrowserContextOptions::host_resolver_rules() const {
-  return ReturnOverriddenValue(host_resolver_rules_,
-                               browser_options_->host_resolver_rules);
-}
-
 const gfx::Size& HeadlessBrowserContextOptions::window_size() const {
   return ReturnOverriddenValue(window_size_, browser_options_->window_size);
 }
@@ -82,22 +73,6 @@ bool HeadlessBrowserContextOptions::site_per_process() const {
 bool HeadlessBrowserContextOptions::block_new_web_contents() const {
   return ReturnOverriddenValue(block_new_web_contents_,
                                browser_options_->block_new_web_contents);
-}
-
-bool HeadlessBrowserContextOptions::capture_resource_metadata() const {
-  return ReturnOverriddenValue(capture_resource_metadata_,
-                               browser_options_->capture_resource_metadata);
-}
-
-base::Optional<base::Time> HeadlessBrowserContextOptions::initial_virtual_time()
-    const {
-  if (initial_virtual_time_)
-    return initial_virtual_time_;
-  return browser_options_->initial_virtual_time;
-}
-
-bool HeadlessBrowserContextOptions::allow_cookies() const {
-  return ReturnOverriddenValue(allow_cookies_, browser_options_->allow_cookies);
 }
 
 base::RepeatingCallback<void(WebPreferences*)>

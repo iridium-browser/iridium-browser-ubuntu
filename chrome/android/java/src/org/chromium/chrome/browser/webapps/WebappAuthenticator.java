@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.webapps;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.os.AsyncTask;
 import android.os.StrictMode;
 import android.os.SystemClock;
 import android.util.Log;
@@ -14,6 +13,7 @@ import android.util.Log;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.SecureRandomInitializer;
 import org.chromium.base.metrics.CachedMetrics.TimesHistogramSample;
+import org.chromium.base.task.AsyncTask;
 
 import java.io.File;
 import java.io.FileInputStream;

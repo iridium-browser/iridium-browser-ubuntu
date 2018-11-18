@@ -14,8 +14,9 @@
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/gles2_cmd_validation.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
+#include "gpu/config/gpu_feature_info.h"
 #include "gpu/gpu_gles2_export.h"
-#include "ui/gl/extension_set.h"
+#include "ui/gfx/extension_set.h"
 
 namespace base {
 class CommandLine;
@@ -127,13 +128,18 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool ext_window_rectangles = false;
     bool chromium_gpu_fence = false;
     bool unpremultiply_and_dither_copy = false;
+    bool separate_stencil_ref_mask_writemask = false;
+    bool mesa_framebuffer_flip_y = false;
+    bool angle_multiview = false;
+    bool khr_parallel_shader_compile = false;
+    bool android_surface_control = false;
   };
 
   FeatureInfo();
 
   // Constructor with workarounds taken from the current process's CommandLine
-  explicit FeatureInfo(
-      const GpuDriverBugWorkarounds& gpu_driver_bug_workarounds);
+  FeatureInfo(const GpuDriverBugWorkarounds& gpu_driver_bug_workarounds,
+              const GpuFeatureInfo& gpu_feature_info);
 
   // Initializes the feature information. Needs a current GL context.
   void Initialize(ContextType context_type,
@@ -153,7 +159,7 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
 
   ContextType context_type() const { return context_type_; }
 
-  const gl::ExtensionSet& extensions() const { return extensions_; }
+  const gfx::ExtensionSet& extensions() const { return extensions_; }
 
   const FeatureFlags& feature_flags() const {
     return feature_flags_;
@@ -178,7 +184,10 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
   bool IsWebGLContext() const;
   bool IsWebGL1OrES2Context() const;
   bool IsWebGL2OrES3Context() const;
+  bool IsWebGL2OrES3OrHigherContext() const;
+  bool IsWebGL2ComputeContext() const;
 
+  void EnableCHROMIUMTextureStorageImage();
   void EnableCHROMIUMColorBufferFloatRGBA();
   void EnableCHROMIUMColorBufferFloatRGB();
   void EnableEXTColorBufferFloat();
@@ -211,7 +220,7 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
   void AddExtensionString(const base::StringPiece& s);
   void InitializeBasicState(const base::CommandLine* command_line);
   void InitializeFeatures();
-  void InitializeFloatAndHalfFloatFeatures(const gl::ExtensionSet& extensions);
+  void InitializeFloatAndHalfFloatFeatures(const gfx::ExtensionSet& extensions);
 
   Validators validators_;
 
@@ -221,7 +230,7 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
   bool is_passthrough_cmd_decoder_ = false;
 
   // The set of extensions returned by glGetString(GL_EXTENSIONS);
-  gl::ExtensionSet extensions_;
+  gfx::ExtensionSet extensions_;
 
   // Flags for some features
   FeatureFlags feature_flags_;

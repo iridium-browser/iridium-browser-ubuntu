@@ -7,12 +7,25 @@
 #include <iterator>
 
 #include "base/callback.h"
+#include "base/feature_list.h"
 #include "base/single_thread_task_runner.h"
+#include "content/public/common/url_utils.h"
+#include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/loader/resource_dispatcher.h"
 #include "content/renderer/loader/url_response_body_consumer.h"
 #include "net/url_request/redirect_info.h"
+#include "services/network/public/cpp/features.h"
 
 namespace content {
+namespace {
+
+// Determines whether it is safe to redirect from |from_url| to |to_url|.
+bool IsRedirectSafe(const GURL& from_url, const GURL& to_url) {
+  return IsSafeRedirectTarget(from_url, to_url) &&
+         GetContentClient()->renderer()->IsSafeRedirectTarget(to_url);
+}
+
+}  // namespace
 
 class URLLoaderClientImpl::DeferredMessage {
  public:
@@ -65,23 +78,6 @@ class URLLoaderClientImpl::DeferredOnReceiveRedirect final
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 };
 
-class URLLoaderClientImpl::DeferredOnDataDownloaded final
-    : public DeferredMessage {
- public:
-  DeferredOnDataDownloaded(int64_t data_length, int64_t encoded_data_length)
-      : data_length_(data_length), encoded_data_length_(encoded_data_length) {}
-
-  void HandleMessage(ResourceDispatcher* dispatcher, int request_id) override {
-    dispatcher->OnDownloadedData(request_id, data_length_,
-                                 encoded_data_length_);
-  }
-  bool IsCompletionMessage() const override { return false; }
-
- private:
-  const int64_t data_length_;
-  const int64_t encoded_data_length_;
-};
-
 class URLLoaderClientImpl::DeferredOnUploadProgress final
     : public DeferredMessage {
  public:
@@ -130,10 +126,14 @@ class URLLoaderClientImpl::DeferredOnComplete final : public DeferredMessage {
 URLLoaderClientImpl::URLLoaderClientImpl(
     int request_id,
     ResourceDispatcher* resource_dispatcher,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    bool bypass_redirect_checks,
+    const GURL& request_url)
     : request_id_(request_id),
       resource_dispatcher_(resource_dispatcher),
       task_runner_(std::move(task_runner)),
+      bypass_redirect_checks_(bypass_redirect_checks),
+      last_loaded_url_(request_url),
       url_loader_client_binding_(this),
       weak_factory_(this) {}
 
@@ -233,10 +233,8 @@ void URLLoaderClientImpl::Bind(
 }
 
 void URLLoaderClientImpl::OnReceiveResponse(
-    const network::ResourceResponseHead& response_head,
-    network::mojom::DownloadedTempFilePtr downloaded_file) {
+    const network::ResourceResponseHead& response_head) {
   has_received_response_ = true;
-  downloaded_file_ = std::move(downloaded_file);
   if (NeedsStoringMessage()) {
     StoreAndDispatch(
         std::make_unique<DeferredOnReceiveResponse>(response_head));
@@ -250,23 +248,20 @@ void URLLoaderClientImpl::OnReceiveRedirect(
     const network::ResourceResponseHead& response_head) {
   DCHECK(!has_received_response_);
   DCHECK(!body_consumer_);
+  if (base::FeatureList::IsEnabled(network::features::kNetworkService) &&
+      !bypass_redirect_checks_ &&
+      !IsRedirectSafe(last_loaded_url_, redirect_info.new_url)) {
+    OnComplete(network::URLLoaderCompletionStatus(net::ERR_UNSAFE_REDIRECT));
+    return;
+  }
+
+  last_loaded_url_ = redirect_info.new_url;
   if (NeedsStoringMessage()) {
     StoreAndDispatch(std::make_unique<DeferredOnReceiveRedirect>(
         redirect_info, response_head, task_runner_));
   } else {
     resource_dispatcher_->OnReceivedRedirect(request_id_, redirect_info,
                                              response_head, task_runner_);
-  }
-}
-
-void URLLoaderClientImpl::OnDataDownloaded(int64_t data_len,
-                                           int64_t encoded_data_len) {
-  if (NeedsStoringMessage()) {
-    StoreAndDispatch(
-        std::make_unique<DeferredOnDataDownloaded>(data_len, encoded_data_len));
-  } else {
-    resource_dispatcher_->OnDownloadedData(request_id_, data_len,
-                                           encoded_data_len);
   }
 }
 
@@ -294,7 +289,7 @@ void URLLoaderClientImpl::OnReceiveCachedMetadata(
 }
 
 void URLLoaderClientImpl::OnTransferSizeUpdated(int32_t transfer_size_diff) {
-  if (is_deferred_) {
+  if (NeedsStoringMessage()) {
     accumulated_transfer_size_diff_during_deferred_ += transfer_size_diff;
   } else {
     resource_dispatcher_->OnTransferSizeUpdated(request_id_,
@@ -316,7 +311,7 @@ void URLLoaderClientImpl::OnStartLoadingResponseBody(
   body_consumer_ = new URLResponseBodyConsumer(
       request_id_, resource_dispatcher_, std::move(body), task_runner_);
 
-  if (is_deferred_) {
+  if (NeedsStoringMessage()) {
     body_consumer_->SetDefersLoading();
     return;
   }
@@ -336,11 +331,6 @@ void URLLoaderClientImpl::OnComplete(
     return;
   }
   body_consumer_->OnComplete(status);
-}
-
-network::mojom::DownloadedTempFilePtr
-URLLoaderClientImpl::TakeDownloadedTempFile() {
-  return std::move(downloaded_file_);
 }
 
 bool URLLoaderClientImpl::NeedsStoringMessage() const {

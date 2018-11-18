@@ -7,11 +7,12 @@
 #include <stddef.h>
 #include <utility>
 
+#include "base/allocator/allocator_extension.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/memory/memory_coordinator_client_registry.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/threading/thread_checker.h"
@@ -26,6 +27,7 @@
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/gpu/content_gpu_client.h"
 #include "gpu/command_buffer/common/activity_flags.h"
+#include "gpu/ipc/service/gpu_channel_manager.h"
 #include "gpu/ipc/service/gpu_init.h"
 #include "gpu/ipc/service/gpu_watchdog_thread.h"
 #include "ipc/ipc_sync_message_filter.h"
@@ -33,7 +35,7 @@
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/viz/privileged/interfaces/gl/gpu_service.mojom.h"
-#include "skia/ext/event_tracer_impl.h"
+#include "third_party/skia/include/core/SkGraphics.h"
 
 #if defined(USE_OZONE)
 #include "ui/ozone/public/ozone_platform.h"
@@ -89,8 +91,7 @@ class QueueingConnectionFilter : public ConnectionFilter {
 
   void AddInterfaces() {
 #if defined(USE_OZONE)
-    ui::OzonePlatform::GetInstance()->AddInterfaces(
-        &registry_with_source_info_);
+    ui::OzonePlatform::GetInstance()->AddInterfaces(registry_.get());
 #endif
   }
 
@@ -106,10 +107,6 @@ class QueueingConnectionFilter : public ConnectionFilter {
                        mojo::ScopedMessagePipeHandle* interface_pipe,
                        service_manager::Connector* connector) override {
     DCHECK(io_thread_checker_.CalledOnValidThread());
-    if (registry_with_source_info_.TryBindInterface(
-            interface_name, interface_pipe, source_info)) {
-      return;
-    }
 
     if (registry_->CanBindInterface(interface_name)) {
       if (released_) {
@@ -138,9 +135,6 @@ class QueueingConnectionFilter : public ConnectionFilter {
   bool released_ = false;
   std::vector<std::unique_ptr<PendingRequest>> pending_requests_;
   std::unique_ptr<service_manager::BinderRegistry> registry_;
-  service_manager::BinderRegistryWithArgs<
-      const service_manager::BindSourceInfo&>
-      registry_with_source_info_;
 
   base::WeakPtrFactory<QueueingConnectionFilter> weak_factory_;
 
@@ -163,24 +157,29 @@ viz::VizMainImpl::ExternalDependencies CreateVizMainDependencies(
 
 }  // namespace
 
-GpuChildThread::GpuChildThread(std::unique_ptr<gpu::GpuInit> gpu_init,
+GpuChildThread::GpuChildThread(base::RepeatingClosure quit_closure,
+                               std::unique_ptr<gpu::GpuInit> gpu_init,
                                viz::VizMainImpl::LogMessages log_messages)
-    : GpuChildThread(GetOptions(), std::move(gpu_init)) {
+    : GpuChildThread(std::move(quit_closure),
+                     GetOptions(),
+                     std::move(gpu_init)) {
   viz_main_.SetLogMessagesForHost(std::move(log_messages));
 }
 
 GpuChildThread::GpuChildThread(const InProcessChildThreadParams& params,
                                std::unique_ptr<gpu::GpuInit> gpu_init)
-    : GpuChildThread(ChildThreadImpl::Options::Builder()
+    : GpuChildThread(base::DoNothing(),
+                     ChildThreadImpl::Options::Builder()
                          .InBrowserProcess(params)
                          .AutoStartServiceManagerConnection(false)
                          .ConnectToBrowser(true)
                          .Build(),
                      std::move(gpu_init)) {}
 
-GpuChildThread::GpuChildThread(const ChildThreadImpl::Options& options,
+GpuChildThread::GpuChildThread(base::RepeatingClosure quit_closure,
+                               const ChildThreadImpl::Options& options,
                                std::unique_ptr<gpu::GpuInit> gpu_init)
-    : ChildThreadImpl(options),
+    : ChildThreadImpl(std::move(quit_closure), options),
       viz_main_(this,
                 CreateVizMainDependencies(GetConnector()),
                 std::move(gpu_init)),
@@ -193,7 +192,9 @@ GpuChildThread::GpuChildThread(const ChildThreadImpl::Options& options,
   }
 }
 
-GpuChildThread::~GpuChildThread() = default;
+GpuChildThread::~GpuChildThread() {
+  base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
+}
 
 void GpuChildThread::Init(const base::Time& process_start_time) {
   viz_main_.gpu_service()->set_start_time(process_start_time);
@@ -229,7 +230,10 @@ void GpuChildThread::Init(const base::Time& process_start_time) {
 
   StartServiceManagerConnection();
 
-  InitSkiaEventTracer();
+  base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
+  memory_pressure_listener_ =
+      std::make_unique<base::MemoryPressureListener>(base::BindRepeating(
+          &GpuChildThread::OnMemoryPressure, base::Unretained(this)));
 }
 
 void GpuChildThread::CreateVizMainService(
@@ -252,9 +256,7 @@ bool GpuChildThread::Send(IPC::Message* msg) {
 void GpuChildThread::OnAssociatedInterfaceRequest(
     const std::string& name,
     mojo::ScopedInterfaceEndpointHandle handle) {
-  if (associated_interfaces_.CanBindRequest(name))
-    associated_interfaces_.BindRequest(name, std::move(handle));
-  else
+  if (!associated_interfaces_.TryBindInterface(name, &handle))
     ChildThreadImpl::OnAssociatedInterfaceRequest(name, std::move(handle));
 }
 
@@ -274,6 +276,8 @@ void GpuChildThread::OnGpuServiceConnection(viz::GpuServiceImpl* gpu_service) {
   // Only set once per process instance.
   service_factory_.reset(new GpuServiceFactory(
       gpu_service->gpu_preferences(),
+      gpu_service->gpu_channel_manager()->gpu_driver_bug_workarounds(),
+      gpu_service->gpu_feature_info(),
       gpu_service->media_gpu_channel_manager()->AsWeakPtr(),
       std::move(overlay_factory_cb)));
 
@@ -292,12 +296,33 @@ void GpuChildThread::PostCompositorThreadCreated(
     gpu_client->PostCompositorThreadCreated(task_runner);
 }
 
+void GpuChildThread::QuitMainMessageLoop() {
+  ProcessShutdown();
+}
+
 void GpuChildThread::BindServiceFactoryRequest(
     service_manager::mojom::ServiceFactoryRequest request) {
   DVLOG(1) << "GPU: Binding service_manager::mojom::ServiceFactoryRequest";
   DCHECK(service_factory_);
   service_factory_bindings_.AddBinding(service_factory_.get(),
                                        std::move(request));
+}
+
+void GpuChildThread::OnTrimMemoryImmediately() {
+  OnPurgeMemory();
+}
+
+void GpuChildThread::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel level) {
+  if (level == base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL)
+    OnPurgeMemory();
+}
+
+void GpuChildThread::OnPurgeMemory() {
+  base::allocator::ReleaseFreeMemory();
+  if (viz_main_.discardable_shared_memory_manager())
+    viz_main_.discardable_shared_memory_manager()->ReleaseFreeMemory();
+  SkGraphics::PurgeAllCaches();
 }
 
 #if defined(OS_ANDROID)

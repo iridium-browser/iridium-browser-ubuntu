@@ -10,8 +10,9 @@ static_library("cpp") {
     "client.h",
     "controller.cc",
     "controller.h",
+    "sampling_profiler_wrapper.cc",
+    "sampling_profiler_wrapper.h",
     "sender_pipe.h",
-    "sender_pipe_posix.cc",
     "sender_pipe_win.cc",
     "settings.cc",
     "settings.h",
@@ -27,10 +28,14 @@ static_library("cpp") {
     "//base",
     "//base:debugging_buildflags",
     "//base/allocator:buildflags",
-    "//mojo/edk",
     "//services/resource_coordinator/public/mojom:",
     "//services/service_manager/public/cpp",
+    "//services/service_manager/sandbox",
   ]
+
+  if (is_posix) {
+    sources += [ "sender_pipe_posix.cc" ]
+  }
 }
 
 source_set("unit_tests") {
@@ -44,7 +49,6 @@ source_set("unit_tests") {
     "//base",
     "//base/allocator:buildflags",
     "//base/test:test_support",
-    "//mojo/edk",
     "//testing/gtest",
   ]
 }

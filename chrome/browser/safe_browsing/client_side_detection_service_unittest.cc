@@ -15,7 +15,6 @@
 #include "base/containers/queue.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -23,13 +22,17 @@
 #include "chrome/common/safe_browsing/client_model.pb.h"
 #include "components/safe_browsing/proto/csd.pb.h"
 #include "components/variations/variations_associated_data.h"
-#include "content/public/common/weak_wrapper_shared_url_loader_factory.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "crypto/sha2.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/settings/stub_install_attributes.h"
+#endif
 
 using ::testing::Invoke;
 using ::testing::Mock;
@@ -69,7 +72,7 @@ class ClientSideDetectionServiceTest : public testing::Test {
  protected:
   void SetUp() override {
     test_shared_loader_factory_ =
-        base::MakeRefCounted<content::WeakWrapperSharedURLLoaderFactory>(
+        base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
             &test_url_loader_factory_);
   }
 
@@ -240,6 +243,10 @@ class ClientSideDetectionServiceTest : public testing::Test {
 
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
+
+#if defined(OS_CHROMEOS)
+  chromeos::ScopedStubInstallAttributes test_install_attributes_;
+#endif
 
  private:
   void SendRequestDone(base::OnceClosure continuation_callback,

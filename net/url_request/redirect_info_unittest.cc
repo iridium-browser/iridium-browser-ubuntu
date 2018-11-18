@@ -36,7 +36,7 @@ TEST(RedirectInfoTest, MethodForRedirect) {
       net::URLRequest::NEVER_CLEAR_REFERRER;
   const std::string kOriginalReferrer = "";
   const GURL kNewLocation = GURL("https://foo.test/redirected");
-  const bool kTokenBindingNegotiated = false;
+  const bool kInsecureSchemeWasUpgraded = false;
   const bool kCopyFragment = true;
 
   for (const auto& test : kTests) {
@@ -48,7 +48,7 @@ TEST(RedirectInfoTest, MethodForRedirect) {
         test.original_method, kOriginalUrl, kOriginalSiteForCookies,
         kOriginalFirstPartyUrlPolicy, kOriginalReferrerPolicy,
         kOriginalReferrer, nullptr /* response_headers */,
-        test.http_status_code, kNewLocation, kTokenBindingNegotiated,
+        test.http_status_code, kNewLocation, kInsecureSchemeWasUpgraded,
         kCopyFragment);
 
     EXPECT_EQ(test.expected_new_method, redirect_info.new_method);
@@ -87,7 +87,7 @@ TEST(RedirectInfoTest, CopyFragment) {
       net::URLRequest::NEVER_CLEAR_REFERRER;
   const std::string kOriginalReferrer = "";
   const int kHttpStatusCode = 301;
-  const bool kTokenBindingNegotiated = false;
+  const bool kInsecureSchemeWasUpgraded = false;
 
   for (const auto& test : kTests) {
     SCOPED_TRACE(::testing::Message()
@@ -99,7 +99,8 @@ TEST(RedirectInfoTest, CopyFragment) {
         KOriginalMethod, GURL(test.original_url), kOriginalSiteForCookies,
         kOriginalFirstPartyUrlPolicy, kOriginalReferrerPolicy,
         kOriginalReferrer, nullptr /* response_headers */, kHttpStatusCode,
-        GURL(test.new_location), kTokenBindingNegotiated, test.copy_fragment);
+        GURL(test.new_location), kInsecureSchemeWasUpgraded,
+        test.copy_fragment);
 
     EXPECT_EQ(GURL(test.expected_new_url), redirect_info.new_url);
   }
@@ -123,8 +124,8 @@ TEST(RedirectInfoTest, FirstPartyURLPolicy) {
       net::URLRequest::NEVER_CLEAR_REFERRER;
   const std::string kOriginalReferrer = "";
   const GURL kNewLocation = GURL("https://foo.test/redirected");
+  const bool kInsecureSchemeWasUpgraded = false;
   const int kHttpStatusCode = 301;
-  const bool kTokenBindingNegotiated = false;
   const bool kCopyFragment = true;
 
   for (const auto& test : kTests) {
@@ -136,7 +137,7 @@ TEST(RedirectInfoTest, FirstPartyURLPolicy) {
         KOriginalMethod, kOriginalUrl, kOriginalSiteForCookies,
         test.original_first_party_url_policy, kOriginalReferrerPolicy,
         kOriginalReferrer, nullptr /* response_headers */, kHttpStatusCode,
-        kNewLocation, kTokenBindingNegotiated, kCopyFragment);
+        kNewLocation, kInsecureSchemeWasUpgraded, kCopyFragment);
 
     EXPECT_EQ(GURL(test.expected_new_site_for_cookies),
               redirect_info.new_site_for_cookies);
@@ -420,7 +421,7 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
   const GURL kOriginalSiteForCookies = GURL("https://foo.test/");
   const URLRequest::FirstPartyURLPolicy kOriginalFirstPartyUrlPolicy =
       net::URLRequest::NEVER_CHANGE_FIRST_PARTY_URL;
-  const bool kTokenBindingNegotiated = false;
+  const bool kInsecureSchemeWasUpgraded = false;
   const bool kCopyFragment = true;
 
   for (const auto& test : kTests) {
@@ -450,65 +451,11 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
         kOriginalFirstPartyUrlPolicy, test.original_referrer_policy,
         test.original_referrer, response_headers.get(),
         response_headers->response_code(), new_location,
-        kTokenBindingNegotiated, kCopyFragment);
+        kInsecureSchemeWasUpgraded, kCopyFragment);
 
     EXPECT_EQ(test.expected_new_referrer_policy,
               redirect_info.new_referrer_policy);
     EXPECT_EQ(test.expected_referrer, redirect_info.new_referrer);
-  }
-}
-
-TEST(RedirectInfoTest, ReferredTokenBinding) {
-  struct TestCase {
-    bool token_binding_negotiated;
-    const char* response_headers;
-    const char* expected_referred_token_binding_host;
-  };
-  const TestCase kTests[] = {
-      {true, "", ""},
-      {true, "Include-Referred-Token-Binding-ID: true", "foo.test"},
-      {true, "Include-Referred-Token-Binding-ID: bar", ""},
-      {false, "", ""},
-      {false, "Include-Referred-Token-Binding-ID: true", ""},
-      {false, "Include-Referred-Token-Binding-ID: bar", ""},
-  };
-
-  const std::string KOriginalMethod = "GET";
-  const GURL kriginalUrl = GURL("https://foo.test/");
-  const GURL kOriginalSiteForCookies = GURL("https://foo.test/");
-  const URLRequest::FirstPartyURLPolicy kOriginalFirstPartyUrlPolicy =
-      net::URLRequest::NEVER_CHANGE_FIRST_PARTY_URL;
-  const URLRequest::ReferrerPolicy kOriginalReferrerPolicy =
-      net::URLRequest::NEVER_CLEAR_REFERRER;
-  const std::string kOriginalReferrer = "";
-  const GURL kNewLocation = GURL("https://bar.test/redirected");
-  const bool kCopyFragment = true;
-
-  for (const auto& test : kTests) {
-    SCOPED_TRACE(::testing::Message()
-                 << "token_binding_negotiated: "
-                 << test.token_binding_negotiated
-                 << " response_headers:" << test.response_headers);
-
-    std::string response_header_text =
-        "HTTP/1.1 302 Redirect\nLocation: " + kNewLocation.spec() + "\n" +
-        std::string(test.response_headers);
-    std::string raw_headers = HttpUtil::AssembleRawHeaders(
-        response_header_text.c_str(),
-        static_cast<int>(response_header_text.length()));
-    auto response_headers =
-        base::MakeRefCounted<HttpResponseHeaders>(raw_headers);
-    EXPECT_EQ(302, response_headers->response_code());
-
-    RedirectInfo redirect_info = RedirectInfo::ComputeRedirectInfo(
-        KOriginalMethod, kriginalUrl, kOriginalSiteForCookies,
-        kOriginalFirstPartyUrlPolicy, kOriginalReferrerPolicy,
-        kOriginalReferrer, response_headers.get(),
-        response_headers->response_code(), kNewLocation,
-        test.token_binding_negotiated, kCopyFragment);
-
-    EXPECT_EQ(test.expected_referred_token_binding_host,
-              redirect_info.referred_token_binding_host);
   }
 }
 

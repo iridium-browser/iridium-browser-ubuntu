@@ -18,7 +18,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/global_request_id.h"
-#include "third_party/blink/public/web/web_popup_type.h"
+#include "content/public/common/widget_type.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace content {
@@ -48,16 +48,8 @@ class RenderWidgetHelper
   // store in a scoped_refptr.
   static RenderWidgetHelper* FromProcessHostID(int render_process_host_id);
 
-  // UI THREAD ONLY -----------------------------------------------------------
-
-  // These two functions provide the backend implementation of the
-  // corresponding functions in RenderProcessHost. See those declarations
-  // for documentation.
-  void ResumeDeferredNavigation(const GlobalRequestID& request_id);
-
   // IO THREAD ONLY -----------------------------------------------------------
   void CreateNewWidget(int opener_id,
-                       blink::WebPopupType popup_type,
                        mojom::WidgetPtr,
                        int* route_id);
   void CreateNewFullscreenWidget(int opener_id,
@@ -74,21 +66,12 @@ class RenderWidgetHelper
   // Called on the UI thread to finish creating a widget.
   void OnCreateWidgetOnUI(int32_t opener_id,
                           int32_t route_id,
-                          mojom::WidgetPtrInfo widget,
-                          blink::WebPopupType popup_type);
+                          mojom::WidgetPtrInfo widget);
 
   // Called on the UI thread to create a fullscreen widget.
   void OnCreateFullscreenWidgetOnUI(int32_t opener_id,
                                     int32_t route_id,
                                     mojom::WidgetPtrInfo widget);
-
-  // Called on the IO thread to resume a paused navigation in the network
-  // stack without transferring it to a new renderer process.
-  void OnResumeDeferredNavigation(const GlobalRequestID& request_id);
-
-  // Called on the IO thread to resume a navigation paused immediately after
-  // receiving response headers.
-  void OnResumeResponseDeferredAtStart(const GlobalRequestID& request_id);
 
   int render_process_id_;
 

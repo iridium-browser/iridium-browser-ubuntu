@@ -31,19 +31,13 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_DOCUMENT_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_DOCUMENT_H_
 
-#include "third_party/blink/public/platform/web_color.h"
 #include "third_party/blink/public/platform/web_referrer_policy.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/public/web/web_draggable_region.h"
 #include "third_party/blink/public/web/web_frame.h"
 #include "third_party/blink/public/web/web_node.h"
-
-namespace v8 {
-class Value;
-template <class T>
-class Local;
-}
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace blink {
 
@@ -80,7 +74,7 @@ class WebDocument : public WebNode {
   BLINK_EXPORT WebString Encoding() const;
   BLINK_EXPORT WebString ContentLanguage() const;
   BLINK_EXPORT WebString GetReferrer() const;
-  BLINK_EXPORT WebColor ThemeColor() const;
+  BLINK_EXPORT SkColor ThemeColor() const;
   // The url of the OpenSearch Desription Document (if any).
   BLINK_EXPORT WebURL OpenSearchDescriptionURL() const;
 
@@ -101,7 +95,13 @@ class WebDocument : public WebNode {
   BLINK_EXPORT WebElement Body() const;
   BLINK_EXPORT WebElement Head();
   BLINK_EXPORT WebString Title() const;
-  BLINK_EXPORT WebString ContentAsTextForTesting() const;
+
+  // |use_inner_text| controls which implementation to use for text dump,
+  // spec-conformant Element.innerText or legacy, to help progressive
+  // rebaseline of layout test text dumps.
+  // TODO(xiaochengh): Remove this flag when rebaseline is complete.
+  BLINK_EXPORT WebString ContentAsTextForTesting(bool use_inner_text) const;
+
   BLINK_EXPORT WebElementCollection All();
   BLINK_EXPORT void Forms(WebVector<WebFormElement>&) const;
   BLINK_EXPORT WebURL CompleteURL(const WebString&) const;
@@ -121,16 +121,12 @@ class WebDocument : public WebNode {
   BLINK_EXPORT void RemoveInsertedStyleSheet(const WebStyleSheetKey&,
                                              CSSOrigin = kAuthorOrigin);
 
-  // Arranges to call WebFrameClient::didMatchCSS(frame(), ...) when one of
+  // Arranges to call WebLocalFrameClient::didMatchCSS(frame(), ...) when one of
   // the selectors matches or stops matching an element in this document.
   // Each call to this method overrides any previous calls.
   BLINK_EXPORT void WatchCSSSelectors(const WebVector<WebString>& selectors);
 
   BLINK_EXPORT WebVector<WebDraggableRegion> DraggableRegions() const;
-
-  BLINK_EXPORT v8::Local<v8::Value> RegisterEmbedderCustomElement(
-      const WebString& name,
-      v8::Local<v8::Value> options);
 
   BLINK_EXPORT WebURL ManifestURL() const;
   BLINK_EXPORT bool ManifestUseCredentials() const;

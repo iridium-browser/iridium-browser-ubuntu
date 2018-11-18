@@ -46,10 +46,9 @@ const int8_t kOnedEAN8LPattern[10][4] = {
 
 CBC_OnedEAN8Writer::CBC_OnedEAN8Writer() {
   m_iDataLenth = 8;
-  m_codeWidth = 3 + (7 * 4) + 5 + (7 * 4) + 3;
 }
 
-CBC_OnedEAN8Writer::~CBC_OnedEAN8Writer() {}
+CBC_OnedEAN8Writer::~CBC_OnedEAN8Writer() = default;
 
 void CBC_OnedEAN8Writer::SetDataLength(int32_t length) {
   m_iDataLenth = 8;
@@ -69,6 +68,7 @@ bool CBC_OnedEAN8Writer::CheckContentValidity(const WideStringView& contents) {
 
 WideString CBC_OnedEAN8Writer::FilterContents(const WideStringView& contents) {
   WideString filtercontents;
+  filtercontents.Reserve(contents.GetLength());
   wchar_t ch;
   for (size_t i = 0; i < contents.GetLength(); i++) {
     ch = contents[i];

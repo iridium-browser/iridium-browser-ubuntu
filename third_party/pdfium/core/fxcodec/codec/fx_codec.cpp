@@ -26,13 +26,6 @@
 #include "third_party/base/logging.h"
 #include "third_party/base/ptr_util.h"
 
-#ifdef PDF_ENABLE_XFA
-#include "core/fxcodec/codec/ccodec_bmpmodule.h"
-#include "core/fxcodec/codec/ccodec_gifmodule.h"
-#include "core/fxcodec/codec/ccodec_pngmodule.h"
-#include "core/fxcodec/codec/ccodec_tiffmodule.h"
-#endif  // PDF_ENABLE_XFA
-
 namespace {
 
 const uint8_t g_CMYK[81 * 81 * 3] = {
@@ -1364,38 +1357,18 @@ CCodec_ModuleMgr::CCodec_ModuleMgr()
 
 CCodec_ModuleMgr::~CCodec_ModuleMgr() {}
 
-#ifdef PDF_ENABLE_XFA
-void CCodec_ModuleMgr::SetBmpModule(std::unique_ptr<CCodec_BmpModule> module) {
-  m_pBmpModule = std::move(module);
-}
-
-void CCodec_ModuleMgr::SetGifModule(std::unique_ptr<CCodec_GifModule> module) {
-  m_pGifModule = std::move(module);
-}
-
-void CCodec_ModuleMgr::SetPngModule(std::unique_ptr<CCodec_PngModule> module) {
-  m_pPngModule = std::move(module);
-}
-
-void CCodec_ModuleMgr::SetTiffModule(
-    std::unique_ptr<CCodec_TiffModule> module) {
-  m_pTiffModule = std::move(module);
-}
-#endif  // PDF_ENABLE_XFA
-
-bool CCodec_BasicModule::RunLengthEncode(const uint8_t* src_buf,
-                                         uint32_t src_size,
+bool CCodec_BasicModule::RunLengthEncode(pdfium::span<const uint8_t> src_span,
                                          uint8_t** dest_buf,
                                          uint32_t* dest_size) {
   // Check inputs
-  if (!src_buf || !dest_buf || !dest_size || src_size == 0)
+  if (src_span.empty() || !dest_buf || !dest_size)
     return false;
 
   // Edge case
-  if (src_size == 1) {
+  if (src_span.size() == 1) {
     *dest_buf = FX_Alloc(uint8_t, 3);
     (*dest_buf)[0] = 0;
-    (*dest_buf)[1] = src_buf[0];
+    (*dest_buf)[1] = src_span[0];
     (*dest_buf)[2] = 128;
     *dest_size = 3;
     return true;
@@ -1404,25 +1377,29 @@ bool CCodec_BasicModule::RunLengthEncode(const uint8_t* src_buf,
   // Worst case: 1 nonmatch, 2 match, 1 nonmatch, 2 match, etc. This becomes
   // 4 output chars for every 3 input, plus up to 4 more for the 1-2 chars
   // rounded off plus the terminating character.
-  uint32_t est_size = 4 * ((src_size + 2) / 3) + 1;
-  *dest_buf = FX_Alloc(uint8_t, est_size);
+  FX_SAFE_SIZE_T estimated_size = src_span.size();
+  estimated_size += 2;
+  estimated_size /= 3;
+  estimated_size *= 4;
+  estimated_size += 1;
+  *dest_buf = FX_Alloc(uint8_t, estimated_size.ValueOrDie());
 
   // Set up pointers.
   uint8_t* out = *dest_buf;
   uint32_t run_start = 0;
   uint32_t run_end = 1;
-  uint8_t x = src_buf[run_start];
-  uint8_t y = src_buf[run_end];
-  while (run_end < src_size) {
-    uint32_t max_len = std::min((uint32_t)128, src_size - run_start);
+  uint8_t x = src_span[run_start];
+  uint8_t y = src_span[run_end];
+  while (run_end < src_span.size()) {
+    size_t max_len = std::min<size_t>(128, src_span.size() - run_start);
     while (x == y && (run_end - run_start < max_len - 1))
-      y = src_buf[++run_end];
+      y = src_span[++run_end];
 
     // Reached end with matched run. Update variables to expected values.
     if (x == y) {
       run_end++;
-      if (run_end < src_size)
-        y = src_buf[run_end];
+      if (run_end < src_span.size())
+        y = src_span[run_end];
     }
     if (run_end - run_start > 1) {  // Matched run but not at end of input.
       out[0] = 257 - (run_end - run_start);
@@ -1430,8 +1407,8 @@ bool CCodec_BasicModule::RunLengthEncode(const uint8_t* src_buf,
       x = y;
       run_start = run_end;
       run_end++;
-      if (run_end < src_size)
-        y = src_buf[run_end];
+      if (run_end < src_span.size())
+        y = src_span[run_end];
       out += 2;
       continue;
     }
@@ -1440,20 +1417,20 @@ bool CCodec_BasicModule::RunLengthEncode(const uint8_t* src_buf,
       out[run_end - run_start] = x;
       x = y;
       run_end++;
-      if (run_end == src_size) {
+      if (run_end == src_span.size()) {
         if (run_end <= run_start + max_len) {
           out[run_end - run_start] = x;
           run_end++;
         }
         break;
       }
-      y = src_buf[run_end];
+      y = src_span[run_end];
     }
     out[0] = run_end - run_start - 2;
     out += run_end - run_start;
     run_start = run_end - 1;
   }
-  if (run_start < src_size) {  // 1 leftover character
+  if (run_start < src_span.size()) {  // 1 leftover character
     out[0] = 0;
     out[1] = x;
     out += 2;
@@ -1463,15 +1440,14 @@ bool CCodec_BasicModule::RunLengthEncode(const uint8_t* src_buf,
   return true;
 }
 
-bool CCodec_BasicModule::A85Encode(const uint8_t* src_buf,
-                                   uint32_t src_size,
+bool CCodec_BasicModule::A85Encode(pdfium::span<const uint8_t> src_span,
                                    uint8_t** dest_buf,
                                    uint32_t* dest_size) {
   // Check inputs.
-  if (!src_buf || !dest_buf || !dest_size)
+  if (!dest_buf || !dest_size)
     return false;
 
-  if (src_size == 0) {
+  if (src_span.empty()) {
     *dest_size = 0;
     return false;
   }
@@ -1479,18 +1455,23 @@ bool CCodec_BasicModule::A85Encode(const uint8_t* src_buf,
   // Worst case: 5 output for each 4 input (plus up to 4 from leftover), plus
   // 2 character new lines each 75 output chars plus 2 termination chars. May
   // have fewer if there are special "z" chars.
-  uint32_t est_size = 5 * (src_size / 4) + 4 + src_size / 30 + 2;
-  *dest_buf = FX_Alloc(uint8_t, est_size);
+  FX_SAFE_SIZE_T estimated_size = src_span.size();
+  estimated_size /= 4;
+  estimated_size *= 5;
+  estimated_size += 4;
+  estimated_size += src_span.size() / 30;
+  estimated_size += 2;
+  *dest_buf = FX_Alloc(uint8_t, estimated_size.ValueOrDie());
 
   // Set up pointers.
   uint8_t* out = *dest_buf;
   uint32_t pos = 0;
   uint32_t line_length = 0;
-  while (src_size >= 4 && pos < src_size - 3) {
-    uint32_t val = ((uint32_t)(src_buf[pos]) << 24) +
-                   ((uint32_t)(src_buf[pos + 1]) << 16) +
-                   ((uint32_t)(src_buf[pos + 2]) << 8) +
-                   (uint32_t)(src_buf[pos + 3]);
+  while (src_span.size() >= 4 && pos < src_span.size() - 3) {
+    uint32_t val = ((uint32_t)(src_span[pos]) << 24) +
+                   ((uint32_t)(src_span[pos + 1]) << 16) +
+                   ((uint32_t)(src_span[pos + 2]) << 8) +
+                   (uint32_t)(src_span[pos + 3]);
     pos += 4;
     if (val == 0) {  // All zero special case
       *out = 'z';
@@ -1510,11 +1491,11 @@ bool CCodec_BasicModule::A85Encode(const uint8_t* src_buf,
       line_length = 0;
     }
   }
-  if (pos < src_size) {  // Leftover bytes
+  if (pos < src_span.size()) {  // Leftover bytes
     uint32_t val = 0;
     int count = 0;
-    while (pos < src_size) {
-      val += (uint32_t)(src_buf[pos]) << (8 * (3 - count));
+    while (pos < src_span.size()) {
+      val += (uint32_t)(src_span[pos]) << (8 * (3 - count));
       count++;
       pos++;
     }
@@ -1535,16 +1516,7 @@ bool CCodec_BasicModule::A85Encode(const uint8_t* src_buf,
 }
 
 #ifdef PDF_ENABLE_XFA
-CFX_DIBAttribute::CFX_DIBAttribute()
-    : m_nXDPI(-1),
-      m_nYDPI(-1),
-      m_fAspectRatio(-1.0f),
-      m_wDPIUnit(0),
-      m_nGifLeft(0),
-      m_nGifTop(0),
-      m_pGifLocalPalette(nullptr),
-      m_nGifLocalPalNum(0),
-      m_nBmpCompressType(0) {}
+CFX_DIBAttribute::CFX_DIBAttribute() {}
 
 CFX_DIBAttribute::~CFX_DIBAttribute() {
   for (const auto& pair : m_Exif)
@@ -1552,13 +1524,12 @@ CFX_DIBAttribute::~CFX_DIBAttribute() {
 }
 #endif  // PDF_ENABLE_XFA
 
-class CCodec_RLScanlineDecoder : public CCodec_ScanlineDecoder {
+class CCodec_RLScanlineDecoder final : public CCodec_ScanlineDecoder {
  public:
   CCodec_RLScanlineDecoder();
   ~CCodec_RLScanlineDecoder() override;
 
-  bool Create(const uint8_t* src_buf,
-              uint32_t src_size,
+  bool Create(pdfium::span<const uint8_t> src_buf,
               int width,
               int height,
               int nComps,
@@ -1569,45 +1540,38 @@ class CCodec_RLScanlineDecoder : public CCodec_ScanlineDecoder {
   uint8_t* v_GetNextLine() override;
   uint32_t GetSrcOffset() override { return m_SrcOffset; }
 
- protected:
+ private:
   bool CheckDestSize();
   void GetNextOperator();
   void UpdateOperator(uint8_t used_bytes);
 
-  uint8_t* m_pScanline;
-  const uint8_t* m_pSrcBuf;
-  uint32_t m_SrcSize;
-  uint32_t m_dwLineBytes;
-  uint32_t m_SrcOffset;
-  bool m_bEOD;
-  uint8_t m_Operator;
+  std::unique_ptr<uint8_t, FxFreeDeleter> m_pScanline;
+  pdfium::span<const uint8_t> m_SrcBuf;
+  size_t m_dwLineBytes = 0;
+  size_t m_SrcOffset = 0;
+  bool m_bEOD = false;
+  uint8_t m_Operator = 0;
 };
-CCodec_RLScanlineDecoder::CCodec_RLScanlineDecoder()
-    : m_pScanline(nullptr),
-      m_pSrcBuf(nullptr),
-      m_SrcSize(0),
-      m_dwLineBytes(0),
-      m_SrcOffset(0),
-      m_bEOD(false),
-      m_Operator(0) {}
-CCodec_RLScanlineDecoder::~CCodec_RLScanlineDecoder() {
-  FX_Free(m_pScanline);
-}
+
+CCodec_RLScanlineDecoder::CCodec_RLScanlineDecoder() = default;
+
+CCodec_RLScanlineDecoder::~CCodec_RLScanlineDecoder() = default;
+
 bool CCodec_RLScanlineDecoder::CheckDestSize() {
-  uint32_t i = 0;
+  size_t i = 0;
   uint32_t old_size = 0;
   uint32_t dest_size = 0;
-  while (i < m_SrcSize) {
-    if (m_pSrcBuf[i] < 128) {
+  while (i < m_SrcBuf.size()) {
+    if (m_SrcBuf[i] < 128) {
       old_size = dest_size;
-      dest_size += m_pSrcBuf[i] + 1;
+      dest_size += m_SrcBuf[i] + 1;
       if (dest_size < old_size) {
         return false;
       }
-      i += m_pSrcBuf[i] + 2;
-    } else if (m_pSrcBuf[i] > 128) {
+      i += m_SrcBuf[i] + 2;
+    } else if (m_SrcBuf[i] > 128) {
       old_size = dest_size;
-      dest_size += 257 - m_pSrcBuf[i];
+      dest_size += 257 - m_SrcBuf[i];
       if (dest_size < old_size) {
         return false;
       }
@@ -1622,14 +1586,13 @@ bool CCodec_RLScanlineDecoder::CheckDestSize() {
   }
   return true;
 }
-bool CCodec_RLScanlineDecoder::Create(const uint8_t* src_buf,
-                                      uint32_t src_size,
+
+bool CCodec_RLScanlineDecoder::Create(pdfium::span<const uint8_t> src_buf,
                                       int width,
                                       int height,
                                       int nComps,
                                       int bpc) {
-  m_pSrcBuf = src_buf;
-  m_SrcSize = src_size;
+  m_SrcBuf = src_buf;
   m_OutputWidth = m_OrigWidth = width;
   m_OutputHeight = m_OrigHeight = height;
   m_nComps = nComps;
@@ -1647,52 +1610,53 @@ bool CCodec_RLScanlineDecoder::Create(const uint8_t* src_buf,
   m_Pitch = pitch.ValueOrDie();
   // Overflow should already have been checked before this is called.
   m_dwLineBytes = (static_cast<uint32_t>(width) * nComps * bpc + 7) / 8;
-  m_pScanline = FX_Alloc(uint8_t, m_Pitch);
+  m_pScanline.reset(FX_Alloc(uint8_t, m_Pitch));
   return CheckDestSize();
 }
+
 bool CCodec_RLScanlineDecoder::v_Rewind() {
-  memset(m_pScanline, 0, m_Pitch);
+  memset(m_pScanline.get(), 0, m_Pitch);
   m_SrcOffset = 0;
   m_bEOD = false;
   m_Operator = 0;
   return true;
 }
+
 uint8_t* CCodec_RLScanlineDecoder::v_GetNextLine() {
   if (m_SrcOffset == 0) {
     GetNextOperator();
-  } else {
-    if (m_bEOD) {
-      return nullptr;
-    }
+  } else if (m_bEOD) {
+    return nullptr;
   }
-  memset(m_pScanline, 0, m_Pitch);
+  memset(m_pScanline.get(), 0, m_Pitch);
   uint32_t col_pos = 0;
   bool eol = false;
-  while (m_SrcOffset < m_SrcSize && !eol) {
+  while (m_SrcOffset < m_SrcBuf.size() && !eol) {
     if (m_Operator < 128) {
       uint32_t copy_len = m_Operator + 1;
       if (col_pos + copy_len >= m_dwLineBytes) {
         copy_len = m_dwLineBytes - col_pos;
         eol = true;
       }
-      if (copy_len >= m_SrcSize - m_SrcOffset) {
-        copy_len = m_SrcSize - m_SrcOffset;
+      if (copy_len >= m_SrcBuf.size() - m_SrcOffset) {
+        copy_len = m_SrcBuf.size() - m_SrcOffset;
         m_bEOD = true;
       }
-      memcpy(m_pScanline + col_pos, m_pSrcBuf + m_SrcOffset, copy_len);
+      auto copy_span = m_SrcBuf.subspan(m_SrcOffset, copy_len);
+      memcpy(m_pScanline.get() + col_pos, copy_span.data(), copy_span.size());
       col_pos += copy_len;
       UpdateOperator((uint8_t)copy_len);
     } else if (m_Operator > 128) {
       int fill = 0;
-      if (m_SrcOffset - 1 < m_SrcSize - 1) {
-        fill = m_pSrcBuf[m_SrcOffset];
+      if (m_SrcOffset - 1 < m_SrcBuf.size() - 1) {
+        fill = m_SrcBuf[m_SrcOffset];
       }
       uint32_t duplicate_len = 257 - m_Operator;
       if (col_pos + duplicate_len >= m_dwLineBytes) {
         duplicate_len = m_dwLineBytes - col_pos;
         eol = true;
       }
-      memset(m_pScanline + col_pos, fill, duplicate_len);
+      memset(m_pScanline.get() + col_pos, fill, duplicate_len);
       col_pos += duplicate_len;
       UpdateOperator((uint8_t)duplicate_len);
     } else {
@@ -1700,14 +1664,15 @@ uint8_t* CCodec_RLScanlineDecoder::v_GetNextLine() {
       break;
     }
   }
-  return m_pScanline;
+  return m_pScanline.get();
 }
+
 void CCodec_RLScanlineDecoder::GetNextOperator() {
-  if (m_SrcOffset >= m_SrcSize) {
+  if (m_SrcOffset >= m_SrcBuf.size()) {
     m_Operator = 128;
     return;
   }
-  m_Operator = m_pSrcBuf[m_SrcOffset];
+  m_Operator = m_SrcBuf[m_SrcOffset];
   m_SrcOffset++;
 }
 void CCodec_RLScanlineDecoder::UpdateOperator(uint8_t used_bytes) {
@@ -1723,7 +1688,7 @@ void CCodec_RLScanlineDecoder::UpdateOperator(uint8_t used_bytes) {
     }
     m_Operator -= used_bytes;
     m_SrcOffset += used_bytes;
-    if (m_SrcOffset >= m_SrcSize) {
+    if (m_SrcOffset >= m_SrcBuf.size()) {
       m_Operator = 128;
     }
     return;
@@ -1740,14 +1705,13 @@ void CCodec_RLScanlineDecoder::UpdateOperator(uint8_t used_bytes) {
 }
 
 std::unique_ptr<CCodec_ScanlineDecoder>
-CCodec_BasicModule::CreateRunLengthDecoder(const uint8_t* src_buf,
-                                           uint32_t src_size,
+CCodec_BasicModule::CreateRunLengthDecoder(pdfium::span<const uint8_t> src_buf,
                                            int width,
                                            int height,
                                            int nComps,
                                            int bpc) {
   auto pDecoder = pdfium::MakeUnique<CCodec_RLScanlineDecoder>();
-  if (!pDecoder->Create(src_buf, src_size, width, height, nComps, bpc))
+  if (!pDecoder->Create(src_buf, width, height, nComps, bpc))
     return nullptr;
 
   return std::move(pDecoder);
@@ -1838,4 +1802,22 @@ std::tuple<float, float, float> AdobeCMYK_to_sRGB(float c,
   // Multiply by a constant rather than dividing because division is much
   // more expensive.
   return std::make_tuple(r * (1.0f / 255), g * (1.0f / 255), b * (1.0f / 255));
+}
+
+FX_SAFE_UINT32 CalculatePitch8(uint32_t bpc, uint32_t components, int width) {
+  FX_SAFE_UINT32 pitch = bpc;
+  pitch *= components;
+  pitch *= width;
+  pitch += 7;
+  pitch /= 8;
+  return pitch;
+}
+
+FX_SAFE_UINT32 CalculatePitch32(int bpp, int width) {
+  FX_SAFE_UINT32 pitch = bpp;
+  pitch *= width;
+  pitch += 31;
+  pitch /= 32;  // quantized to number of 32-bit words.
+  pitch *= 4;   // and then back to bytes, (not just /8 in one step).
+  return pitch;
 }

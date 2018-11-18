@@ -31,7 +31,7 @@ namespace blink {
 // need more columns than what a group has room for, we'll create another group
 // and put them there (and make them appear in the next outer fragmentainer).
 class CORE_EXPORT MultiColumnFragmentainerGroup {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   MultiColumnFragmentainerGroup(const LayoutMultiColumnSet&);
@@ -126,22 +126,7 @@ class CORE_EXPORT MultiColumnFragmentainerGroup {
 
   LayoutRect FlowThreadPortionRectAt(unsigned column_index) const;
 
-  enum ClipRectAxesSelector {
-    // Only limit the clip rectangle in the block direction. Leave inline
-    // position and length at infinity. Certain operations require this. Those
-    // operations would typically ideally want no clipping at all, but in our
-    // implementation we have to clip in the block direction, in order to slice
-    // the flow thread properly into columns.
-    kBlockDirectionAxis,
-
-    // Limit the clip rectangle along both axes. This is what to use for
-    // painting and hit testing.
-    kBothAxes
-  };
-
-  LayoutRect FlowThreadPortionOverflowRectAt(
-      unsigned column_index,
-      ClipRectAxesSelector = kBothAxes) const;
+  LayoutRect FlowThreadPortionOverflowRectAt(unsigned column_index) const;
 
   // Get the first and the last column intersecting the specified block range.
   // Note that |logicalBottomInFlowThread| is an exclusive endpoint.
@@ -193,6 +178,8 @@ class CORE_EXPORT MultiColumnFragmentainerGroup {
   // to a column, even if said point is not inside any of the columns.
   unsigned ColumnIndexAtVisualPoint(const LayoutPoint& visual_point) const;
 
+  unsigned UnclampedActualColumnCount() const;
+
   const LayoutMultiColumnSet& column_set_;
 
   LayoutUnit logical_top_;
@@ -206,6 +193,8 @@ class CORE_EXPORT MultiColumnFragmentainerGroup {
 
   // Maximum logical height allowed.
   LayoutUnit max_logical_height_;
+
+  unsigned actual_column_count_allowance_ = 0;
 
   bool is_logical_height_known_ = false;
 };

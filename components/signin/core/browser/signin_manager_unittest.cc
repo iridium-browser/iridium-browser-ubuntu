@@ -13,11 +13,13 @@
 #include "base/compiler_specific.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "build/build_config.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/device_id_helper.h"
 #include "components/signin/core/browser/fake_account_fetcher_service.h"
 #include "components/signin/core/browser/fake_gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
@@ -29,10 +31,6 @@
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/cookies/cookie_monster.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_request.h"
-#include "net/url_request/url_request_context_getter.h"
-#include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -82,19 +80,17 @@ class SigninManagerTest : public testing::Test {
  public:
   SigninManagerTest()
       : test_signin_client_(&user_prefs_),
+        token_service_(&user_prefs_),
         cookie_manager_service_(&token_service_,
                                 GaiaConstants::kChromeSource,
                                 &test_signin_client_),
-        url_fetcher_factory_(nullptr),
         account_consistency_(signin::AccountConsistencyMethod::kDisabled) {
-    test_signin_client_.SetURLRequestContext(
-        new net::TestURLRequestContextGetter(loop_.task_runner()));
-    cookie_manager_service_.Init(&url_fetcher_factory_);
     AccountFetcherService::RegisterPrefs(user_prefs_.registry());
     AccountTrackerService::RegisterPrefs(user_prefs_.registry());
+    ProfileOAuth2TokenService::RegisterProfilePrefs(user_prefs_.registry());
     SigninManagerBase::RegisterProfilePrefs(user_prefs_.registry());
     SigninManagerBase::RegisterPrefs(local_state_.registry());
-    account_tracker_.Initialize(&test_signin_client_);
+    account_tracker_.Initialize(&user_prefs_, base::FilePath());
     account_fetcher_.Initialize(&test_signin_client_, &token_service_,
                                 &account_tracker_,
                                 std::make_unique<TestImageDecoder>());
@@ -116,6 +112,7 @@ class SigninManagerTest : public testing::Test {
 
   AccountTrackerService* account_tracker() { return &account_tracker_; }
   FakeAccountFetcherService* account_fetcher() { return &account_fetcher_; }
+  PrefService* prefs() { return &user_prefs_; }
 
   // Seed the account tracker with information from logged in user.  Normally
   // this is done by UI code before calling SigninManager.  Returns the string
@@ -167,12 +164,11 @@ class SigninManagerTest : public testing::Test {
   base::MessageLoop loop_;
   sync_preferences::TestingPrefServiceSyncable user_prefs_;
   TestingPrefServiceSimple local_state_;
-  FakeProfileOAuth2TokenService token_service_;
   TestSigninClient test_signin_client_;
+  FakeProfileOAuth2TokenService token_service_;
   AccountTrackerService account_tracker_;
   FakeGaiaCookieManagerService cookie_manager_service_;
   FakeAccountFetcherService account_fetcher_;
-  net::FakeURLFetcherFactory url_fetcher_factory_;
   std::unique_ptr<SigninManager> manager_;
   TestSigninManagerObserver test_observer_;
   std::vector<std::string> oauth_tokens_fetched_;
@@ -340,11 +336,11 @@ TEST_F(SigninManagerTest, SignOutWhileProhibited) {
   EXPECT_TRUE(manager_->GetAuthenticatedAccountId().empty());
 
   manager_->SetAuthenticatedAccountInfo("gaia_id", "user@gmail.com");
-  manager_->ProhibitSignout(true);
+  signin_client()->set_is_signout_allowed(false);
   manager_->SignOut(signin_metrics::SIGNOUT_TEST,
                     signin_metrics::SignoutDelete::IGNORE_METRIC);
   EXPECT_TRUE(manager_->IsAuthenticated());
-  manager_->ProhibitSignout(false);
+  signin_client()->set_is_signout_allowed(true);
   manager_->SignOut(signin_metrics::SIGNOUT_TEST,
                     signin_metrics::SignoutDelete::IGNORE_METRIC);
   EXPECT_FALSE(manager_->IsAuthenticated());
@@ -512,13 +508,13 @@ TEST_F(SigninManagerTest, GaiaIdMigration) {
                           AccountTrackerService::kAccountInfoPref);
     update->Clear();
     auto dict = std::make_unique<base::DictionaryValue>();
-    dict->SetString("account_id", base::UTF8ToUTF16(email));
-    dict->SetString("email", base::UTF8ToUTF16(email));
-    dict->SetString("gaia", base::UTF8ToUTF16(gaia_id));
+    dict->SetString("account_id", email);
+    dict->SetString("email", email);
+    dict->SetString("gaia", gaia_id);
     update->Append(std::move(dict));
 
     account_tracker()->Shutdown();
-    account_tracker()->Initialize(signin_client());
+    account_tracker()->Initialize(prefs(), base::FilePath());
 
     client_prefs->SetString(prefs::kGoogleServicesAccountId, email);
 
@@ -542,13 +538,13 @@ TEST_F(SigninManagerTest, VeryOldProfileGaiaIdMigration) {
                           AccountTrackerService::kAccountInfoPref);
     update->Clear();
     auto dict = std::make_unique<base::DictionaryValue>();
-    dict->SetString("account_id", base::UTF8ToUTF16(email));
-    dict->SetString("email", base::UTF8ToUTF16(email));
-    dict->SetString("gaia", base::UTF8ToUTF16(gaia_id));
+    dict->SetString("account_id", email);
+    dict->SetString("email", email);
+    dict->SetString("gaia", gaia_id);
     update->Append(std::move(dict));
 
     account_tracker()->Shutdown();
-    account_tracker()->Initialize(signin_client());
+    account_tracker()->Initialize(prefs(), base::FilePath());
 
     client_prefs->ClearPref(prefs::kGoogleServicesAccountId);
     client_prefs->SetString(prefs::kGoogleServicesUsername, email);
@@ -572,13 +568,13 @@ TEST_F(SigninManagerTest, GaiaIdMigrationCrashInTheMiddle) {
                           AccountTrackerService::kAccountInfoPref);
     update->Clear();
     auto dict = std::make_unique<base::DictionaryValue>();
-    dict->SetString("account_id", base::UTF8ToUTF16(email));
-    dict->SetString("email", base::UTF8ToUTF16(email));
-    dict->SetString("gaia", base::UTF8ToUTF16(gaia_id));
+    dict->SetString("account_id", email);
+    dict->SetString("email", email);
+    dict->SetString("gaia", gaia_id);
     update->Append(std::move(dict));
 
     account_tracker()->Shutdown();
-    account_tracker()->Initialize(signin_client());
+    account_tracker()->Initialize(prefs(), base::FilePath());
 
     client_prefs->SetString(prefs::kGoogleServicesAccountId, gaia_id);
 

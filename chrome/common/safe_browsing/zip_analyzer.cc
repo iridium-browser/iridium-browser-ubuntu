@@ -27,6 +27,8 @@
 #if defined(OS_MACOSX)
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
+#include "base/containers/span.h"
+#include "chrome/common/safe_browsing/disk_image_type_sniffer_mac.h"
 #include "chrome/common/safe_browsing/mach_o_image_reader_mac.h"
 #endif  // OS_MACOSX
 
@@ -54,8 +56,7 @@ class HashingFileWriter : public zip::FileWriterDelegate {
 
 HashingFileWriter::HashingFileWriter(base::File* file)
     : zip::FileWriterDelegate(file),
-      sha256_(crypto::SecureHash::Create(crypto::SecureHash::SHA256)) {
-}
+      sha256_(crypto::SecureHash::Create(crypto::SecureHash::SHA256)) {}
 
 bool HashingFileWriter::WriteBytes(const char* data, int num_bytes) {
   if (!zip::FileWriterDelegate::WriteBytes(data, num_bytes))
@@ -80,8 +81,7 @@ bool StringIsMachOMagic(std::string bytes) {
 }
 #endif  // OS_MACOSX
 
-void AnalyzeContainedFile(
-    const scoped_refptr<BinaryFeatureExtractor>& binary_feature_extractor,
+void SetLengthAndDigestForContainedFile(
     const base::FilePath& file_path,
     zip::ZipReader* reader,
     base::File* temp_file,
@@ -96,21 +96,67 @@ void AnalyzeContainedFile(
   if (reader->ExtractCurrentEntry(&writer,
                                   std::numeric_limits<uint64_t>::max())) {
     uint8_t digest[crypto::kSHA256Length];
-    writer.ComputeDigest(&digest[0], arraysize(digest));
+    writer.ComputeDigest(&digest[0], base::size(digest));
     archived_binary->mutable_digests()->set_sha256(&digest[0],
-                                                   arraysize(digest));
-    if (!binary_feature_extractor->ExtractImageFeaturesFromFile(
-            temp_file->Duplicate(),
-            BinaryFeatureExtractor::kDefaultOptions,
-            archived_binary->mutable_image_headers(),
-            archived_binary->mutable_signature()->mutable_signed_data())) {
-      archived_binary->clear_image_headers();
-      archived_binary->clear_signature();
-    } else if (!archived_binary->signature().signed_data_size()) {
-      // No SignedData blobs were extracted, so clear the signature field.
-      archived_binary->clear_signature();
+                                                   base::size(digest));
+  }
+}
+
+void AnalyzeContainedBinary(
+    const scoped_refptr<BinaryFeatureExtractor>& binary_feature_extractor,
+    base::File* temp_file,
+    ClientDownloadRequest::ArchivedBinary* archived_binary) {
+  if (!binary_feature_extractor->ExtractImageFeaturesFromFile(
+          temp_file->Duplicate(), BinaryFeatureExtractor::kDefaultOptions,
+          archived_binary->mutable_image_headers(),
+          archived_binary->mutable_signature()->mutable_signed_data())) {
+    archived_binary->clear_image_headers();
+    archived_binary->clear_signature();
+  } else if (!archived_binary->signature().signed_data_size()) {
+    // No SignedData blobs were extracted, so clear the signature field.
+    archived_binary->clear_signature();
+  }
+}
+
+// Helper class to get a certain size trailer of the extracted file. Extracts
+// the file into memory, retaining only the last |trailer_size_bytes| bytes.
+class TrailerWriterDelegate : public zip::WriterDelegate {
+ public:
+  explicit TrailerWriterDelegate(size_t trailer_size_bytes);
+
+  // zip::WriterDelegate implementation:
+  bool PrepareOutput() override { return true; }
+  bool WriteBytes(const char* data, int num_bytes) override;
+  void SetTimeModified(const base::Time& time) override {}
+
+  const std::string& trailer() { return trailer_; }
+
+ private:
+  size_t trailer_size_bytes_;
+  std::string trailer_;
+};
+
+TrailerWriterDelegate::TrailerWriterDelegate(size_t trailer_size_bytes)
+    : trailer_size_bytes_(trailer_size_bytes), trailer_() {}
+
+bool TrailerWriterDelegate::WriteBytes(const char* data, int num_bytes) {
+  // TODO(drubery): WriterDelegate::WriteBytes should probably have |num_bytes|
+  // by a size_t. Investigate how difficult it would be to migrate
+  // implementations of WriterDelegate over.
+  base::CheckedNumeric<size_t> num_bytes_size(num_bytes);
+  if (!num_bytes_size.IsValid())
+    return false;
+
+  if (num_bytes_size.ValueOrDie() >= trailer_size_bytes_) {
+    trailer_ = std::string(data + num_bytes - trailer_size_bytes_,
+                           trailer_size_bytes_);
+  } else {
+    trailer_.append(data, num_bytes);
+    if (trailer_.size() > trailer_size_bytes_) {
+      trailer_ = trailer_.substr(trailer_.size() - trailer_size_bytes_);
     }
   }
+  return true;
 }
 
 }  // namespace
@@ -142,12 +188,38 @@ void AnalyzeZipFile(base::File zip_file,
     }
     const base::FilePath& file = reader.current_entry_info()->file_path();
     bool current_entry_is_executable;
+
 #if defined(OS_MACOSX)
     std::string magic;
     reader.ExtractCurrentEntryToString(sizeof(uint32_t), &magic);
+
+    std::string dmg_header;
+    reader.ExtractCurrentEntryToString(
+        DiskImageTypeSnifferMac::AppleDiskImageTrailerSize(), &dmg_header);
+
     current_entry_is_executable =
         FileTypePolicies::GetInstance()->IsCheckedBinaryFile(file) ||
-        StringIsMachOMagic(magic);
+        StringIsMachOMagic(magic) ||
+        DiskImageTypeSnifferMac::IsAppleDiskImageTrailer(
+            base::span<const uint8_t>(
+                reinterpret_cast<const uint8_t*>(dmg_header.c_str()),
+                dmg_header.size()));
+
+    // We can skip checking the trailer if we already know the file is
+    // executable.
+    if (!current_entry_is_executable) {
+      TrailerWriterDelegate trailer_writer(
+          DiskImageTypeSnifferMac::AppleDiskImageTrailerSize());
+      reader.ExtractCurrentEntry(
+          &trailer_writer,
+          FileTypePolicies::GetInstance()->GetMaxFileSizeToAnalyze("dmg"));
+      const std::string& trailer = trailer_writer.trailer();
+      current_entry_is_executable =
+          DiskImageTypeSnifferMac::IsAppleDiskImageTrailer(
+              base::span<const uint8_t>(
+                  reinterpret_cast<const uint8_t*>(trailer.data()),
+                  trailer.size()));
+    }
 #else
     current_entry_is_executable =
         FileTypePolicies::GetInstance()->IsCheckedBinaryFile(file);
@@ -159,11 +231,11 @@ void AnalyzeZipFile(base::File zip_file,
       archived_archive_filenames.insert(file.BaseName());
       ClientDownloadRequest::ArchivedBinary* archived_archive =
           results->archived_binary.Add();
-      std::string file_basename_utf8(file.BaseName().AsUTF8Unsafe());
-      if (base::StreamingUtf8Validator::Validate(file_basename_utf8))
-        archived_archive->set_file_basename(file_basename_utf8);
-      archived_archive->set_download_type(
-          ClientDownloadRequest::ZIPPED_ARCHIVE);
+      archived_archive->set_download_type(ClientDownloadRequest::ARCHIVE);
+      archived_archive->set_is_encrypted(
+          reader.current_entry_info()->is_encrypted());
+      SetLengthAndDigestForContainedFile(file, &reader, &temp_file,
+                                         archived_archive);
     } else if (current_entry_is_executable) {
 #if defined(OS_MACOSX)
       // This check prevents running analysis on .app files since they are
@@ -176,8 +248,14 @@ void AnalyzeZipFile(base::File zip_file,
 #endif  // OS_MACOSX
         DVLOG(2) << "Downloaded a zipped executable: " << file.value();
         results->has_executable = true;
-        AnalyzeContainedFile(binary_feature_extractor, file, &reader,
-                             &temp_file, results->archived_binary.Add());
+        ClientDownloadRequest::ArchivedBinary* archived_binary =
+            results->archived_binary.Add();
+        archived_binary->set_is_encrypted(
+            reader.current_entry_info()->is_encrypted());
+        SetLengthAndDigestForContainedFile(file, &reader, &temp_file,
+                                           archived_binary);
+        AnalyzeContainedBinary(binary_feature_extractor, &temp_file,
+                               archived_binary);
 #if defined(OS_MACOSX)
       }
 #endif  // OS_MACOSX

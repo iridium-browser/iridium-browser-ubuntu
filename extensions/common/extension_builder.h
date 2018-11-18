@@ -5,12 +5,14 @@
 #ifndef EXTENSIONS_COMMON_EXTENSION_BUILDER_H_
 #define EXTENSIONS_COMMON_EXTENSION_BUILDER_H_
 
+#include <initializer_list>
 #include <memory>
 #include <string>
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/strings/string_piece.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/value_builder.h"
 
@@ -48,6 +50,11 @@ class ExtensionBuilder {
     BROWSER_ACTION,
   };
 
+  enum class BackgroundPage {
+    PERSISTENT,
+    EVENT,
+  };
+
   // Initializes an ExtensionBuilder that can be used with SetManifest() for
   // complete customization.
   ExtensionBuilder();
@@ -65,7 +72,7 @@ class ExtensionBuilder {
 
   // Can only be called once, after which it's invalid to use the builder.
   // CHECKs that the extension was created successfully.
-  scoped_refptr<Extension> Build();
+  scoped_refptr<const Extension> Build();
 
   //////////////////////////////////////////////////////////////////////////////
   // Utility methods for use with aided manifest construction.
@@ -77,6 +84,54 @@ class ExtensionBuilder {
   // Sets an action type for the extension to have. By default, no action will
   // be set (though note that we synthesize a page action for most extensions).
   ExtensionBuilder& SetAction(ActionType action);
+
+  // Sets a background page for the extension to have. By default, no background
+  // page will be set.
+  ExtensionBuilder& SetBackgroundPage(BackgroundPage background_page);
+
+  // Adds a content script to the extension, with a script with the specified
+  // |script_name| that matches the given |match_patterns|.
+  ExtensionBuilder& AddContentScript(
+      const std::string& script_name,
+      const std::vector<std::string>& match_patterns);
+
+  // Shortcut for setting a specific manifest version. Typically we'd use
+  // SetManifestKey() or SetManifestPath() for these, but provide a faster
+  // route for version, since it's so central.
+  ExtensionBuilder& SetVersion(const std::string& version);
+
+  // Shortcuts to setting values on the manifest dictionary without needing to
+  // go all the way through MergeManifest(). Sample usage:
+  // ExtensionBuilder("name").SetManifestKey("version", "0.2").Build();
+  // Can be used in conjuction with ListBuilder and DictionaryBuilder for more
+  // complex types.
+  template <typename T>
+  ExtensionBuilder& SetManifestKey(base::StringPiece key, T value) {
+    SetManifestKeyImpl(key, base::Value(value));
+    return *this;
+  }
+  template <typename T>
+  ExtensionBuilder& SetManifestPath(
+      std::initializer_list<base::StringPiece> path,
+      T value) {
+    SetManifestPathImpl(path, base::Value(value));
+    return *this;
+  }
+  // Specializations for unique_ptr<> to allow passing unique_ptr<base::Value>.
+  // All other types will fail to compile.
+  template <typename T>
+  ExtensionBuilder& SetManifestKey(base::StringPiece key,
+                                   std::unique_ptr<T> value) {
+    SetManifestKeyImpl(key, std::move(*value));
+    return *this;
+  }
+  template <typename T>
+  ExtensionBuilder& SetManifestPath(
+      std::initializer_list<base::StringPiece> path,
+      std::unique_ptr<T> value) {
+    SetManifestPathImpl(path, std::move(*value));
+    return *this;
+  }
 
   //////////////////////////////////////////////////////////////////////////////
   // Utility methods for use with custom manifest construction.
@@ -110,6 +165,10 @@ class ExtensionBuilder {
 
  private:
   struct ManifestData;
+
+  void SetManifestKeyImpl(base::StringPiece key, base::Value value);
+  void SetManifestPathImpl(std::initializer_list<base::StringPiece> path,
+                           base::Value value);
 
   // Information for constructing the manifest; either metadata about the
   // manifest which will be used to construct it, or the dictionary itself. Only

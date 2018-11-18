@@ -14,9 +14,8 @@
 #include "base/files/file_path.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/timer/elapsed_timer.h"
-#include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/firewall_manager_win.h"
 #endif
 
@@ -38,12 +37,10 @@ namespace {
 #if defined(OS_WIN)
 void ReportFirewallStats() {
   base::FilePath exe_path;
-  if (!PathService::Get(base::FILE_EXE, &exe_path))
+  if (!base::PathService::Get(base::FILE_EXE, &exe_path))
     return;
   base::ElapsedTimer timer;
-  std::unique_ptr<installer::FirewallManager> manager =
-      installer::FirewallManager::Create(BrowserDistribution::GetDistribution(),
-                                         exe_path);
+  auto manager = installer::FirewallManager::Create(exe_path);
   if (!manager)
     return;
   bool is_firewall_ready = manager->CanUseLocalPorts();
@@ -81,7 +78,7 @@ scoped_refptr<ServiceDiscoverySharedClient>
   if (!is_firewall_state_reported) {
     is_firewall_state_reported = true;
     auto task_runner = base::CreateCOMSTATaskRunnerWithTraits(
-        {base::TaskPriority::BACKGROUND, base::MayBlock()});
+        {base::TaskPriority::BEST_EFFORT, base::MayBlock()});
     task_runner->PostTask(FROM_HERE, base::BindOnce(&ReportFirewallStats));
   }
 #endif  // defined(OS_WIN)

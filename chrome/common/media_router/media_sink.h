@@ -49,9 +49,12 @@ class MediaSink {
             SinkIconType icon_type,
             MediaRouteProviderId provider_id = MediaRouteProviderId::UNKNOWN);
   MediaSink(const MediaSink& other);
+  MediaSink(MediaSink&& other) noexcept;
   MediaSink();
-
   ~MediaSink();
+
+  MediaSink& operator=(const MediaSink& other);
+  MediaSink& operator=(MediaSink&& other) noexcept;
 
   void set_sink_id(const MediaSink::Id& sink_id) { sink_id_ = sink_id; }
   const MediaSink::Id& id() const { return sink_id_; }
@@ -88,13 +91,6 @@ class MediaSink {
   // using |collator|, and finally their IDs.
   bool CompareUsingCollator(const MediaSink& other,
                             const icu::Collator* collator) const;
-
-  // For storing in sets and in maps as keys.
-  struct Compare {
-    bool operator()(const MediaSink& sink1, const MediaSink& sink2) const {
-      return sink1.id() < sink2.id();
-    }
-  };
 
  private:
   // Unique identifier for the MediaSink.

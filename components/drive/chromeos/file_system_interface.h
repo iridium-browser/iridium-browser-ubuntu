@@ -7,7 +7,9 @@
 
 #include <stdint.h>
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -78,32 +80,32 @@ typedef std::vector<MetadataSearchResult> MetadataSearchResultVector;
 
 // Used to get a resource entry from the file system.
 // If |error| is not FILE_ERROR_OK, |entry_info| is set to NULL.
-typedef base::Callback<void(FileError error,
-                            std::unique_ptr<ResourceEntry> entry)>
+typedef base::OnceCallback<void(FileError error,
+                                std::unique_ptr<ResourceEntry> entry)>
     GetResourceEntryCallback;
 
 // Used to get files from the file system.
-typedef base::Callback<void(FileError error,
-                            const base::FilePath& file_path,
-                            std::unique_ptr<ResourceEntry> entry)>
+typedef base::OnceCallback<void(FileError error,
+                                const base::FilePath& file_path,
+                                std::unique_ptr<ResourceEntry> entry)>
     GetFileCallback;
 
 // Used to get file content from the file system.
 // If the file content is available in local cache, |local_file| is filled with
 // the path to the cache file. If the file content starts to be downloaded from
 // the server, |local_file| is empty.
-typedef base::Callback<void(FileError error,
-                            const base::FilePath& local_file,
-                            std::unique_ptr<ResourceEntry> entry)>
+typedef base::OnceCallback<void(FileError error,
+                                const base::FilePath& local_file,
+                                std::unique_ptr<ResourceEntry> entry)>
     GetFileContentInitializedCallback;
 
 // Used to get list of entries under a directory.
-typedef base::Callback<void(std::unique_ptr<ResourceEntryVector> entries)>
+typedef base::OnceCallback<void(std::unique_ptr<ResourceEntryVector> entries)>
     ReadDirectoryEntriesCallback;
 
 // Used to get drive content search results.
 // If |error| is not FILE_ERROR_OK, |result_paths| is empty.
-typedef base::Callback<void(
+typedef base::OnceCallback<void(
     FileError error,
     const GURL& next_link,
     std::unique_ptr<std::vector<SearchResultInfo>> result_paths)>
@@ -111,13 +113,13 @@ typedef base::Callback<void(
 
 // Callback for SearchMetadata(). On success, |error| is FILE_ERROR_OK, and
 // |result| contains the search result.
-typedef base::Callback<void(FileError error,
-                            std::unique_ptr<MetadataSearchResultVector> result)>
+typedef base::OnceCallback<
+    void(FileError error, std::unique_ptr<MetadataSearchResultVector> result)>
     SearchMetadataCallback;
 
 // Callback for SearchByHashesCallback. On success, vector contains hash and
 // corresponding files. The vector can include multiple entries for one hash.
-typedef base::Callback<void(FileError, const std::vector<HashAndFilePath>&)>
+typedef base::OnceCallback<void(FileError, const std::vector<HashAndFilePath>&)>
     SearchByHashesCallback;
 
 // Used to open files from the file system. |file_path| is the path on the local
@@ -126,31 +128,29 @@ typedef base::Callback<void(FileError, const std::vector<HashAndFilePath>&)>
 // modification to the cache is done. Otherwise, Drive file system does not
 // pick up the file for uploading.
 // |close_callback| must not be called more than once.
-typedef base::Callback<void(FileError error,
-                            const base::FilePath& file_path,
-                            const base::Closure& close_callback)>
+typedef base::OnceCallback<void(FileError error,
+                                const base::FilePath& file_path,
+                                const base::RepeatingClosure& close_callback)>
     OpenFileCallback;
 
 // Used to get available space for the account from Drive.
-typedef base::Callback<void(FileError error,
-                            int64_t bytes_total,
-                            int64_t bytes_used)> GetAvailableSpaceCallback;
-
-// Used to get the url to the sharing dialog.
-typedef base::Callback<void(FileError error,
-                            const GURL& share_url)> GetShareUrlCallback;
+typedef base::OnceCallback<
+    void(FileError error, int64_t bytes_total, int64_t bytes_used)>
+    GetAvailableSpaceCallback;
 
 // Used to get filesystem metadata.
-typedef base::Callback<void(const FileSystemMetadata&)>
+typedef base::OnceCallback<void(
+    const FileSystemMetadata&,
+    const std::map<std::string, FileSystemMetadata>&)>
     GetFilesystemMetadataCallback;
 
 // Used to mark cached files mounted.
-typedef base::Callback<void(FileError error,
-                            const base::FilePath& file_path)>
+typedef base::OnceCallback<void(FileError error,
+                                const base::FilePath& file_path)>
     MarkMountedCallback;
 
 // Used to check if a cached file is mounted.
-typedef base::Callback<void(FileError error, bool is_mounted)>
+typedef base::OnceCallback<void(FileError error, bool is_mounted)>
     IsMountedCallback;
 
 // Used to get file path.
@@ -194,14 +194,19 @@ enum SearchMetadataOptions {
 // The interface is defined to make FileSystem mockable.
 class FileSystemInterface {
  public:
-  virtual ~FileSystemInterface() {}
+  virtual ~FileSystemInterface() = default;
 
   // Adds and removes the observer.
   virtual void AddObserver(FileSystemObserver* observer) = 0;
   virtual void RemoveObserver(FileSystemObserver* observer) = 0;
 
-  // Checks for updates on the server.
+  // Checks for updates on the server, in response to a timer expiring - most
+  // likely when we are not connected to push notifications.
   virtual void CheckForUpdates() = 0;
+
+  // Check for updates on the server, for the given ids. The ids are either
+  // team drive ids, or an empty string for the users default corpus.
+  virtual void CheckForUpdates(const std::set<std::string>& ids) = 0;
 
   // Initiates transfer of |local_src_file_path| to |remote_dest_file_path|.
   // |local_src_file_path| must be a file from the local file system.
@@ -226,7 +231,7 @@ class FileSystemInterface {
   virtual void OpenFile(const base::FilePath& file_path,
                         OpenMode open_mode,
                         const std::string& mime_type,
-                        const OpenFileCallback& callback) = 0;
+                        OpenFileCallback callback) = 0;
 
   // Copies |src_file_path| to |dest_file_path| on the file system.
   // |src_file_path| can be a hosted document (see limitations below).
@@ -347,7 +352,7 @@ class FileSystemInterface {
   //
   // Returns the cache path and entry info to |callback|. It must not be null.
   virtual void GetFile(const base::FilePath& file_path,
-                       const GetFileCallback& callback) = 0;
+                       GetFileCallback callback) = 0;
 
   // Makes sure that |file_path| in the file system is available in the local
   // cache, and mark it as dirty. The next modification to the cache file is
@@ -356,7 +361,7 @@ class FileSystemInterface {
   //
   // Returns the cache path and entry info to |callback|. It must not be null.
   virtual void GetFileForSaving(const base::FilePath& file_path,
-                                const GetFileCallback& callback) = 0;
+                                GetFileCallback callback) = 0;
 
   // Gets a file by the given |file_path| and returns a closure to cancel the
   // task.
@@ -372,7 +377,7 @@ class FileSystemInterface {
   // must not be null.
   virtual base::Closure GetFileContent(
       const base::FilePath& file_path,
-      const GetFileContentInitializedCallback& initialized_callback,
+      GetFileContentInitializedCallback initialized_callback,
       const google_apis::GetContentCallback& get_content_callback,
       const FileOperationCallback& completion_callback) = 0;
 
@@ -381,7 +386,7 @@ class FileSystemInterface {
   //
   // |callback| must not be null.
   virtual void GetResourceEntry(const base::FilePath& file_path,
-                                const GetResourceEntryCallback& callback) = 0;
+                                GetResourceEntryCallback callback) = 0;
 
   // Finds and reads a directory by |file_path|. This call will also retrieve
   // and refresh file system content from server and disk cache.
@@ -390,7 +395,7 @@ class FileSystemInterface {
   // |completion_callback| must not be null.
   virtual void ReadDirectory(
       const base::FilePath& file_path,
-      const ReadDirectoryEntriesCallback& entries_callback,
+      ReadDirectoryEntriesCallback entries_callback,
       const FileOperationCallback& completion_callback) = 0;
 
   // Does server side content search for |search_query|.
@@ -402,7 +407,7 @@ class FileSystemInterface {
   // |callback| must not be null.
   virtual void Search(const std::string& search_query,
                       const GURL& next_link,
-                      const SearchCallback& callback) = 0;
+                      SearchCallback callback) = 0;
 
   // Searches the local resource metadata, and returns the entries
   // |at_most_num_matches| that contain |query| in their base names. Search is
@@ -415,43 +420,34 @@ class FileSystemInterface {
                               int options,
                               int at_most_num_matches,
                               MetadataSearchOrder order,
-                              const SearchMetadataCallback& callback) = 0;
+                              SearchMetadataCallback callback) = 0;
 
   // Searches the local resource metadata, and returns the entries that have the
   // given |hashes|. The list of resource entries are passed to |callback|. The
   // item of the list can be null if the corresponding file is not found.
   // |callback| must not be null.
   virtual void SearchByHashes(const std::set<std::string>& hashes,
-                              const SearchByHashesCallback& callback) = 0;
+                              SearchByHashesCallback callback) = 0;
 
   // Fetches the user's Account Metadata to find out current quota information
   // and returns it to the callback.
-  virtual void GetAvailableSpace(const GetAvailableSpaceCallback& callback) = 0;
-
-  // Fetches the url to the sharing dialog to be embedded in |embed_origin|,
-  // for the specified file or directory. |callback| must not be null.
-  virtual void GetShareUrl(
-      const base::FilePath& file_path,
-      const GURL& embed_origin,
-      const GetShareUrlCallback& callback) = 0;
+  virtual void GetAvailableSpace(GetAvailableSpaceCallback callback) = 0;
 
   // Returns miscellaneous metadata of the file system like the largest
   // timestamp. Used in chrome:drive-internals. |callback| must not be null.
-  virtual void GetMetadata(
-      const GetFilesystemMetadataCallback& callback) = 0;
+  virtual void GetMetadata(GetFilesystemMetadataCallback callback) = 0;
 
   // Marks the cached file as mounted, and runs |callback| upon completion.
   // If succeeded, the cached file path will be passed to the |callback|.
   // |callback| must not be null.
   virtual void MarkCacheFileAsMounted(const base::FilePath& drive_file_path,
-                                      const MarkMountedCallback& callback) = 0;
+                                      MarkMountedCallback callback) = 0;
 
   // Checks if the cached file is marked as mounted, and passes the result to
   // |callback| upon completion. If the file was not found in the cache, the
   // result is false. |callback| must not be null.
-  virtual void IsCacheFileMarkedAsMounted(
-      const base::FilePath& drive_file_path,
-      const IsMountedCallback& callback) = 0;
+  virtual void IsCacheFileMarkedAsMounted(const base::FilePath& drive_file_path,
+                                          IsMountedCallback callback) = 0;
 
   // Marks the cached file as unmounted, and runs |callback| upon completion.
   // Note that this method expects that the |cached_file_path| is the path

@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_WORKERS_THREADED_WORKLET_MESSAGING_PROXY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_WORKERS_THREADED_WORKLET_MESSAGING_PROXY_H_
 
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/workers/threaded_messaging_proxy_base.h"
 #include "third_party/blink/renderer/core/workers/worklet_global_scope_proxy.h"
@@ -25,6 +26,7 @@ class CORE_EXPORT ThreadedWorkletMessagingProxy
   void FetchAndInvokeScript(
       const KURL& module_url_record,
       network::mojom::FetchCredentialsMode,
+      FetchClientSettingsObjectSnapshot* outside_settings_object,
       scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
       WorkletPendingTasks*) final;
   void WorkletObjectDestroyed() final;

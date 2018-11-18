@@ -27,12 +27,14 @@ class CustomLayoutChild : public ScriptWrappable {
 
  public:
   CustomLayoutChild(const CSSLayoutDefinition&, LayoutBox*);
-  virtual ~CustomLayoutChild() = default;
+  ~CustomLayoutChild() override = default;
 
   // LayoutChild.idl
   PrepopulatedComputedStylePropertyMap* styleMap() const { return style_map_; }
   CustomLayoutFragmentRequest* layoutNextFragment(
-      const CustomLayoutConstraintsOptions&);
+      ScriptState*,
+      const CustomLayoutConstraintsOptions&,
+      ExceptionState&);
 
   LayoutBox* GetLayoutBox() const {
     DCHECK(box_);

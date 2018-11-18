@@ -7,6 +7,7 @@
 #import <UIKit/UIKit.h>
 
 #include "base/base_paths.h"
+#include "base/bind.h"
 #include "base/critical_closure.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
@@ -14,15 +15,14 @@
 #import "base/ios/crb_protocol_observers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/mac/bind_objc_block.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/path_service.h"
 #include "base/sequence_checker.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "ios/chrome/browser/experimental_flags.h"
 #import "ios/chrome/browser/snapshots/lru_cache.h"
 #import "ios/chrome/browser/snapshots/snapshot_cache_internal.h"
@@ -49,6 +49,8 @@
 @interface SnapshotCache ()
 // List of observers to be notified of changes to the snapshot cache.
 @property(nonatomic, strong) SnapshotCacheObservers* observers;
+// Marked set of identifiers for which images should not be immediately deleted.
+@property(nonatomic, strong) NSMutableSet* markedIDs;
 
 // Remove all UIImages from |lruCache_|.
 - (void)handleEnterBackground;
@@ -157,7 +159,6 @@ UIImage* ReadImageForSessionFromDisk(NSString* session_id,
                                      ImageType image_type,
                                      ImageScale image_scale,
                                      const base::FilePath& cache_directory) {
-  base::AssertBlockingAllowed();
   // TODO(crbug.com/295891): consider changing back to -imageWithContentsOfFile
   // instead of -imageWithData if both rdar://15747161 and the bug incorrectly
   // reporting the image as damaged https://stackoverflow.com/q/5081297/5353
@@ -165,6 +166,7 @@ UIImage* ReadImageForSessionFromDisk(NSString* session_id,
   base::FilePath file_path =
       ImagePath(session_id, image_type, image_scale, cache_directory);
   NSString* path = base::SysUTF8ToNSString(file_path.AsUTF8Unsafe());
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::WILL_BLOCK);
   return [UIImage imageWithData:[NSData dataWithContentsOfFile:path]
                           scale:(image_type == IMAGE_TYPE_GREYSCALE
                                      ? 1.0
@@ -172,7 +174,6 @@ UIImage* ReadImageForSessionFromDisk(NSString* session_id,
 }
 
 void WriteImageToDisk(UIImage* image, const base::FilePath& file_path) {
-  base::AssertBlockingAllowed();
   if (!image)
     return;
 
@@ -187,6 +188,7 @@ void WriteImageToDisk(UIImage* image, const base::FilePath& file_path) {
   }
 
   NSString* path = base::SysUTF8ToNSString(file_path.AsUTF8Unsafe());
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::WILL_BLOCK);
   [UIImageJPEGRepresentation(image, kJPEGImageQuality) writeToFile:path
                                                         atomically:YES];
 
@@ -209,7 +211,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
                              ImageScale image_scale,
                              UIImage* color_image,
                              const base::FilePath& cache_directory) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::WILL_BLOCK);
   if (!color_image) {
     color_image = ReadImageForSessionFromDisk(session_id, IMAGE_TYPE_COLOR,
                                               image_scale, cache_directory);
@@ -259,8 +261,9 @@ void ConvertAndSaveGreyImage(NSString* session_id,
   SEQUENCE_CHECKER(sequenceChecker_);
 }
 
-@synthesize pinnedIDs = pinnedIDs_;
-@synthesize observers = observers_;
+@synthesize pinnedIDs = _pinnedIDs;
+@synthesize observers = _observers;
+@synthesize markedIDs = _markedIDs;
 
 - (instancetype)init {
   base::FilePath cacheDirectory;
@@ -282,7 +285,8 @@ void ConvertAndSaveGreyImage(NSString* session_id,
     taskRunner_ = base::CreateSequencedTaskRunnerWithTraits(
         {base::MayBlock(), base::TaskPriority::USER_VISIBLE});
 
-    observers_ = [SnapshotCacheObservers observers];
+    _observers = [SnapshotCacheObservers observers];
+    _markedIDs = [[NSMutableSet alloc] init];
 
     [[NSNotificationCenter defaultCenter]
         addObserver:self
@@ -347,12 +351,12 @@ void ConvertAndSaveGreyImage(NSString* session_id,
   __weak LRUCache* weakLRUCache = lruCache_;
   base::PostTaskAndReplyWithResult(
       taskRunner_.get(), FROM_HERE,
-      base::BindBlockArc(^base::scoped_nsobject<UIImage>() {
+      base::BindOnce(^base::scoped_nsobject<UIImage>() {
         // Retrieve the image on a high priority thread.
         return base::scoped_nsobject<UIImage>(ReadImageForSessionFromDisk(
             sessionID, IMAGE_TYPE_COLOR, snapshotsScale, cacheDirectory));
       }),
-      base::BindBlockArc(^(base::scoped_nsobject<UIImage> image) {
+      base::BindOnce(^(base::scoped_nsobject<UIImage> image) {
         if (image)
           [weakLRUCache setObject:image forKey:sessionID];
         callback(image);
@@ -366,7 +370,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
 
   [lruCache_ setObject:image forKey:sessionID];
 
-  [self.observers snapshotCache:self didUpdateSnapshotForTab:sessionID];
+  [self.observers snapshotCache:self didUpdateSnapshotForIdentifier:sessionID];
 
   // Copy ivars used by the block so that it does not reference |self|.
   const base::FilePath cacheDirectory = cacheDirectory_;
@@ -374,7 +378,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
 
   // Save the image to disk.
   taskRunner_->PostTask(
-      FROM_HERE, base::BindBlockArc(^{
+      FROM_HERE, base::BindOnce(^{
         WriteImageToDisk(image, ImagePath(sessionID, IMAGE_TYPE_COLOR,
                                           snapshotsScale, cacheDirectory));
       }));
@@ -382,7 +386,13 @@ void ConvertAndSaveGreyImage(NSString* session_id,
 
 - (void)removeImageWithSessionID:(NSString*)sessionID {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequenceChecker_);
+  // Do not immediately delete if the ID is marked.
+  if ([self.markedIDs containsObject:sessionID])
+    return;
+
   [lruCache_ removeObjectForKey:sessionID];
+
+  [self.observers snapshotCache:self didUpdateSnapshotForIdentifier:sessionID];
 
   if (!taskRunner_)
     return;
@@ -392,13 +402,29 @@ void ConvertAndSaveGreyImage(NSString* session_id,
   const ImageScale snapshotsScale = snapshotsScale_;
 
   taskRunner_->PostTask(
-      FROM_HERE, base::BindBlockArc(^{
+      FROM_HERE, base::BindOnce(^{
         for (size_t index = 0; index < arraysize(kImageTypes); ++index) {
           base::DeleteFile(ImagePath(sessionID, kImageTypes[index],
                                      snapshotsScale, cacheDirectory),
                            false /* recursive */);
         }
       }));
+}
+
+- (void)markImageWithSessionID:(NSString*)sessionID {
+  [self.markedIDs addObject:sessionID];
+}
+
+- (void)removeMarkedImages {
+  while (self.markedIDs.count > 0) {
+    NSString* sessionID = [self.markedIDs anyObject];
+    [self.markedIDs removeObject:sessionID];
+    [self removeImageWithSessionID:sessionID];
+  }
+}
+
+- (void)unmarkAllImages {
+  [self.markedIDs removeAllObjects];
 }
 
 - (base::FilePath)imagePathForSessionID:(NSString*)sessionID {
@@ -426,7 +452,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
   const ImageScale snapshotsScale = snapshotsScale_;
 
   taskRunner_->PostTask(
-      FROM_HERE, base::BindBlockArc(^{
+      FROM_HERE, base::BindOnce(^{
         if (!base::DirectoryExists(cacheDirectory))
           return;
 
@@ -465,13 +491,13 @@ void ConvertAndSaveGreyImage(NSString* session_id,
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequenceChecker_);
   NSMutableDictionary<NSString*, UIImage*>* dictionary =
       [NSMutableDictionary dictionaryWithCapacity:2];
-  for (NSString* sessionID in pinnedIDs_) {
+  for (NSString* sessionID in self.pinnedIDs) {
     UIImage* image = [lruCache_ objectForKey:sessionID];
     if (image)
       [dictionary setObject:image forKey:sessionID];
   }
   [lruCache_ removeAllObjects];
-  for (NSString* sessionID in pinnedIDs_)
+  for (NSString* sessionID in self.pinnedIDs)
     [lruCache_ setObject:[dictionary objectForKey:sessionID] forKey:sessionID];
 }
 
@@ -482,7 +508,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
 
 - (void)handleBecomeActive {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequenceChecker_);
-  for (NSString* sessionID in pinnedIDs_)
+  for (NSString* sessionID in self.pinnedIDs)
     [self retrieveImageForSessionID:sessionID
                            callback:^(UIImage*){
                            }];
@@ -515,7 +541,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
   __weak SnapshotCache* weakSelf = self;
   base::PostTaskAndReplyWithResult(
       taskRunner_.get(), FROM_HERE,
-      base::BindBlockArc(^base::scoped_nsobject<UIImage>() {
+      base::BindOnce(^base::scoped_nsobject<UIImage>() {
         // If the image is not in the cache, load it from disk.
         UIImage* localImage = image;
         if (!localImage) {
@@ -526,7 +552,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
           localImage = GreyImage(localImage);
         return base::scoped_nsobject<UIImage>(localImage);
       }),
-      base::BindBlockArc(^(base::scoped_nsobject<UIImage> greyImage) {
+      base::BindOnce(^(base::scoped_nsobject<UIImage> greyImage) {
         [weakSelf saveGreyImage:greyImage forKey:sessionID];
       }));
 }
@@ -592,12 +618,12 @@ void ConvertAndSaveGreyImage(NSString* session_id,
   __weak SnapshotCache* weakSelf = self;
   base::PostTaskAndReplyWithResult(
       taskRunner_.get(), FROM_HERE,
-      base::BindBlockArc(^base::scoped_nsobject<UIImage>() {
+      base::BindOnce(^base::scoped_nsobject<UIImage>() {
         // Retrieve the image on a high priority thread.
         return base::scoped_nsobject<UIImage>(ReadImageForSessionFromDisk(
             sessionID, IMAGE_TYPE_GREYSCALE, snapshotsScale, cacheDirectory));
       }),
-      base::BindBlockArc(^(base::scoped_nsobject<UIImage> image) {
+      base::BindOnce(^(base::scoped_nsobject<UIImage> image) {
         if (image) {
           callback(image);
           return;
@@ -633,7 +659,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
   const ImageScale snapshotsScale = snapshotsScale_;
 
   taskRunner_->PostTask(
-      FROM_HERE, base::BindBlockArc(^{
+      FROM_HERE, base::BindOnce(^{
         ConvertAndSaveGreyImage(sessionID, snapshotsScale,
                                 backgroundingColorImage, cacheDirectory);
       }));

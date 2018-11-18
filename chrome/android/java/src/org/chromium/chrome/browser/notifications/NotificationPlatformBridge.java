@@ -28,7 +28,7 @@ import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.browserservices.TrustedWebActivityClient;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions;
 import org.chromium.chrome.browser.notifications.channels.SiteChannelsManager;
@@ -80,6 +80,8 @@ public class NotificationPlatformBridge {
 
     private long mLastNotificationClickMs;
 
+    private TrustedWebActivityClient mTwaClient;
+
     /**
      * Creates a new instance of the NotificationPlatformBridge.
      *
@@ -130,6 +132,7 @@ public class NotificationPlatformBridge {
             mNotificationManager = new NotificationManagerProxyImpl(
                     (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE));
         }
+        mTwaClient = new TrustedWebActivityClient();
     }
 
     /**
@@ -234,17 +237,16 @@ public class NotificationPlatformBridge {
      * from the gear button on a flipped notification, this launches the site specific preferences
      * screen.
      *
-     * @param context The context that received the intent.
      * @param incomingIntent The received intent.
      */
-    public static void launchNotificationPreferences(Context context, Intent incomingIntent) {
+    public static void launchNotificationPreferences(Intent incomingIntent) {
         // This method handles an intent fired by the Android system. There is no guarantee that the
         // native library is loaded at this point. The native library is needed for the preferences
         // activity, and it loads the library, but there are some native calls even before that
         // activity is started: from RecordUserAction.record and (indirectly) from
         // UrlFormatter.formatUrlForSecurityDisplay.
         try {
-            ChromeBrowserInitializer.getInstance(context).handleSynchronousStartup();
+            ChromeBrowserInitializer.getInstance().handleSynchronousStartup();
         } catch (ProcessInitException e) {
             Log.e(TAG, "Failed to start browser process.", e);
             // The library failed to initialize and nothing in the application can work, so kill
@@ -255,7 +257,7 @@ public class NotificationPlatformBridge {
 
         // Use the application context because it lives longer. When using the given context, it
         // may be stopped before the preferences intent is handled.
-        Context applicationContext = context.getApplicationContext();
+        Context applicationContext = ContextUtils.getApplicationContext();
 
         // If we can read an origin from the intent, use it to open the settings screen for that
         // origin.
@@ -279,7 +281,7 @@ public class NotificationPlatformBridge {
             // Notification preferences for all origins.
             fragmentArguments = new Bundle();
             fragmentArguments.putString(SingleCategoryPreferences.EXTRA_CATEGORY,
-                    SiteSettingsCategory.CATEGORY_NOTIFICATIONS);
+                    SiteSettingsCategory.preferenceKey(SiteSettingsCategory.Type.NOTIFICATIONS));
             fragmentArguments.putString(SingleCategoryPreferences.EXTRA_TITLE,
                     applicationContext.getResources().getString(
                             R.string.push_notifications_permission_title));
@@ -523,13 +525,11 @@ public class NotificationPlatformBridge {
         nativeStoreCachedWebApkPackageForNotificationId(
                 mNativeNotificationPlatformBridge, notificationId, webApkPackage);
 
+        // Record whether it's known whether notifications can be shown to the user at all.
+        NotificationSystemStatusUtil.recordAppNotificationStatusHistogram();
+
         Context context = ContextUtils.getApplicationContext();
         Resources res = context.getResources();
-
-        // Record whether it's known whether notifications can be shown to the user at all.
-        RecordHistogram.recordEnumeratedHistogram("Notifications.AppNotificationStatus",
-                NotificationSystemStatusUtil.determineAppNotificationStatus(context),
-                NotificationSystemStatusUtil.APP_NOTIFICATIONS_STATUS_BOUNDARY);
 
         PendingIntent clickIntent = makePendingIntent(context,
                 NotificationConstants.ACTION_CLICK_NOTIFICATION, notificationId, origin, scopeUrl,
@@ -546,23 +546,20 @@ public class NotificationPlatformBridge {
                         .setBody(body)
                         .setImage(image)
                         .setLargeIcon(icon)
-                        .setSmallIcon(R.drawable.ic_chrome)
-                        .setSmallIcon(badge)
+                        .setSmallIconId(R.drawable.ic_chrome)
+                        .setStatusBarIcon(badge)
+                        .setSmallIconForContent(badge)
                         .setContentIntent(clickIntent)
                         .setDeleteIntent(closeIntent)
                         .setTicker(createTickerText(title, body))
                         .setTimestamp(timestamp)
                         .setRenotify(renotify)
-                        .setOrigin(UrlFormatter.formatUrlForSecurityDisplay(
-                                origin, false /* showScheme */));
+                        .setOrigin(UrlFormatter.formatUrlForSecurityDisplayOmitScheme(origin));
 
         if (shouldSetChannelId(forWebApk)) {
-            // TODO(crbug.com/700377): Channel ID should be retrieved from cache in native and
+            // TODO(crbug.com/773738): Channel ID should be retrieved from cache in native and
             // passed through to here with other notification parameters.
-            String channelId =
-                    ChromeFeatureList.isEnabled(ChromeFeatureList.SITE_NOTIFICATION_CHANNELS)
-                    ? SiteChannelsManager.getInstance().getChannelIdForOrigin(origin)
-                    : ChannelDefinitions.CHANNEL_ID_SITES;
+            String channelId = SiteChannelsManager.getInstance().getChannelIdForOrigin(origin);
             notificationBuilder.setChannelId(channelId);
         }
 
@@ -596,6 +593,9 @@ public class NotificationPlatformBridge {
         if (forWebApk) {
             WebApkServiceClient.getInstance().notifyNotification(
                     webApkPackage, notificationBuilder, notificationId, PLATFORM_ID);
+        } else if (mTwaClient.twaExistsForScope(Uri.parse(scopeUrl))) {
+            mTwaClient.notifyNotification(Uri.parse(scopeUrl), notificationId, PLATFORM_ID,
+                    notificationBuilder);
         } else {
             // Set up a pending intent for going to the settings screen for |origin|.
             Intent settingsIntent = PreferencesLauncher.createIntentForSettingsPage(
@@ -622,17 +622,16 @@ public class NotificationPlatformBridge {
             notificationBuilder.addSettingsAction(
                     settingsIconId, settingsTitle, pendingSettingsIntent);
 
-            mNotificationManager.notify(notificationId, PLATFORM_ID, notificationBuilder.build());
+            Notification notification = notificationBuilder.build();
+            mNotificationManager.notify(notificationId, PLATFORM_ID, notification);
             NotificationUmaTracker.getInstance().onNotificationShown(
-                    NotificationUmaTracker.SITES, notificationBuilder.mChannelId);
+                    NotificationUmaTracker.SystemNotificationType.SITES, notification);
         }
     }
 
     private NotificationBuilderBase createNotificationBuilder(Context context, boolean hasImage) {
-        if (useCustomLayouts(hasImage)) {
-            return new CustomNotificationBuilder(context);
-        }
-        return new StandardNotificationBuilder(context);
+        return useCustomLayouts(hasImage) ? new CustomNotificationBuilder(context)
+                                          : new StandardNotificationBuilder(context);
     }
 
     /** Returns whether to set a channel id when building a notification. */
@@ -712,24 +711,37 @@ public class NotificationPlatformBridge {
                             @Override
                             public void onChecked(boolean doesBrowserBackWebApk) {
                                 closeNotificationInternal(notificationId,
-                                        doesBrowserBackWebApk ? webApkPackageFound : null);
+                                        doesBrowserBackWebApk ? webApkPackageFound : null,
+                                        scopeUrl);
                             }
                         };
                 ChromeWebApkHost.checkChromeBacksWebApkAsync(webApkPackageFound, callback);
                 return;
             }
         }
-        closeNotificationInternal(notificationId, webApkPackage);
+        closeNotificationInternal(notificationId, webApkPackage, scopeUrl);
     }
 
     /** Called after querying whether the browser backs the given WebAPK. */
-    private void closeNotificationInternal(String notificationId, String webApkPackage) {
-        if (TextUtils.isEmpty(webApkPackage)) {
-            mNotificationManager.cancel(notificationId, PLATFORM_ID);
-        } else {
+    private void closeNotificationInternal(String notificationId, String webApkPackage,
+            String scopeUrl) {
+        if (!TextUtils.isEmpty(webApkPackage)) {
             WebApkServiceClient.getInstance().cancelNotification(
                     webApkPackage, notificationId, PLATFORM_ID);
+            return;
         }
+
+        if (mTwaClient.twaExistsForScope(Uri.parse(scopeUrl))) {
+            mTwaClient.cancelNotification(Uri.parse(scopeUrl), notificationId, PLATFORM_ID);
+
+            // There's an edge case where a notification was displayed by Chrome, a Trusted Web
+            // Activity is then installed and run then the notification is cancelled by javascript.
+            // Chrome will attempt to close the notification through the TWA client and not itself.
+            // Since NotificationManager#cancel is safe to call if the requested notification
+            // isn't being shown, we just call that as well to ensure notifications are cleared.
+        }
+
+        mNotificationManager.cancel(notificationId, PLATFORM_ID);
     }
 
     /**

@@ -11,13 +11,12 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
 #include "components/dom_distiller/content/browser/distiller_page_web_contents.h"
@@ -143,7 +142,7 @@ std::unique_ptr<DomDistillerService> CreateDomDistillerService(
   std::unique_ptr<DistillerURLFetcherFactory> distiller_url_fetcher_factory(
       new DistillerURLFetcherFactory(
           content::BrowserContext::GetDefaultStoragePartition(context)
-              ->GetURLRequestContext()));
+              ->GetURLLoaderFactoryForBrowserProcess()));
 
   dom_distiller::proto::DomDistillerOptions options;
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(kExtractTextOnly)) {
@@ -186,7 +185,7 @@ std::unique_ptr<DomDistillerService> CreateDomDistillerService(
 void AddComponentsTestResources() {
   base::FilePath pak_file;
   base::FilePath pak_dir;
-  PathService::Get(base::DIR_MODULE, &pak_dir);
+  base::PathService::Get(base::DIR_MODULE, &pak_dir);
   pak_file =
       pak_dir.Append(FILE_PATH_LITERAL("components_tests_resources.pak"));
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
@@ -422,7 +421,7 @@ class ContentExtractor : public ContentBrowserTest {
     requests_.clear();
     service_.reset();
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+        FROM_HERE, base::RunLoop::QuitCurrentWhenIdleClosureDeprecated());
   }
 
   size_t pending_tasks_;

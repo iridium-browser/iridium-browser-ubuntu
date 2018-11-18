@@ -45,7 +45,8 @@ class MEDIA_EXPORT MimeUtil {
     THEORA,
     DOLBY_VISION,
     AV1,
-    LAST_CODEC = AV1
+    MPEG_H_AUDIO,
+    LAST_CODEC = MPEG_H_AUDIO
   };
 
   // Platform configuration structure.  Controls which codecs are supported at
@@ -68,9 +69,9 @@ class MEDIA_EXPORT MimeUtil {
 
   // See mime_util.h for more information on these methods.
   bool IsSupportedMediaMimeType(const std::string& mime_type) const;
-  void SplitCodecsToVector(const std::string& codecs,
-                           std::vector<std::string>* codecs_out,
-                           bool strip);
+  void SplitCodecs(const std::string& codecs,
+                   std::vector<std::string>* codecs_out);
+  void StripCodecs(std::vector<std::string>* codecs);
   bool ParseVideoCodecString(const std::string& mime_type,
                              const std::string& codec_id,
                              bool* out_is_ambiguous,

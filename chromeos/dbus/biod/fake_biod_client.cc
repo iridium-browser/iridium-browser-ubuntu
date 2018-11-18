@@ -83,9 +83,7 @@ void FakeBiodClient::SendAuthScanDone(const std::string& fingerprint,
   // more than five entries.
   for (const auto& entry : records_) {
     const std::unique_ptr<FakeRecord>& record = entry.second;
-    if (std::find(record->fake_fingerprint.begin(),
-                  record->fake_fingerprint.end(),
-                  fingerprint) != record->fake_fingerprint.end()) {
+    if (base::ContainsValue(record->fake_fingerprint, fingerprint)) {
       const std::string& user_id = record->user_id;
       matches[user_id].push_back(entry.first);
     }
@@ -143,7 +141,7 @@ void FakeBiodClient::StartEnrollSession(const std::string& user_id,
 }
 
 void FakeBiodClient::GetRecordsForUser(const std::string& user_id,
-                                       const UserRecordsCallback& callback) {
+                                       UserRecordsCallback callback) {
   std::vector<dbus::ObjectPath> records_object_paths;
   for (const auto& record : records_) {
     if (record.second->user_id == user_id)
@@ -151,7 +149,7 @@ void FakeBiodClient::GetRecordsForUser(const std::string& user_id,
   }
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(callback, records_object_paths));
+      FROM_HERE, base::BindOnce(std::move(callback), records_object_paths));
 }
 
 void FakeBiodClient::DestroyAllRecords(VoidDBusMethodCallback callback) {
@@ -217,13 +215,13 @@ void FakeBiodClient::RemoveRecord(const dbus::ObjectPath& record_path,
 }
 
 void FakeBiodClient::RequestRecordLabel(const dbus::ObjectPath& record_path,
-                                        const LabelCallback& callback) {
+                                        LabelCallback callback) {
   std::string record_label;
   if (records_.find(record_path) != records_.end())
     record_label = records_[record_path]->label;
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(callback, record_label));
+      FROM_HERE, base::BindOnce(std::move(callback), record_label));
 }
 
 }  // namespace chromeos

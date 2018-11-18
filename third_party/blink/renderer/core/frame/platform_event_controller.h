@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/core/page/page_visibility_observer.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/timer.h"
+#include "third_party/blink/renderer/platform/web_task_runner.h"
 
 namespace blink {
 
@@ -25,7 +26,8 @@ class CORE_EXPORT PlatformEventController : public PageVisibilityObserver {
   // This is called when new data becomes available.
   virtual void DidUpdateData() = 0;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
+  Document* GetDocument() const { return document_; }
 
  protected:
   explicit PlatformEventController(Document*);

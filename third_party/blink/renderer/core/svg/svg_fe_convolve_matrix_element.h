@@ -60,13 +60,14 @@ class SVGFEConvolveMatrixElement final
   SVGAnimatedInteger* targetX() { return target_x_.Get(); }
   SVGAnimatedInteger* targetY() { return target_y_.Get(); }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit SVGFEConvolveMatrixElement(Document&);
 
   IntSize MatrixOrder() const;
   IntPoint TargetPoint() const;
+  float ComputeDivisor() const;
 
   bool SetFilterEffectAttribute(FilterEffect*, const QualifiedName&) override;
   void SvgAttributeChanged(const QualifiedName&) override;

@@ -5,11 +5,12 @@
     "service_manager:connector": {
       "provides": {
         "service_manager:service_factory": [
-          "service_manager::mojom::ServiceFactory"
+          "service_manager.mojom.ServiceFactory"
         ]
       },
       "requires": {
         "device": [
+          "device:bluetooth_system",
           "device:battery_monitor",
           "device:generic_sensor",
           "device:geolocation_config",

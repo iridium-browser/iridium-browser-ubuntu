@@ -37,7 +37,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_string.h"
-#include "third_party/blink/public/platform/web_thread.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
@@ -48,6 +47,7 @@
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/text/cstring.h"
@@ -92,7 +92,7 @@ class WebAssociatedURLLoaderTest : public testing::Test,
         "invisible_iframe.html", "visible_iframe.html",
         "zero_sized_iframe.html",
     };
-    for (size_t i = 0; i < WTF_ARRAY_LENGTH(iframe_support_files); ++i) {
+    for (size_t i = 0; i < arraysize(iframe_support_files); ++i) {
       RegisterMockedUrl(url_root, iframe_support_files[i]);
     }
 
@@ -154,9 +154,7 @@ class WebAssociatedURLLoaderTest : public testing::Test,
     did_receive_cached_metadata_ = true;
   }
 
-  void DidFinishLoading(double finish_time) override {
-    did_finish_loading_ = true;
-  }
+  void DidFinishLoading() override { did_finish_loading_ = true; }
 
   void DidFail(const WebURLError& error) override { did_fail_ = true; }
 
@@ -308,7 +306,7 @@ TEST_F(WebAssociatedURLLoaderTest, CrossOriginSuccess) {
   WebURLRequest request(url);
   // No-CORS requests (CrossOriginRequestPolicyAllow) aren't allowed for the
   // default context. So we set the context as Script here.
-  request.SetRequestContext(WebURLRequest::kRequestContextScript);
+  request.SetRequestContext(mojom::RequestContextType::SCRIPT);
   request.SetFetchCredentialsMode(network::mojom::FetchCredentialsMode::kOmit);
 
   expected_response_ = WebURLResponse();
@@ -522,7 +520,7 @@ TEST_F(WebAssociatedURLLoaderTest,
 
   ServeRequests();
   // We should get a notification about access control check failure.
-  EXPECT_FALSE(will_follow_redirect_);
+  EXPECT_TRUE(will_follow_redirect_);
   EXPECT_FALSE(did_receive_response_);
   EXPECT_FALSE(did_receive_data_);
   EXPECT_TRUE(did_fail_);
@@ -570,8 +568,7 @@ TEST_F(WebAssociatedURLLoaderTest,
   EXPECT_TRUE(expected_loader_);
   expected_loader_->LoadAsynchronously(request, this);
   ServeRequests();
-  // We should not receive a notification for the redirect.
-  EXPECT_FALSE(will_follow_redirect_);
+  EXPECT_TRUE(will_follow_redirect_);
   EXPECT_TRUE(did_receive_response_);
   EXPECT_TRUE(did_receive_data_);
   EXPECT_TRUE(did_finish_loading_);
@@ -630,9 +627,6 @@ TEST_F(WebAssociatedURLLoaderTest, MAYBE_UntrustedCheckHeaders) {
   // Check that validation is case-insensitive.
   CheckHeaderFails("AcCePt-ChArSeT");
   CheckHeaderFails("ProXy-FoO");
-
-  // Check invalid header values.
-  CheckHeaderFails("foo", "bar\x0d\x0ax-csrf-token:\x20test1234");
 }
 
 // Test that the loader filters response headers according to the CORS standard.
@@ -689,6 +683,61 @@ TEST_F(WebAssociatedURLLoaderTest, CrossOriginHeaderAllowResponseHeaders) {
   EXPECT_TRUE(did_finish_loading_);
 
   EXPECT_FALSE(actual_response_.HttpHeaderField(header_name_string).IsEmpty());
+}
+
+TEST_F(WebAssociatedURLLoaderTest, AccessCheckForLocalURL) {
+  KURL url = ToKURL("file://test.pdf");
+
+  WebURLRequest request(url);
+  request.SetRequestContext(mojom::RequestContextType::PLUGIN);
+  request.SetFetchRequestMode(network::mojom::FetchRequestMode::kNoCORS);
+  request.SetFetchCredentialsMode(network::mojom::FetchCredentialsMode::kOmit);
+
+  expected_response_ = WebURLResponse();
+  expected_response_.SetMIMEType("text/plain");
+  expected_response_.SetHTTPStatusCode(200);
+  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
+      url, expected_response_, frame_file_path_);
+
+  WebAssociatedURLLoaderOptions options;
+  expected_loader_ = CreateAssociatedURLLoader(options);
+  EXPECT_TRUE(expected_loader_);
+  expected_loader_->LoadAsynchronously(request, this);
+  ServeRequests();
+
+  // The request failes due to a security check.
+  EXPECT_FALSE(did_receive_response_);
+  EXPECT_FALSE(did_receive_data_);
+  EXPECT_FALSE(did_finish_loading_);
+  EXPECT_TRUE(did_fail_);
+}
+
+TEST_F(WebAssociatedURLLoaderTest, BypassAccessCheckForLocalURL) {
+  KURL url = ToKURL("file://test.pdf");
+
+  WebURLRequest request(url);
+  request.SetRequestContext(mojom::RequestContextType::PLUGIN);
+  request.SetFetchRequestMode(network::mojom::FetchRequestMode::kNoCORS);
+  request.SetFetchCredentialsMode(network::mojom::FetchCredentialsMode::kOmit);
+
+  expected_response_ = WebURLResponse();
+  expected_response_.SetMIMEType("text/plain");
+  expected_response_.SetHTTPStatusCode(200);
+  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
+      url, expected_response_, frame_file_path_);
+
+  WebAssociatedURLLoaderOptions options;
+  options.grant_universal_access = true;
+  expected_loader_ = CreateAssociatedURLLoader(options);
+  EXPECT_TRUE(expected_loader_);
+  expected_loader_->LoadAsynchronously(request, this);
+  ServeRequests();
+
+  // The security check is bypassed due to |grant_universal_access|.
+  EXPECT_TRUE(did_receive_response_);
+  EXPECT_TRUE(did_receive_data_);
+  EXPECT_TRUE(did_finish_loading_);
+  EXPECT_FALSE(did_fail_);
 }
 
 #undef MAYBE_UntrustedCheckHeaders

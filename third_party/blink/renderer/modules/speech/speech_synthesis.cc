@@ -25,10 +25,18 @@
 
 #include "third_party/blink/renderer/modules/speech/speech_synthesis.h"
 
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/html/media/autoplay_policy.h"
+#include "third_party/blink/renderer/core/timing/dom_window_performance.h"
+#include "third_party/blink/renderer/core/timing/performance.h"
+#include "third_party/blink/renderer/modules/speech/speech_synthesis_error_event.h"
+#include "third_party/blink/renderer/modules/speech/speech_synthesis_error_event_init.h"
 #include "third_party/blink/renderer/modules/speech/speech_synthesis_event.h"
+#include "third_party/blink/renderer/modules/speech/speech_synthesis_event_init.h"
 #include "third_party/blink/renderer/platform/speech/platform_speech_synthesis_voice.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -39,7 +47,9 @@ SpeechSynthesis* SpeechSynthesis::Create(ExecutionContext* context) {
 SpeechSynthesis::SpeechSynthesis(ExecutionContext* context)
     : ContextClient(context),
       platform_speech_synthesizer_(PlatformSpeechSynthesizer::Create(this)),
-      is_paused_(false) {}
+      is_paused_(false) {
+  DCHECK(!GetExecutionContext() || GetExecutionContext()->IsDocument());
+}
 
 void SpeechSynthesis::SetPlatformSynthesizer(
     PlatformSpeechSynthesizer* synthesizer) {
@@ -49,7 +59,7 @@ void SpeechSynthesis::SetPlatformSynthesizer(
 void SpeechSynthesis::VoicesDidChange() {
   voice_list_.clear();
   if (GetExecutionContext())
-    DispatchEvent(Event::Create(EventTypeNames::voiceschanged));
+    DispatchEvent(*Event::Create(EventTypeNames::voiceschanged));
 }
 
 const HeapVector<Member<SpeechSynthesisVoice>>& SpeechSynthesis::getVoices() {
@@ -60,9 +70,8 @@ const HeapVector<Member<SpeechSynthesisVoice>>& SpeechSynthesis::getVoices() {
   // platform again.
   const Vector<scoped_refptr<PlatformSpeechSynthesisVoice>>& platform_voices =
       platform_speech_synthesizer_->GetVoiceList();
-  size_t voice_count = platform_voices.size();
-  for (size_t k = 0; k < voice_count; k++)
-    voice_list_.push_back(SpeechSynthesisVoice::Create(platform_voices[k]));
+  for (auto voice : platform_voices)
+    voice_list_.push_back(SpeechSynthesisVoice::Create(voice));
 
   return voice_list_;
 }
@@ -88,13 +97,32 @@ void SpeechSynthesis::StartSpeakingImmediately() {
   SpeechSynthesisUtterance* utterance = CurrentSpeechUtterance();
   DCHECK(utterance);
 
-  utterance->SetStartTime(CurrentTimeTicksInSeconds());
+  double millis;
+  if (!GetElapsedTimeMillis(&millis))
+    return;
+
+  utterance->SetStartTime(millis / 1000.0);
   is_paused_ = false;
   platform_speech_synthesizer_->Speak(utterance->PlatformUtterance());
 }
 
 void SpeechSynthesis::speak(SpeechSynthesisUtterance* utterance) {
   DCHECK(utterance);
+  Document* document = To<Document>(GetExecutionContext());
+  if (!document)
+    return;
+
+  // Note: Non-UseCounter based TTS metrics are of the form TextToSpeech.* and
+  // are generally global, whereas these are scoped to a single page load.
+  UseCounter::Count(document, WebFeature::kTextToSpeech_Speak);
+  UseCounter::CountCrossOriginIframe(
+      *document, WebFeature::kTextToSpeech_SpeakCrossOrigin);
+  if (!IsAllowedToStartByAutoplay()) {
+    Deprecation::CountDeprecation(
+        document, WebFeature::kTextToSpeech_SpeakDisallowedByAutoplay);
+    FireErrorEvent(utterance, 0 /* char_index */, "not-allowed");
+    return;
+  }
 
   utterance_queue_.push_back(utterance);
 
@@ -124,15 +152,34 @@ void SpeechSynthesis::resume() {
 
 void SpeechSynthesis::FireEvent(const AtomicString& type,
                                 SpeechSynthesisUtterance* utterance,
-                                unsigned long char_index,
+                                uint32_t char_index,
                                 const String& name) {
-  if (!GetExecutionContext())
+  double millis;
+  if (!GetElapsedTimeMillis(&millis))
     return;
 
-  double elapsed_time_millis =
-      (CurrentTimeTicksInSeconds() - utterance->StartTime()) * 1000.0;
-  utterance->DispatchEvent(SpeechSynthesisEvent::Create(
-      type, utterance, char_index, elapsed_time_millis, name));
+  SpeechSynthesisEventInit init;
+  init.setUtterance(utterance);
+  init.setCharIndex(char_index);
+  init.setElapsedTime(millis - (utterance->StartTime() * 1000.0));
+  init.setName(name);
+  utterance->DispatchEvent(*SpeechSynthesisEvent::Create(type, init));
+}
+
+void SpeechSynthesis::FireErrorEvent(SpeechSynthesisUtterance* utterance,
+                                     unsigned long char_index,
+                                     const String& error) {
+  double millis;
+  if (!GetElapsedTimeMillis(&millis))
+    return;
+
+  SpeechSynthesisErrorEventInit init;
+  init.setUtterance(utterance);
+  init.setCharIndex(char_index);
+  init.setElapsedTime(millis - (utterance->StartTime() * 1000.0));
+  init.setError(error);
+  utterance->DispatchEvent(
+      *SpeechSynthesisErrorEvent::Create(EventTypeNames::error, init));
 }
 
 void SpeechSynthesis::HandleSpeakingCompleted(
@@ -152,8 +199,13 @@ void SpeechSynthesis::HandleSpeakingCompleted(
   // sent an event on an utterance before it got the message that we
   // canceled it, and we should always report to the user what actually
   // happened.
-  FireEvent(error_occurred ? EventTypeNames::error : EventTypeNames::end,
-            utterance, 0, String());
+  if (error_occurred) {
+    // TODO(csharrison): Actually pass the correct message. For now just use a
+    // generic error.
+    FireErrorEvent(utterance, 0, "synthesis-failed");
+  } else {
+    FireEvent(EventTypeNames::end, utterance, 0, String());
+  }
 
   // Start the next utterance if we just finished one and one was pending.
   if (should_start_speaking && !utterance_queue_.IsEmpty())
@@ -241,6 +293,33 @@ void SpeechSynthesis::Trace(blink::Visitor* visitor) {
   PlatformSpeechSynthesizerClient::Trace(visitor);
   ContextClient::Trace(visitor);
   EventTargetWithInlineData::Trace(visitor);
+}
+
+bool SpeechSynthesis::GetElapsedTimeMillis(double* millis) {
+  if (!GetExecutionContext())
+    return false;
+  Document* delegate_document = To<Document>(GetExecutionContext());
+  if (!delegate_document || delegate_document->IsStopped())
+    return false;
+  LocalDOMWindow* delegate_dom_window = delegate_document->domWindow();
+  if (!delegate_dom_window)
+    return false;
+
+  *millis = DOMWindowPerformance::performance(*delegate_dom_window)->now();
+  return true;
+}
+
+bool SpeechSynthesis::IsAllowedToStartByAutoplay() const {
+  Document* document = To<Document>(GetExecutionContext());
+  DCHECK(document);
+
+  // Note: could check the utterance->volume here, but that could be overriden
+  // in the case of SSML.
+  if (AutoplayPolicy::GetAutoplayPolicyForDocument(*document) !=
+      AutoplayPolicy::Type::kDocumentUserActivationRequired) {
+    return true;
+  }
+  return AutoplayPolicy::IsDocumentAllowedToPlay(*document);
 }
 
 }  // namespace blink

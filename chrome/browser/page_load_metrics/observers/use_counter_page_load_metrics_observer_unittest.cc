@@ -8,9 +8,10 @@
 #include <vector>
 #include "base/macros.h"
 #include "base/metrics/histogram_base.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_test_harness.h"
 #include "chrome/browser/page_load_metrics/page_load_tracker.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "third_party/blink/public/platform/web_feature.mojom.h"
 #include "url/gurl.h"
 
@@ -168,15 +169,20 @@ TEST_F(UseCounterPageLoadMetricsObserverTest, RecordUkmUsage) {
   HistogramBasicTest(page_load_features_0, page_load_features_1);
 
   std::vector<const ukm::mojom::UkmEntry*> entries =
-      test_ukm_recorder().GetEntriesByName(internal::kUkmUseCounterEventName);
-  EXPECT_EQ(2ul, entries.size());
+      test_ukm_recorder().GetEntriesByName(
+          ukm::builders::Blink_UseCounter::kEntryName);
+  EXPECT_EQ(3ul, entries.size());
   test_ukm_recorder().ExpectEntrySourceHasUrl(entries[0], GURL(kTestUrl));
   test_ukm_recorder().ExpectEntryMetric(
-      entries[0], internal::kUkmUseCounterFeature,
-      static_cast<int64_t>(WebFeature::kNavigatorVibrate));
+      entries[0], ukm::builders::Blink_UseCounter::kFeatureName,
+      static_cast<int64_t>(WebFeature::kPageVisits));
   test_ukm_recorder().ExpectEntrySourceHasUrl(entries[1], GURL(kTestUrl));
   test_ukm_recorder().ExpectEntryMetric(
-      entries[1], internal::kUkmUseCounterFeature,
+      entries[1], ukm::builders::Blink_UseCounter::kFeatureName,
+      static_cast<int64_t>(WebFeature::kNavigatorVibrate));
+  test_ukm_recorder().ExpectEntrySourceHasUrl(entries[2], GURL(kTestUrl));
+  test_ukm_recorder().ExpectEntryMetric(
+      entries[2], ukm::builders::Blink_UseCounter::kFeatureName,
       static_cast<int64_t>(WebFeature::kTouchEventPreventedNoTouchAction));
 }
 

@@ -15,6 +15,7 @@
 #include "extensions/browser/api/declarative_content/content_rules_registry.h"
 #include "extensions/browser/api/storage/settings_namespace.h"
 #include "extensions/common/api/clipboard.h"
+#include "extensions/common/extension_id.h"
 
 class GURL;
 
@@ -54,7 +55,7 @@ class SettingsObserver;
 class ValueStoreCache;
 class ValueStoreFactory;
 class VirtualKeyboardDelegate;
-class WebRequestEventRouterDelegate;
+struct WebRequestInfo;
 class WebViewGuest;
 class WebViewGuestDelegate;
 class WebViewPermissionHelper;
@@ -94,9 +95,16 @@ class ExtensionsAPIClient {
   virtual bool ShouldHideResponseHeader(const GURL& url,
                                         const std::string& header_name) const;
 
-  // Returns true if a request from the given URL from the browser context
-  // should be hidden from extensions.
-  virtual bool ShouldHideBrowserNetworkRequest(const GURL& url) const;
+  // Returns true if the given |request| should be hidden from extensions. This
+  // should be invoked on the IO thread.
+  virtual bool ShouldHideBrowserNetworkRequest(
+      const WebRequestInfo& request) const;
+
+  // Notifies that an extension failed to act on a network request because the
+  // access to request was withheld.
+  virtual void NotifyWebRequestWithheld(int render_process_id,
+                                        int render_frame_id,
+                                        const ExtensionId& extension_id);
 
   // Creates the AppViewGuestDelegate.
   virtual AppViewGuestDelegate* CreateAppViewGuestDelegate() const;
@@ -124,10 +132,6 @@ class ExtensionsAPIClient {
   virtual WebViewPermissionHelperDelegate*
   CreateWebViewPermissionHelperDelegate(
       WebViewPermissionHelper* web_view_permission_helper) const;
-
-  // Creates a delegate for WebRequestEventRouter.
-  virtual std::unique_ptr<WebRequestEventRouterDelegate>
-  CreateWebRequestEventRouterDelegate() const;
 
   // TODO(wjmaclean): Remove this when (if) ContentRulesRegistry code moves
   // to extensions/browser/api.

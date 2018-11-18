@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The Android Open foo Project
+ * Copyright (C) 2018 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -105,7 +105,7 @@ TEST(DeferredTest, BindTwiceDoesNotHoldBindState) {
 
   // Re-binding the callback should release the bind state, without invoking the
   // old callback.
-  deferred.Bind([](AsyncResult<TestMessage> msg) {});
+  deferred.Bind([](AsyncResult<TestMessage>) {});
   ASSERT_EQ(1, num_callbacks.use_count());
   ASSERT_EQ(0, *num_callbacks);
 

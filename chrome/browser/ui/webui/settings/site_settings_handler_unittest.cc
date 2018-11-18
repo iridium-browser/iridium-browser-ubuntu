@@ -7,15 +7,19 @@
 #include <memory>
 #include <string>
 
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
+#include "base/test/simple_test_clock.h"
+#include "chrome/browser/browsing_data/mock_browsing_data_local_storage_helper.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/permissions/permission_decision_auto_blocker.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/site_settings_helper.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -64,10 +68,11 @@ class FlashContentSettingsChangeWaiter : public content_settings::Observer {
   }
 
   // content_settings::Observer:
-  void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
-                               const ContentSettingsPattern& secondary_pattern,
-                               ContentSettingsType content_type,
-                               std::string resource_identifier) override {
+  void OnContentSettingChanged(
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
+      ContentSettingsType content_type,
+      const std::string& resource_identifier) override {
     if (content_type == CONTENT_SETTINGS_TYPE_PLUGINS)
       Proceed();
   }
@@ -147,6 +152,36 @@ class SiteSettingsHandlerTest : public testing::Test {
   TestingProfile* profile() { return &profile_; }
   content::TestWebUI* web_ui() { return &web_ui_; }
   SiteSettingsHandler* handler() { return &handler_; }
+
+  void ValidateBlockAutoplay(bool expected_value, bool expected_enabled) {
+    const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
+    EXPECT_EQ("cr.webUIListenerCallback", data.function_name());
+
+    std::string event_name;
+    ASSERT_TRUE(data.arg1()->GetAsString(&event_name));
+    EXPECT_EQ("onBlockAutoplayStatusChanged", event_name);
+
+    const base::DictionaryValue* event_data = nullptr;
+    ASSERT_TRUE(data.arg2()->GetAsDictionary(&event_data));
+
+    bool enabled;
+    ASSERT_TRUE(event_data->GetBoolean("enabled", &enabled));
+    EXPECT_EQ(expected_enabled, enabled);
+
+    const base::DictionaryValue* pref_data = nullptr;
+    ASSERT_TRUE(event_data->GetDictionary("pref", &pref_data));
+
+    bool value;
+    ASSERT_TRUE(pref_data->GetBoolean("value", &value));
+    EXPECT_EQ(expected_value, value);
+  }
+
+  void SetSoundContentSettingDefault(ContentSetting value) {
+    HostContentSettingsMap* content_settings =
+        HostContentSettingsMapFactory::GetForProfile(profile());
+    content_settings->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SOUND,
+                                               value);
+  }
 
   void ValidateDefault(const ContentSetting expected_setting,
                        const site_settings::SiteSettingSource expected_source,
@@ -353,6 +388,254 @@ TEST_F(SiteSettingsHandlerTest, GetAndSetDefault) {
   handler()->HandleGetDefaultValueForContentType(&get_args);
   ValidateDefault(CONTENT_SETTING_BLOCK,
                   site_settings::SiteSettingSource::kDefault, 3U);
+}
+
+TEST_F(SiteSettingsHandlerTest, GetAllSites) {
+  base::ListValue get_all_sites_args;
+  get_all_sites_args.AppendString(kCallbackId);
+  base::Value category_list(base::Value::Type::LIST);
+  category_list.GetList().emplace_back(kNotifications);
+  category_list.GetList().emplace_back(kFlash);
+  get_all_sites_args.GetList().push_back(std::move(category_list));
+
+  // Test all sites is empty when there are no preferences.
+  handler()->HandleGetAllSites(&get_all_sites_args);
+  EXPECT_EQ(1U, web_ui()->call_data().size());
+
+  {
+    const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
+    EXPECT_EQ("cr.webUIResponse", data.function_name());
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
+    ASSERT_TRUE(data.arg2()->GetBool());
+
+    const base::Value::ListStorage& site_groups = data.arg3()->GetList();
+    EXPECT_EQ(0UL, site_groups.size());
+  }
+
+  // Add a couple of exceptions and check they appear in all sites.
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile());
+  const GURL url1("http://example.com");
+  const GURL url2("https://other.example.com");
+  map->SetContentSettingDefaultScope(url1, url1,
+                                     CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                                     std::string(), CONTENT_SETTING_BLOCK);
+  map->SetContentSettingDefaultScope(url2, url2, CONTENT_SETTINGS_TYPE_PLUGINS,
+                                     std::string(), CONTENT_SETTING_ALLOW);
+  handler()->HandleGetAllSites(&get_all_sites_args);
+
+  {
+    const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
+    EXPECT_EQ("cr.webUIResponse", data.function_name());
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
+    ASSERT_TRUE(data.arg2()->GetBool());
+
+    const base::Value::ListStorage& site_groups = data.arg3()->GetList();
+    EXPECT_EQ(1UL, site_groups.size());
+    for (const base::Value& site_group : site_groups) {
+      const std::string& etld_plus1_string =
+          site_group.FindKey("etldPlus1")->GetString();
+      const base::Value::ListStorage& origin_list =
+          site_group.FindKey("origins")->GetList();
+      EXPECT_EQ("example.com", etld_plus1_string);
+      EXPECT_EQ(2UL, origin_list.size());
+      EXPECT_EQ(url1.spec(), origin_list[0].FindKey("origin")->GetString());
+      EXPECT_EQ(0, origin_list[0].FindKey("engagement")->GetDouble());
+      EXPECT_EQ(url2.spec(), origin_list[1].FindKey("origin")->GetString());
+      EXPECT_EQ(0, origin_list[1].FindKey("engagement")->GetDouble());
+    }
+  }
+
+  // Add an additional exception belonging to a different eTLD+1.
+  const GURL url3("https://example2.net");
+  map->SetContentSettingDefaultScope(url3, url3, CONTENT_SETTINGS_TYPE_PLUGINS,
+                                     std::string(), CONTENT_SETTING_BLOCK);
+  handler()->HandleGetAllSites(&get_all_sites_args);
+
+  {
+    const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
+    EXPECT_EQ("cr.webUIResponse", data.function_name());
+
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
+    ASSERT_TRUE(data.arg2()->GetBool());
+
+    const base::Value::ListStorage& site_groups = data.arg3()->GetList();
+    EXPECT_EQ(2UL, site_groups.size());
+    for (const base::Value& site_group : site_groups) {
+      const std::string& etld_plus1_string =
+          site_group.FindKey("etldPlus1")->GetString();
+      const base::Value::ListStorage& origin_list =
+          site_group.FindKey("origins")->GetList();
+      if (etld_plus1_string == "example2.net") {
+        EXPECT_EQ(1UL, origin_list.size());
+        EXPECT_EQ(url3.spec(), origin_list[0].FindKey("origin")->GetString());
+      } else {
+        EXPECT_EQ("example.com", etld_plus1_string);
+      }
+    }
+  }
+
+  // Test embargoed settings also appear.
+  PermissionDecisionAutoBlocker* auto_blocker =
+      PermissionDecisionAutoBlocker::GetForProfile(profile());
+  base::SimpleTestClock clock;
+  clock.SetNow(base::Time::Now());
+  auto_blocker->SetClockForTesting(&clock);
+  const GURL url4("https://example2.co.uk");
+  for (int i = 0; i < 3; ++i) {
+    auto_blocker->RecordDismissAndEmbargo(url4,
+                                          CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
+  }
+  EXPECT_EQ(
+      CONTENT_SETTING_BLOCK,
+      auto_blocker->GetEmbargoResult(url4, CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
+          .content_setting);
+  handler()->HandleGetAllSites(&get_all_sites_args);
+
+  {
+    const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
+    EXPECT_EQ("cr.webUIResponse", data.function_name());
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
+    ASSERT_TRUE(data.arg2()->GetBool());
+
+    const base::Value::ListStorage& site_groups = data.arg3()->GetList();
+    EXPECT_EQ(3UL, site_groups.size());
+  }
+
+  // Check |url4| disappears from the list when its embargo expires.
+  clock.Advance(base::TimeDelta::FromDays(8));
+  handler()->HandleGetAllSites(&get_all_sites_args);
+
+  {
+    const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
+    EXPECT_EQ("cr.webUIResponse", data.function_name());
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
+    ASSERT_TRUE(data.arg2()->GetBool());
+
+    const base::Value::ListStorage& site_groups = data.arg3()->GetList();
+    EXPECT_EQ(2UL, site_groups.size());
+    EXPECT_EQ("example.com", site_groups[0].FindKey("etldPlus1")->GetString());
+    EXPECT_EQ("example2.net", site_groups[1].FindKey("etldPlus1")->GetString());
+  }
+
+  // Add an expired embargo setting to an existing eTLD+1 group and make sure it
+  // still appears.
+  for (int i = 0; i < 3; ++i) {
+    auto_blocker->RecordDismissAndEmbargo(url3,
+                                          CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
+  }
+  EXPECT_EQ(
+      CONTENT_SETTING_BLOCK,
+      auto_blocker->GetEmbargoResult(url3, CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
+          .content_setting);
+  clock.Advance(base::TimeDelta::FromDays(8));
+  EXPECT_EQ(
+      CONTENT_SETTING_ASK,
+      auto_blocker->GetEmbargoResult(url3, CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
+          .content_setting);
+
+  handler()->HandleGetAllSites(&get_all_sites_args);
+  {
+    const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
+    EXPECT_EQ("cr.webUIResponse", data.function_name());
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
+    ASSERT_TRUE(data.arg2()->GetBool());
+
+    const base::Value::ListStorage& site_groups = data.arg3()->GetList();
+    EXPECT_EQ(2UL, site_groups.size());
+    EXPECT_EQ("example.com", site_groups[0].FindKey("etldPlus1")->GetString());
+    EXPECT_EQ("example2.net", site_groups[1].FindKey("etldPlus1")->GetString());
+  }
+
+  // Add an expired embargo to a new eTLD+1 and make sure it doesn't appear.
+  const GURL url5("http://test.example5.com");
+  for (int i = 0; i < 3; ++i) {
+    auto_blocker->RecordDismissAndEmbargo(url5,
+                                          CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
+  }
+  EXPECT_EQ(
+      CONTENT_SETTING_BLOCK,
+      auto_blocker->GetEmbargoResult(url5, CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
+          .content_setting);
+  clock.Advance(base::TimeDelta::FromDays(8));
+  EXPECT_EQ(
+      CONTENT_SETTING_ASK,
+      auto_blocker->GetEmbargoResult(url5, CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
+          .content_setting);
+
+  handler()->HandleGetAllSites(&get_all_sites_args);
+  {
+    const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
+    EXPECT_EQ("cr.webUIResponse", data.function_name());
+    EXPECT_EQ(kCallbackId, data.arg1()->GetString());
+    ASSERT_TRUE(data.arg2()->GetBool());
+
+    const base::Value::ListStorage& site_groups = data.arg3()->GetList();
+    EXPECT_EQ(2UL, site_groups.size());
+    EXPECT_EQ("example.com", site_groups[0].FindKey("etldPlus1")->GetString());
+    EXPECT_EQ("example2.net", site_groups[1].FindKey("etldPlus1")->GetString());
+  }
+
+  // Each call to HandleGetAllSites() above added a callback to the profile's
+  // BrowsingDataLocalStorageHelper, so make sure these aren't stuck waiting to
+  // run at the end of the test.
+  base::RunLoop run_loop;
+  run_loop.RunUntilIdle();
+}
+
+TEST_F(SiteSettingsHandlerTest, GetAllSitesLocalStorage) {
+  scoped_refptr<MockBrowsingDataLocalStorageHelper>
+      mock_browsing_data_local_storage_helper =
+          new MockBrowsingDataLocalStorageHelper(profile());
+  handler()->SetBrowsingDataLocalStorageHelperForTesting(
+      mock_browsing_data_local_storage_helper);
+
+  // Add local storage for |origin|.
+  const GURL origin("https://example.com:12378");
+  mock_browsing_data_local_storage_helper->AddLocalStorageForOrigin(origin, 1);
+
+  // Check these sites are included in the callback.
+  base::ListValue get_all_sites_args;
+  get_all_sites_args.AppendString(kCallbackId);
+  base::Value category_list(base::Value::Type::LIST);
+  get_all_sites_args.GetList().push_back(std::move(category_list));
+
+  // Wait for the fetch handler to finish, then check it includes |origin| in
+  // its result.
+  handler()->HandleGetAllSites(&get_all_sites_args);
+  EXPECT_EQ(1U, web_ui()->call_data().size());
+  mock_browsing_data_local_storage_helper->Notify();
+  EXPECT_EQ(2U, web_ui()->call_data().size());
+  base::RunLoop run_loop;
+  run_loop.RunUntilIdle();
+
+  const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
+  EXPECT_EQ("cr.webUIListenerCallback", data.function_name());
+
+  std::string callback_id;
+  ASSERT_TRUE(data.arg1()->GetAsString(&callback_id));
+  EXPECT_EQ("onLocalStorageListFetched", callback_id);
+
+  const base::ListValue* local_storage_list;
+  ASSERT_TRUE(data.arg2()->GetAsList(&local_storage_list));
+  EXPECT_EQ(1U, local_storage_list->GetSize());
+
+  const base::DictionaryValue* site_group;
+  ASSERT_TRUE(local_storage_list->GetDictionary(0, &site_group));
+
+  std::string etld_plus1_string;
+  ASSERT_TRUE(site_group->GetString("etldPlus1", &etld_plus1_string));
+  ASSERT_EQ("example.com", etld_plus1_string);
+
+  const base::ListValue* origin_list;
+  ASSERT_TRUE(site_group->GetList("origins", &origin_list));
+  EXPECT_EQ(1U, origin_list->GetSize());
+
+  const base::DictionaryValue* origin_info;
+  ASSERT_TRUE(origin_list->GetDictionary(0, &origin_info));
+  EXPECT_EQ(origin.spec(), origin_info->FindKey("origin")->GetString());
+  EXPECT_EQ(0, origin_info->FindKey("engagement")->GetDouble());
+  EXPECT_EQ(1, origin_info->FindKey("usage")->GetDouble());
 }
 
 TEST_F(SiteSettingsHandlerTest, Origins) {
@@ -979,6 +1262,52 @@ TEST_F(SiteSettingsHandlerTest, SessionOnlyException) {
   EXPECT_EQ(1U, web_ui()->call_data().size());
   histograms.ExpectTotalCount(uma_base, 1);
   histograms.ExpectTotalCount(uma_base + ".SessionOnly", 1);
+}
+
+TEST_F(SiteSettingsHandlerTest, BlockAutoplay_SendOnRequest) {
+  base::ListValue args;
+  handler()->HandleFetchBlockAutoplayStatus(&args);
+
+  // Check that we are checked and enabled.
+  ValidateBlockAutoplay(true, true);
+}
+
+TEST_F(SiteSettingsHandlerTest, BlockAutoplay_SoundSettingUpdate) {
+  SetSoundContentSettingDefault(CONTENT_SETTING_BLOCK);
+  base::RunLoop().RunUntilIdle();
+
+  // Check that we are not checked or enabled.
+  ValidateBlockAutoplay(false, false);
+
+  SetSoundContentSettingDefault(CONTENT_SETTING_ALLOW);
+  base::RunLoop().RunUntilIdle();
+
+  // Check that we are checked and enabled.
+  ValidateBlockAutoplay(true, true);
+}
+
+TEST_F(SiteSettingsHandlerTest, BlockAutoplay_PrefUpdate) {
+  profile()->GetPrefs()->SetBoolean(prefs::kBlockAutoplayEnabled, false);
+  base::RunLoop().RunUntilIdle();
+
+  // Check that we are not checked but are enabled.
+  ValidateBlockAutoplay(false, true);
+
+  profile()->GetPrefs()->SetBoolean(prefs::kBlockAutoplayEnabled, true);
+  base::RunLoop().RunUntilIdle();
+
+  // Check that we are checked and enabled.
+  ValidateBlockAutoplay(true, true);
+}
+
+TEST_F(SiteSettingsHandlerTest, BlockAutoplay_Update) {
+  EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(prefs::kBlockAutoplayEnabled));
+
+  base::ListValue data;
+  data.AppendBoolean(false);
+
+  handler()->HandleSetBlockAutoplayEnabled(&data);
+  EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(prefs::kBlockAutoplayEnabled));
 }
 
 }  // namespace settings

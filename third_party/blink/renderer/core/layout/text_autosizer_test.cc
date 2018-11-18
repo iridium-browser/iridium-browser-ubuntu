@@ -10,7 +10,6 @@
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
-#include "third_party/blink/renderer/platform/platform_frame_view.h"
 
 namespace blink {
 class TextAutosizerClient : public EmptyChromeClient {
@@ -20,7 +19,7 @@ class TextAutosizerClient : public EmptyChromeClient {
     return value * device_scale_factor_;
   }
   IntRect ViewportToScreen(const IntRect& rect,
-                           const PlatformFrameView* view) const override {
+                           const LocalFrameView*) const override {
     IntRect scaled_rect(rect);
     scaled_rect.Scale(1 / device_scale_factor_);
     return scaled_rect;
@@ -39,9 +38,9 @@ class TextAutosizerTest : public RenderingTest {
     return GetTextAutosizerClient();
   }
   TextAutosizerClient& GetTextAutosizerClient() const {
-    DEFINE_STATIC_LOCAL(TextAutosizerClient, client,
+    DEFINE_STATIC_LOCAL(Persistent<TextAutosizerClient>, client,
                         (TextAutosizerClient::Create()));
-    return client;
+    return *client;
   }
   void set_device_scale_factor(float device_scale_factor) {
     GetTextAutosizerClient().set_device_scale_factor(device_scale_factor);
@@ -79,11 +78,11 @@ TEST_F(TextAutosizerTest, SimpleParagraph) {
   )HTML");
   Element* autosized = GetDocument().getElementById("autosized");
   EXPECT_FLOAT_EQ(16.f,
-                  autosized->GetLayoutObject()->Style()->SpecifiedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // (specified font-size = 16px) * (viewport width = 800px) /
   // (window width = 320px) = 40px.
   EXPECT_FLOAT_EQ(40.f,
-                  autosized->GetLayoutObject()->Style()->ComputedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, TextSizeAdjustDisablesAutosizing) {
@@ -122,16 +121,16 @@ TEST_F(TextAutosizerTest, TextSizeAdjustDisablesAutosizing) {
   )HTML");
   LayoutObject* text_size_adjust_auto =
       GetDocument().getElementById("textSizeAdjustAuto")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust_auto->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(40.f, text_size_adjust_auto->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust_auto->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(40.f, text_size_adjust_auto->StyleRef().ComputedFontSize());
   LayoutObject* text_size_adjust_none =
       GetDocument().getElementById("textSizeAdjustNone")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust_none->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust_none->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust_none->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust_none->StyleRef().ComputedFontSize());
   LayoutObject* text_size_adjust100 =
       GetDocument().getElementById("textSizeAdjust100")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust100->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust100->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust100->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust100->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, ParagraphWithChangingTextSizeAdjustment) {
@@ -155,37 +154,37 @@ TEST_F(TextAutosizerTest, ParagraphWithChangingTextSizeAdjustment) {
   )HTML");
   Element* autosized_div = GetDocument().getElementById("autosized");
   EXPECT_FLOAT_EQ(
-      16.f, autosized_div->GetLayoutObject()->Style()->SpecifiedFontSize());
+      16.f, autosized_div->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   EXPECT_FLOAT_EQ(
-      40.f, autosized_div->GetLayoutObject()->Style()->ComputedFontSize());
+      40.f, autosized_div->GetLayoutObject()->StyleRef().ComputedFontSize());
 
   autosized_div->setAttribute(HTMLNames::classAttr, "none");
   GetDocument().View()->UpdateAllLifecyclePhases();
   EXPECT_FLOAT_EQ(
-      16.f, autosized_div->GetLayoutObject()->Style()->SpecifiedFontSize());
+      16.f, autosized_div->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   EXPECT_FLOAT_EQ(
-      16.f, autosized_div->GetLayoutObject()->Style()->ComputedFontSize());
+      16.f, autosized_div->GetLayoutObject()->StyleRef().ComputedFontSize());
 
   autosized_div->setAttribute(HTMLNames::classAttr, "small");
   GetDocument().View()->UpdateAllLifecyclePhases();
   EXPECT_FLOAT_EQ(
-      16.f, autosized_div->GetLayoutObject()->Style()->SpecifiedFontSize());
+      16.f, autosized_div->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   EXPECT_FLOAT_EQ(
-      8.f, autosized_div->GetLayoutObject()->Style()->ComputedFontSize());
+      8.f, autosized_div->GetLayoutObject()->StyleRef().ComputedFontSize());
 
   autosized_div->setAttribute(HTMLNames::classAttr, "large");
   GetDocument().View()->UpdateAllLifecyclePhases();
   EXPECT_FLOAT_EQ(
-      16.f, autosized_div->GetLayoutObject()->Style()->SpecifiedFontSize());
+      16.f, autosized_div->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   EXPECT_FLOAT_EQ(
-      24.f, autosized_div->GetLayoutObject()->Style()->ComputedFontSize());
+      24.f, autosized_div->GetLayoutObject()->StyleRef().ComputedFontSize());
 
   autosized_div->removeAttribute(HTMLNames::classAttr);
   GetDocument().View()->UpdateAllLifecyclePhases();
   EXPECT_FLOAT_EQ(
-      16.f, autosized_div->GetLayoutObject()->Style()->SpecifiedFontSize());
+      16.f, autosized_div->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   EXPECT_FLOAT_EQ(
-      40.f, autosized_div->GetLayoutObject()->Style()->ComputedFontSize());
+      40.f, autosized_div->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, ZeroTextSizeAdjustment) {
@@ -206,8 +205,8 @@ TEST_F(TextAutosizerTest, ZeroTextSizeAdjustment) {
   )HTML");
   LayoutObject* text_size_adjust_zero =
       GetDocument().getElementById("textSizeAdjustZero")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust_zero->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(0.f, text_size_adjust_zero->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust_zero->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(0.f, text_size_adjust_zero->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, NegativeTextSizeAdjustment) {
@@ -229,8 +228,9 @@ TEST_F(TextAutosizerTest, NegativeTextSizeAdjustment) {
   LayoutObject* text_size_adjust_negative =
       GetDocument().getElementById("textSizeAdjustNegative")->GetLayoutObject();
   EXPECT_FLOAT_EQ(16.f,
-                  text_size_adjust_negative->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(40.f, text_size_adjust_negative->Style()->ComputedFontSize());
+                  text_size_adjust_negative->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(40.f,
+                  text_size_adjust_negative->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, TextSizeAdjustmentPixelUnits) {
@@ -251,8 +251,9 @@ TEST_F(TextAutosizerTest, TextSizeAdjustmentPixelUnits) {
       "</div>");
   LayoutObject* text_size_adjust_pixels =
       GetDocument().getElementById("textSizeAdjustPixels")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust_pixels->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(40.f, text_size_adjust_pixels->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(16.f,
+                  text_size_adjust_pixels->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(40.f, text_size_adjust_pixels->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, NestedTextSizeAdjust) {
@@ -282,14 +283,14 @@ TEST_F(TextAutosizerTest, NestedTextSizeAdjust) {
   )HTML");
   LayoutObject* text_size_adjust_a =
       GetDocument().getElementById("textSizeAdjustA")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust_a->Style()->SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust_a->StyleRef().SpecifiedFontSize());
   // 16px * 47% = 7.52
-  EXPECT_FLOAT_EQ(7.52f, text_size_adjust_a->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(7.52f, text_size_adjust_a->StyleRef().ComputedFontSize());
   LayoutObject* text_size_adjust_b =
       GetDocument().getElementById("textSizeAdjustB")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust_b->Style()->SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust_b->StyleRef().SpecifiedFontSize());
   // 16px * 53% = 8.48
-  EXPECT_FLOAT_EQ(8.48f, text_size_adjust_b->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(8.48f, text_size_adjust_b->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, PrefixedTextSizeAdjustIsAlias) {
@@ -310,10 +311,10 @@ TEST_F(TextAutosizerTest, PrefixedTextSizeAdjustIsAlias) {
   )HTML");
   LayoutObject* text_size_adjust =
       GetDocument().getElementById("textSizeAdjust")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(8.f, text_size_adjust->Style()->ComputedFontSize());
-  EXPECT_FLOAT_EQ(.5f,
-                  text_size_adjust->Style()->GetTextSizeAdjust().Multiplier());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(8.f, text_size_adjust->StyleRef().ComputedFontSize());
+  EXPECT_FLOAT_EQ(
+      .5f, text_size_adjust->StyleRef().GetTextSizeAdjust().Multiplier());
 }
 
 TEST_F(TextAutosizerTest, AccessibilityFontScaleFactor) {
@@ -335,11 +336,11 @@ TEST_F(TextAutosizerTest, AccessibilityFontScaleFactor) {
   )HTML");
   Element* autosized = GetDocument().getElementById("autosized");
   EXPECT_FLOAT_EQ(16.f,
-                  autosized->GetLayoutObject()->Style()->SpecifiedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // 1.5 * (specified font-size = 16px) * (viewport width = 800px) /
   // (window width = 320px) = 60px.
   EXPECT_FLOAT_EQ(60.f,
-                  autosized->GetLayoutObject()->Style()->ComputedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, AccessibilityFontScaleFactorWithTextSizeAdjustNone) {
@@ -372,19 +373,19 @@ TEST_F(TextAutosizerTest, AccessibilityFontScaleFactorWithTextSizeAdjustNone) {
   )HTML");
   Element* autosized = GetDocument().getElementById("autosized");
   EXPECT_FLOAT_EQ(16.f,
-                  autosized->GetLayoutObject()->Style()->SpecifiedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // 1.5 * (specified font-size = 16px) = 24px.
   EXPECT_FLOAT_EQ(24.f,
-                  autosized->GetLayoutObject()->Style()->ComputedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().ComputedFontSize());
 
   // Because this does not autosize (due to the width), no accessibility font
   // scale factor should be applied.
   Element* not_autosized = GetDocument().getElementById("notAutosized");
   EXPECT_FLOAT_EQ(
-      16.f, not_autosized->GetLayoutObject()->Style()->SpecifiedFontSize());
+      16.f, not_autosized->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // specified font-size = 16px.
   EXPECT_FLOAT_EQ(
-      16.f, not_autosized->GetLayoutObject()->Style()->ComputedFontSize());
+      16.f, not_autosized->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, ChangingAccessibilityFontScaleFactor) {
@@ -406,21 +407,21 @@ TEST_F(TextAutosizerTest, ChangingAccessibilityFontScaleFactor) {
   )HTML");
   Element* autosized = GetDocument().getElementById("autosized");
   EXPECT_FLOAT_EQ(16.f,
-                  autosized->GetLayoutObject()->Style()->SpecifiedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // 1.0 * (specified font-size = 16px) * (viewport width = 800px) /
   // (window width = 320px) = 40px.
   EXPECT_FLOAT_EQ(40.f,
-                  autosized->GetLayoutObject()->Style()->ComputedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().ComputedFontSize());
 
   GetDocument().GetSettings()->SetAccessibilityFontScaleFactor(2);
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_FLOAT_EQ(16.f,
-                  autosized->GetLayoutObject()->Style()->SpecifiedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // 2.0 * (specified font-size = 16px) * (viewport width = 800px) /
   // (window width = 320px) = 80px.
   EXPECT_FLOAT_EQ(80.f,
-                  autosized->GetLayoutObject()->Style()->ComputedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, TextSizeAdjustDoesNotDisableAccessibility) {
@@ -453,21 +454,21 @@ TEST_F(TextAutosizerTest, TextSizeAdjustDoesNotDisableAccessibility) {
       GetDocument().getElementById("textSizeAdjustNone");
   EXPECT_FLOAT_EQ(
       16.f,
-      text_size_adjust_none->GetLayoutObject()->Style()->SpecifiedFontSize());
+      text_size_adjust_none->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // 1.5 * (specified font-size = 16px) = 24px.
   EXPECT_FLOAT_EQ(
       24.f,
-      text_size_adjust_none->GetLayoutObject()->Style()->ComputedFontSize());
+      text_size_adjust_none->GetLayoutObject()->StyleRef().ComputedFontSize());
 
   Element* text_size_adjust_double =
       GetDocument().getElementById("textSizeAdjustDouble");
-  EXPECT_FLOAT_EQ(
-      16.f,
-      text_size_adjust_double->GetLayoutObject()->Style()->SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust_double->GetLayoutObject()
+                            ->StyleRef()
+                            .SpecifiedFontSize());
   // 1.5 * (specified font-size = 16px) * (text size adjustment = 2) = 48px.
-  EXPECT_FLOAT_EQ(
-      48.f,
-      text_size_adjust_double->GetLayoutObject()->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(48.f, text_size_adjust_double->GetLayoutObject()
+                            ->StyleRef()
+                            .ComputedFontSize());
 
   // Changing the accessibility font scale factor should change the adjusted
   // size.
@@ -476,19 +477,19 @@ TEST_F(TextAutosizerTest, TextSizeAdjustDoesNotDisableAccessibility) {
 
   EXPECT_FLOAT_EQ(
       16.f,
-      text_size_adjust_none->GetLayoutObject()->Style()->SpecifiedFontSize());
+      text_size_adjust_none->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // 2.0 * (specified font-size = 16px) = 32px.
   EXPECT_FLOAT_EQ(
       32.f,
-      text_size_adjust_none->GetLayoutObject()->Style()->ComputedFontSize());
+      text_size_adjust_none->GetLayoutObject()->StyleRef().ComputedFontSize());
 
-  EXPECT_FLOAT_EQ(
-      16.f,
-      text_size_adjust_double->GetLayoutObject()->Style()->SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust_double->GetLayoutObject()
+                            ->StyleRef()
+                            .SpecifiedFontSize());
   // 2.0 * (specified font-size = 16px) * (text size adjustment = 2) = 64px.
-  EXPECT_FLOAT_EQ(
-      64.f,
-      text_size_adjust_double->GetLayoutObject()->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(64.f, text_size_adjust_double->GetLayoutObject()
+                            ->StyleRef()
+                            .ComputedFontSize());
 }
 
 // https://crbug.com/646237
@@ -507,10 +508,10 @@ TEST_F(TextAutosizerTest, DISABLED_TextSizeAdjustWithoutNeedingAutosizing) {
 
   LayoutObject* text_size_adjust =
       GetDocument().getElementById("textSizeAdjust")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, text_size_adjust->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(24.f, text_size_adjust->Style()->ComputedFontSize());
-  EXPECT_FLOAT_EQ(1.5f,
-                  text_size_adjust->Style()->GetTextSizeAdjust().Multiplier());
+  EXPECT_FLOAT_EQ(16.f, text_size_adjust->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(24.f, text_size_adjust->StyleRef().ComputedFontSize());
+  EXPECT_FLOAT_EQ(
+      1.5f, text_size_adjust->StyleRef().GetTextSizeAdjust().Multiplier());
 }
 
 TEST_F(TextAutosizerTest, DeviceScaleAdjustmentWithViewport) {
@@ -537,23 +538,23 @@ TEST_F(TextAutosizerTest, DeviceScaleAdjustmentWithViewport) {
 
   Element* autosized = GetDocument().getElementById("autosized");
   EXPECT_FLOAT_EQ(16.f,
-                  autosized->GetLayoutObject()->Style()->SpecifiedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // (specified font-size = 16px) * (viewport width = 800px) /
   // (window width = 320px) = 40px.
   // The device scale adjustment of 1.5 is ignored.
   EXPECT_FLOAT_EQ(40.f,
-                  autosized->GetLayoutObject()->Style()->ComputedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().ComputedFontSize());
 
   GetDocument().GetSettings()->SetViewportMetaEnabled(false);
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   autosized = GetDocument().getElementById("autosized");
   EXPECT_FLOAT_EQ(16.f,
-                  autosized->GetLayoutObject()->Style()->SpecifiedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // (device scale adjustment = 1.5) * (specified font-size = 16px) *
   // (viewport width = 800px) / (window width = 320px) = 60px.
   EXPECT_FLOAT_EQ(60.f,
-                  autosized->GetLayoutObject()->Style()->ComputedFontSize());
+                  autosized->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, ChangingSuperClusterFirstText) {
@@ -591,14 +592,14 @@ TEST_F(TextAutosizerTest, ChangingSuperClusterFirstText) {
 
   LayoutObject* long_text =
       GetDocument().getElementById("longText")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, long_text->Style()->SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(16.f, long_text->StyleRef().SpecifiedFontSize());
   //(specified font-size = 16px) * (block width = 560px) /
   // (window width = 320px) = 28px.
-  EXPECT_FLOAT_EQ(28.f, long_text->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(28.f, long_text->StyleRef().ComputedFontSize());
   LayoutObject* short_text =
       GetDocument().getElementById("shortText")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, short_text->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(28.f, short_text->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(16.f, short_text->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(28.f, short_text->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, ChangingSuperClusterSecondText) {
@@ -636,14 +637,14 @@ TEST_F(TextAutosizerTest, ChangingSuperClusterSecondText) {
 
   LayoutObject* long_text =
       GetDocument().getElementById("longText")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, long_text->Style()->SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(16.f, long_text->StyleRef().SpecifiedFontSize());
   //(specified font-size = 16px) * (block width = 560px) /
   // (window width = 320px) = 28px.
-  EXPECT_FLOAT_EQ(28.f, long_text->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(28.f, long_text->StyleRef().ComputedFontSize());
   LayoutObject* short_text =
       GetDocument().getElementById("shortText")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, short_text->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(28.f, short_text->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(16.f, short_text->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(28.f, short_text->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, AddingSuperCluster) {
@@ -683,14 +684,14 @@ TEST_F(TextAutosizerTest, AddingSuperCluster) {
 
   LayoutObject* long_text =
       GetDocument().getElementById("longText")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, long_text->Style()->SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(16.f, long_text->StyleRef().SpecifiedFontSize());
   //(specified font-size = 16px) * (block width = 560px) /
   // (window width = 320px) = 28px.
-  EXPECT_FLOAT_EQ(28.f, long_text->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(28.f, long_text->StyleRef().ComputedFontSize());
   LayoutObject* short_text =
       GetDocument().getElementById("shortText")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, short_text->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(28.f, short_text->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(16.f, short_text->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(28.f, short_text->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, ChangingInheritedClusterTextInsideSuperCluster) {
@@ -729,14 +730,14 @@ TEST_F(TextAutosizerTest, ChangingInheritedClusterTextInsideSuperCluster) {
 
   LayoutObject* long_text =
       GetDocument().getElementById("longText")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, long_text->Style()->SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(16.f, long_text->StyleRef().SpecifiedFontSize());
   //(specified font-size = 16px) * (block width = 560px) /
   // (window width = 320px) = 28px.
-  EXPECT_FLOAT_EQ(28.f, long_text->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(28.f, long_text->StyleRef().ComputedFontSize());
   LayoutObject* short_text =
       GetDocument().getElementById("shortText")->GetLayoutObject();
-  EXPECT_FLOAT_EQ(16.f, short_text->Style()->SpecifiedFontSize());
-  EXPECT_FLOAT_EQ(28.f, short_text->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(16.f, short_text->StyleRef().SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(28.f, short_text->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, AutosizeInnerContentOfRuby) {
@@ -778,20 +779,20 @@ TEST_F(TextAutosizerTest, AutosizeInnerContentOfRuby) {
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   Element* ruby_inline = GetDocument().getElementById("rubyInline");
-  EXPECT_FLOAT_EQ(16.f,
-                  ruby_inline->GetLayoutObject()->Style()->SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(
+      16.f, ruby_inline->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // (specified font-size = 16px) * (viewport width = 800px) /
   // (window width = 320px) = 40px.
-  EXPECT_FLOAT_EQ(40.f,
-                  ruby_inline->GetLayoutObject()->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(
+      40.f, ruby_inline->GetLayoutObject()->StyleRef().ComputedFontSize());
 
   Element* ruby_block = GetDocument().getElementById("rubyBlock");
-  EXPECT_FLOAT_EQ(16.f,
-                  ruby_block->GetLayoutObject()->Style()->SpecifiedFontSize());
+  EXPECT_FLOAT_EQ(
+      16.f, ruby_block->GetLayoutObject()->StyleRef().SpecifiedFontSize());
   // (specified font-size = 16px) * (viewport width = 800px) /
   // (window width = 320px) = 40px.
   EXPECT_FLOAT_EQ(40.f,
-                  ruby_block->GetLayoutObject()->Style()->ComputedFontSize());
+                  ruby_block->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, ResizeAndGlyphOverflowChanged) {
@@ -869,7 +870,7 @@ TEST_F(TextAutosizerTest, narrowContentInsideNestedWideBlock) {
   //(content width = 200px) / (window width = 320px) < 1.0f, multiplier = 1.0,
   // font-size = 16px;
   EXPECT_FLOAT_EQ(16.f,
-                  content->GetLayoutObject()->Style()->ComputedFontSize());
+                  content->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, LayoutViewWidthProvider) {
@@ -901,7 +902,7 @@ TEST_F(TextAutosizerTest, LayoutViewWidthProvider) {
   // (specified font-size = 16px) * (viewport width = 800px) /
   // (window width = 320px) = 40px.
   EXPECT_FLOAT_EQ(40.f,
-                  content->GetLayoutObject()->Style()->ComputedFontSize());
+                  content->GetLayoutObject()->StyleRef().ComputedFontSize());
 
   GetDocument().getElementById("panel")->SetInnerHTMLFromString("insert text");
   content->SetInnerHTMLFromString(content->InnerHTMLAsString());
@@ -910,7 +911,7 @@ TEST_F(TextAutosizerTest, LayoutViewWidthProvider) {
   // (specified font-size = 16px) * (viewport width = 800px) /
   // (window width = 320px) = 40px.
   EXPECT_FLOAT_EQ(40.f,
-                  content->GetLayoutObject()->Style()->ComputedFontSize());
+                  content->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, MultiColumns) {
@@ -943,7 +944,8 @@ TEST_F(TextAutosizerTest, MultiColumns) {
   Element* target = GetDocument().getElementById("target");
   // (specified font-size = 16px) * ( thread flow layout width = 800px / 3) /
   // (window width = 320px) < 16px.
-  EXPECT_FLOAT_EQ(16.f, target->GetLayoutObject()->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(16.f,
+                  target->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, ScaledbyDSF) {
@@ -971,7 +973,7 @@ TEST_F(TextAutosizerTest, ScaledbyDSF) {
   // (specified font-size = 16px) * (thread flow layout width = 800px) /
   // (window width = 320px) * (device scale factor) = 40px * device_scale.
   EXPECT_FLOAT_EQ(40.0f * device_scale,
-                  target->GetLayoutObject()->Style()->ComputedFontSize());
+                  target->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, ClusterHasNotEnoughTextToAutosizeForZoomDSF) {
@@ -993,7 +995,8 @@ TEST_F(TextAutosizerTest, ClusterHasNotEnoughTextToAutosizeForZoomDSF) {
   // minimum_text_length_to_autosize < length. Thus, ClusterMultiplier()
   // returns 1 (not multiplied by the accessibility font scale factor).
   // computed font-size = specified font-size = 8px.
-  EXPECT_FLOAT_EQ(8.0f, target->GetLayoutObject()->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(8.0f,
+                  target->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 // TODO(jaebaek): Unit tests ClusterHasNotEnoughTextToAutosizeForZoomDSF and
@@ -1030,7 +1033,7 @@ TEST_F(TextAutosizerTest, ClusterHasEnoughTextToAutosizeForZoomDSF) {
   // ClusterHasEnoughTextToAutosize() returns true and both accessibility font
   // scale factor and device scale factor are multiplied.
   EXPECT_FLOAT_EQ(20.0f * device_scale,
-                  target->GetLayoutObject()->Style()->ComputedFontSize());
+                  target->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 
 TEST_F(TextAutosizerTest, AfterPrint) {
@@ -1052,11 +1055,12 @@ TEST_F(TextAutosizerTest, AfterPrint) {
   )HTML");
   Element* target = GetDocument().getElementById("target");
   EXPECT_FLOAT_EQ(20.0f * device_scale,
-                  target->GetLayoutObject()->Style()->ComputedFontSize());
+                  target->GetLayoutObject()->StyleRef().ComputedFontSize());
   GetDocument().GetFrame()->StartPrinting(print_size, print_size, 1.0);
-  EXPECT_FLOAT_EQ(8.0f, target->GetLayoutObject()->Style()->ComputedFontSize());
+  EXPECT_FLOAT_EQ(8.0f,
+                  target->GetLayoutObject()->StyleRef().ComputedFontSize());
   GetDocument().GetFrame()->EndPrinting();
   EXPECT_FLOAT_EQ(20.0f * device_scale,
-                  target->GetLayoutObject()->Style()->ComputedFontSize());
+                  target->GetLayoutObject()->StyleRef().ComputedFontSize());
 }
 }  // namespace blink

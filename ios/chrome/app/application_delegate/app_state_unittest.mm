@@ -11,6 +11,7 @@
 #include "base/ios/block_types.h"
 #include "base/mac/scoped_block.h"
 #include "base/synchronization/lock.h"
+#include "base/task/post_task.h"
 #import "ios/chrome/app/application_delegate/app_navigation.h"
 #import "ios/chrome/app/application_delegate/app_state_testing.h"
 #import "ios/chrome/app/application_delegate/browser_launcher.h"
@@ -32,7 +33,9 @@
 #include "ios/chrome/browser/ntp_snippets/ios_chrome_content_suggestions_service_factory.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
+#import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/ui/main/browser_view_information.h"
 #import "ios/chrome/browser/ui/safe_mode/safe_mode_coordinator.h"
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
@@ -45,6 +48,7 @@
 #import "ios/testing/ocmock_complex_type_helper.h"
 #include "ios/web/net/request_tracker_impl.h"
 #include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/web_task_traits.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #include "third_party/ocmock/gtest_support.h"
 
@@ -156,7 +160,7 @@ class AppStateTest : public BlockCleanupTest {
 
     [app_state_ applicationDidEnterBackground:application
                                  memoryHelper:memoryHelper
-                          tabSwitcherIsActive:YES];
+                      incognitoContentVisible:YES];
 
     metrics_mediator_called_ = NO;
   }
@@ -187,7 +191,7 @@ class AppStateTest : public BlockCleanupTest {
   void swizzleMetricsMediatorDisableReporting() {
     metrics_mediator_called_ = NO;
 
-    metrics_mediator_swizzle_block_ = ^() {
+    metrics_mediator_swizzle_block_ = ^{
       metrics_mediator_called_ = YES;
     };
 
@@ -236,7 +240,7 @@ class AppStateTest : public BlockCleanupTest {
 
     stubNullCurrentBrowserState(browser_view_information_);
 
-    void (^swizzleBlock)() = ^() {
+    void (^swizzleBlock)() = ^{
     };
 
     ScopedBlockSwizzler swizzler(
@@ -321,7 +325,7 @@ class AppStateWithThreadTest : public PlatformTest {
     BOOL created = NO;
     base::Lock* lock = new base::Lock;
 
-    web::WebThread::PostTask(web::WebThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(FROM_HERE, {web::WebThread::IO},
                              base::Bind(&createTracker, &created, lock));
 
     CFTimeInterval start = CACurrentMediaTime();
@@ -524,14 +528,10 @@ TEST_F(AppStateWithThreadTest, willTerminate) {
   id window = [OCMockObject mockForClass:[UIWindow class]];
   id browserViewInformation =
       [OCMockObject mockForProtocol:@protocol(BrowserViewInformation)];
-  id mainTabModel = [OCMockObject mockForClass:[TabModel class]];
-  id OTRTabModel = [OCMockObject mockForClass:[TabModel class]];
   [[[browserLauncher stub] andReturnValue:@(INITIALIZATION_STAGE_FOREGROUND)]
       browserInitializationStage];
   [[[browserLauncher stub] andReturn:browserViewInformation]
       browserViewInformation];
-  [[[browserViewInformation stub] andReturn:mainTabModel] mainTabModel];
-  [[[browserViewInformation stub] andReturn:OTRTabModel] otrTabModel];
   [[[browserViewInformation stub] andReturn:browserViewController] currentBVC];
 
   id settingsNavigationController =
@@ -543,11 +543,7 @@ TEST_F(AppStateWithThreadTest, willTerminate) {
   [[appNavigation expect] closeSettingsAnimated:NO completion:nil];
 
   [[browserViewInformation expect] cleanDeviceSharingManager];
-
-  [[mainTabModel expect] haltAllTabs];
-
-  [[OTRTabModel expect] closeAllTabs];
-  [[OTRTabModel expect] saveSessionImmediately:YES];
+  [[browserViewInformation expect] haltAllTabs];
 
   id startupInformation =
       [OCMockObject mockForProtocol:@protocol(StartupInformation)];
@@ -566,8 +562,6 @@ TEST_F(AppStateWithThreadTest, willTerminate) {
                applicationNavigation:appNavigation];
 
   // Test.
-  EXPECT_OCMOCK_VERIFY(OTRTabModel);
-  EXPECT_OCMOCK_VERIFY(mainTabModel);
   EXPECT_OCMOCK_VERIFY(browserViewController);
   EXPECT_OCMOCK_VERIFY(startupInformation);
   EXPECT_OCMOCK_VERIFY(appNavigation);
@@ -645,13 +639,16 @@ TEST_F(AppStateTest, resumeSessionShouldOpenNTPTabSwitcher) {
   [[[getStartupInformationMock() stub] andReturn:nil] startupParameters];
   [[[getStartupInformationMock() stub] andReturnValue:@NO] isColdStart];
 
-  // TabOpening.
-  id tabOpener = [OCMockObject mockForProtocol:@protocol(TabOpening)];
-
   // BrowserViewInformation.
   id mainTabModel = [OCMockObject mockForClass:[TabModel class]];
   [[mainTabModel expect] resetSessionMetrics];
   [[[browserViewInformation stub] andReturn:mainTabModel] mainTabModel];
+  [[[browserViewInformation stub] andReturn:mainTabModel] currentTabModel];
+
+  // TabOpening.
+  id tabOpener = [OCMockObject mockForProtocol:@protocol(TabOpening)];
+  [[[tabOpener stub] andReturnValue:@YES]
+      shouldOpenNTPTabOnActivationOfTabModel:mainTabModel];
 
   // TabSwitcher.
   id tabSwitcher = [OCMockObject mockForProtocol:@protocol(TabSwitching)];
@@ -690,23 +687,26 @@ TEST_F(AppStateTest, resumeSessionShouldOpenNTPNoTabSwitcher) {
   [[[getStartupInformationMock() stub] andReturn:nil] startupParameters];
   [[[getStartupInformationMock() stub] andReturnValue:@NO] isColdStart];
 
-  // TabOpening.
-  id tabOpener = [OCMockObject mockForProtocol:@protocol(TabOpening)];
-
   // BrowserViewInformation.
   id mainTabModel = [OCMockObject mockForClass:[TabModel class]];
   [[mainTabModel expect] resetSessionMetrics];
 
-  id dispatcher = [OCMockObject mockForProtocol:@protocol(BrowserCommands)];
-  [[dispatcher expect] openNewTab:[OCMArg any]];
+  id dispatcher = [OCMockObject mockForProtocol:@protocol(ApplicationCommands)];
+  [((id<ApplicationCommands>)[dispatcher expect]) openURLInNewTab:[OCMArg any]];
 
   id currentBVC = [OCMockObject mockForClass:[BrowserViewController class]];
   stubBrowserState(currentBVC);
   [[[currentBVC stub] andReturn:dispatcher] dispatcher];
 
   [[[browserViewInformation stub] andReturn:mainTabModel] mainTabModel];
+  [[[browserViewInformation stub] andReturn:mainTabModel] currentTabModel];
   [[[browserViewInformation stub] andReturn:currentBVC] currentBVC];
   [[[browserViewInformation stub] andReturn:nil] otrBVC];
+
+  // TabOpening.
+  id tabOpener = [OCMockObject mockForProtocol:@protocol(TabOpening)];
+  [[[tabOpener stub] andReturnValue:@YES]
+      shouldOpenNTPTabOnActivationOfTabModel:mainTabModel];
 
   // TabSwitcher.
   id tabSwitcher = [OCMockObject mockForProtocol:@protocol(TabSwitching)];
@@ -765,7 +765,7 @@ TEST_F(AppStateTest, applicationWillEnterForeground) {
 
   stubNullCurrentBrowserState(browserViewInformation);
 
-  void (^swizzleBlock)() = ^() {
+  void (^swizzleBlock)() = ^{
   };
 
   ScopedBlockSwizzler swizzler(
@@ -917,7 +917,7 @@ TEST_F(AppStateTest, applicationDidEnterBackgroundIncognito) {
   // Action.
   [appState applicationDidEnterBackground:application
                              memoryHelper:memoryHelper
-                      tabSwitcherIsActive:YES];
+                  incognitoContentVisible:YES];
 
   // Tests.
   EXPECT_OCMOCK_VERIFY(startupInformation);
@@ -942,7 +942,7 @@ TEST_F(AppStateTest, applicationDidEnterBackgroundStageBackground) {
   // Action.
   [getAppStateWithRealWindow(window) applicationDidEnterBackground:application
                                                       memoryHelper:memoryHelper
-                                               tabSwitcherIsActive:YES];
+                                           incognitoContentVisible:YES];
 
   // Tests.
   EXPECT_EQ(NSUInteger(0), [window subviews].count);
@@ -980,7 +980,7 @@ TEST_F(AppStateTest, applicationDidEnterBackgroundNoIncognitoBlocker) {
   // Action.
   [appState applicationDidEnterBackground:application
                              memoryHelper:memoryHelper
-                      tabSwitcherIsActive:YES];
+                  incognitoContentVisible:NO];
 
   // Tests.
   EXPECT_OCMOCK_VERIFY(startupInformation);

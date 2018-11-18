@@ -160,8 +160,7 @@ bool ExternalMountPoints::CrackVirtualPath(
   if (components.size() < 1)
     return false;
 
-  std::vector<base::FilePath::StringType>::iterator component_iter =
-      components.begin();
+  auto component_iter = components.begin();
   std::string maybe_mount_name =
       base::FilePath(*component_iter++).AsUTF8Unsafe();
 
@@ -330,8 +329,7 @@ bool ExternalMountPoints::ValidateNewMountPoint(const std::string& mount_name,
       }
     }
 
-    std::map<base::FilePath, std::string>::iterator potential_child =
-        path_to_name_map_.upper_bound(path);
+    auto potential_child = path_to_name_map_.upper_bound(path);
     if (potential_child != path_to_name_map_.end()) {
       if (potential_child->first == path ||
           path.IsParent(potential_child->first)) {

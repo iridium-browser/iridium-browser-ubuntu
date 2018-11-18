@@ -9,7 +9,6 @@
 #import "ios/chrome/browser/ui/commands/omnibox_suggestion_commands.h"
 #import "ios/chrome/browser/ui/omnibox/autocomplete_result_consumer.h"
 #import "ios/chrome/browser/ui/omnibox/image_retriever.h"
-#import "ios/chrome/browser/ui/omnibox/popup/table_view_owning.h"
 
 @protocol ImageRetriever;
 
@@ -21,9 +20,16 @@
 // is the first responder, this view controller cannot receive these events.
 // Hence the delegation.
 @interface OmniboxPopupViewController
-    : UIViewController<AutocompleteResultConsumer,
-                       OmniboxSuggestionCommands,
-                       TableViewOwning>
+    : UIViewController<AutocompleteResultConsumer, OmniboxSuggestionCommands>
+
+// When enabled, this view controller will display shortcuts when no suggestions
+// are available. When enabling this, |shortcutsViewController| must be set.
+// This can be toggled at runtime, for example to only show shortcuts on regular
+// pages and not show them on NTP.
+@property(nonatomic, assign) BOOL shortcutsEnabled;
+// The view controller to display when no suggestions is available. See also:
+// |shortcutsEnabled|.
+@property(nonatomic, weak) UIViewController* shortcutsViewController;
 
 @property(nonatomic, assign) BOOL incognito;
 @property(nonatomic, weak) id<AutocompleteResultConsumerDelegate> delegate;

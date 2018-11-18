@@ -49,14 +49,17 @@ void FakeOutputSurface::SwapBuffers(OutputSurfaceFrame frame) {
   ++num_sent_frames_;
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&FakeOutputSurface::SwapBuffersAck,
-                     weak_ptr_factory_.GetWeakPtr(), num_sent_frames_));
+      FROM_HERE, base::BindOnce(&FakeOutputSurface::SwapBuffersAck,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                frame.need_presentation_feedback));
 }
 
-void FakeOutputSurface::SwapBuffersAck(uint64_t swap_id) {
-  client_->DidReceiveSwapBuffersAck(swap_id);
-  client_->DidReceivePresentationFeedback(swap_id, gfx::PresentationFeedback());
+void FakeOutputSurface::SwapBuffersAck(bool need_presentation_feedback) {
+  client_->DidReceiveSwapBuffersAck();
+  if (need_presentation_feedback) {
+    client_->DidReceivePresentationFeedback(
+        {base::TimeTicks::Now(), base::TimeDelta(), 0});
+  }
 }
 
 void FakeOutputSurface::BindFramebuffer() {
@@ -84,10 +87,6 @@ bool FakeOutputSurface::HasExternalStencilTest() const {
   return has_external_stencil_test_;
 }
 
-bool FakeOutputSurface::SurfaceIsSuspendForRecycle() const {
-  return suspended_for_recycle_;
-}
-
 OverlayCandidateValidator* FakeOutputSurface::GetOverlayCandidateValidator()
     const {
   return overlay_candidate_validator_;
@@ -98,11 +97,11 @@ gfx::BufferFormat FakeOutputSurface::GetOverlayBufferFormat() const {
 }
 
 bool FakeOutputSurface::IsDisplayedAsOverlayPlane() const {
-  return false;
+  return overlay_texture_id_ != 0;
 }
 
 unsigned FakeOutputSurface::GetOverlayTextureId() const {
-  return 0;
+  return overlay_texture_id_;
 }
 
 #if BUILDFLAG(ENABLE_VULKAN)
@@ -111,5 +110,9 @@ gpu::VulkanSurface* FakeOutputSurface::GetVulkanSurface() {
   return nullptr;
 }
 #endif
+
+unsigned FakeOutputSurface::UpdateGpuFence() {
+  return gpu_fence_id_;
+}
 
 }  // namespace viz

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/events/pointer_event_factory.h"
 
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/platform/geometry/float_size.h"
 
@@ -62,6 +63,8 @@ const AtomicString& PointerEventNameForEventType(WebInputEvent::Type type) {
       return EventTypeNames::pointerup;
     case WebInputEvent::kPointerMove:
       return EventTypeNames::pointermove;
+    case WebInputEvent::kPointerRawMove:
+      return EventTypeNames::pointerrawmove;
     case WebInputEvent::kPointerCancel:
       return EventTypeNames::pointercancel;
     default:
@@ -170,6 +173,7 @@ void PointerEventFactory::SetEventSpecificFields(
   pointer_event_init.setCancelable(type != EventTypeNames::pointerenter &&
                                    type != EventTypeNames::pointerleave &&
                                    type != EventTypeNames::pointercancel &&
+                                   type != EventTypeNames::pointerrawmove &&
                                    type != EventTypeNames::gotpointercapture &&
                                    type != EventTypeNames::lostpointercapture);
 
@@ -185,6 +189,7 @@ PointerEvent* PointerEventFactory::Create(
   DCHECK(event_type == WebInputEvent::kPointerDown ||
          event_type == WebInputEvent::kPointerUp ||
          event_type == WebInputEvent::kPointerMove ||
+         event_type == WebInputEvent::kPointerRawMove ||
          event_type == WebInputEvent::kPointerCancel);
 
   PointerEventInit pointer_event_init;
@@ -192,14 +197,6 @@ PointerEvent* PointerEventFactory::Create(
   SetIdTypeButtons(pointer_event_init, web_pointer_event);
 
   AtomicString type = PointerEventNameForEventType(event_type);
-  // Make sure chorded buttons fire pointermove instead of pointerup/down.
-  if ((event_type == WebInputEvent::kPointerDown &&
-       (pointer_event_init.buttons() &
-        ~ButtonToButtonsBitfield(web_pointer_event.button)) != 0) ||
-      (event_type == WebInputEvent::kPointerUp &&
-       pointer_event_init.buttons() != 0))
-    type = EventTypeNames::pointermove;
-
   if (event_type == WebInputEvent::kPointerDown ||
       event_type == WebInputEvent::kPointerUp) {
     WebPointerProperties::Button button = web_pointer_event.button;
@@ -209,6 +206,14 @@ PointerEvent* PointerEventFactory::Create(
         button == WebPointerProperties::Button::kLeft)
       button = WebPointerProperties::Button::kEraser;
     pointer_event_init.setButton(static_cast<int>(button));
+
+    // Make sure chorded buttons fire pointermove instead of pointerup/down.
+    if ((event_type == WebInputEvent::kPointerDown &&
+         (pointer_event_init.buttons() & ~ButtonToButtonsBitfield(button)) !=
+             0) ||
+        (event_type == WebInputEvent::kPointerUp &&
+         pointer_event_init.buttons() != 0))
+      type = EventTypeNames::pointermove;
   } else {
     pointer_event_init.setButton(
         static_cast<int>(WebPointerProperties::Button::kNoButton));
@@ -223,7 +228,8 @@ PointerEvent* PointerEventFactory::Create(
 
   SetEventSpecificFields(pointer_event_init, type);
 
-  if (type == EventTypeNames::pointermove) {
+  if (type == EventTypeNames::pointermove ||
+      type == EventTypeNames::pointerrawmove) {
     HeapVector<Member<PointerEvent>> coalesced_pointer_events;
     for (const auto& coalesced_event : coalesced_events) {
       DCHECK_EQ(web_pointer_event.id, coalesced_event.id);
@@ -235,9 +241,8 @@ PointerEvent* PointerEventFactory::Create(
       coalesced_event_init.setBubbles(false);
       UpdateCommonPointerEventInit(coalesced_event, view,
                                    &coalesced_event_init);
-      PointerEvent* event = PointerEvent::Create(
-          type, coalesced_event_init,
-          TimeTicksFromSeconds(coalesced_event.TimeStampSeconds()));
+      PointerEvent* event = PointerEvent::Create(type, coalesced_event_init,
+                                                 coalesced_event.TimeStamp());
       // Set the trusted flag for the coalesced events at the creation time
       // as oppose to the normal events which is done at the dispatch time. This
       // is because we don't want to go over all the coalesced events at every
@@ -249,9 +254,8 @@ PointerEvent* PointerEventFactory::Create(
     pointer_event_init.setCoalescedEvents(coalesced_pointer_events);
   }
 
-  return PointerEvent::Create(
-      type, pointer_event_init,
-      TimeTicksFromSeconds(web_pointer_event.TimeStampSeconds()));
+  return PointerEvent::Create(type, pointer_event_init,
+                              web_pointer_event.TimeStamp());
 }
 
 PointerEvent* PointerEventFactory::CreatePointerCancelEvent(
@@ -307,6 +311,21 @@ PointerEvent* PointerEventFactory::CreatePointerEventFrom(
 
   return PointerEvent::Create(type, pointer_event_init,
                               pointer_event->PlatformTimeStamp());
+}
+
+PointerEvent* PointerEventFactory::CreatePointerRawMoveEvent(
+    PointerEvent* pointer_event) {
+  // This function is for creating pointerrawmove event from a pointerdown/up
+  // event that caused by chorded buttons and hence its type is changed to
+  // pointermove.
+  DCHECK(pointer_event->type() == EventTypeNames::pointermove &&
+         (pointer_event->buttons() &
+          ~ButtonToButtonsBitfield(static_cast<WebPointerProperties::Button>(
+              pointer_event->button()))) != 0 &&
+         pointer_event->button() != 0);
+
+  return CreatePointerEventFrom(pointer_event, EventTypeNames::pointerrawmove,
+                                pointer_event->relatedTarget());
 }
 
 PointerEvent* PointerEventFactory::CreatePointerCaptureEvent(

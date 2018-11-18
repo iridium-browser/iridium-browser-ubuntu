@@ -45,11 +45,11 @@ HTMLMediaElement* LayoutMedia::MediaElement() const {
 }
 
 void LayoutMedia::UpdateLayout() {
-  LayoutSize old_size = ContentBoxRect().Size();
+  LayoutSize old_size(ContentWidth(), ContentHeight());
 
   LayoutImage::UpdateLayout();
 
-  LayoutRect new_rect = ContentBoxRect();
+  LayoutRect new_rect(PhysicalContentBoxRect());
 
   LayoutState state(*this);
 
@@ -92,11 +92,8 @@ void LayoutMedia::UpdateLayout() {
 
     LayoutBox* layout_box = ToLayoutBox(child);
     layout_box->SetLocation(new_rect.Location());
-    // TODO(foolip): Remove the mutableStyleRef() and depend on CSS
-    // width/height: inherit to match the media element size.
-    layout_box->MutableStyleRef().SetHeight(Length(new_rect.Height(), kFixed));
-    layout_box->MutableStyleRef().SetWidth(Length(width, kFixed));
-
+    layout_box->SetOverrideLogicalWidth(width);
+    layout_box->SetOverrideLogicalHeight(new_rect.Height());
     layout_box->ForceLayout();
   }
 
@@ -131,7 +128,8 @@ bool LayoutMedia::IsChildAllowed(LayoutObject* child,
   return false;
 }
 
-void LayoutMedia::PaintReplaced(const PaintInfo&, const LayoutPoint&) const {}
+void LayoutMedia::PaintReplaced(const PaintInfo&,
+                                const LayoutPoint& paint_offset) const {}
 
 LayoutUnit LayoutMedia::ComputePanelWidth(const LayoutRect& media_rect) const {
   // TODO(mlamouri): we don't know if the main frame has an horizontal scrollbar
@@ -148,23 +146,26 @@ LayoutUnit LayoutMedia::ComputePanelWidth(const LayoutRect& media_rect) const {
   Page* page = GetDocument().GetPage();
   LocalFrame* main_frame = page->DeprecatedLocalMainFrame();
   LocalFrameView* page_view = main_frame ? main_frame->View() : nullptr;
-  if (!main_frame || !page_view)
+  if (!main_frame || !page_view || !page_view->GetLayoutView())
     return media_rect.Width();
 
   // If the main frame can have a scrollbar, we'll never be cut off.
   // TODO(crbug.com/771379): Once we no longer assume that the video is in the
   // main frame for the visibility calculation below, we will only care about
   // the video's frame's scrollbar check below.
-  if (page_view->EffectiveHorizontalScrollbarMode() != kScrollbarAlwaysOff)
+  ScrollbarMode h_mode, v_mode;
+  page_view->GetLayoutView()->CalculateScrollbarModes(h_mode, v_mode);
+  if (h_mode != kScrollbarAlwaysOff)
     return media_rect.Width();
 
   // If the video's frame (can be different from main frame if video is in an
   // iframe) can have a scrollbar, we'll never be cut off.
   LocalFrame* media_frame = GetFrame();
   LocalFrameView* media_page_view = media_frame ? media_frame->View() : nullptr;
-  if (media_page_view && media_page_view->EffectiveHorizontalScrollbarMode() !=
-                             kScrollbarAlwaysOff) {
-    return media_rect.Width();
+  if (media_page_view && media_page_view->GetLayoutView()) {
+    media_page_view->GetLayoutView()->CalculateScrollbarModes(h_mode, v_mode);
+    if (h_mode != kScrollbarAlwaysOff)
+      return media_rect.Width();
   }
 
   // TODO(crbug.com/771379): This code assumes the video is in the main frame.

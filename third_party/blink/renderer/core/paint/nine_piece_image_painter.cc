@@ -24,13 +24,15 @@ void PaintPieces(GraphicsContext& context,
                  const ComputedStyle& style,
                  const NinePieceImage& nine_piece_image,
                  Image* image,
-                 IntSize image_size) {
+                 IntSize image_size,
+                 bool include_logical_left_edge,
+                 bool include_logical_right_edge) {
   IntRectOutsets border_widths(style.BorderTopWidth(), style.BorderRightWidth(),
                                style.BorderBottomWidth(),
                                style.BorderLeftWidth());
-  NinePieceImageGrid grid(nine_piece_image, image_size,
-                          PixelSnappedIntRect(border_image_rect),
-                          border_widths);
+  NinePieceImageGrid grid(
+      nine_piece_image, image_size, PixelSnappedIntRect(border_image_rect),
+      border_widths, include_logical_left_edge, include_logical_right_edge);
 
   for (NinePiece piece = kMinPiece; piece < kMaxPiece; ++piece) {
     NinePieceImageGrid::NinePieceDrawInfo draw_info = grid.GetNinePieceDrawInfo(
@@ -60,7 +62,9 @@ bool NinePieceImagePainter::Paint(GraphicsContext& graphics_context,
                                   Node* node,
                                   const LayoutRect& rect,
                                   const ComputedStyle& style,
-                                  const NinePieceImage& nine_piece_image) {
+                                  const NinePieceImage& nine_piece_image,
+                                  bool include_logical_left_edge,
+                                  bool include_logical_right_edge) {
   StyleImage* style_image = nine_piece_image.GetImage();
   if (!style_image)
     return false;
@@ -96,13 +100,15 @@ bool NinePieceImagePainter::Paint(GraphicsContext& graphics_context,
 
   TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage",
                "data",
-               InspectorPaintImageEvent::Data(node, *style_image, image->Rect(),
+               InspectorPaintImageEvent::Data(node, *style_image,
+                                              FloatRect(image->Rect()),
                                               FloatRect(border_image_rect)));
 
   ScopedInterpolationQuality interpolation_quality_scope(
       graphics_context, style.GetInterpolationQuality());
   PaintPieces(graphics_context, border_image_rect, style, nine_piece_image,
-              image.get(), image_size);
+              image.get(), image_size, include_logical_left_edge,
+              include_logical_right_edge);
 
   return true;
 }

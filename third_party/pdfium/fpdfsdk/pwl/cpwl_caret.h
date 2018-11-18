@@ -9,13 +9,12 @@
 
 #include "fpdfsdk/pwl/cpwl_wnd.h"
 
-class CPWL_Caret : public CPWL_Wnd {
+class CPWL_Caret final : public CPWL_Wnd {
  public:
   CPWL_Caret();
   ~CPWL_Caret() override;
 
   // CPWL_Wnd
-  ByteString GetClassName() const override;
   void DrawThisAppearance(CFX_RenderDevice* pDevice,
                           const CFX_Matrix& mtUser2Device) override;
   bool InvalidateRect(CFX_FloatRect* pRect) override;

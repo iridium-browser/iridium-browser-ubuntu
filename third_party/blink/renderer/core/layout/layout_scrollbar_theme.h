@@ -26,7 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_SCROLLBAR_THEME_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_SCROLLBAR_THEME_H_
 
-#include "third_party/blink/renderer/platform/scroll/scrollbar_theme.h"
+#include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 
 namespace blink {
 
@@ -49,54 +49,53 @@ class LayoutScrollbarTheme final : public ScrollbarTheme {
                          const DisplayItemClient&,
                          const IntRect& corner_rect) override;
 
-  bool ShouldCenterOnThumb(const ScrollbarThemeClient& scrollbar,
+  bool ShouldCenterOnThumb(const Scrollbar& scrollbar,
                            const WebMouseEvent& event) override {
     return ScrollbarTheme::DeprecatedStaticGetTheme().ShouldCenterOnThumb(
         scrollbar, event);
   }
-  bool ShouldSnapBackToDragOrigin(const ScrollbarThemeClient& scrollbar,
+  bool ShouldSnapBackToDragOrigin(const Scrollbar& scrollbar,
                                   const WebMouseEvent& event) override {
     return ScrollbarTheme::DeprecatedStaticGetTheme()
         .ShouldSnapBackToDragOrigin(scrollbar, event);
   }
 
-  double InitialAutoscrollTimerDelay() override {
+  TimeDelta InitialAutoscrollTimerDelay() override {
     return ScrollbarTheme::DeprecatedStaticGetTheme()
         .InitialAutoscrollTimerDelay();
   }
-  double AutoscrollTimerDelay() override {
+  TimeDelta AutoscrollTimerDelay() override {
     return ScrollbarTheme::DeprecatedStaticGetTheme().AutoscrollTimerDelay();
   }
 
-  void RegisterScrollbar(ScrollbarThemeClient& scrollbar) override {
+  void RegisterScrollbar(Scrollbar& scrollbar) override {
     return ScrollbarTheme::DeprecatedStaticGetTheme().RegisterScrollbar(
         scrollbar);
   }
-  void UnregisterScrollbar(ScrollbarThemeClient& scrollbar) override {
+  void UnregisterScrollbar(Scrollbar& scrollbar) override {
     return ScrollbarTheme::DeprecatedStaticGetTheme().UnregisterScrollbar(
         scrollbar);
   }
 
-  int MinimumThumbLength(const ScrollbarThemeClient&) override;
+  int MinimumThumbLength(const Scrollbar&) override;
 
-  void ButtonSizesAlongTrackAxis(const ScrollbarThemeClient&,
+  void ButtonSizesAlongTrackAxis(const Scrollbar&,
                                  int& before_size,
                                  int& after_size);
 
   static LayoutScrollbarTheme* GetLayoutScrollbarTheme();
 
  protected:
-  bool HasButtons(const ScrollbarThemeClient&) override;
-  bool HasThumb(const ScrollbarThemeClient&) override;
+  bool HasButtons(const Scrollbar&) override;
+  bool HasThumb(const Scrollbar&) override;
 
-  IntRect BackButtonRect(const ScrollbarThemeClient&,
+  IntRect BackButtonRect(const Scrollbar&,
                          ScrollbarPart,
                          bool painting = false) override;
-  IntRect ForwardButtonRect(const ScrollbarThemeClient&,
+  IntRect ForwardButtonRect(const Scrollbar&,
                             ScrollbarPart,
                             bool painting = false) override;
-  IntRect TrackRect(const ScrollbarThemeClient&,
-                    bool painting = false) override;
+  IntRect TrackRect(const Scrollbar&, bool painting = false) override;
 
   void PaintScrollbarBackground(GraphicsContext&, const Scrollbar&) override;
   void PaintTrackBackground(GraphicsContext&,
@@ -115,7 +114,7 @@ class LayoutScrollbarTheme final : public ScrollbarTheme {
                       const Scrollbar&,
                       const IntRect&) override;
 
-  IntRect ConstrainTrackRectToTrackPieces(const ScrollbarThemeClient&,
+  IntRect ConstrainTrackRectToTrackPieces(const Scrollbar&,
                                           const IntRect&) override;
 };
 

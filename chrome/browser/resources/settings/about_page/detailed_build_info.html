@@ -14,7 +14,7 @@
   <template>
     <style include="settings-shared">
       cr-policy-indicator {
-        -webkit-margin-start: var(--cr-controlled-by-spacing);
+        margin-inline-start: var(--cr-controlled-by-spacing);
       }
 
       /* The command line string can contain very long substrings that
@@ -76,7 +76,9 @@
     </div>
     <div class="settings-box two-line single-column">
       <div>$i18n{aboutCommandLineLabel}</div>
-      <div id="command-line" class="secondary">$i18n{aboutCommandLine}</div>
+      <div id="command-line" class="secondary">
+        [[i18n('aboutCommandLine')]]
+      </div>
     </div>
     <div class="settings-box two-line single-column">
       <div>$i18n{aboutBuildDateLabel}</div>

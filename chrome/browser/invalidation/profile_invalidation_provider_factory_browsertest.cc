@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/account_id/account_id.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/invalidation/public/invalidation_service.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_names.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -32,19 +32,15 @@ class ProfileInvalidationProviderFactoryTestBase : public InProcessBrowserTest {
 };
 
 ProfileInvalidationProviderFactoryTestBase::
-    ProfileInvalidationProviderFactoryTestBase() {
-}
+    ProfileInvalidationProviderFactoryTestBase() {}
 
 ProfileInvalidationProviderFactoryTestBase::
-    ~ProfileInvalidationProviderFactoryTestBase() {
-}
+    ~ProfileInvalidationProviderFactoryTestBase() {}
 
-bool
-ProfileInvalidationProviderFactoryTestBase::
+bool ProfileInvalidationProviderFactoryTestBase::
     CanConstructProfileInvalidationProvider(Profile* profile) {
-  return static_cast<bool>(
-      ProfileInvalidationProviderFactory::GetInstance()->
-          GetServiceForBrowserContext(profile, false));
+  return static_cast<bool>(ProfileInvalidationProviderFactory::GetInstance()
+                               ->GetServiceForBrowserContext(profile, false));
 }
 
 class ProfileInvalidationProviderFactoryLoginScreenBrowserTest
@@ -61,12 +57,10 @@ class ProfileInvalidationProviderFactoryLoginScreenBrowserTest
 };
 
 ProfileInvalidationProviderFactoryLoginScreenBrowserTest::
-    ProfileInvalidationProviderFactoryLoginScreenBrowserTest() {
-}
+    ProfileInvalidationProviderFactoryLoginScreenBrowserTest() {}
 
 ProfileInvalidationProviderFactoryLoginScreenBrowserTest::
-    ~ProfileInvalidationProviderFactoryLoginScreenBrowserTest() {
-}
+    ~ProfileInvalidationProviderFactoryLoginScreenBrowserTest() {}
 
 void ProfileInvalidationProviderFactoryLoginScreenBrowserTest::SetUpCommandLine(
     base::CommandLine* command_line) {
@@ -96,12 +90,10 @@ class ProfileInvalidationProviderFactoryGuestBrowserTest
 };
 
 ProfileInvalidationProviderFactoryGuestBrowserTest::
-    ProfileInvalidationProviderFactoryGuestBrowserTest() {
-}
+    ProfileInvalidationProviderFactoryGuestBrowserTest() {}
 
 ProfileInvalidationProviderFactoryGuestBrowserTest::
-    ~ProfileInvalidationProviderFactoryGuestBrowserTest() {
-}
+    ~ProfileInvalidationProviderFactoryGuestBrowserTest() {}
 
 void ProfileInvalidationProviderFactoryGuestBrowserTest::SetUpCommandLine(
     base::CommandLine* command_line) {

@@ -10,9 +10,9 @@ import static org.junit.Assert.assertThat;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.Robolectric;
 import org.robolectric.annotation.Config;
 
+import org.chromium.base.task.test.ShadowAsyncTask;
 import org.chromium.chromecast.base.Controller;
 import org.chromium.testing.local.LocalRobolectricTestRunner;
 
@@ -24,7 +24,7 @@ import java.util.concurrent.Executor;
  * Tests for AsyncTaskRunner.
  */
 @RunWith(LocalRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
+@Config(manifest = Config.NONE, shadows = {ShadowAsyncTask.class})
 public class AsyncTaskRunnerTest {
     private static class TestExecutor implements Executor {
         private final List<Runnable> mTasks = new ArrayList<>();
@@ -40,14 +40,6 @@ public class AsyncTaskRunnerTest {
             }
             mTasks.clear();
         }
-    }
-
-    @Test
-    public void testHappyPath() {
-        List<Integer> result = new ArrayList<>();
-        new AsyncTaskRunner().doAsync(() -> 45, result::add);
-        Robolectric.flushBackgroundThreadScheduler();
-        assertThat(result, contains(45));
     }
 
     @Test
@@ -79,7 +71,7 @@ public class AsyncTaskRunnerTest {
         AsyncTaskRunner runner = new AsyncTaskRunner(executor);
         // For each message in the controller, schedule a task to capitalize the message, and add
         // the capitalized message to the result list.
-        controller.watch(message -> runner.doAsync(() -> message.toUpperCase(), result::add));
+        controller.subscribe(message -> runner.doAsync(() -> message.toUpperCase(), result::add));
         // If the task is run before the controller is reset, it should add to the list.
         controller.set("new");
         executor.flush();

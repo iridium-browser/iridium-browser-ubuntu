@@ -166,6 +166,7 @@ HistogramBase* Histogram::Factory::Build() {
       return DummyHistogram::GetInstance();
     // To avoid racy destruction at shutdown, the following will be leaked.
     const BucketRanges* created_ranges = CreateRanges();
+
     const BucketRanges* registered_ranges =
         StatisticsRecorder::RegisterOrDeleteDuplicateRanges(created_ranges);
 
@@ -228,17 +229,19 @@ HistogramBase* Histogram::Factory::Build() {
     }
   }
 
-  CHECK_EQ(histogram_type_, histogram->GetHistogramType()) << name_;
-  if (bucket_count_ != 0 &&
-      !histogram->HasConstructionArguments(minimum_, maximum_, bucket_count_)) {
+  if (histogram_type_ != histogram->GetHistogramType() ||
+      (bucket_count_ != 0 && !histogram->HasConstructionArguments(
+                                 minimum_, maximum_, bucket_count_))) {
     // The construction arguments do not match the existing histogram.  This can
     // come about if an extension updates in the middle of a chrome run and has
-    // changed one of them, or simply by bad code within Chrome itself.  We
-    // return NULL here with the expectation that bad code in Chrome will crash
-    // on dereference, but extension/Pepper APIs will guard against NULL and not
-    // crash.
-    DLOG(ERROR) << "Histogram " << name_ << " has bad construction arguments";
-    return nullptr;
+    // changed one of them, or simply by bad code within Chrome itself.  A NULL
+    // return would cause Chrome to crash; better to just record it for later
+    // analysis.
+    UmaHistogramSparse("Histogram.MismatchedConstructionArguments",
+                       static_cast<Sample>(HashMetricName(name_)));
+    DLOG(ERROR) << "Histogram " << name_
+                << " has mismatched construction arguments";
+    return DummyHistogram::GetInstance();
   }
   return histogram;
 }
@@ -265,6 +268,16 @@ HistogramBase* Histogram::FactoryTimeGet(const std::string& name,
                     flags);
 }
 
+HistogramBase* Histogram::FactoryMicrosecondsTimeGet(const std::string& name,
+                                                     TimeDelta minimum,
+                                                     TimeDelta maximum,
+                                                     uint32_t bucket_count,
+                                                     int32_t flags) {
+  return FactoryGet(name, static_cast<Sample>(minimum.InMicroseconds()),
+                    static_cast<Sample>(maximum.InMicroseconds()), bucket_count,
+                    flags);
+}
+
 HistogramBase* Histogram::FactoryGet(const char* name,
                                      Sample minimum,
                                      Sample maximum,
@@ -280,6 +293,15 @@ HistogramBase* Histogram::FactoryTimeGet(const char* name,
                                          int32_t flags) {
   return FactoryTimeGet(std::string(name), minimum, maximum, bucket_count,
                         flags);
+}
+
+HistogramBase* Histogram::FactoryMicrosecondsTimeGet(const char* name,
+                                                     TimeDelta minimum,
+                                                     TimeDelta maximum,
+                                                     uint32_t bucket_count,
+                                                     int32_t flags) {
+  return FactoryMicrosecondsTimeGet(std::string(name), minimum, maximum,
+                                    bucket_count, flags);
 }
 
 std::unique_ptr<HistogramBase> Histogram::PersistentCreate(
@@ -315,6 +337,7 @@ void Histogram::InitializeBucketRanges(Sample minimum,
   Sample current = minimum;
   ranges->set_range(bucket_index, current);
   size_t bucket_count = ranges->bucket_count();
+
   while (bucket_count > ++bucket_index) {
     double log_current;
     log_current = log(static_cast<double>(current));
@@ -539,6 +562,14 @@ void Histogram::WriteHTMLGraph(std::string* output) const {
 
 void Histogram::WriteAscii(std::string* output) const {
   WriteAsciiImpl(true, "\n", output);
+}
+
+void Histogram::ValidateHistogramContents() const {
+  CHECK(unlogged_samples_);
+  CHECK(unlogged_samples_->bucket_ranges());
+  CHECK(logged_samples_);
+  CHECK(logged_samples_->bucket_ranges());
+  CHECK_NE(0U, logged_samples_->id());
 }
 
 void Histogram::SerializeInfoImpl(Pickle* pickle) const {
@@ -953,10 +984,12 @@ void LinearHistogram::InitializeBucketRanges(Sample minimum,
   double min = minimum;
   double max = maximum;
   size_t bucket_count = ranges->bucket_count();
+
   for (size_t i = 1; i < bucket_count; ++i) {
     double linear_range =
         (min * (bucket_count - 1 - i) + max * (i - 1)) / (bucket_count - 2);
-    ranges->set_range(i, static_cast<Sample>(linear_range + 0.5));
+    uint32_t range = static_cast<Sample>(linear_range + 0.5);
+    ranges->set_range(i, range);
   }
   ranges->set_range(ranges->bucket_count(), HistogramBase::kSampleType_MAX);
   ranges->ResetChecksum();
@@ -986,6 +1019,72 @@ HistogramBase* LinearHistogram::DeserializeInfoImpl(PickleIterator* iter) {
     return nullptr;
   }
   return histogram;
+}
+
+//------------------------------------------------------------------------------
+// ScaledLinearHistogram: This is a wrapper around a LinearHistogram that
+// scales input counts.
+//------------------------------------------------------------------------------
+
+ScaledLinearHistogram::ScaledLinearHistogram(const char* name,
+                                             Sample minimum,
+                                             Sample maximum,
+                                             uint32_t bucket_count,
+                                             int32_t scale,
+                                             int32_t flags)
+    : histogram_(static_cast<LinearHistogram*>(
+          LinearHistogram::FactoryGet(name,
+                                      minimum,
+                                      maximum,
+                                      bucket_count,
+                                      flags))),
+      scale_(scale) {
+  DCHECK(histogram_);
+  DCHECK_LT(1, scale);
+  DCHECK_EQ(1, minimum);
+  CHECK_EQ(static_cast<Sample>(bucket_count), maximum - minimum + 2)
+      << " ScaledLinearHistogram requires buckets of size 1";
+
+  remainders_.resize(histogram_->bucket_count(), 0);
+}
+
+ScaledLinearHistogram::~ScaledLinearHistogram() = default;
+
+void ScaledLinearHistogram::AddScaledCount(Sample value, int count) {
+  if (count == 0)
+    return;
+  if (count < 0) {
+    NOTREACHED();
+    return;
+  }
+  const int32_t max_value =
+      static_cast<int32_t>(histogram_->bucket_count() - 1);
+  if (value > max_value)
+    value = max_value;
+  if (value < 0)
+    value = 0;
+
+  int scaled_count = count / scale_;
+  subtle::Atomic32 remainder = count - scaled_count * scale_;
+
+  // ScaledLinearHistogram currently requires 1-to-1 mappings between value
+  // and bucket which alleviates the need to do a bucket lookup here (something
+  // that is internal to the HistogramSamples object).
+  if (remainder > 0) {
+    remainder =
+        subtle::NoBarrier_AtomicIncrement(&remainders_[value], remainder);
+    // If remainder passes 1/2 scale, increment main count (thus rounding up).
+    // The remainder is decremented by the full scale, though, which will
+    // cause it to go negative and thus requrire another increase by the full
+    // scale amount before another bump of the scaled count.
+    if (remainder >= scale_ / 2) {
+      scaled_count += 1;
+      subtle::NoBarrier_AtomicIncrement(&remainders_[value], -scale_);
+    }
+  }
+
+  if (scaled_count > 0)
+    histogram_->AddCount(value, scaled_count);
 }
 
 //------------------------------------------------------------------------------
@@ -1154,11 +1253,10 @@ HistogramType CustomHistogram::GetHistogramType() const {
 }
 
 // static
-std::vector<Sample> CustomHistogram::ArrayToCustomRanges(
-    const Sample* values, uint32_t num_values) {
+std::vector<Sample> CustomHistogram::ArrayToCustomEnumRanges(
+    base::span<const Sample> values) {
   std::vector<Sample> all_values;
-  for (uint32_t i = 0; i < num_values; ++i) {
-    Sample value = values[i];
+  for (Sample value : values) {
     all_values.push_back(value);
 
     // Ensure that a guard bucket is added. If we end up with duplicate

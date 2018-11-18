@@ -24,11 +24,20 @@ class BASE_EXPORT ReadOnlySharedMemoryRegion {
   using MappingType = ReadOnlySharedMemoryMapping;
   // Creates a new ReadOnlySharedMemoryRegion instance of a given size along
   // with the WritableSharedMemoryMapping which provides the only way to modify
-  // the content of the newly created region.
+  // the content of the newly created region. The returned region and mapping
+  // are guaranteed to either be both valid or both invalid. Use
+  // |MappedReadOnlyRegion::IsValid()| as a shortcut for checking creation
+  // success.
   //
   // This means that the caller's process is the only process that can modify
   // the region content. If you need to pass write access to another process,
   // consider using WritableSharedMemoryRegion or UnsafeSharedMemoryRegion.
+  //
+  // This call will fail if the process does not have sufficient permissions to
+  // create a shared memory region itself. See
+  // mojo::CreateReadOnlySharedMemoryRegion in
+  // mojo/public/cpp/base/shared_memory_utils.h for creating a shared memory
+  // region from a an unprivileged process where a broker must be used.
   static MappedReadOnlyRegion Create(size_t size);
 
   // Returns a ReadOnlySharedMemoryRegion built from a platform-specific handle
@@ -86,6 +95,12 @@ class BASE_EXPORT ReadOnlySharedMemoryRegion {
     return handle_.GetSize();
   }
 
+  // Returns 128-bit GUID of the region.
+  const UnguessableToken& GetGUID() const {
+    DCHECK(IsValid());
+    return handle_.GetGUID();
+  }
+
  private:
   explicit ReadOnlySharedMemoryRegion(
       subtle::PlatformSharedMemoryRegion handle);
@@ -99,6 +114,13 @@ class BASE_EXPORT ReadOnlySharedMemoryRegion {
 struct MappedReadOnlyRegion {
   ReadOnlySharedMemoryRegion region;
   WritableSharedMemoryMapping mapping;
+  // Helper function to check return value of
+  // ReadOnlySharedMemoryRegion::Create(). |region| and |mapping| either both
+  // valid or invalid.
+  bool IsValid() {
+    DCHECK_EQ(region.IsValid(), mapping.IsValid());
+    return region.IsValid() && mapping.IsValid();
+  }
 };
 
 }  // namespace base

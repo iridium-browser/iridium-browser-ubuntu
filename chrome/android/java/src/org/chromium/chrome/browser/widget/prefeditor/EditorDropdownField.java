@@ -20,7 +20,7 @@ import android.widget.TextView;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.preferences.autofill.AutofillProfileBridge.DropdownKeyValue;
-import org.chromium.ui.UiUtils;
+import org.chromium.ui.KeyboardVisibilityDelegate;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -89,14 +89,19 @@ class EditorDropdownField implements EditorFieldView {
             mAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         }
 
-        // If no value is selected, we'll  select the hint, which is the first item on the dropdown
-        // adapter.
+        // If no value is selected or the value previously entered is not valid, we'll  select the
+        // hint, which is the first item on the dropdown adapter. We also need to check for both key
+        // and value, because the saved value could take both forms (as in NY or New York).
         mSelectedIndex = TextUtils.isEmpty(mFieldModel.getValue())
                 ? 0
-                : mAdapter.getPosition(
-                          mFieldModel.getDropdownValueByKey((mFieldModel.getValue().toString())));
-
-        assert mSelectedIndex >= 0;
+                : mAdapter.getPosition(mFieldModel.getValue().toString());
+        if (mSelectedIndex < 0) {
+            // Assuming that mFieldModel.getValue() is the value (New York).
+            mSelectedIndex = mAdapter.getPosition(
+                    mFieldModel.getDropdownValueByKey(mFieldModel.getValue().toString()));
+        }
+        // Invalid value in the mFieldModel
+        if (mSelectedIndex < 0) mSelectedIndex = 0;
 
         mDropdown = (Spinner) mLayout.findViewById(R.id.spinner);
         mDropdown.setTag(this);
@@ -174,7 +179,7 @@ class EditorDropdownField implements EditorFieldView {
     }
 
     private void requestFocusAndHideKeyboard() {
-        UiUtils.hideKeyboard(mDropdown);
+        KeyboardVisibilityDelegate.getInstance().hideKeyboard(mDropdown);
         ViewGroup parent = (ViewGroup) mDropdown.getParent();
         if (parent != null) parent.requestChildFocus(mDropdown, mDropdown);
         mDropdown.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED);

@@ -4,10 +4,10 @@
 
 #include "third_party/blink/renderer/core/fetch/fetch_response_data.h"
 
-#include "third_party/blink/public/platform/modules/serviceworker/web_service_worker_response.h"
-#include "third_party/blink/renderer/core/fetch/body_stream_buffer.h"
+#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_response.h"
 #include "third_party/blink/renderer/core/fetch/fetch_header_list.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_utils.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
@@ -28,19 +28,29 @@ WebVector<WebString> HeaderSetToWebVector(const WebHTTPHeaderSet& headers) {
   return result;
 }
 
+Vector<String> HeaderSetToVector(const WebHTTPHeaderSet& headers) {
+  Vector<String> result;
+  result.ReserveInitialCapacity(headers.size());
+  // WebHTTPHeaderSet stores headers using Latin1 encoding.
+  for (const auto& header : headers)
+    result.push_back(String(header.data(), header.size()));
+  return result;
+}
+
 }  // namespace
 
 FetchResponseData* FetchResponseData::Create() {
   // "Unless stated otherwise, a response's url is null, status is 200, status
-  // message is `OK`, header list is an empty header list, and body is null."
-  return new FetchResponseData(Type::kDefault, 200, "OK");
+  // message is the empty byte sequence, header list is an empty header list,
+  // and body is null."
+  return new FetchResponseData(Type::kDefault, 200, g_empty_atom);
 }
 
 FetchResponseData* FetchResponseData::CreateNetworkErrorResponse() {
   // "A network error is a response whose status is always 0, status message
   // is always the empty byte sequence, header list is aways an empty list,
   // and body is always null."
-  return new FetchResponseData(Type::kError, 0, "");
+  return new FetchResponseData(Type::kError, 0, g_empty_atom);
 }
 
 FetchResponseData* FetchResponseData::CreateWithBuffer(
@@ -105,7 +115,8 @@ FetchResponseData* FetchResponseData::CreateOpaqueFilteredResponse() const {
   // cache state is 'none'."
   //
   // https://fetch.spec.whatwg.org/#concept-filtered-response-opaque
-  FetchResponseData* response = new FetchResponseData(Type::kOpaque, 0, "");
+  FetchResponseData* response =
+      new FetchResponseData(Type::kOpaque, 0, g_empty_atom);
   response->internal_response_ = const_cast<FetchResponseData*>(this);
   return response;
 }
@@ -119,7 +130,7 @@ FetchResponseData* FetchResponseData::CreateOpaqueRedirectFilteredResponse()
   //
   // https://fetch.spec.whatwg.org/#concept-filtered-response-opaque-redirect
   FetchResponseData* response =
-      new FetchResponseData(Type::kOpaqueRedirect, 0, "");
+      new FetchResponseData(Type::kOpaqueRedirect, 0, g_empty_atom);
   response->SetURLList(url_list_);
   response->internal_response_ = const_cast<FetchResponseData*>(this);
   return response;
@@ -162,7 +173,8 @@ const Vector<KURL>& FetchResponseData::InternalURLList() const {
   return url_list_;
 }
 
-FetchResponseData* FetchResponseData::Clone(ScriptState* script_state) {
+FetchResponseData* FetchResponseData::Clone(ScriptState* script_state,
+                                            ExceptionState& exception_state) {
   FetchResponseData* new_response = Create();
   new_response->type_ = type_;
   if (termination_reason_) {
@@ -185,7 +197,9 @@ FetchResponseData* FetchResponseData::Clone(ScriptState* script_state) {
       DCHECK_EQ(buffer_, internal_response_->buffer_);
       DCHECK_EQ(internal_response_->type_, Type::kDefault);
       new_response->internal_response_ =
-          internal_response_->Clone(script_state);
+          internal_response_->Clone(script_state, exception_state);
+      if (exception_state.HadException())
+        return nullptr;
       buffer_ = internal_response_->buffer_;
       new_response->buffer_ = new_response->internal_response_->buffer_;
       break;
@@ -194,7 +208,9 @@ FetchResponseData* FetchResponseData::Clone(ScriptState* script_state) {
       if (buffer_) {
         BodyStreamBuffer* new1 = nullptr;
         BodyStreamBuffer* new2 = nullptr;
-        buffer_->Tee(&new1, &new2);
+        buffer_->Tee(&new1, &new2, exception_state);
+        if (exception_state.HadException())
+          return nullptr;
         buffer_ = new1;
         new_response->buffer_ = new2;
       }
@@ -210,7 +226,9 @@ FetchResponseData* FetchResponseData::Clone(ScriptState* script_state) {
       DCHECK(!buffer_);
       DCHECK_EQ(internal_response_->type_, Type::kDefault);
       new_response->internal_response_ =
-          internal_response_->Clone(script_state);
+          internal_response_->Clone(script_state, exception_state);
+      if (exception_state.HadException())
+        return nullptr;
       break;
   }
   return new_response;
@@ -238,13 +256,39 @@ void FetchResponseData::PopulateWebServiceWorkerResponse(
   }
 }
 
+mojom::blink::FetchAPIResponsePtr
+FetchResponseData::PopulateFetchAPIResponse() {
+  if (internal_response_) {
+    mojom::blink::FetchAPIResponsePtr response =
+        internal_response_->PopulateFetchAPIResponse();
+    response->response_type = type_;
+    response->cors_exposed_header_names =
+        HeaderSetToVector(cors_exposed_header_names_);
+    return response;
+  }
+  mojom::blink::FetchAPIResponsePtr response =
+      mojom::blink::FetchAPIResponse::New();
+  response->url_list = url_list_;
+  response->status_code = status_;
+  response->status_text = status_message_;
+  response->response_type = type_;
+  response->response_time = response_time_;
+  response->cache_storage_cache_name = cache_storage_cache_name_;
+  response->cors_exposed_header_names =
+      HeaderSetToVector(cors_exposed_header_names_);
+  for (const auto& header : HeaderList()->List())
+    response->headers.insert(header.first, header.second);
+  return response;
+}
+
 FetchResponseData::FetchResponseData(Type type,
                                      unsigned short status,
                                      AtomicString status_message)
     : type_(type),
       status_(status),
       status_message_(status_message),
-      header_list_(FetchHeaderList::Create()) {}
+      header_list_(FetchHeaderList::Create()),
+      response_time_(base::Time::Now()) {}
 
 void FetchResponseData::ReplaceBodyStreamBuffer(BodyStreamBuffer* buffer) {
   if (type_ == Type::kBasic || type_ == Type::kCORS) {

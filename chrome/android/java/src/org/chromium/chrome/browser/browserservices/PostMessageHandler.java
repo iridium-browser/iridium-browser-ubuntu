@@ -16,7 +16,6 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.browserservices.OriginVerifier.OriginVerificationListener;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.content.browser.AppWebMessagePort;
 import org.chromium.content_public.browser.MessagePort;
 import org.chromium.content_public.browser.MessagePort.MessageCallback;
 import org.chromium.content_public.browser.WebContents;
@@ -31,7 +30,7 @@ public class PostMessageHandler
     private WebContents mWebContents;
     private boolean mMessageChannelCreated;
     private boolean mBoundToService;
-    private AppWebMessagePort[] mChannel;
+    private MessagePort[] mChannel;
     private Uri mPostMessageUri;
     private String mPackageName;
 
@@ -84,8 +83,8 @@ public class PostMessageHandler
             @Override
             public void didFinishNavigation(String url, boolean isInMainFrame, boolean isErrorPage,
                     boolean hasCommitted, boolean isSameDocument, boolean isFragmentNavigation,
-                    Integer pageTransition, int errorCode, String errorDescription,
-                    int httpStatusCode) {
+                    boolean isRendererInitiated, boolean isDownload, Integer pageTransition,
+                    int errorCode, String errorDescription, int httpStatusCode) {
                 if (mNavigatedOnce && hasCommitted && isInMainFrame && !isSameDocument
                         && mChannel != null) {
                     webContents.removeObserver(this);
@@ -121,11 +120,11 @@ public class PostMessageHandler
     }
 
     private void initializeWithWebContents(final WebContents webContents) {
-        mChannel = (AppWebMessagePort[]) webContents.createMessageChannel();
+        mChannel = webContents.createMessageChannel();
         mChannel[0].setMessageCallback(mMessageCallback, null);
 
         webContents.postMessageToFrame(
-                null, "", mPostMessageUri.toString(), "", new AppWebMessagePort[] {mChannel[1]});
+                null, "", mPostMessageUri.toString(), "", new MessagePort[] {mChannel[1]});
 
         mMessageChannelCreated = true;
         if (mBoundToService) notifyMessageChannelReady(null);
@@ -191,7 +190,8 @@ public class PostMessageHandler
     }
 
     @Override
-    public void onOriginVerified(String packageName, Origin origin, boolean result) {
+    public void onOriginVerified(String packageName, Origin origin, boolean result,
+            Boolean online) {
         if (!result) return;
         initializeWithPostMessageUri(
                 OriginVerifier.getPostMessageUriFromVerifiedOrigin(packageName, origin));

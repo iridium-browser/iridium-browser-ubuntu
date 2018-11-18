@@ -8,8 +8,8 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "base/values.h"
 #include "components/update_client/update_client_errors.h"
 #include "components/update_client/utils.h"
@@ -83,7 +83,7 @@ void VersionedTestInstaller::Install(const base::FilePath& unpack_path,
   const auto manifest = update_client::ReadManifest(unpack_path);
   std::string version_string;
   manifest->GetStringASCII("version", &version_string);
-  const base::Version version(version_string.c_str());
+  const base::Version version(version_string);
 
   const base::FilePath path =
       install_directory_.AppendASCII(version.GetString());

@@ -12,7 +12,6 @@ import mock
 import os
 import StringIO
 
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
 from chromite.lib import parallel
@@ -32,7 +31,8 @@ class FindDebugDirMock(partial_mock.PartialMock):
     self.path = path
     super(FindDebugDirMock, self).__init__(*args, **kwargs)
 
-  def FindDebugDir(self, _board):
+  # pylint: disable=unused-argument
+  def FindDebugDir(self, _board, sysroot=None):
     return self.path
 
 
@@ -218,7 +218,7 @@ class GenerateSymbolsTest(cros_test_lib.MockTempDirTestCase):
       self.assertEquals(ret, 0)
       self.assertEquals(gen_mock.call_count, 1)
 
-class GenerateSymbolTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
+class GenerateSymbolTest(cros_test_lib.RunCommandTempDirTestCase):
   """Test GenerateBreakpadSymbol."""
 
   def setUp(self):
@@ -372,7 +372,7 @@ class UtilsTest(cros_test_lib.TestCase):
 
 
 def main(_argv):
-  # pylint: disable=W0212
+  # pylint: disable=protected-access
   # Set timeouts small so that if the unit test hangs, it won't hang for long.
   parallel._BackgroundTask.STARTUP_TIMEOUT = 5
   parallel._BackgroundTask.EXIT_TIMEOUT = 5

@@ -23,6 +23,9 @@
 namespace v8 {
 namespace internal {
 
+// TODO(sigurds): Change this value once we use relative jumps.
+constexpr size_t kMaxPCRelativeCodeRangeInMB = 0;
+
 // Number of registers
 const int kNumRegisters = 32;
 
@@ -35,6 +38,11 @@ const int kNoRegister = -1;
 // various load instructions (one less due to unsigned)
 const int kLoadPtrMaxReachBits = 15;
 const int kLoadDoubleMaxReachBits = 15;
+
+// Actual value of root register is offset from the root array's start
+// to take advantage of negative displacement values.
+// TODO(sigurds): Choose best value.
+constexpr int kRootRegisterBias = 128;
 
 // sign-extend the least significant 16-bits of value <imm>
 #define SIGN_EXT_IMM16(imm) ((static_cast<int>(imm) << 16) >> 16)
@@ -79,22 +87,6 @@ inline Condition NegateCondition(Condition cond) {
   return static_cast<Condition>(cond ^ ne);
 }
 
-
-// Commute a condition such that {a cond b == b cond' a}.
-inline Condition CommuteCondition(Condition cond) {
-  switch (cond) {
-    case lt:
-      return gt;
-    case gt:
-      return lt;
-    case ge:
-      return le;
-    case le:
-      return ge;
-    default:
-      return cond;
-  }
-}
 
 // -----------------------------------------------------------------------------
 // Instructions encoding.
@@ -1209,13 +1201,15 @@ typedef uint32_t Instr;
   /* Compare Logical */             \
   V(cmpl, CMPL, 0x7C000040)
 
-#define PPC_X_OPCODE_EH_S_FORM_LIST(V)              \
-  /* Store Byte Conditional Indexed */              \
-  V(stbcx, STBCX, 0x7C00056D)                       \
-  /* Store Halfword Conditional Indexed Xform */    \
-  V(sthcx, STHCX, 0x7C0005AD)                       \
-  /* Store Word Conditional Indexed & record CR0 */ \
-  V(stwcx, STWCX, 0x7C00012D)
+#define PPC_X_OPCODE_EH_S_FORM_LIST(V)                    \
+  /* Store Byte Conditional Indexed */                    \
+  V(stbcx, STBCX, 0x7C00056D)                             \
+  /* Store Halfword Conditional Indexed Xform */          \
+  V(sthcx, STHCX, 0x7C0005AD)                             \
+  /* Store Word Conditional Indexed & record CR0 */       \
+  V(stwcx, STWCX, 0x7C00012D)                             \
+  /* Store Doubleword Conditional Indexed & record CR0 */ \
+  V(stdcx, STDCX, 0x7C0001AD)
 
 #define PPC_X_OPCODE_EH_L_FORM_LIST(V)          \
   /* Load Byte And Reserve Indexed */           \
@@ -1223,15 +1217,15 @@ typedef uint32_t Instr;
   /* Load Halfword And Reserve Indexed Xform */ \
   V(lharx, LHARX, 0x7C0000E8)                   \
   /* Load Word and Reserve Indexed */           \
-  V(lwarx, LWARX, 0x7C000028)
+  V(lwarx, LWARX, 0x7C000028)                   \
+  /* Load Doubleword And Reserve Indexed */     \
+  V(ldarx, LDARX, 0x7C0000A8)
 
 #define PPC_X_OPCODE_UNUSED_LIST(V)                                            \
   /* Bit Permute Doubleword */                                                 \
   V(bpermd, BPERMD, 0x7C0001F8)                                                \
   /* Extend Sign Word */                                                       \
   V(extsw, EXTSW, 0x7C0007B4)                                                  \
-  /* Load Doubleword And Reserve Indexed */                                    \
-  V(ldarx, LDARX, 0x7C0000A8)                                                  \
   /* Load Word Algebraic with Update Indexed */                                \
   V(lwaux, LWAUX, 0x7C0002EA)                                                  \
   /* Load Word Algebraic Indexed */                                            \
@@ -1240,8 +1234,6 @@ typedef uint32_t Instr;
   V(prtyd, PRTYD, 0x7C000174)                                                  \
   /* Store Doubleword Byte-Reverse Indexed */                                  \
   V(stdbrx, STDBRX, 0x7C000528)                                                \
-  /* Store Doubleword Conditional Indexed & record CR0 */                      \
-  V(stdcx, STDCX, 0x7C0001AD)                                                  \
   /* Trap Doubleword */                                                        \
   V(td, TD, 0x7C000088)                                                        \
   /* Branch Conditional to Branch Target Address Register */                   \
@@ -2748,10 +2740,13 @@ const Instr rtCallRedirInstr = TWI;
 //   return ((type == 0) || (type == 1)) && instr->HasS();
 // }
 //
+
+constexpr uint8_t kInstrSize = 4;
+constexpr uint8_t kInstrSizeLog2 = 2;
+constexpr uint8_t kPcLoadDelta = 8;
+
 class Instruction {
  public:
-  enum { kInstrSize = 4, kInstrSizeLog2 = 2, kPCReadOffset = 8 };
-
 // Helper macro to define static accessors.
 // We use the cast to char* trick to bypass the strict anti-aliasing rules.
 #define DECLARE_STATIC_TYPED_ACCESSOR(return_type, Name) \
