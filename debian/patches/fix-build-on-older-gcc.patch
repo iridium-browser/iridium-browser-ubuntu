@@ -1,7 +1,5 @@
-Index: dev/gpu/command_buffer/service/texture_manager.cc
-===================================================================
---- dev.orig/gpu/command_buffer/service/texture_manager.cc
-+++ dev/gpu/command_buffer/service/texture_manager.cc
+--- a/gpu/command_buffer/service/texture_manager.cc
++++ b/gpu/command_buffer/service/texture_manager.cc
 @@ -134,130 +134,130 @@ class FormatTypeValidator {
    FormatTypeValidator() {
      static const FormatType kSupportedFormatTypes[] = {
@@ -243,10 +241,8 @@ Index: dev/gpu/command_buffer/service/texture_manager.cc
      if (supported_combinations_.find(query) != supported_combinations_.end()) {
        return true;
      }
-Index: dev/chrome/browser/media/router/providers/wired_display/wired_display_media_route_provider.cc
-===================================================================
---- dev.orig/chrome/browser/media/router/providers/wired_display/wired_display_media_route_provider.cc
-+++ dev/chrome/browser/media/router/providers/wired_display/wired_display_media_route_provider.cc
+--- a/chrome/browser/media/router/providers/wired_display/wired_display_media_route_provider.cc
++++ b/chrome/browser/media/router/providers/wired_display/wired_display_media_route_provider.cc
 @@ -129,8 +129,10 @@ void WiredDisplayMediaRouteProvider::Cre
    route.set_incognito(profile_->IsOffTheRecord());
    route.set_controller_type(RouteControllerType::kGeneric);
@@ -259,10 +255,8 @@ Index: dev/chrome/browser/media/router/providers/wired_display/wired_display_med
    presentation.set_receiver(
        CreatePresentationReceiver(presentation_id, &presentation, *display));
    presentation.receiver()->Start(presentation_id, GURL(media_source));
-Index: dev/extensions/common/api/web_request.json
-===================================================================
---- dev.orig/extensions/common/api/web_request.json
-+++ dev/extensions/common/api/web_request.json
+--- a/extensions/common/api/web_request.json
++++ b/extensions/common/api/web_request.json
 @@ -204,8 +204,7 @@
                      "description": "If the request method is POST and the body is a sequence of key-value pairs encoded in UTF8, encoded as either multipart/form-data, or application/x-www-form-urlencoded, this dictionary is present and for each key contains the list of all values for that key. If the data is of another media type, or if it is malformed, the dictionary is not present. An example value of this dictionary is {'key': ['value1', 'value2']}.",
                      "properties": {},
@@ -273,10 +267,8 @@ Index: dev/extensions/common/api/web_request.json
                      }
                    },
                    "raw" : {
-Index: dev/media/base/subsample_entry.h
-===================================================================
---- dev.orig/media/base/subsample_entry.h
-+++ dev/media/base/subsample_entry.h
+--- a/media/base/subsample_entry.h
++++ b/media/base/subsample_entry.h
 @@ -36,7 +36,7 @@ struct SubsampleEntry {
  // does not match |input_size|.
  MEDIA_EXPORT bool VerifySubsamplesMatchSize(
@@ -286,10 +278,8 @@ Index: dev/media/base/subsample_entry.h
  
  }  // namespace media
  
-Index: dev/device/bluetooth/dbus/bluetooth_gatt_attribute_helpers.cc
-===================================================================
---- dev.orig/device/bluetooth/dbus/bluetooth_gatt_attribute_helpers.cc
-+++ dev/device/bluetooth/dbus/bluetooth_gatt_attribute_helpers.cc
+--- a/device/bluetooth/dbus/bluetooth_gatt_attribute_helpers.cc
++++ b/device/bluetooth/dbus/bluetooth_gatt_attribute_helpers.cc
 @@ -27,8 +27,9 @@ bool ReadOptions(dbus::MessageReader* re
        return false;
      }
@@ -302,10 +292,8 @@ Index: dev/device/bluetooth/dbus/bluetooth_gatt_attribute_helpers.cc
        options->clear();
        return false;
      }
-Index: dev/cc/trees/layer_tree_mutator.cc
-===================================================================
---- dev.orig/cc/trees/layer_tree_mutator.cc
-+++ dev/cc/trees/layer_tree_mutator.cc
+--- a/cc/trees/layer_tree_mutator.cc
++++ b/cc/trees/layer_tree_mutator.cc
 @@ -58,8 +58,9 @@ bool MutatorInputState::IsEmpty() const
  
  AnimationWorkletInput& MutatorInputState::EnsureWorkletEntry(int id) {
@@ -317,10 +305,8 @@ Index: dev/cc/trees/layer_tree_mutator.cc
  
    return *it->second;
  }
-Index: dev/device/fido/authenticator_get_assertion_response.cc
-===================================================================
---- dev.orig/device/fido/authenticator_get_assertion_response.cc
-+++ dev/device/fido/authenticator_get_assertion_response.cc
+--- a/device/fido/authenticator_get_assertion_response.cc
++++ b/device/fido/authenticator_get_assertion_response.cc
 @@ -101,16 +101,16 @@ std::vector<uint8_t> GetSerializedCtapDe
      const AuthenticatorGetAssertionResponse& response) {
    cbor::Value::MapValue response_map;
@@ -343,10 +329,8 @@ Index: dev/device/fido/authenticator_get_assertion_response.cc
    auto encoded_response =
        cbor::Writer::Write(cbor::Value(std::move(response_map)));
    DCHECK(encoded_response);
-Index: dev/device/fido/authenticator_supported_options.cc
-===================================================================
---- dev.orig/device/fido/authenticator_supported_options.cc
-+++ dev/device/fido/authenticator_supported_options.cc
+--- a/device/fido/authenticator_supported_options.cc
++++ b/device/fido/authenticator_supported_options.cc
 @@ -57,19 +57,19 @@ AuthenticatorSupportedOptions::SetIsPlat
  
  cbor::Value ConvertToCBOR(const AuthenticatorSupportedOptions& options) {
@@ -385,10 +369,8 @@ Index: dev/device/fido/authenticator_supported_options.cc
        break;
      case ClientPinAvailability::kNotSupported:
        break;
-Index: dev/device/fido/attestation_object.cc
-===================================================================
---- dev.orig/device/fido/attestation_object.cc
-+++ dev/device/fido/attestation_object.cc
+--- a/device/fido/attestation_object.cc
++++ b/device/fido/attestation_object.cc
 @@ -78,9 +78,9 @@ std::vector<uint8_t> AttestationObject::
  std::vector<uint8_t> SerializeToCtapStyleCborEncodedBytes(
      const AttestationObject& object) {
@@ -402,10 +384,8 @@ Index: dev/device/fido/attestation_object.cc
    auto encoded_bytes = cbor::Writer::Write(cbor::Value(std::move(map)));
    DCHECK(encoded_bytes);
    return std::move(*encoded_bytes);
-Index: dev/device/fido/authenticator_get_info_response.cc
-===================================================================
---- dev.orig/device/fido/authenticator_get_info_response.cc
-+++ dev/device/fido/authenticator_get_info_response.cc
+--- a/device/fido/authenticator_get_info_response.cc
++++ b/device/fido/authenticator_get_info_response.cc
 @@ -71,21 +71,21 @@ std::vector<uint8_t> EncodeToCBOR(
                                                                   : kU2fVersion);
    }
@@ -434,10 +414,8 @@ Index: dev/device/fido/authenticator_get_info_response.cc
    }
  
    auto encoded_bytes =
-Index: dev/device/fido/public_key_credential_rp_entity.cc
-===================================================================
---- dev.orig/device/fido/public_key_credential_rp_entity.cc
-+++ dev/device/fido/public_key_credential_rp_entity.cc
+--- a/device/fido/public_key_credential_rp_entity.cc
++++ b/device/fido/public_key_credential_rp_entity.cc
 @@ -78,12 +78,12 @@ PublicKeyCredentialRpEntity& PublicKeyCr
  
  cbor::Value PublicKeyCredentialRpEntity::ConvertToCBOR() const {
@@ -454,10 +432,8 @@ Index: dev/device/fido/public_key_credential_rp_entity.cc
  
    return cbor::Value(std::move(rp_map));
  }
-Index: dev/device/fido/public_key_credential_user_entity.cc
-===================================================================
---- dev.orig/device/fido/public_key_credential_user_entity.cc
-+++ dev/device/fido/public_key_credential_user_entity.cc
+--- a/device/fido/public_key_credential_user_entity.cc
++++ b/device/fido/public_key_credential_user_entity.cc
 @@ -63,13 +63,13 @@ PublicKeyCredentialUserEntity::~PublicKe
  
  cbor::Value PublicKeyCredentialUserEntity::ConvertToCBOR() const {
@@ -476,10 +452,8 @@ Index: dev/device/fido/public_key_credential_user_entity.cc
    }
    return cbor::Value(std::move(user_map));
  }
-Index: dev/device/fido/public_key_credential_params.cc
-===================================================================
---- dev.orig/device/fido/public_key_credential_params.cc
-+++ dev/device/fido/public_key_credential_params.cc
+--- a/device/fido/public_key_credential_params.cc
++++ b/device/fido/public_key_credential_params.cc
 @@ -64,10 +64,10 @@ cbor::Value PublicKeyCredentialParams::C
  
    for (const auto& credential : public_key_credential_params_) {
@@ -495,10 +469,8 @@ Index: dev/device/fido/public_key_credential_params.cc
      credential_param_array.emplace_back(std::move(cbor_credential_map));
    }
    return cbor::Value(std::move(credential_param_array));
-Index: dev/device/fido/virtual_ctap2_device.cc
-===================================================================
---- dev.orig/device/fido/virtual_ctap2_device.cc
-+++ dev/device/fido/virtual_ctap2_device.cc
+--- a/device/fido/virtual_ctap2_device.cc
++++ b/device/fido/virtual_ctap2_device.cc
 @@ -115,13 +115,13 @@ std::vector<uint8_t> ConstructMakeCreden
      base::span<const uint8_t> signature,
      AuthenticatorData authenticator_data) {
@@ -516,10 +488,8 @@ Index: dev/device/fido/virtual_ctap2_device.cc
    }
  
    AuthenticatorMakeCredentialResponse make_credential_response(
-Index: dev/device/fido/hid/fido_hid_device.cc
-===================================================================
---- dev.orig/device/fido/hid/fido_hid_device.cc
-+++ dev/device/fido/hid/fido_hid_device.cc
+--- a/device/fido/hid/fido_hid_device.cc
++++ b/device/fido/hid/fido_hid_device.cc
 @@ -49,7 +49,7 @@ void FidoHidDevice::Cancel() {
      return;
  
@@ -529,10 +499,8 @@ Index: dev/device/fido/hid/fido_hid_device.cc
    WriteMessage(
        FidoHidMessage::Create(channel_id_, FidoHidDeviceCommand::kCancel,
                               output_report_size_, std::vector<uint8_t>()),
-Index: dev/device/fido/cable/fido_cable_handshake_handler.cc
-===================================================================
---- dev.orig/device/fido/cable/fido_cable_handshake_handler.cc
-+++ dev/device/fido/cable/fido_cable_handshake_handler.cc
+--- a/device/fido/cable/fido_cable_handshake_handler.cc
++++ b/device/fido/cable/fido_cable_handshake_handler.cc
 @@ -45,8 +45,8 @@ base::Optional<std::array<uint8_t, kClie
  ConstructHandshakeMessage(base::StringPiece handshake_key,
                            base::span<const uint8_t, 16> client_random_nonce) {
@@ -544,10 +512,8 @@ Index: dev/device/fido/cable/fido_cable_handshake_handler.cc
    auto client_hello = cbor::Writer::Write(cbor::Value(std::move(map)));
    DCHECK(client_hello);
  
-Index: dev/components/password_manager/core/browser/http_credentials_cleaner.cc
-===================================================================
---- dev.orig/components/password_manager/core/browser/http_credentials_cleaner.cc
-+++ dev/components/password_manager/core/browser/http_credentials_cleaner.cc
+--- a/components/password_manager/core/browser/http_credentials_cleaner.cc
++++ b/components/password_manager/core/browser/http_credentials_cleaner.cc
 @@ -43,9 +43,9 @@ void HttpCredentialCleaner::OnGetPasswor
    // federated credentials.
    for (auto& form : RemoveNonHTTPOrHTTPSForms(std::move(results))) {
@@ -560,10 +526,8 @@ Index: dev/components/password_manager/core/browser/http_credentials_cleaner.cc
      if (form->origin.SchemeIs(url::kHttpScheme)) {
        const GURL origin = form->origin;
        PostHSTSQueryForHostAndNetworkContext(
-Index: dev/extensions/common/permissions/permissions_info.h
-===================================================================
---- dev.orig/extensions/common/permissions/permissions_info.h
-+++ dev/extensions/common/permissions/permissions_info.h
+--- a/extensions/common/permissions/permissions_info.h
++++ b/extensions/common/permissions/permissions_info.h
 @@ -21,6 +21,18 @@
  #include "extensions/common/permissions/api_permission.h"
  #include "extensions/common/permissions/api_permission_set.h"
@@ -583,10 +547,8 @@ Index: dev/extensions/common/permissions/permissions_info.h
  namespace extensions {
  
  struct Alias;
-Index: dev/components/ukm/ukm_recorder_impl.h
-===================================================================
---- dev.orig/components/ukm/ukm_recorder_impl.h
-+++ dev/components/ukm/ukm_recorder_impl.h
+--- a/components/ukm/ukm_recorder_impl.h
++++ b/components/ukm/ukm_recorder_impl.h
 @@ -25,6 +25,18 @@ class UkmBrowserTestBase;
  class UkmEGTestHelper;
  }
@@ -606,10 +568,8 @@ Index: dev/components/ukm/ukm_recorder_impl.h
  namespace ukm {
  class Report;
  class UkmRecorderImplTest;
-Index: dev/media/gpu/vaapi/vaapi_jpeg_decode_accelerator.cc
-===================================================================
---- dev.orig/media/gpu/vaapi/vaapi_jpeg_decode_accelerator.cc
-+++ dev/media/gpu/vaapi/vaapi_jpeg_decode_accelerator.cc
+--- a/media/gpu/vaapi/vaapi_jpeg_decode_accelerator.cc
++++ b/media/gpu/vaapi/vaapi_jpeg_decode_accelerator.cc
 @@ -45,9 +45,11 @@ static void ReportToUMA(VAJDADecoderFail
  // macro in the header file without pulling in the entire <va/va.h>.
  static_assert(VA_FOURCC_YUYV == VA_FOURCC('Y', 'U', 'Y', 'V'),
@@ -672,10 +632,8 @@ Index: dev/media/gpu/vaapi/vaapi_jpeg_decode_accelerator.cc
      case VA_FOURCC_YUY2:
      case VA_FOURCC_YUYV: {
        DCHECK_EQ(image->num_planes, 1u);
-Index: dev/components/viz/service/frame_sinks/frame_sink_manager_impl.cc
-===================================================================
---- dev.orig/components/viz/service/frame_sinks/frame_sink_manager_impl.cc
-+++ dev/components/viz/service/frame_sinks/frame_sink_manager_impl.cc
+--- a/components/viz/service/frame_sinks/frame_sink_manager_impl.cc
++++ b/components/viz/service/frame_sinks/frame_sink_manager_impl.cc
 @@ -99,7 +99,7 @@ void FrameSinkManagerImpl::RegisterFrame
    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
    DCHECK(!base::ContainsKey(frame_sink_data_, frame_sink_id));
@@ -685,10 +643,8 @@ Index: dev/components/viz/service/frame_sinks/frame_sink_manager_impl.cc
  
    if (video_detector_)
      video_detector_->OnFrameSinkIdRegistered(frame_sink_id);
-Index: dev/third_party/blink/renderer/platform/heap/gc_info.cc
-===================================================================
---- dev.orig/third_party/blink/renderer/platform/heap/gc_info.cc
-+++ dev/third_party/blink/renderer/platform/heap/gc_info.cc
+--- a/third_party/blink/renderer/platform/heap/gc_info.cc
++++ b/third_party/blink/renderer/platform/heap/gc_info.cc
 @@ -51,7 +51,7 @@ void GCInfoTable::CreateGlobalTable() {
  
  uint32_t GCInfoTable::EnsureGCInfoIndex(
@@ -698,10 +654,8 @@ Index: dev/third_party/blink/renderer/platform/heap/gc_info.cc
    DCHECK(gc_info);
    DCHECK(gc_info_index_slot);
  
-Index: dev/third_party/blink/renderer/platform/heap/gc_info.h
-===================================================================
---- dev.orig/third_party/blink/renderer/platform/heap/gc_info.h
-+++ dev/third_party/blink/renderer/platform/heap/gc_info.h
+--- a/third_party/blink/renderer/platform/heap/gc_info.h
++++ b/third_party/blink/renderer/platform/heap/gc_info.h
 @@ -72,7 +72,7 @@ class PLATFORM_EXPORT GCInfoTable {
      return info;
    }
@@ -720,10 +674,8 @@ Index: dev/third_party/blink/renderer/platform/heap/gc_info.h
      uint32_t index = gc_info_index.load(std::memory_order_acquire);
      if (!index)
        index = GCInfoTable::Get().EnsureGCInfoIndex(&kGcInfo, &gc_info_index);
-Index: dev/chrome/browser/background_fetch/background_fetch_delegate_impl.cc
-===================================================================
---- dev.orig/chrome/browser/background_fetch/background_fetch_delegate_impl.cc
-+++ dev/chrome/browser/background_fetch/background_fetch_delegate_impl.cc
+--- a/chrome/browser/background_fetch/background_fetch_delegate_impl.cc
++++ b/chrome/browser/background_fetch/background_fetch_delegate_impl.cc
 @@ -374,7 +374,7 @@ void BackgroundFetchDelegateImpl::StartD
    DCHECK(job_details_map_.count(job_unique_id));
    JobDetails& job_details = job_details_map_.find(job_unique_id)->second;
@@ -733,10 +685,8 @@ Index: dev/chrome/browser/background_fetch/background_fetch_delegate_impl.cc
    GetDownloadService()->StartDownload(params);
  }
  
-Index: dev/components/page_image_annotation/core/page_annotator.cc
-===================================================================
---- dev.orig/components/page_image_annotation/core/page_annotator.cc
-+++ dev/components/page_image_annotation/core/page_annotator.cc
+--- a/components/page_image_annotation/core/page_annotator.cc
++++ b/components/page_image_annotation/core/page_annotator.cc
 @@ -77,7 +77,9 @@ void PageAnnotator::AddNewImage(
      base::RepeatingCallback<SkBitmap()> pixels_callback) {
    images_.emplace(std::piecewise_construct,
@@ -748,10 +698,8 @@ Index: dev/components/page_image_annotation/core/page_annotator.cc
  }
  
  void PageAnnotator::NotifyObserver(Observer* const observer,
-Index: dev/third_party/angle/src/libANGLE/renderer/vulkan/vk_cache_utils.cpp
-===================================================================
---- dev.orig/third_party/angle/src/libANGLE/renderer/vulkan/vk_cache_utils.cpp
-+++ dev/third_party/angle/src/libANGLE/renderer/vulkan/vk_cache_utils.cpp
+--- a/third_party/angle/src/libANGLE/renderer/vulkan/vk_cache_utils.cpp
++++ b/third_party/angle/src/libANGLE/renderer/vulkan/vk_cache_utils.cpp
 @@ -1344,7 +1344,7 @@ angle::Result GraphicsPipelineCache::ins
      }
  
@@ -770,15 +718,13 @@ Index: dev/third_party/angle/src/libANGLE/renderer/vulkan/vk_cache_utils.cpp
  }
  
  // DescriptorSetLayoutCache implementation.
-Index: dev/ui/gfx/color_utils.cc
-===================================================================
---- dev.orig/ui/gfx/color_utils.cc
-+++ dev/ui/gfx/color_utils.cc
+--- a/ui/gfx/color_utils.cc
++++ b/ui/gfx/color_utils.cc
 @@ -431,7 +431,7 @@ SkColor SetDarkestColorForTesting(SkColo
    // GetContrastRatio(kWhiteLuminance, g_luminance_midpoint).  The formula below
    // can be verified by plugging it into how GetContrastRatio() operates.
    g_luminance_midpoint =
--      std::sqrtf((dark_luminance + 0.05f) * (kWhiteLuminance + 0.05f)) - 0.05f;
+-      std::sqrt((dark_luminance + 0.05f) * (kWhiteLuminance + 0.05f)) - 0.05f;
 +      sqrtf((dark_luminance + 0.05f) * (kWhiteLuminance + 0.05f)) - 0.05f;
  
    return previous_darkest_color;

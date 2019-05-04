@@ -1,6 +1,6 @@
 --- a/chrome/browser/first_run/first_run.cc
 +++ b/chrome/browser/first_run/first_run.cc
-@@ -468,6 +468,7 @@ void SetShouldShowWelcomePage() {
+@@ -441,6 +441,7 @@ void SetShouldShowWelcomePage() {
  }
  
  bool ShouldShowWelcomePage() {
