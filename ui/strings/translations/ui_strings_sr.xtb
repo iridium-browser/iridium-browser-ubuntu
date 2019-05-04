@@ -5,6 +5,7 @@
 <translation id="1127811143501539442">{DAYS,plural, =1{Пре 1 дан}one{Пре # дан}few{Пре # дана}other{Пре # дана}}</translation>
 <translation id="1156623771253174079">{SECONDS,plural, =1{Пре 1 минут}one{Пре # минут}few{Пре # минута}other{Пре # минута}}</translation>
 <translation id="1169783199079129864">{MINUTES,plural, =1{1 м}one{# м}few{# м}other{# м}}</translation>
+<translation id="1181037720776840403">Уклони</translation>
 <translation id="1243314992276662751">Отпреми</translation>
 <translation id="1269641567813814718">Win</translation>
 <translation id="1293699935367580298">Esc</translation>
@@ -30,16 +31,19 @@
 <translation id="1871244248791675517">Ins</translation>
 <translation id="1884435127456172652"><ph name="NUMBER" />%</translation>
 <translation id="1901303067676059328">Изабери &amp;све</translation>
+<translation id="1938451708255335766">Да бисте подесили густину приказа прозора, поново покрените апликацију.</translation>
 <translation id="2141853158323869627">{DAYS,plural, =1{1 д}one{# д}few{# д}other{# д}}</translation>
 <translation id="2148716181193084225">Данас</translation>
 <translation id="2168039046890040389">Страница нагоре</translation>
 <translation id="2190355936436201913">(празно)</translation>
+<translation id="2192232475740621500">Користи ниску густину</translation>
 <translation id="219905428774326614">Покретач, све апликације</translation>
 <translation id="2267918077332197517">Блокирај сва обавештења са овог сајта</translation>
 <translation id="2289052229480071835">Додирните циљна поља за додир на екрану.</translation>
 <translation id="2295140143284145483">Анкета</translation>
 <translation id="2297836609126180313"><ph name="QUANTITY" /> TB/s</translation>
 <translation id="24452542372838207">Прошири обавештење</translation>
+<translation id="2445449901874883781">Користи високу густину</translation>
 <translation id="2482878487686419369">Обавештења</translation>
 <translation id="2497284189126895209">Све датотеке</translation>
 <translation id="2515586267016047495">Alt</translation>
@@ -60,7 +64,10 @@
 <translation id="3234408098842461169">Стрелица надоле</translation>
 <translation id="3291688615589870984">{DAYS,plural, =1{1 дан}one{# дан}few{# дана}other{# дана}}</translation>
 <translation id="335581015389089642">Говор</translation>
+<translation id="3462241349431650993">Ако сакријете овај предлог, он се више неће приказивати на вашем налогу на свим уређајима.</translation>
+<translation id="3479552764303398839">Не сада</translation>
 <translation id="3600566671520689681">{DAYS,plural, =1{Још 1 дан}one{Још # дан}few{Још # дана}other{Још # дана}}</translation>
+<translation id="3608915363409716668"><ph name="MAXIMUM_VALUE" />+</translation>
 <translation id="3618849550573277856">Потражи „<ph name="LOOKUP_STRING" />“</translation>
 <translation id="364720409959344976">Избор директоријума за отпремање</translation>
 <translation id="3660179305079774227">Стрелица нагоре</translation>
@@ -99,6 +106,7 @@
 <translation id="5613020302032141669">Стрелица налево</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{1 мин}one{# мин}few{# мин}other{# мин}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{1 дан и }one{# дан и }few{# дана и }other{# дана и }}</translation>
+<translation id="5895138241574237353">Покрени поново</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{Још 1 секунда}one{Још # секунда}few{Још # секунде}other{Још # секунди}}</translation>
 <translation id="5941711191222866238">Смањи</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 сат}one{# сат}few{# сата}other{# сати}}</translation>
@@ -120,6 +128,7 @@
 <translation id="6483402905448010557">{SECONDS,plural, =1{Пре 1 секунду}one{Пре # секунду}few{Пре # секунде}other{Пре # секунди}}</translation>
 <translation id="654149438358937226">Блокирај сва обавештења</translation>
 <translation id="6567071839949112727">кликните на претходни елемент</translation>
+<translation id="6578407462441924264">Без имена</translation>
 <translation id="6612467943526193239">Да бисте изашли из калибрације, притисните Esc.</translation>
 <translation id="6620110761915583480">Чување датотеке</translation>
 <translation id="6699343763173986273">Следећа песма медија</translation>
@@ -154,6 +163,7 @@
 <translation id="8087772101393322318"><ph name="KEY_MODIFIER_NAME" />+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{Пре 1 сат}one{Пре # сат}few{Пре # сата}other{Пре # сати}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{Још 1 сек}one{Још # сек}few{Још # сек}other{Још # сек}}</translation>
+<translation id="8152264887680882389"><ph name="TEXT" />, аутоматско довршавање</translation>
 <translation id="815598010540052116">Помери надоле</translation>
 <translation id="8179976553408161302">Enter</translation>
 <translation id="8210608804940886430">Страница надоле</translation>
@@ -165,6 +175,7 @@
 <translation id="838869780401515933">изабери</translation>
 <translation id="8393700583063109961">Пошаљите поруку</translation>
 <translation id="8394908167088220973">Пуштање/паузирање медија</translation>
+<translation id="8420205633584771378">Желите ли да уклоните овај предлог?</translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1 г}one{# г}few{# г}other{# г}}</translation>
 <translation id="8602707065186045623"><ph name="SAVEAS_EXTENSION_TYPE" /> датотека (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KB/s</translation>
@@ -177,7 +188,6 @@
 <translation id="8841375032071747811">Дугме Назад</translation>
 <translation id="8901569739625249689"><ph name="QUANTITY" /> KB</translation>
 <translation id="9002566407876343676">отварање</translation>
-<translation id="9038489124413477075">Неименовани директоријум</translation>
 <translation id="9044832324875206639">{SECONDS,plural, =1{1 сек}one{# сек}few{# сек}other{# сек}}</translation>
 <translation id="9059834730836941392">Скупи обавештење</translation>
 <translation id="9150735707954472829">Картица</translation>

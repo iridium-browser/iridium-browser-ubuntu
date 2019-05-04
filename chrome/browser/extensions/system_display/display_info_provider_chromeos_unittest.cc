@@ -12,7 +12,6 @@
 #include "ash/public/cpp/ash_switches.h"
 #include "ash/public/interfaces/constants.mojom.h"
 #include "ash/shell.h"
-#include "ash/test/ash_test_base.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/command_line.h"
 #include "base/macros.h"
@@ -20,6 +19,7 @@
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/system_display/display_info_provider_chromeos.h"
 #include "chrome/browser/ui/ash/tablet_mode_client.h"
+#include "chrome/test/base/chrome_ash_test_base.h"
 #include "content/public/test/test_service_manager_context.h"
 #include "extensions/common/api/system_display.h"
 #include "services/service_manager/public/cpp/connector.h"
@@ -46,7 +46,7 @@ void ErrorCallback(std::string* result,
   std::move(callback).Run();
 }
 
-class DisplayInfoProviderChromeosTest : public ash::AshTestBase {
+class DisplayInfoProviderChromeosTest : public ChromeAshTestBase {
  public:
   DisplayInfoProviderChromeosTest() {}
 
@@ -56,7 +56,7 @@ class DisplayInfoProviderChromeosTest : public ash::AshTestBase {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kUseFirstDisplayAsInternal);
 
-    ash::AshTestBase::SetUp();
+    ChromeAshTestBase::SetUp();
 
     // Note: for now we have two instances of CrosDisplayConfig, one owned by
     // ash::Shell and this one. Since CrosDisplayConfig just provides an
@@ -69,7 +69,7 @@ class DisplayInfoProviderChromeosTest : public ash::AshTestBase {
     connector_ = service_manager::Connector::Create(&request);
     service_manager::Connector::TestApi test_api(connector_.get());
     test_api.OverrideBinderForTesting(
-        service_manager::Identity(ash::mojom::kServiceName),
+        service_manager::ServiceFilter::ByName(ash::mojom::kServiceName),
         ash::mojom::CrosDisplayConfigController::Name_,
         base::BindRepeating(&DisplayInfoProviderChromeosTest::
                                 AddCrosDisplayConfigControllerBinding,
@@ -778,10 +778,11 @@ TEST_F(DisplayInfoProviderChromeosTest, UnifiedModeLayout) {
   EXPECT_TRUE(SetDisplayLayout(layout));
   EXPECT_EQ(gfx::Size(650, 743),
             display::Screen::GetScreen()->GetPrimaryDisplay().size());
-  EXPECT_EQ(displays[3].id,
-            std::to_string(GetDisplayManager()
+  EXPECT_EQ(displays[2].id,
+            std::to_string(ash::Shell::Get()
+                               ->display_configuration_controller()
                                ->GetPrimaryMirroringDisplayForUnifiedDesktop()
-                               ->id()));
+                               .id()));
 
   // Confirm the new layout.
   DisplayLayoutList new_layout = GetDisplayLayout();

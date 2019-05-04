@@ -101,6 +101,16 @@ void WebURLRequest::SetSiteForCookies(const WebURL& site_for_cookies) {
   resource_request_->SetSiteForCookies(site_for_cookies);
 }
 
+base::Optional<WebSecurityOrigin> WebURLRequest::TopFrameOrigin() const {
+  const SecurityOrigin* origin = resource_request_->TopFrameOrigin();
+  return origin ? base::Optional<WebSecurityOrigin>(origin)
+                : base::Optional<WebSecurityOrigin>();
+}
+
+void WebURLRequest::SetTopFrameOrigin(const WebSecurityOrigin& origin) {
+  resource_request_->SetTopFrameOrigin(origin);
+}
+
 WebSecurityOrigin WebURLRequest::RequestorOrigin() const {
   return resource_request_->RequestorOrigin();
 }
@@ -148,8 +158,9 @@ void WebURLRequest::SetHTTPHeaderField(const WebString& name,
   resource_request_->SetHTTPHeaderField(name, value);
 }
 
-void WebURLRequest::SetHTTPReferrer(const WebString& web_referrer,
-                                    WebReferrerPolicy referrer_policy) {
+void WebURLRequest::SetHTTPReferrer(
+    const WebString& web_referrer,
+    network::mojom::ReferrerPolicy referrer_policy) {
   // WebString doesn't have the distinction between empty and null. We use
   // the null WTFString for referrer.
   DCHECK_EQ(Referrer::NoReferrer(), String());
@@ -157,8 +168,7 @@ void WebURLRequest::SetHTTPReferrer(const WebString& web_referrer,
       web_referrer.IsEmpty() ? Referrer::NoReferrer() : String(web_referrer);
   // TODO(domfarolino): Stop storing ResourceRequest's generated referrer as a
   // header and instead use a separate member. See https://crbug.com/850813.
-  resource_request_->SetHTTPReferrer(
-      Referrer(referrer, static_cast<ReferrerPolicy>(referrer_policy)));
+  resource_request_->SetHTTPReferrer(Referrer(referrer, referrer_policy));
 }
 
 void WebURLRequest::AddHTTPHeaderField(const WebString& name,
@@ -208,8 +218,8 @@ network::mojom::RequestContextFrameType WebURLRequest::GetFrameType() const {
   return resource_request_->GetFrameType();
 }
 
-WebReferrerPolicy WebURLRequest::GetReferrerPolicy() const {
-  return static_cast<WebReferrerPolicy>(resource_request_->GetReferrerPolicy());
+network::mojom::ReferrerPolicy WebURLRequest::GetReferrerPolicy() const {
+  return resource_request_->GetReferrerPolicy();
 }
 
 void WebURLRequest::SetHTTPOriginIfNeeded(const WebSecurityOrigin& origin) {
@@ -346,6 +356,14 @@ void WebURLRequest::SetExtraData(std::unique_ptr<ExtraData> extra_data) {
   resource_request_->SetExtraData(std::move(extra_data));
 }
 
+bool WebURLRequest::IsDownloadToNetworkCacheOnly() const {
+  return resource_request_->IsDownloadToNetworkCacheOnly();
+}
+
+void WebURLRequest::SetDownloadToNetworkCacheOnly(bool download_to_cache_only) {
+  resource_request_->SetDownloadToNetworkCacheOnly(download_to_cache_only);
+}
+
 ResourceRequest& WebURLRequest::ToMutableResourceRequest() {
   DCHECK(resource_request_);
   return *resource_request_;
@@ -370,14 +388,9 @@ bool WebURLRequest::IsExternalRequest() const {
   return resource_request_->IsExternalRequest();
 }
 
-network::mojom::CORSPreflightPolicy WebURLRequest::GetCORSPreflightPolicy()
+network::mojom::CorsPreflightPolicy WebURLRequest::GetCorsPreflightPolicy()
     const {
-  return resource_request_->CORSPreflightPolicy();
-}
-
-void WebURLRequest::SetNavigationStartTime(
-    base::TimeTicks navigation_start_seconds) {
-  resource_request_->SetNavigationStartTime(navigation_start_seconds);
+  return resource_request_->CorsPreflightPolicy();
 }
 
 base::Optional<WebString> WebURLRequest::GetSuggestedFilename() const {
@@ -389,10 +402,6 @@ base::Optional<WebString> WebURLRequest::GetSuggestedFilename() const {
 
 bool WebURLRequest::IsAdResource() const {
   return resource_request_->IsAdResource();
-}
-
-const WebContentSecurityPolicyList& WebURLRequest::GetInitiatorCSP() const {
-  return resource_request_->GetInitiatorCSP();
 }
 
 void WebURLRequest::SetUpgradeIfInsecure(bool upgrade_if_insecure) {
@@ -424,12 +433,27 @@ void WebURLRequest::SetOriginPolicy(const WebString& policy) {
   resource_request_->SetOriginPolicy(policy);
 }
 
-const WebString WebURLRequest::GetRequestedWith() const {
-  return resource_request_->GetRequestedWith();
+const WebString WebURLRequest::GetRequestedWithHeader() const {
+  return resource_request_->GetRequestedWithHeader();
 }
 
-void WebURLRequest::SetRequestedWith(const WebString& value) {
-  resource_request_->SetRequestedWith(value);
+void WebURLRequest::SetRequestedWithHeader(const WebString& value) {
+  resource_request_->SetRequestedWithHeader(value);
+}
+
+const WebString WebURLRequest::GetClientDataHeader() const {
+  return resource_request_->GetClientDataHeader();
+}
+
+void WebURLRequest::SetClientDataHeader(const WebString& value) {
+  resource_request_->SetClientDataHeader(value);
+}
+
+const base::UnguessableToken& WebURLRequest::GetFetchWindowId() const {
+  return resource_request_->GetFetchWindowId();
+}
+void WebURLRequest::SetFetchWindowId(const base::UnguessableToken& id) {
+  resource_request_->SetFetchWindowId(id);
 }
 
 const ResourceRequest& WebURLRequest::ToResourceRequest() const {

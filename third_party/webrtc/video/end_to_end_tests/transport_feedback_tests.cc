@@ -8,6 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "absl/memory/memory.h"
 #include "call/call.h"
 #include "call/fake_network_pipe.h"
 #include "call/simulated_network.h"
@@ -58,7 +59,6 @@ TEST_P(TransportFeedbackEndToEndTest, AssignsTransportSequenceNumbers) {
                                   BuiltInNetworkBehaviorConfig())),
                           sender_call,
                           payload_type_map),
-          done_(false, false),
           parser_(RtpHeaderParser::Create()),
           first_media_ssrc_(first_media_ssrc),
           rtx_to_media_ssrcs_(ssrc_map),
@@ -415,8 +415,9 @@ TEST_P(TransportFeedbackEndToEndTest,
       EXPECT_TRUE(parser.Parse(data, length));
       return parser.transport_feedback()->num_packets() > 0;
     }
-    void ModifySenderCallConfig(Call::Config* config) override {
-      config->bitrate_config.max_bitrate_bps = 300000;
+    void ModifySenderBitrateConfig(
+        BitrateConstraints* bitrate_config) override {
+      bitrate_config->max_bitrate_bps = 300000;
     }
 
     void PerformTest() override {

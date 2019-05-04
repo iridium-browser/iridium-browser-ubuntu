@@ -7,6 +7,7 @@
 
 #include <ostream>
 
+#include "components/arc/common/app.mojom.h"
 #include "components/arc/common/auth.mojom.h"
 
 class Profile;
@@ -36,7 +37,10 @@ enum class OptInActionType : int {
   // ARC was opted out by user from session.
   SESSION_OPTED_OUT = 9,
 
-  kMaxValue = SESSION_OPTED_OUT,
+  // ARC was opted in due to configuration in OOBE flow.
+  OOBE_OPTED_IN_CONFIGURATION = 10,
+
+  kMaxValue = OOBE_OPTED_IN_CONFIGURATION,
 };
 
 enum class OptInCancelReason {
@@ -215,17 +219,23 @@ void UpdateEnabledStateUMA(bool enabled);
 void UpdateEnabledStateByUserTypeUMA(bool enabled, const Profile* profile);
 void UpdateProvisioningResultUMA(ProvisioningResult result,
                                  const Profile* profile);
+void UpdateSecondarySigninResultUMA(ProvisioningResult result);
 void UpdateProvisioningTiming(const base::TimeDelta& elapsed_time,
                               bool success,
                               const Profile* profile);
 void UpdateReauthorizationResultUMA(ProvisioningResult result,
                                     const Profile* profile);
+void UpdatePlayAutoInstallRequestState(mojom::PaiFlowState state,
+                                       const Profile* profile);
+void UpdatePlayAutoInstallRequestTime(const base::TimeDelta& elapsed_time,
+                                      const Profile* profile);
 void UpdatePlayStoreShowTime(const base::TimeDelta& elapsed_time,
                              const Profile* profile);
 void UpdateSilentAuthCodeUMA(OptInSilentAuthCode state);
 void UpdateSupervisionTransitionResultUMA(
     mojom::SupervisionChangeStatus result);
 void UpdateReauthorizationSilentAuthCodeUMA(OptInSilentAuthCode state);
+void UpdateSecondaryAccountSilentAuthCodeUMA(OptInSilentAuthCode state);
 void UpdateAuthTiming(const char* histogram_name, base::TimeDelta elapsed_time);
 void UpdateAuthCheckinAttempts(int32_t num_attempts);
 void UpdateAuthAccountCheckStatus(mojom::AccountCheckStatus status);

@@ -24,7 +24,6 @@
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/cloud_policy_core.h"
-#include "components/policy/core/common/cloud/dm_auth.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_switches.h"
 #include "components/policy/proto/device_management_backend.pb.h"
@@ -107,8 +106,8 @@ void UserPolicyTestHelper::WaitForInitialPolicy(Profile* profile) {
       enterprise_management::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
       enterprise_management::DeviceRegisterRequest::LIFETIME_INDEFINITE,
       enterprise_management::LicenseType::UNDEFINED,
-      DMAuth::FromOAuthToken("bogus"), std::string(), std::string(),
-      std::string());
+      "oauth_token_unused" /* oauth_token */, std::string() /* client_id */,
+      std::string() /* requisition */, std::string() /* current_state_key */);
 
   policy::ProfilePolicyConnector* const profile_connector =
       policy::ProfilePolicyConnectorFactory::GetForBrowserContext(profile);
@@ -137,6 +136,7 @@ void UserPolicyTestHelper::UpdatePolicy(
 }
 
 void UserPolicyTestHelper::DeletePolicyFile() {
+  base::ScopedAllowBlockingForTesting allow_io;
   base::DeleteFile(PolicyFilePath(), false);
 }
 
@@ -145,6 +145,8 @@ void UserPolicyTestHelper::WritePolicyFile(
     const base::DictionaryValue& recommended) {
   const std::string policy = BuildPolicy(
       mandatory, recommended, dm_protocol::kChromeUserPolicyType, account_id_);
+
+  base::ScopedAllowBlockingForTesting allow_io;
   const int bytes_written =
       base::WriteFile(PolicyFilePath(), policy.data(), policy.size());
   ASSERT_EQ(static_cast<int>(policy.size()), bytes_written);

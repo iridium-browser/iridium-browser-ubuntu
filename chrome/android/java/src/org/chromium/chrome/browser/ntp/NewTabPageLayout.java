@@ -12,6 +12,7 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.support.annotation.Nullable;
+import android.support.v4.view.ViewCompat;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.AttributeSet;
@@ -26,12 +27,13 @@ import android.widget.TextView;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.compositor.layouts.EmptyOverviewModeObserver;
+import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
+import org.chromium.chrome.browser.compositor.layouts.LayoutManagerChrome;
 import org.chromium.chrome.browser.compositor.layouts.content.InvalidationAwareThumbnailProvider;
 import org.chromium.chrome.browser.explore_sites.ExperimentalExploreSitesSection;
 import org.chromium.chrome.browser.explore_sites.ExploreSitesBridge;
 import org.chromium.chrome.browser.explore_sites.ExploreSitesSection;
-import org.chromium.chrome.browser.explore_sites.ExploreSitesVariation;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.NewTabPage.OnSearchBoxScrollListener;
@@ -112,6 +114,9 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
      */
     private boolean mHasShownView;
 
+    /** Observer for overview mode. */
+    private EmptyOverviewModeObserver mOverviewObserver;
+
     private boolean mSearchProviderHasLogo = true;
     private boolean mSearchProviderIsGoogle;
 
@@ -132,15 +137,6 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
     private int mSearchBoxBoundsVerticalInset;
 
     private ScrollDelegate mScrollDelegate;
-
-    /**
-     * @return Whether the simplified NTP ablation experiment arm which removes the additional
-     *         suggestions sections without replacing them with shortcut buttons is enabled.
-     */
-    public static boolean isSimplifiedNtpAblationEnabled() {
-        return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                ChromeFeatureList.SIMPLIFIED_NTP, PARAM_SIMPLIFIED_NTP_ABLATION, true);
-    }
 
     /**
      * A delegate used to obtain information about scroll state and perform various scroll
@@ -190,9 +186,10 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
         mSearchBoxView = findViewById(R.id.search_box);
         insertSiteSectionView();
 
-        if (ExploreSitesBridge.getVariation() == ExploreSitesVariation.ENABLED) {
+        int variation = ExploreSitesBridge.getVariation();
+        if (ExploreSitesBridge.isEnabled(variation)) {
             mExploreSectionView = ((ViewStub) findViewById(R.id.explore_sites_stub)).inflate();
-        } else if (ExploreSitesBridge.getVariation() == ExploreSitesVariation.EXPERIMENT) {
+        } else if (ExploreSitesBridge.isExperimental(variation)) {
             ViewStub exploreStub = findViewById(R.id.explore_sites_stub);
             exploreStub.setLayoutResource(R.layout.experimental_explore_sites_section);
             mExploreSectionView = exploreStub.inflate();
@@ -241,10 +238,11 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
         mSiteSectionViewHolder = SiteSection.createViewHolder(getSiteSectionView(), mUiConfig);
         mSiteSectionViewHolder.bindDataSource(mTileGroup, tileRenderer);
 
-        if (ExploreSitesBridge.getVariation() == ExploreSitesVariation.ENABLED) {
+        int variation = ExploreSitesBridge.getVariation();
+        if (ExploreSitesBridge.isEnabled(variation)) {
             mExploreSection = new ExploreSitesSection(mExploreSectionView, profile,
                     mManager.getNavigationDelegate(), SuggestionsConfig.getTileStyle(mUiConfig));
-        } else if (ExploreSitesBridge.getVariation() == ExploreSitesVariation.EXPERIMENT) {
+        } else if (ExploreSitesBridge.isExperimental(variation)) {
             mExploreSection = new ExperimentalExploreSitesSection(
                     mExploreSectionView, profile, mManager.getNavigationDelegate());
         }
@@ -260,7 +258,6 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
         }
         mNoSearchLogoSpacer = findViewById(R.id.no_search_logo_spacer);
 
-        initializeShortcuts();
         initializeSearchBoxTextView();
         initializeVoiceSearchButton();
         initializeLayoutChangeListener();
@@ -272,9 +269,24 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
         VrModuleProvider.registerVrModeObserver(this);
         if (VrModuleProvider.getDelegate().isInVr()) onEnterVr();
 
-        maybeShowIPHOnHomepageTile();
+        LayoutManager layoutManager =
+                tab.getActivity().getCompositorViewHolder().getLayoutManager();
+        if (layoutManager instanceof LayoutManagerChrome) {
+            final LayoutManagerChrome chromeLayoutManager = (LayoutManagerChrome) layoutManager;
+            if (chromeLayoutManager.overviewVisible()) {
+                mOverviewObserver = new EmptyOverviewModeObserver() {
+                    @Override
+                    public void onOverviewModeFinishedHiding() {
+                        maybeShowIPHOnHomepageTile();
+                        chromeLayoutManager.removeOverviewModeObserver(mOverviewObserver);
+                        mOverviewObserver = null;
+                    }
+                };
+                chromeLayoutManager.addOverviewModeObserver(mOverviewObserver);
+            }
+        }
 
-        manager.addDestructionObserver(NewTabPageLayout.this ::onDestroy);
+        manager.addDestructionObserver(NewTabPageLayout.this::onDestroy);
 
         mInitialized = true;
 
@@ -437,7 +449,7 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
         ViewGroup.LayoutParams layoutParams = mSiteSectionView.getLayoutParams();
         layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
         // If the explore sites section exists, then space it more closely.
-        if (ExploreSitesBridge.getVariation() == ExploreSitesVariation.ENABLED) {
+        if (ExploreSitesBridge.isEnabled(ExploreSitesBridge.getVariation())) {
             ((MarginLayoutParams) layoutParams).bottomMargin =
                     getResources().getDimensionPixelOffset(
                             R.dimen.tile_grid_layout_vertical_spacing);
@@ -747,6 +759,13 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
             NewTabPageUma.recordSearchAvailableLoadTime(mTab.getActivity());
             TraceEvent.instant("NewTabPageSearchAvailable)");
         }
+
+        // If we are in overview mode, the IPH will be dismissed by overview swap.
+        // The overview mode finish observer will show the IPH instead, since
+        // onAttachedToWindow is called before the overview mode has finished swapping.
+        if (mOverviewObserver == null) {
+            maybeShowIPHOnHomepageTile();
+        }
     }
 
     /**
@@ -755,6 +774,12 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
      */
     void updateVoiceSearchButtonVisibility() {
         mVoiceSearchButton.setVisibility(mManager.isVoiceSearchEnabled() ? VISIBLE : GONE);
+        ViewCompat.setPaddingRelative(mSearchBoxView, ViewCompat.getPaddingStart(mSearchBoxView),
+                mSearchBoxView.getPaddingTop(),
+                mManager.isVoiceSearchEnabled() ? 0
+                                                : getResources().getDimensionPixelSize(
+                                                        R.dimen.location_bar_lateral_padding),
+                mSearchBoxView.getPaddingBottom());
     }
 
     @Override
@@ -882,23 +907,14 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
 
     private void onDestroy() {
         VrModuleProvider.unregisterVrModeObserver(this);
-    }
-
-    private void initializeShortcuts() {
-        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.SIMPLIFIED_NTP)
-                || isSimplifiedNtpAblationEnabled()) {
-            return;
+        // Need to null-check compositor view holder and layout manager since they might've
+        // been cleared by now.
+        if (mOverviewObserver != null && mTab.getActivity().getCompositorViewHolder() != null
+                && mTab.getActivity().getCompositorViewHolder().getLayoutManager() != null) {
+            ((LayoutManagerChrome) mTab.getActivity().getCompositorViewHolder().getLayoutManager())
+                    .removeOverviewModeObserver(mOverviewObserver);
+            mOverviewObserver = null;
         }
-
-        ViewStub shortcutsStub = findViewById(R.id.shortcuts_stub);
-        mShortcutsView = (ViewGroup) shortcutsStub.inflate();
-
-        mShortcutsView.findViewById(R.id.bookmarks_button)
-                .setOnClickListener(view -> mManager.getNavigationDelegate().navigateToBookmarks());
-
-        mShortcutsView.findViewById(R.id.downloads_button)
-                .setOnClickListener(
-                        view -> mManager.getNavigationDelegate().navigateToDownloadManager());
     }
 
     /**

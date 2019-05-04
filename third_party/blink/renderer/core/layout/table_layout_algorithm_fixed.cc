@@ -26,7 +26,7 @@
 #include "third_party/blink/renderer/core/layout/layout_table_cell.h"
 #include "third_party/blink/renderer/core/layout/layout_table_col.h"
 #include "third_party/blink/renderer/core/layout/layout_table_section.h"
-#include "third_party/blink/renderer/platform/layout_unit.h"
+#include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 
 /*
   The text below is from the CSS 2.1 specs.
@@ -98,7 +98,7 @@ int TableLayoutAlgorithmFixed::CalcWidthArray() {
     if (col->IsTableColumnGroupWithColumnChildren())
       continue;
 
-    Length col_style_logical_width = col->StyleRef().LogicalWidth();
+    const Length& col_style_logical_width = col->StyleRef().LogicalWidth();
     int effective_col_width = 0;
     if (col_style_logical_width.IsFixed() &&
         col_style_logical_width.Value() > 0)
@@ -196,7 +196,7 @@ void TableLayoutAlgorithmFixed::ComputeIntrinsicLogicalWidths(
 void TableLayoutAlgorithmFixed::ApplyPreferredLogicalWidthQuirks(
     LayoutUnit& min_width,
     LayoutUnit& max_width) const {
-  Length table_logical_width = table_->StyleRef().LogicalWidth();
+  const Length& table_logical_width = table_->StyleRef().LogicalWidth();
   if (table_logical_width.IsFixed() && table_logical_width.IsPositive()) {
     min_width = max_width = LayoutUnit(
         max(min_width,

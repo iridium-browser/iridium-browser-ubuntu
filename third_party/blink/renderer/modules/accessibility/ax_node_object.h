@@ -41,11 +41,9 @@ class HTMLLabelElement;
 class Node;
 
 class MODULES_EXPORT AXNodeObject : public AXObject {
- protected:
-  AXNodeObject(Node*, AXObjectCacheImpl&);
-
  public:
   static AXNodeObject* Create(Node*, AXObjectCacheImpl&);
+  AXNodeObject(Node*, AXObjectCacheImpl&);
   ~AXNodeObject() override;
   void Trace(blink::Visitor*) override;
 
@@ -218,11 +216,6 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   // Position in set and Size of set
   int PosInSet() const override;
   int SetSize() const override;
-  // Compute the number of siblings that have the same role before |this|,
-  // following rules for counting the number of items in a set.
-  int AutoPosInSet() const;
-  // Compute the number of unignored siblings with the same role as |this|.
-  int AutoSetSize() const;
 
   // Aria-owns.
   void ComputeAriaOwnsChildren(

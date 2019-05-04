@@ -10,13 +10,10 @@ import sys
 _MODULES_BY_DIAGNOSTIC_NAME = {
     'Breakdown': 'diagnostics.breakdown',
     'GenericSet': 'diagnostics.generic_set',
-    'UnmergeableDiagnosticSet': 'histogram',
-    'RelatedEventSet': 'histogram',
-    'DateRange': 'histogram',
-    'TagMap': 'histogram',
-    'RelatedHistogramBreakdown': 'histogram',
-    'RelatedHistogramMap': 'histogram',
-    'RelatedNameMap': 'histogram',
+    'UnmergeableDiagnosticSet': 'diagnostics.unmergeable_diagnostic_set',
+    'RelatedEventSet': 'diagnostics.related_event_set',
+    'DateRange': 'diagnostics.date_range',
+    'RelatedNameMap': 'diagnostics.related_name_map',
 }
 
 
@@ -28,7 +25,7 @@ def IsDiagnosticTypename(name):
 
 
 def GetDiagnosticTypenames():
-  return _MODULES_BY_DIAGNOSTIC_NAME.iterkeys()
+  return _MODULES_BY_DIAGNOSTIC_NAME.keys()
 
 
 def GetDiagnosticClassForName(name):

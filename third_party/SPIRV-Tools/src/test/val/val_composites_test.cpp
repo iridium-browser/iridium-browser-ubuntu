@@ -320,11 +320,9 @@ TEST_F(ValidateComposites, CompositeConstructVectorWrongConsituent1) {
 )";
 
   CompileSuccessfully(GenerateShaderCode(body).c_str());
-  ASSERT_EQ(SPV_ERROR_INVALID_DATA, ValidateInstructions());
-  EXPECT_THAT(
-      getDiagnosticString(),
-      HasSubstr("Expected Constituents to be scalars or vectors of the same "
-                "type as Result Type components"));
+  ASSERT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions());
+  EXPECT_THAT(getDiagnosticString(), HasSubstr("Operand 5[%float] cannot be a "
+                                               "type"));
 }
 
 TEST_F(ValidateComposites, CompositeConstructVectorWrongConsituent2) {
@@ -540,7 +538,8 @@ TEST_F(ValidateComposites, CopyObjectResultTypeNotType) {
 
   CompileSuccessfully(GenerateShaderCode(body).c_str());
   ASSERT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions());
-  EXPECT_THAT(getDiagnosticString(), HasSubstr("ID 19 is not a type id"));
+  EXPECT_THAT(getDiagnosticString(),
+              HasSubstr("ID 19[%float_0] is not a type id"));
 }
 
 TEST_F(ValidateComposites, CopyObjectWrongOperandType) {
@@ -660,10 +659,9 @@ TEST_F(ValidateComposites, CompositeExtractNotObject) {
 )";
 
   CompileSuccessfully(GenerateShaderCode(body));
-  ASSERT_EQ(SPV_ERROR_INVALID_DATA, ValidateInstructions());
-  EXPECT_THAT(getDiagnosticString(),
-              HasSubstr("Expected Composite to be an object "
-                        "of composite type"));
+  ASSERT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions());
+  EXPECT_THAT(getDiagnosticString(), HasSubstr("Operand 11[%v4float] cannot "
+                                               "be a type"));
 }
 
 TEST_F(ValidateComposites, CompositeExtractNotComposite) {
@@ -1467,6 +1465,30 @@ OpFunctionEnd
 
   CompileSuccessfully(spirv);
   EXPECT_EQ(SPV_SUCCESS, ValidateInstructions());
+}
+
+TEST_F(ValidateComposites, ExtractDynamicLabelIndex) {
+  const std::string spirv = R"(
+OpCapability Shader
+OpCapability Linkage
+OpMemoryModel Logical GLSL450
+%void = OpTypeVoid
+%float = OpTypeFloat 32
+%v4float = OpTypeVector %float 4
+%void_fn = OpTypeFunction %void
+%float_0 = OpConstant %float 0
+%v4float_0 = OpConstantComposite %v4float %float_0 %float_0 %float_0 %float_0
+%func = OpFunction %void None %void_fn
+%1 = OpLabel
+%ex = OpVectorExtractDynamic %float %v4float_0 %v4float_0
+OpReturn
+OpFunctionEnd
+)";
+
+  CompileSuccessfully(spirv);
+  EXPECT_EQ(SPV_ERROR_INVALID_DATA, ValidateInstructions());
+  EXPECT_THAT(getDiagnosticString(),
+              HasSubstr("Expected Index to be int scalar"));
 }
 
 }  // namespace

@@ -9,6 +9,7 @@
 #include "test_utils/ANGLETest.h"
 
 #include "test_utils/gl_raii.h"
+#include "util/EGLWindow.h"
 
 namespace angle
 {
@@ -52,14 +53,9 @@ TEST_P(ExplicitContextTest, GetProcAddress)
 
     EGLContext context = getEGLWindow()->getContext();
 
-    PFNGLCLEARCOLORCONTEXTANGLE clearColor = reinterpret_cast<PFNGLCLEARCOLORCONTEXTANGLE>(
-        eglGetProcAddress("glClearColorContextANGLE"));
-    PFNGLCLEARCONTEXTANGLE clear =
-        reinterpret_cast<PFNGLCLEARCONTEXTANGLE>(eglGetProcAddress("glClearContextANGLE"));
-
     // Clear to green
-    clearColor(context, 1.0f, 0, 0, 1.0f);
-    clear(context, GL_COLOR_BUFFER_BIT);
+    glClearColorContextANGLE(context, 1.0f, 0, 0, 1.0f);
+    glClearContextANGLE(context, GL_COLOR_BUFFER_BIT);
 
     // Check for green
     EXPECT_PIXEL_EQ(0, 0, 255, 0, 0, 255);
@@ -91,6 +87,11 @@ TEST_P(ExplicitContextTest, NullContext)
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these
 // tests should be run against.
-ANGLE_INSTANTIATE_TEST(ExplicitContextTest, ES2_D3D9(), ES2_D3D11(), ES2_OPENGL(), ES2_OPENGLES());
+ANGLE_INSTANTIATE_TEST(ExplicitContextTest,
+                       ES2_D3D9(),
+                       ES2_D3D11(),
+                       ES2_OPENGL(),
+                       ES2_OPENGLES(),
+                       ES2_VULKAN());
 
 }  // namespace angle

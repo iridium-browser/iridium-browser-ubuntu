@@ -48,7 +48,7 @@
    * coverage of the outline on each pixel cell.
    *
    * It is based on ideas that I initially found in Raph Levien's
-   * excellent LibArt graphics library (see http://www.levien.com/libart
+   * excellent LibArt graphics library (see https://www.levien.com/libart
    * for more information, though the web pages do not tell anything
    * about the renderer; you'll have to dive into the source code to
    * understand how it works).
@@ -222,10 +222,10 @@ typedef ptrdiff_t  FT_PtrDist;
 #endif
 
 #define FT_THROW( e )                               \
-          ( FT_Throw( FT_ERR_CAT( ErrRaster, e ),   \
+          ( FT_Throw( FT_ERR_CAT( ErrRaster_, e ),  \
                       __LINE__,                     \
                       __FILE__ )                  | \
-            FT_ERR_CAT( ErrRaster, e )            )
+            FT_ERR_CAT( ErrRaster_, e )           )
 
 #else /* !FT_DEBUG_LEVEL_TRACE */
 

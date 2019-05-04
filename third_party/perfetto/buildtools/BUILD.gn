@@ -57,6 +57,8 @@ config("libunwindstack_config") {
     rebase_path("android-core/libprocinfo/include", root_build_dir),
     "-isystem",
     rebase_path("android-core/base/include", root_build_dir),
+    "-isystem",
+    rebase_path("android-core/demangle/include", root_build_dir),
   ]
   if (is_android) {
     cflags += [
@@ -606,6 +608,7 @@ source_set("sqlite") {
     "sqlite/sqlite3.c",
     "sqlite/sqlite3.h",
     "sqlite/sqlite3ext.h",
+    "sqlite_src/ext/misc/percentile.c",
   ]
   configs -= [ "//gn/standalone:extra_warnings" ]
   public_configs = [ ":sqlite_config" ]
@@ -690,6 +693,7 @@ source_set("libunwindstack") {
     "android-core/base/stringprintf.cpp",
     "android-core/base/strings.cpp",
     "android-core/base/threads.cpp",
+    "android-core/demangle/Demangler.cpp",
     "android-core/libunwindstack/ArmExidx.cpp",
     "android-core/libunwindstack/DwarfCfa.cpp",
     "android-core/libunwindstack/DwarfEhFrameWithHdr.cpp",
@@ -699,6 +703,7 @@ source_set("libunwindstack") {
     "android-core/libunwindstack/Elf.cpp",
     "android-core/libunwindstack/ElfInterface.cpp",
     "android-core/libunwindstack/ElfInterfaceArm.cpp",
+    "android-core/libunwindstack/Global.cpp",
     "android-core/libunwindstack/JitDebug.cpp",
     "android-core/libunwindstack/LocalUnwinder.cpp",
     "android-core/libunwindstack/Log.cpp",
@@ -771,34 +776,36 @@ source_set("linenoise") {
   public_configs = [ ":linenoise_config" ]
 }
 
-source_set("libfuzzer") {
-  configs -= [
-    "//gn/standalone:extra_warnings",
-    "//gn/standalone/sanitizers:sanitizers_cflags",
-  ]
-  sources = [
-    "libfuzzer/FuzzerCrossOver.cpp",
-    "libfuzzer/FuzzerDataFlowTrace.cpp",
-    "libfuzzer/FuzzerDriver.cpp",
-    "libfuzzer/FuzzerExtFunctionsDlsym.cpp",
-    "libfuzzer/FuzzerExtFunctionsWeak.cpp",
-    "libfuzzer/FuzzerExtFunctionsWeakAlias.cpp",
-    "libfuzzer/FuzzerExtraCounters.cpp",
-    "libfuzzer/FuzzerIO.cpp",
-    "libfuzzer/FuzzerIOPosix.cpp",
-    "libfuzzer/FuzzerIOWindows.cpp",
-    "libfuzzer/FuzzerLoop.cpp",
-    "libfuzzer/FuzzerMain.cpp",
-    "libfuzzer/FuzzerMerge.cpp",
-    "libfuzzer/FuzzerMutate.cpp",
-    "libfuzzer/FuzzerSHA1.cpp",
-    "libfuzzer/FuzzerShmemPosix.cpp",
-    "libfuzzer/FuzzerTracePC.cpp",
-    "libfuzzer/FuzzerUtil.cpp",
-    "libfuzzer/FuzzerUtilDarwin.cpp",
-    "libfuzzer/FuzzerUtilFuchsia.cpp",
-    "libfuzzer/FuzzerUtilLinux.cpp",
-    "libfuzzer/FuzzerUtilPosix.cpp",
-    "libfuzzer/FuzzerUtilWindows.cpp",
-  ]
+if (use_libfuzzer) {
+  source_set("libfuzzer") {
+    configs -= [
+      "//gn/standalone:extra_warnings",
+      "//gn/standalone/sanitizers:sanitizers_cflags",
+    ]
+    sources = [
+      "libfuzzer/FuzzerCrossOver.cpp",
+      "libfuzzer/FuzzerDataFlowTrace.cpp",
+      "libfuzzer/FuzzerDriver.cpp",
+      "libfuzzer/FuzzerExtFunctionsDlsym.cpp",
+      "libfuzzer/FuzzerExtFunctionsWeak.cpp",
+      "libfuzzer/FuzzerExtFunctionsWeakAlias.cpp",
+      "libfuzzer/FuzzerExtraCounters.cpp",
+      "libfuzzer/FuzzerIO.cpp",
+      "libfuzzer/FuzzerIOPosix.cpp",
+      "libfuzzer/FuzzerIOWindows.cpp",
+      "libfuzzer/FuzzerLoop.cpp",
+      "libfuzzer/FuzzerMain.cpp",
+      "libfuzzer/FuzzerMerge.cpp",
+      "libfuzzer/FuzzerMutate.cpp",
+      "libfuzzer/FuzzerSHA1.cpp",
+      "libfuzzer/FuzzerShmemPosix.cpp",
+      "libfuzzer/FuzzerTracePC.cpp",
+      "libfuzzer/FuzzerUtil.cpp",
+      "libfuzzer/FuzzerUtilDarwin.cpp",
+      "libfuzzer/FuzzerUtilFuchsia.cpp",
+      "libfuzzer/FuzzerUtilLinux.cpp",
+      "libfuzzer/FuzzerUtilPosix.cpp",
+      "libfuzzer/FuzzerUtilWindows.cpp",
+    ]
+  }
 }

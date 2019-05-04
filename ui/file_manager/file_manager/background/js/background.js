@@ -12,14 +12,11 @@
 function FileBrowserBackgroundImpl() {
   BackgroundBase.call(this);
 
-  /** @type {!analytics.Tracker} */
-  this.tracker = metrics.getTracker();
-
   /**
    * Progress center of the background page.
    * @type {!ProgressCenter}
    */
-  this.progressCenter = new ProgressCenter();
+  this.progressCenter = new ProgressCenterImpl();
 
   /**
    * File operation manager.
@@ -33,7 +30,7 @@ function FileBrowserBackgroundImpl() {
    *
    * @type {!importer.HistoryLoader}
    */
-  this.historyLoader = new importer.RuntimeHistoryLoader(this.tracker);
+  this.historyLoader = new importer.RuntimeHistoryLoader();
 
   /**
    * Event handler for progress center.
@@ -56,13 +53,13 @@ function FileBrowserBackgroundImpl() {
    * Drive sync handler.
    * @type {!DriveSyncHandler}
    */
-  this.driveSyncHandler = new DriveSyncHandler(this.progressCenter);
+  this.driveSyncHandler = new DriveSyncHandlerImpl(this.progressCenter);
 
   /**
    * @type {!importer.DispositionChecker.CheckerFunction}
    */
-  this.dispositionChecker_ = importer.DispositionChecker.createChecker(
-      this.historyLoader, this.tracker);
+  this.dispositionChecker_ =
+      importer.DispositionChecker.createChecker(this.historyLoader);
 
   /**
    * Provides support for scaning media devices as part of Cloud Import.
@@ -80,7 +77,10 @@ function FileBrowserBackgroundImpl() {
    */
   this.mediaImportHandler = new importer.MediaImportHandler(
       this.progressCenter, this.historyLoader, this.dispositionChecker_,
-      this.tracker, this.driveSyncHandler);
+      this.driveSyncHandler);
+
+  /** @type {!Crostini} */
+  this.crostini = new CrostiniImpl();
 
   /**
    * String assets.
@@ -101,7 +101,7 @@ function FileBrowserBackgroundImpl() {
   chrome.contextMenus.onClicked.addListener(
       this.onContextMenuClicked_.bind(this));
 
-  // Initializa string and volume manager related stuffs.
+  // Initialize string and volume manager related stuffs.
   this.initializationPromise_.then(function(strings) {
     this.stringData = strings;
     this.initContextMenu_();
@@ -110,9 +110,12 @@ function FileBrowserBackgroundImpl() {
       volumeManager.addEventListener(
           VolumeManagerCommon.VOLUME_ALREADY_MOUNTED,
           this.handleViewEvent_.bind(this));
+
+      this.crostini.init(volumeManager);
+      this.crostini.listen();
     }.bind(this));
 
-    this.fileOperationManager = new FileOperationManager();
+    this.fileOperationManager = new FileOperationManagerImpl();
     this.fileOperationHandler_ = new FileOperationHandler(
         this.fileOperationManager, this.progressCenter);
   }.bind(this));
@@ -174,11 +177,12 @@ FileBrowserBackgroundImpl.prototype.handleViewEventInternal_ = function(event) {
                 console.error('Got view event with invalid volume id.');
               }
             } else if (event.volumeId) {
-              if (event.type === VolumeManagerCommon.VOLUME_ALREADY_MOUNTED)
+              if (event.type === VolumeManagerCommon.VOLUME_ALREADY_MOUNTED) {
                 this.navigateToVolumeInFocusedWindowWhenReady_(
                     event.volumeId, event.filePath);
-              else
+              } else {
                 this.navigateToVolumeWhenReady_(event.volumeId, event.filePath);
+              }
             } else {
               console.error('Got view event with no actionable destination.');
             }
@@ -290,11 +294,12 @@ FileBrowserBackgroundImpl.prototype.navigateToVolumeInFocusedWindow_ = function(
     volume, opt_directoryPath) {
   this.retrieveEntryInVolume_(volume, opt_directoryPath)
       .then(function(directoryEntry) {
-        if (directoryEntry)
+        if (directoryEntry) {
           volumeManagerFactory.getInstance().then(function(volumeManager) {
             volumeManager.dispatchEvent(
                 VolumeManagerCommon.createArchiveOpenedEvent(directoryEntry));
           }.bind(this));
+        }
       });
 };
 
@@ -319,6 +324,9 @@ var nextFileManagerDialogID = 0;
 function registerDialog(dialogWindow) {
   var id = DIALOG_ID_PREFIX + (nextFileManagerDialogID++);
   window.background.dialogs[id] = dialogWindow;
+  if (window.IN_TEST) {
+    dialogWindow.IN_TEST = true;
+  }
   dialogWindow.addEventListener('pagehide', function() {
     delete window.background.dialogs[id];
   });
@@ -364,15 +372,17 @@ FileBrowserBackgroundImpl.prototype.onLaunched_ = function() {
       chrome.storage.local.get(function(items) {
         for (var key in items) {
           if (items.hasOwnProperty(key)) {
-            if (key.match(FILES_ID_PATTERN))
+            if (key.match(FILES_ID_PATTERN)) {
               chrome.storage.local.remove(key);
+            }
           }
         }
       });
     }
     launcher.launchFileManager(
-        null, undefined, LaunchType.FOCUS_ANY_OR_CREATE,
-        function() { metrics.recordInterval('Load.BackgroundLaunch'); });
+        null, undefined, LaunchType.FOCUS_ANY_OR_CREATE, function() {
+          metrics.recordInterval('Load.BackgroundLaunch');
+        });
   });
 };
 
@@ -431,7 +441,7 @@ FileBrowserBackgroundImpl.prototype.onContextMenuClicked_ = function(info) {
     // new window. If not found, then launch with the default url.
     this.findFocusedWindow_().then(function(key) {
       if (!key) {
-        launcher.launchFileManager(appState);
+        launcher.launchFileManager();
         return;
       }
       var appState = {

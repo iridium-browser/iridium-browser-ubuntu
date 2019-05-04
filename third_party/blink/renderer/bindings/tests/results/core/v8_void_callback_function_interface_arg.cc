@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // This file has been auto-generated from the Jinja2 template
-// third_party/blink/renderer/bindings/templates/callback_function.cpp.tmpl
+// third_party/blink/renderer/bindings/templates/callback_function.cc.tmpl
 // by the script code_generator_v8.py.
 // DO NOT MODIFY!
 
@@ -28,13 +28,21 @@ const char* V8VoidCallbackFunctionInterfaceArg::NameInHeapSnapshot() const {
 }
 
 v8::Maybe<void> V8VoidCallbackFunctionInterfaceArg::Invoke(ScriptWrappable* callback_this_value, HTMLDivElement* divElement) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "VoidCallbackFunctionInterfaceArg",
+          "invoke");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<void>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
     // of the callback function here.
     v8::HandleScope handle_scope(GetIsolate());
-    v8::Local<v8::Object> callback_object = CallbackFunction();
+    v8::Local<v8::Object> callback_object = CallbackObject();
     CHECK(!callback_object.IsEmpty());
     v8::Context::Scope context_scope(callback_object->CreationContext());
     V8ThrowException::ThrowError(
@@ -48,7 +56,7 @@ v8::Maybe<void> V8VoidCallbackFunctionInterfaceArg::Invoke(ScriptWrappable* call
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
@@ -62,14 +70,14 @@ v8::Maybe<void> V8VoidCallbackFunctionInterfaceArg::Invoke(ScriptWrappable* call
   function = CallbackFunction();
 
   v8::Local<v8::Value> this_arg;
-  this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+  this_arg = ToV8(callback_this_value, callback_relevant_script_state);
 
   // step: Let esArgs be the result of converting args to an ECMAScript
   //   arguments list. If this throws an exception, set completion to the
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
   v8::Local<v8::Value> v8_divElement = ToV8(divElement, argument_creation_context, GetIsolate());
   constexpr int argc = 1;
@@ -80,7 +88,7 @@ v8::Maybe<void> V8VoidCallbackFunctionInterfaceArg::Invoke(ScriptWrappable* call
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,

@@ -32,8 +32,13 @@
 #include "components/constrained_window/constrained_window_views.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/public/cpp/mus_property_mirror_ash.h"
 #include "ash/test/ash_test_views_delegate.h"
-#include "chrome/test/base/ash_test_environment_chrome.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "content/public/browser/context_factory.h"
+#include "ui/aura/mus/window_tree_client.h"
+#include "ui/aura/test/env_test_helper.h"
+#include "ui/views/mus/mus_client.h"
 #else
 #include "ui/views/test/test_views_delegate.h"
 #endif
@@ -44,47 +49,23 @@ using content::RenderFrameHost;
 using content::RenderFrameHostTester;
 using content::WebContents;
 
-BrowserWithTestWindowTest::BrowserWithTestWindowTest()
-    : BrowserWithTestWindowTest(Browser::TYPE_TABBED,
-                                false,
-                                content::TestBrowserThreadBundle::DEFAULT) {}
-
-BrowserWithTestWindowTest::BrowserWithTestWindowTest(
-    content::TestBrowserThreadBundle::Options thread_bundle_options)
-    : BrowserWithTestWindowTest(Browser::TYPE_TABBED,
-                                false,
-                                thread_bundle_options) {}
-
-BrowserWithTestWindowTest::BrowserWithTestWindowTest(Browser::Type browser_type,
-                                                     bool hosted_app)
-    : BrowserWithTestWindowTest(browser_type,
-                                hosted_app,
-                                content::TestBrowserThreadBundle::DEFAULT) {}
-
-BrowserWithTestWindowTest::BrowserWithTestWindowTest(
-    Browser::Type browser_type,
-    bool hosted_app,
-    content::TestBrowserThreadBundle::Options thread_bundle_options)
-    : thread_bundle_(thread_bundle_options),
-      browser_type_(browser_type),
-      hosted_app_(hosted_app) {
-#if defined(OS_CHROMEOS)
-  ash_test_environment_ = std::make_unique<AshTestEnvironmentChrome>();
-  ash_test_helper_ =
-      std::make_unique<ash::AshTestHelper>(ash_test_environment_.get());
-#endif
-}
-
 BrowserWithTestWindowTest::~BrowserWithTestWindowTest() {}
 
 void BrowserWithTestWindowTest::SetUp() {
   testing::Test::SetUp();
 #if defined(OS_CHROMEOS)
-  ash_test_helper_->SetUp(true);
-  ash_test_helper_->SetRunningOutsideAsh();
+  ash_test_helper_.SetUp(true);
+  ash_test_helper_.SetRunningOutsideAsh();
+  if (aura::Env::GetInstance()->mode() == aura::Env::Mode::MUS)
+    ash_test_helper_.CreateMusClient();
 #elif defined(TOOLKIT_VIEWS)
   views_test_helper_.reset(new views::ScopedViewsTestHelper());
 #endif
+
+  // This must be created after ash_test_helper_ is set up so that it doesn't
+  // create an InputDeviceManager.
+  rvh_test_enabler_ = std::make_unique<content::RenderViewHostTestEnabler>();
+
 #if defined(TOOLKIT_VIEWS)
   SetConstrainedWindowViewsClient(CreateChromeConstrainedWindowViewsClient());
 
@@ -131,7 +112,12 @@ void BrowserWithTestWindowTest::TearDown() {
   profile_manager_.reset();
 
 #if defined(OS_CHROMEOS)
-  ash_test_helper_->TearDown();
+  // If initialized, the KioskAppManager will register an observer to
+  // CrosSettings and will need to be destroyed before it. Having it destroyed
+  // as part of the teardown will avoid unexpected test failures.
+  chromeos::KioskAppManager::Shutdown();
+
+  ash_test_helper_.TearDown();
 #elif defined(TOOLKIT_VIEWS)
   views_test_helper_.reset();
 #endif
@@ -146,7 +132,7 @@ void BrowserWithTestWindowTest::TearDown() {
 
 gfx::NativeWindow BrowserWithTestWindowTest::GetContext() {
 #if defined(OS_CHROMEOS)
-  return ash_test_helper_->CurrentContext();
+  return ash_test_helper_.CurrentContext();
 #elif defined(TOOLKIT_VIEWS)
   return views_test_helper_->GetContext();
 #else
@@ -225,3 +211,11 @@ Browser* BrowserWithTestWindowTest::CreateBrowser(
   params.window = browser_window;
   return new Browser(params);
 }
+
+BrowserWithTestWindowTest::BrowserWithTestWindowTest(
+    std::unique_ptr<content::TestBrowserThreadBundle> thread_bundle,
+    Browser::Type browser_type,
+    bool hosted_app)
+    : thread_bundle_(std::move(thread_bundle)),
+      browser_type_(browser_type),
+      hosted_app_(hosted_app) {}

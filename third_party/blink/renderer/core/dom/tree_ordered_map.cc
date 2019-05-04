@@ -41,10 +41,8 @@
 
 namespace blink {
 
-using namespace HTMLNames;
-
 TreeOrderedMap* TreeOrderedMap::Create() {
-  return new TreeOrderedMap;
+  return MakeGarbageCollected<TreeOrderedMap>();
 }
 
 TreeOrderedMap::TreeOrderedMap() = default;
@@ -80,7 +78,8 @@ inline bool KeyMatchesSlotName(const AtomicString& key,
 void TreeOrderedMap::Add(const AtomicString& key, Element& element) {
   DCHECK(key);
 
-  Map::AddResult add_result = map_.insert(key, new MapEntry(element));
+  Map::AddResult add_result =
+      map_.insert(key, MakeGarbageCollected<MapEntry>(element));
   if (add_result.is_new_entry)
     return;
 
@@ -156,7 +155,7 @@ const HeapVector<Member<Element>>& TreeOrderedMap::GetAllElementsById(
     const TreeScope& scope) const {
   DCHECK(key);
   DEFINE_STATIC_LOCAL(Persistent<HeapVector<Member<Element>>>, empty_vector,
-                      (new HeapVector<Member<Element>>));
+                      (MakeGarbageCollected<HeapVector<Member<Element>>>()));
 
   Map::iterator it = map_.find(key);
   if (it == map_.end())
@@ -206,11 +205,11 @@ Element* TreeOrderedMap::GetCachedFirstElementWithoutAccessingNodeTree(
   return entry->element;
 }
 
-void TreeOrderedMap::Trace(blink::Visitor* visitor) {
+void TreeOrderedMap::Trace(Visitor* visitor) {
   visitor->Trace(map_);
 }
 
-void TreeOrderedMap::MapEntry::Trace(blink::Visitor* visitor) {
+void TreeOrderedMap::MapEntry::Trace(Visitor* visitor) {
   visitor->Trace(element);
   visitor->Trace(ordered_list);
 }

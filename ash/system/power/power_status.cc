@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cmath>
 
-#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/power_utils.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
@@ -24,6 +23,7 @@
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -43,11 +43,11 @@ static PowerStatus* g_power_status = nullptr;
 const int kMinVisualChargeLevel = 1;
 
 // The color of the battery's badge (bolt, unreliable, X).
-const SkColor kBatteryBadgeColor = SkColorSetA(SK_ColorBLACK, 0xB2);
+const SkColor kBatteryBadgeColor = gfx::kGoogleGrey900;
 
 // The color used for the battery's badge and charged color when the battery
 // charge level is critically low and the device is not plugged in.
-const SkColor kBatteryAlertColor = SkColorSetRGB(0xDA, 0x27, 0x12);
+const SkColor kBatteryAlertColor = gfx::kGoogleRedDark600;
 
 class BatteryImageSource : public gfx::CanvasImageSource {
  public:
@@ -66,24 +66,19 @@ class BatteryImageSource : public gfx::CanvasImageSource {
   void Draw(gfx::Canvas* canvas) override {
     canvas->Save();
     const float dsf = canvas->UndoDeviceScaleFactor();
-    // All constants below are expressed relative to a canvas size of 16. The
-    // actual canvas size (i.e. |size()|) may not be 16.
-    const float kAssumedCanvasSize =
-        features::IsSystemTrayUnifiedEnabled() ? 20 : 16;
+    // All constants below are expressed relative to a canvas size of 20. The
+    // actual canvas size (i.e. |size()|) may not be 20.
+    const float kAssumedCanvasSize = 20;
     const float const_scale = dsf * size().height() / kAssumedCanvasSize;
 
     // The two shapes in this path define the outline of the battery icon.
     SkPath path;
-    gfx::RectF top = features::IsSystemTrayUnifiedEnabled()
-                         ? gfx::RectF(8, 3, 4, 2)
-                         : gfx::RectF(6.5f, 2, 3, 1);
+    gfx::RectF top = gfx::RectF(8, 3, 4, 2);
     top.Scale(const_scale);
     top = gfx::RectF(gfx::ToEnclosingRect(top));
     path.addRect(gfx::RectFToSkRect(top));
 
-    gfx::RectF bottom = features::IsSystemTrayUnifiedEnabled()
-                            ? gfx::RectF(6, 5, 8, 12)
-                            : gfx::RectF(4.5f, 3, 7, 11);
+    gfx::RectF bottom = gfx::RectF(6, 5, 8, 12);
     bottom.Scale(const_scale);
     // Align the top of bottom rect to the bottom of the top one. Otherwise,
     // they may overlap and the top will be too small.
@@ -347,24 +342,17 @@ void PowerStatus::CalculateBatteryImageInfo(BatteryImageInfo* info) const {
   info->alert_if_low = !IsLinePowerConnected();
 
   if (!IsUsbChargerConnected() && !IsBatteryPresent()) {
-    info->icon_badge = features::IsSystemTrayUnifiedEnabled()
-                           ? &kUnifiedMenuBatteryXIcon
-                           : &kSystemTrayBatteryXIcon;
+    info->icon_badge = &kUnifiedMenuBatteryXIcon;
     info->charge_percent = 0;
     return;
   }
 
-  if (IsUsbChargerConnected()) {
-    info->icon_badge = features::IsSystemTrayUnifiedEnabled()
-                           ? &kUnifiedMenuBatteryUnreliableIcon
-                           : &kSystemTrayBatteryUnreliableIcon;
-  } else if (IsLinePowerConnected()) {
-    info->icon_badge = features::IsSystemTrayUnifiedEnabled()
-                           ? &kUnifiedMenuBatteryBoltIcon
-                           : &kSystemTrayBatteryBoltIcon;
-  } else {
+  if (IsUsbChargerConnected())
+    info->icon_badge = &kUnifiedMenuBatteryUnreliableIcon;
+  else if (IsLinePowerConnected())
+    info->icon_badge = &kUnifiedMenuBatteryBoltIcon;
+  else
     info->icon_badge = nullptr;
-  }
 
   info->charge_percent = GetBatteryPercent();
 
@@ -372,9 +360,7 @@ void PowerStatus::CalculateBatteryImageInfo(BatteryImageInfo* info) const {
   // have a badge assigned.
   if (GetBatteryPercent() < kCriticalBatteryChargePercentage &&
       !info->icon_badge) {
-    info->icon_badge = features::IsSystemTrayUnifiedEnabled()
-                           ? &kUnifiedMenuBatteryAlertIcon
-                           : &kSystemTrayBatteryAlertIcon;
+    info->icon_badge = &kUnifiedMenuBatteryAlertIcon;
   }
 }
 
@@ -464,6 +450,23 @@ std::pair<base::string16, base::string16> PowerStatus::GetStatusStrings()
   }
 
   return std::make_pair(percentage, status);
+}
+
+base::string16 PowerStatus::GetInlinedStatusString() const {
+  base::string16 percentage_text;
+  base::string16 status_text;
+  std::tie(percentage_text, status_text) = GetStatusStrings();
+
+  if (!percentage_text.empty() && !status_text.empty()) {
+    return percentage_text +
+           l10n_util::GetStringUTF16(
+               IDS_ASH_STATUS_TRAY_BATTERY_STATUS_SEPARATOR) +
+           status_text;
+  } else if (!percentage_text.empty()) {
+    return percentage_text;
+  } else {
+    return status_text;
+  }
 }
 
 PowerStatus::PowerStatus() {

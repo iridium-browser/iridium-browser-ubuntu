@@ -5,7 +5,10 @@
 #ifndef CHROME_BROWSER_USB_WEB_USB_SERVICE_IMPL_H_
 #define CHROME_BROWSER_USB_WEB_USB_SERVICE_IMPL_H_
 
+#include <map>
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "base/macros.h"
@@ -22,6 +25,8 @@ namespace content {
 class RenderFrameHost;
 }
 
+using DeviceClientBindings = mojo::BindingSet<device::mojom::UsbDeviceClient>;
+
 class UsbChooserContext;
 
 // Implements a restricted device::mojom::UsbDeviceManager interface by wrapping
@@ -29,7 +34,8 @@ class UsbChooserContext;
 // permission model as well as permission granted by the user through a device
 // chooser UI.
 class WebUsbServiceImpl : public blink::mojom::WebUsbService,
-                          public UsbChooserContext::Observer,
+                          public ChooserContextBase::PermissionObserver,
+                          public UsbChooserContext::DeviceObserver,
                           public device::mojom::UsbDeviceClient {
  public:
   WebUsbServiceImpl(content::RenderFrameHost* render_frame_host,
@@ -56,7 +62,11 @@ class WebUsbServiceImpl : public blink::mojom::WebUsbService,
       GetDevicesCallback callback,
       std::vector<device::mojom::UsbDeviceInfoPtr> device_info_list);
 
-  // UsbChooserContext::Observer implementation:
+  // ChooserContextBase::PermissionObserver implementation:
+  void OnPermissionRevoked(const GURL& requesting_origin,
+                           const GURL& embedding_origin) override;
+
+  // UsbChooserContext::DeviceObserver implementation:
   void OnDeviceAdded(const device::mojom::UsbDeviceInfo& device_info) override;
   void OnDeviceRemoved(
       const device::mojom::UsbDeviceInfo& device_info) override;
@@ -71,16 +81,21 @@ class WebUsbServiceImpl : public blink::mojom::WebUsbService,
   content::RenderFrameHost* const render_frame_host_;
   base::WeakPtr<WebUsbChooser> usb_chooser_;
   UsbChooserContext* chooser_context_;
+  GURL requesting_origin_;
+  GURL embedding_origin_;
 
   // Used to bind with Blink.
   mojo::BindingSet<blink::mojom::WebUsbService> bindings_;
   mojo::AssociatedInterfacePtrSet<device::mojom::UsbDeviceManagerClient>
       clients_;
 
-  // Binding used to connect with USB devices for opened/closed events.
-  mojo::BindingSet<device::mojom::UsbDeviceClient> device_client_bindings_;
+  // Tracks DeviceClient bindings for each device (by GUID).
+  std::unordered_map<std::string, DeviceClientBindings> device_client_bindings_;
 
-  ScopedObserver<UsbChooserContext, UsbChooserContext::Observer> observer_;
+  ScopedObserver<UsbChooserContext, UsbChooserContext::DeviceObserver>
+      device_observer_;
+  ScopedObserver<ChooserContextBase, ChooserContextBase::PermissionObserver>
+      permission_observer_;
 
   base::WeakPtrFactory<WebUsbServiceImpl> weak_factory_;
 

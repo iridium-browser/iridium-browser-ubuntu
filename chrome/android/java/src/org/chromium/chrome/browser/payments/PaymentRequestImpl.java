@@ -6,8 +6,8 @@ package org.chromium.chrome.browser.payments;
 
 import android.app.Activity;
 import android.content.Context;
-import android.content.Intent;
 import android.os.Handler;
+import android.support.annotation.Nullable;
 import android.support.v4.util.ArrayMap;
 import android.text.TextUtils;
 
@@ -27,8 +27,7 @@ import org.chromium.chrome.browser.page_info.CertificateChainHelper;
 import org.chromium.chrome.browser.payments.ui.ContactDetailsSection;
 import org.chromium.chrome.browser.payments.ui.LineItem;
 import org.chromium.chrome.browser.payments.ui.PaymentInformation;
-import org.chromium.chrome.browser.payments.ui.PaymentRequestSection.OptionSection
-        .FocusChangedObserver;
+import org.chromium.chrome.browser.payments.ui.PaymentRequestSection.OptionSection.FocusChangedObserver;
 import org.chromium.chrome.browser.payments.ui.PaymentRequestUI;
 import org.chromium.chrome.browser.payments.ui.SectionInformation;
 import org.chromium.chrome.browser.payments.ui.ShoppingCart;
@@ -42,10 +41,11 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
+import org.chromium.chrome.browser.tabmodel.TabModelUtils;
+import org.chromium.chrome.browser.tabmodel.TabSelectionType;
 import org.chromium.chrome.browser.widget.prefeditor.Completable;
 import org.chromium.chrome.browser.widget.prefeditor.EditableOption;
 import org.chromium.components.payments.CurrencyFormatter;
@@ -57,6 +57,7 @@ import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsStatics;
 import org.chromium.mojo.system.MojoException;
 import org.chromium.payments.mojom.CanMakePaymentQueryResult;
+import org.chromium.payments.mojom.HasEnrolledInstrumentQueryResult;
 import org.chromium.payments.mojom.PaymentComplete;
 import org.chromium.payments.mojom.PaymentCurrencyAmount;
 import org.chromium.payments.mojom.PaymentDetails;
@@ -83,8 +84,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-
-import javax.annotation.Nullable;
 
 /**
  * Android implementation of the PaymentRequest service defined in
@@ -127,64 +126,14 @@ public class PaymentRequestImpl
         void onPaymentRequestServiceShowFailed();
 
         /**
-         * Called when the canMakePayment() request has been responded.
+         * Called when the canMakePayment() request has been responded to.
          */
         void onPaymentRequestServiceCanMakePaymentQueryResponded();
-    }
-
-    /** The object to keep track of payment queries. */
-    private static class CanMakePaymentQuery {
-        private final Set<PaymentRequestImpl> mObservers = new HashSet<>();
-        private final Map<String, String> mMethods;
 
         /**
-         * Keeps track of a payment query.
-         *
-         * @param methods The map of the payment methods that are being queried to the corresponding
-         *                payment method data.
+         * Called when the hasEnrolledInstrument() request has been responded to.
          */
-        public CanMakePaymentQuery(Map<String, PaymentMethodData> methods) {
-            assert methods != null;
-            mMethods = new HashMap<>();
-            for (Map.Entry<String, PaymentMethodData> method : methods.entrySet()) {
-                mMethods.put(method.getKey(),
-                        method.getValue() == null ? "" : method.getValue().stringifiedData);
-            }
-        }
-
-        /**
-         * Checks whether the given payment methods and data match the previously queried payment
-         * methods and data.
-         *
-         * @param methods The map of the payment methods that are being queried to the corresponding
-         *                payment method data.
-         * @return True if the given methods and data match the previously queried payment methods
-         *         and data.
-         */
-        public boolean matchesPaymentMethods(Map<String, PaymentMethodData> methods) {
-            if (!mMethods.keySet().equals(methods.keySet())) return false;
-
-            for (Map.Entry<String, String> thisMethod : mMethods.entrySet()) {
-                PaymentMethodData otherMethod = methods.get(thisMethod.getKey());
-                String otherData = otherMethod == null ? "" : otherMethod.stringifiedData;
-                if (!thisMethod.getValue().equals(otherData)) return false;
-            }
-
-            return true;
-        }
-
-        /** @param response Whether payment can be made. */
-        public void notifyObserversOfResponse(boolean response) {
-            for (PaymentRequestImpl observer : mObservers) {
-                observer.respondCanMakePaymentQuery(response);
-            }
-            mObservers.clear();
-        }
-
-        /** @param observer The observer to notify when the query response is known. */
-        public void addObserver(PaymentRequestImpl observer) {
-            mObservers.add(observer);
-        }
+        void onPaymentRequestServiceHasEnrolledInstrumentQueryResponded();
     }
 
     /** Limit in the number of suggested items in a section. */
@@ -233,9 +182,6 @@ public class PaymentRequestImpl
                 return compareInstrumentsByFrecency(b, a);
             };
 
-    /** Every origin can call canMakePayment() every 30 minutes. */
-    private static final int CAN_MAKE_PAYMENT_QUERY_PERIOD_MS = 30 * 60 * 1000;
-
     private static PaymentRequestServiceObserverForTest sObserverForTest;
     private static boolean sIsLocalCanMakePaymentQueryQuotaEnforcedForTest;
 
@@ -244,14 +190,6 @@ public class PaymentRequestImpl
      * one PaymentRequest UI per browser process.
      */
     private static boolean sIsAnyPaymentRequestShowing;
-
-    /**
-     * In-memory mapping of the origins of iframes that have recently called canMakePayment() to the
-     * list of the payment methods that were being queried. Used for throttling the usage of this
-     * call. The mapping is shared among all instances of PaymentRequestImpl in the browser process
-     * on UI thread. The user can reset the throttling mechanism by restarting the browser.
-     */
-    private static Map<String, CanMakePaymentQuery> sCanMakePaymentQueries;
 
     /** Monitors changes in the TabModelSelector. */
     private final TabModelSelectorObserver mSelectorObserver = new EmptyTabModelSelectorObserver() {
@@ -283,6 +221,8 @@ public class PaymentRequestImpl
     private final boolean mIsIncognito;
 
     private PaymentRequestClient mClient;
+    private boolean mIsCanMakePaymentResponsePending;
+    private boolean mIsHasEnrolledInstrumentResponsePending;
     private boolean mIsCurrentPaymentRequestShowing;
 
     /**
@@ -358,7 +298,7 @@ public class PaymentRequestImpl
      * True after at least one usable payment instrument has been found. Should be read only after
      * all payment apps have been queried.
      */
-    private boolean mCanMakePayment;
+    private boolean mHasEnrolledInstrument;
 
     /**
      * True if we should skip showing PaymentRequest UI.
@@ -406,9 +346,6 @@ public class PaymentRequestImpl
         mCardEditor = new CardEditor(mWebContents, mAddressEditor, sObserverForTest);
 
         mJourneyLogger = new JourneyLogger(mIsIncognito, mWebContents);
-
-        if (sCanMakePaymentQueries == null) sCanMakePaymentQueries = new ArrayMap<>();
-
         mCurrencyFormatterMap = new HashMap<>();
     }
 
@@ -667,6 +604,15 @@ public class PaymentRequestImpl
         mObservedTabModelSelector.addObserver(mSelectorObserver);
         mObservedTabModel.addObserver(mTabModelObserver);
 
+        // Only the currently selected tab is allowed to show the payment UI.
+        if (TabModelUtils.getCurrentWebContents(mObservedTabModel) != mWebContents) {
+            mJourneyLogger.setNotShown(NotShownReason.OTHER);
+            disconnectFromClientWithDebugMessage(
+                    "Background tab is not allowed to show PaymentRequest UI");
+            if (sObserverForTest != null) sObserverForTest.onPaymentRequestServiceShowFailed();
+            return;
+        }
+
         mIsUserGestureShow = isUserGesture;
         buildUI(chromeActivity);
         if (!mShouldSkipShowingPaymentRequestUi) mUI.show();
@@ -750,11 +696,12 @@ public class PaymentRequestImpl
             }
         }
 
-        if (queryApps.isEmpty()) {
-            CanMakePaymentQuery query = sCanMakePaymentQueries.get(getCanMakePaymentId());
-            if (query != null && query.matchesPaymentMethods(mMethodData)) {
-                query.notifyObserversOfResponse(mCanMakePayment);
-            }
+        if (mIsCanMakePaymentResponsePending) {
+            respondCanMakePaymentQuery(mArePaymentMethodsSupported);
+        }
+
+        if (mIsHasEnrolledInstrumentResponsePending && queryApps.isEmpty()) {
+            respondHasEnrolledInstrumentQuery(mHasEnrolledInstrument);
         }
 
         if (disconnectIfNoPaymentMethodsSupported()) return;
@@ -801,6 +748,14 @@ public class PaymentRequestImpl
             String canDedupedApplicationId = canDedupedApplicationIdUri.toString();
             if (TextUtils.isEmpty(canDedupedApplicationId)) continue;
             canDedupedApplicationIds.add(canDedupedApplicationId);
+            // Add the trailing slash, because Service worker registration scope is a directory path
+            // that must end with a '/' (e.g., "https://google.com/pay/"), whereas
+            // "canDedupedApplicationIdUri" is derived from the native Android payment app's default
+            // URL-based payment method name that may not necessarily specify the trailing slash
+            // (e.g., "https://google.com/pay").
+            if (canDedupedApplicationId.charAt(canDedupedApplicationId.length() - 1) != '/') {
+                canDedupedApplicationIds.add(canDedupedApplicationId + '/');
+            }
         }
         for (String appId : canDedupedApplicationIds) {
             for (int i = 0; i < mApps.size(); i++) {
@@ -912,7 +867,9 @@ public class PaymentRequestImpl
         }
         mRawLineItems = Collections.unmodifiableList(Arrays.asList(details.displayItems));
 
-        mUiShippingOptions = getShippingOptions(details.shippingOptions);
+        if (mUiShippingOptions == null || details.shippingOptions != null) {
+            mUiShippingOptions = getShippingOptions(details.shippingOptions);
+        }
 
         for (int i = 0; i < details.modifiers.length; i++) {
             PaymentDetailsModifier modifier = details.modifiers[i];
@@ -1505,9 +1462,7 @@ public class PaymentRequestImpl
             return;
         }
 
-        Intent intent = PreferencesLauncher.createIntentForSettingsPage(
-                context, MainPreferences.class.getName());
-        context.startActivity(intent);
+        PreferencesLauncher.launchSettingsPage(context, MainPreferences.class);
     }
 
     @Override
@@ -1582,60 +1537,64 @@ public class PaymentRequestImpl
     public void canMakePayment() {
         if (mClient == null) return;
 
-        final String canMakePaymentId = getCanMakePaymentId();
-        CanMakePaymentQuery query = sCanMakePaymentQueries.get(canMakePaymentId);
-        if (query == null) {
-            // If there has not been a canMakePayment() query in the last 30 minutes, take a note
-            // that one has happened just now. Remember the payment method names and the
-            // corresponding data for the next 30 minutes. Forget about it after the 30 minute
-            // period expires.
-            query = new CanMakePaymentQuery(Collections.unmodifiableMap(mMethodData));
-            sCanMakePaymentQueries.put(canMakePaymentId, query);
-            mHandler.postDelayed(() -> sCanMakePaymentQueries.remove(canMakePaymentId),
-                    CAN_MAKE_PAYMENT_QUERY_PERIOD_MS);
-        } else if (shouldEnforceCanMakePaymentQueryQuota()
-                && !query.matchesPaymentMethods(Collections.unmodifiableMap(mMethodData))) {
-            // If there has been a canMakePayment() query in the last 30 minutes, but the previous
-            // payment method names and the corresponding data don't match, enforce the
-            // canMakePayment() query quota (unless the quota is turned off).
-            mClient.onCanMakePayment(CanMakePaymentQueryResult.QUERY_QUOTA_EXCEEDED);
-            if (sObserverForTest != null) {
-                sObserverForTest.onPaymentRequestServiceCanMakePaymentQueryResponded();
-            }
-            return;
+        if (isFinishedQueryingPaymentApps()) {
+            respondCanMakePaymentQuery(mArePaymentMethodsSupported);
+        } else {
+            mIsCanMakePaymentResponsePending = true;
         }
-
-        query.addObserver(this);
-        if (isFinishedQueryingPaymentApps()) query.notifyObserversOfResponse(mCanMakePayment);
     }
 
     private void respondCanMakePaymentQuery(boolean response) {
         if (mClient == null) return;
 
-        boolean isIgnoringQueryQuota = false;
-        if (!shouldEnforceCanMakePaymentQueryQuota()) {
-            CanMakePaymentQuery query = sCanMakePaymentQueries.get(getCanMakePaymentId());
-            // The cached query may have expired between instantiation of PaymentRequest and
-            // finishing the query of the payment apps.
-            if (query != null) {
-                isIgnoringQueryQuota =
-                        !query.matchesPaymentMethods(Collections.unmodifiableMap(mMethodData));
-            }
-        }
+        mIsCanMakePaymentResponsePending = false;
+        mClient.onCanMakePayment(response ? CanMakePaymentQueryResult.CAN_MAKE_PAYMENT
+                                          : CanMakePaymentQueryResult.CANNOT_MAKE_PAYMENT);
 
-        if (isIgnoringQueryQuota) {
-            mClient.onCanMakePayment(response
-                            ? CanMakePaymentQueryResult.WARNING_CAN_MAKE_PAYMENT
-                            : CanMakePaymentQueryResult.WARNING_CANNOT_MAKE_PAYMENT);
+        // TODO(https://crbug.com/915907): emit JourneyLogger event once the event names are
+        // updated.
+
+        if (sObserverForTest != null) {
+            sObserverForTest.onPaymentRequestServiceCanMakePaymentQueryResponded();
+        }
+    }
+
+    /**
+     * Called by the merchant website to check if the user has complete payment instruments.
+     */
+    @Override
+    public void hasEnrolledInstrument() {
+        if (mClient == null) return;
+
+        if (isFinishedQueryingPaymentApps()) {
+            respondHasEnrolledInstrumentQuery(mHasEnrolledInstrument);
         } else {
-            mClient.onCanMakePayment(response ? CanMakePaymentQueryResult.CAN_MAKE_PAYMENT
-                                              : CanMakePaymentQueryResult.CANNOT_MAKE_PAYMENT);
+            mIsHasEnrolledInstrumentResponsePending = true;
+        }
+    }
+
+    private void respondHasEnrolledInstrumentQuery(boolean response) {
+        if (mClient == null) return;
+
+        mIsHasEnrolledInstrumentResponsePending = false;
+
+        if (CanMakePaymentQuery.canQuery(
+                    mWebContents, mTopLevelOrigin, mPaymentRequestOrigin, mMethodData)) {
+            mClient.onHasEnrolledInstrument(response
+                            ? HasEnrolledInstrumentQueryResult.HAS_ENROLLED_INSTRUMENT
+                            : HasEnrolledInstrumentQueryResult.HAS_NO_ENROLLED_INSTRUMENT);
+        } else if (shouldEnforceCanMakePaymentQueryQuota()) {
+            mClient.onHasEnrolledInstrument(HasEnrolledInstrumentQueryResult.QUERY_QUOTA_EXCEEDED);
+        } else {
+            mClient.onHasEnrolledInstrument(response
+                            ? HasEnrolledInstrumentQueryResult.WARNING_HAS_ENROLLED_INSTRUMENT
+                            : HasEnrolledInstrumentQueryResult.WARNING_HAS_NO_ENROLLED_INSTRUMENT);
         }
 
         mJourneyLogger.setCanMakePaymentValue(response || mIsIncognito);
 
         if (sObserverForTest != null) {
-            sObserverForTest.onPaymentRequestServiceCanMakePaymentQueryResponded();
+            sObserverForTest.onPaymentRequestServiceHasEnrolledInstrumentQueryResponded();
         }
     }
 
@@ -1645,7 +1604,11 @@ public class PaymentRequestImpl
      * localhost and file:// scheme origins to verify its behavior.
      */
     private boolean shouldEnforceCanMakePaymentQueryQuota() {
-        return !OriginSecurityChecker.isOriginLocalhostOrFile(mWebContents.getLastCommittedUrl())
+        // If |mWebContents| is destroyed, don't bother checking the localhost or file:// scheme
+        // exemption. It doesn't really matter anyways.
+        return mWebContents.isDestroyed()
+                || !OriginSecurityChecker.isOriginLocalhostOrFile(
+                        mWebContents.getLastCommittedUrl())
                 || sIsLocalCanMakePaymentQueryQuotaEnforcedForTest;
     }
 
@@ -1688,7 +1651,7 @@ public class PaymentRequestImpl
                 if (!instrumentMethodNames.isEmpty()) {
                     mHideServerAutofillInstruments |=
                             instrument.isServerAutofillInstrumentReplacement();
-                    mCanMakePayment |= instrument.canMakePayment();
+                    mHasEnrolledInstrument |= instrument.canMakePayment();
                     mPendingInstruments.add(instrument);
                 } else {
                     instrument.dismissInstrument();
@@ -1697,7 +1660,7 @@ public class PaymentRequestImpl
         }
 
         // Always return false when can make payment is disabled.
-        mCanMakePayment &=
+        mHasEnrolledInstrument &=
                 PrefServiceBridge.getInstance().getBoolean(Pref.CAN_MAKE_PAYMENT_ENABLED);
 
         int additionalTextResourceId = app.getAdditionalAppTextResourceId();
@@ -1741,9 +1704,8 @@ public class PaymentRequestImpl
                 ? 0
                 : SectionInformation.NO_SELECTION;
 
-        CanMakePaymentQuery query = sCanMakePaymentQueries.get(getCanMakePaymentId());
-        if (query != null && query.matchesPaymentMethods(mMethodData)) {
-            query.notifyObserversOfResponse(mCanMakePayment);
+        if (mIsHasEnrolledInstrumentResponsePending) {
+            respondHasEnrolledInstrumentQuery(mHasEnrolledInstrument);
         }
 
         // The list of payment instruments is ready to display.
@@ -1773,11 +1735,6 @@ public class PaymentRequestImpl
         SettingsAutofillAndPaymentsObserver.getInstance().registerObserver(this);
 
         triggerPaymentAppUiSkipIfApplicable();
-    }
-
-    /** @return The identifier for the CanMakePayment query to use. */
-    private String getCanMakePaymentId() {
-        return mPaymentRequestOrigin + ":" + mTopLevelOrigin;
     }
 
     /**

@@ -19,9 +19,10 @@
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/sync/base/cancelation_signal.h"
@@ -425,7 +426,7 @@ class SyncerTest : public testing::Test,
         const base::Time& now_minus_2h =
             base::Time::Now() - base::TimeDelta::FromHours(2);
         entry.PutMtime(now_plus_30s);
-        for (size_t i = 0; i < arraysize(test->features); ++i) {
+        for (size_t i = 0; i < base::size(test->features); ++i) {
           switch (test->features[i]) {
             case LIST_END:
               break;
@@ -526,7 +527,7 @@ class SyncerTest : public testing::Test,
     ASSERT_FALSE(nudge_tracker_.IsGetUpdatesRequired());
   }
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment task_environment_;
 
   // Some ids to aid tests. Only the root one's value is specific. The rest
   // are named for test clarity.
@@ -749,7 +750,8 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
   {
     const StatusController& status_controller = cycle_->status_controller();
     // Expect success.
-    EXPECT_EQ(SYNCER_OK, status_controller.model_neutral_state().commit_result);
+    EXPECT_EQ(SyncerError::SYNCER_OK,
+              status_controller.model_neutral_state().commit_result.value());
     // None should be unsynced anymore.
     syncable::ReadTransaction rtrans(FROM_HERE, directory());
     VERIFY_ENTRY(1, false, false, false, 0, 21, 21, ids_, &rtrans);
@@ -3078,8 +3080,9 @@ TEST_F(SyncerTest, CommitManyItemsInOneGo_PostBufferFail) {
   EXPECT_FALSE(SyncShareNudge());
 
   EXPECT_EQ(1U, mock_server_->commit_messages().size());
-  EXPECT_EQ(SYNC_SERVER_ERROR,
-            cycle_->status_controller().model_neutral_state().commit_result);
+  EXPECT_EQ(
+      SyncerError::SYNC_SERVER_ERROR,
+      cycle_->status_controller().model_neutral_state().commit_result.value());
   EXPECT_EQ(items_to_commit - kDefaultMaxCommitBatchSize,
             directory()->unsynced_entity_count());
 }
@@ -4863,7 +4866,8 @@ TEST_F(SyncerTest, GetKeySuccess) {
 
   SyncShareConfigure();
 
-  EXPECT_EQ(SYNCER_OK, cycle_->status_controller().last_get_key_result());
+  EXPECT_EQ(SyncerError::SYNCER_OK,
+            cycle_->status_controller().last_get_key_result().value());
   {
     syncable::ReadTransaction rtrans(FROM_HERE, directory());
     EXPECT_FALSE(directory()->GetNigoriHandler()->NeedKeystoreKey(&rtrans));
@@ -4879,7 +4883,8 @@ TEST_F(SyncerTest, GetKeyEmpty) {
   mock_server_->SetKeystoreKey(std::string());
   SyncShareConfigure();
 
-  EXPECT_NE(SYNCER_OK, cycle_->status_controller().last_get_key_result());
+  EXPECT_NE(SyncerError::SYNCER_OK,
+            cycle_->status_controller().last_get_key_result().value());
   {
     syncable::ReadTransaction rtrans(FROM_HERE, directory());
     EXPECT_TRUE(directory()->GetNigoriHandler()->NeedKeystoreKey(&rtrans));

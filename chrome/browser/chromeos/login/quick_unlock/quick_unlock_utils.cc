@@ -4,7 +4,13 @@
 
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_utils.h"
 
+#include <string>
+#include <vector>
+
 #include "base/feature_list.h"
+#include "base/files/file_path.h"
+#include "base/strings/string_split.h"
+#include "base/system/sys_info.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
@@ -28,6 +34,7 @@ bool disable_pin_by_policy_for_testing_ = false;
 const char kQuickUnlockWhitelistOptionAll[] = "all";
 const char kQuickUnlockWhitelistOptionPin[] = "PIN";
 const char kQuickUnlockWhitelistOptionFingerprint[] = "FINGERPRINT";
+const base::FilePath kFingerprintSensorPath = base::FilePath("/dev/cros_fp");
 
 // Default minimum PIN length. Policy can increase or decrease this value.
 constexpr int kDefaultMinimumPinLength = 6;
@@ -98,27 +105,41 @@ bool IsPinEnabled(PrefService* pref_service) {
   if (enable_for_testing_)
     return true;
 
-  // TODO(jdufault): Disable PIN for supervised users until we allow the owner
-  // to set the PIN. See crbug.com/632797.
+  // PIN is disabled for legacy supervised user, but allowed to child user.
   user_manager::User* user = user_manager::UserManager::Get()->GetActiveUser();
-  if (user && user->IsSupervised())
+  if (user && user->GetType() == user_manager::UserType::USER_TYPE_SUPERVISED)
     return false;
 
   // Enable quick unlock only if the switch is present.
   return base::FeatureList::IsEnabled(features::kQuickUnlockPin);
 }
 
-bool IsFingerprintEnabled() {
+// Returns true if the fingerprint sensor is on the keyboard.
+// TODO(crbug.com/938738): Replace this disallowed board name reference
+// with a flag that's determined based on settings from chromeos-config.
+bool IsFingerprintReaderOnKeyboard() {
+  const std::vector<std::string> board =
+      base::SplitString(base::SysInfo::GetLsbReleaseBoard(), "-",
+                        base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  const std::string board_name = board[0];
+  return board_name == "nami";
+}
+
+bool IsFingerprintEnabled(Profile* profile) {
   if (enable_for_testing_)
     return true;
 
-  // Disable fingerprint for secondary user.
-  user_manager::UserManager* user_manager = user_manager::UserManager::Get();
-  if (user_manager->GetActiveUser() != user_manager->GetPrimaryUser())
+  // Disable fingerprint if the device does not have a fingerprint reader
+  // TODO(yulunwu): http://crbug.com/922270
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  if (!base::PathExists(kFingerprintSensorPath))
     return false;
 
-  // Disable fingerprint if forbidden by policy.
-  const Profile* profile = ProfileManager::GetPrimaryUserProfile();
+  // Disable fingerprint if the profile does not belong to the primary user.
+  if (profile != ProfileManager::GetPrimaryUserProfile())
+    return false;
+
+  // Disable fingerprint if disallowed by policy.
   if (IsFingerprintDisabledByPolicy(profile->GetPrefs()))
     return false;
 
@@ -128,6 +149,10 @@ bool IsFingerprintEnabled() {
 
 void EnableForTesting() {
   enable_for_testing_ = true;
+}
+
+bool IsEnabledForTesting() {
+  return enable_for_testing_;
 }
 
 void DisablePinByPolicyForTesting(bool disable) {

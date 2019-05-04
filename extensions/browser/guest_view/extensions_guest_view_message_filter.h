@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <map>
 #include <string>
 
 #include "base/macros.h"
@@ -31,7 +32,6 @@ class GuestViewManager;
 }
 
 namespace extensions {
-
 // This class filters out incoming extensions GuestView-specific IPC messages
 // from thw renderer process. It is created on the UI thread. Messages may be
 // handled on the IO thread or the UI thread.
@@ -44,8 +44,10 @@ class ExtensionsGuestViewMessageFilter
                                    content::BrowserContext* context);
 
  private:
+  class FrameNavigationHelper;
   friend class content::BrowserThread;
   friend class base::DeleteHelper<ExtensionsGuestViewMessageFilter>;
+  friend class ExtensionsGuestViewMessageFilter::FrameNavigationHelper;
 
   ~ExtensionsGuestViewMessageFilter() override;
 

@@ -12,6 +12,7 @@
 #include "components/offline_pages/core/background/request_queue_store.h"
 #include "components/offline_pages/core/background/request_queue_task_test_base.h"
 #include "components/offline_pages/core/background/test_request_queue_store.h"
+#include "components/offline_pages/core/offline_clock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace offline_pages {
@@ -50,13 +51,13 @@ class GetRequestsTaskTest : public RequestQueueTaskTestBase {
 };
 
 void GetRequestsTaskTest::AddItemsToStore(RequestQueueStore* store) {
-  base::Time creation_time = base::Time::Now();
+  base::Time creation_time = OfflineTimeNow();
   SavePageRequest request_1(kRequestId1, kUrl1, kClientId1, creation_time,
                             true);
   store->AddRequest(request_1,
                     base::BindOnce(&GetRequestsTaskTest::AddRequestDone,
                                    base::Unretained(this)));
-  creation_time = base::Time::Now();
+  creation_time = OfflineTimeNow();
   SavePageRequest request_2(kRequestId2, kUrl2, kClientId2, creation_time,
                             true);
   store->AddRequest(request_2,

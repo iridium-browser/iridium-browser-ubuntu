@@ -36,10 +36,27 @@
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_offset_mapping.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_physical_line_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_physical_text_fragment.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_block_node.h"
 #include "third_party/blink/renderer/core/paint/ng/ng_paint_fragment.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/platform/fonts/shaping/shape_result_view.h"
 
 namespace blink {
+
+namespace {
+
+// TODO(yoichio): Share condition between NGOffsetMapping::AcceptsPosition.
+bool ShouldUseLayoutNGTextContent(const Node& node) {
+  LayoutObject* layout_object = node.GetLayoutObject();
+  DCHECK(layout_object);
+  if (layout_object->IsInline())
+    return layout_object->ContainingNGBlockFlow();
+  if (LayoutBlockFlow* block_flow = ToLayoutBlockFlowOrNull(layout_object))
+    return NGBlockNode::CanUseNewLayout(*block_flow);
+  return false;
+}
+
+}  // namespace
 
 // The current selection to be painted is represented as 2 pairs of
 // (Node, offset).
@@ -93,7 +110,7 @@ class SelectionPaintRange : public GarbageCollected<SelectionPaintRange> {
 LayoutSelection::LayoutSelection(FrameSelection& frame_selection)
     : frame_selection_(&frame_selection),
       has_pending_selection_(false),
-      paint_range_(new SelectionPaintRange) {}
+      paint_range_(MakeGarbageCollected<SelectionPaintRange>()) {}
 
 enum class SelectionMode {
   kNone,
@@ -159,7 +176,8 @@ struct OldSelectedNodes {
   STACK_ALLOCATED();
 
  public:
-  OldSelectedNodes() : paint_range(new SelectionPaintRange) {}
+  OldSelectedNodes()
+      : paint_range(MakeGarbageCollected<SelectionPaintRange>()) {}
   OldSelectedNodes(OldSelectedNodes&& other) {
     paint_range = other.paint_range;
     selected_map = std::move(other.selected_map);
@@ -180,7 +198,8 @@ struct NewPaintRangeAndSelectedNodes {
   STACK_ALLOCATED();
 
  public:
-  NewPaintRangeAndSelectedNodes() : paint_range(new SelectionPaintRange) {}
+  NewPaintRangeAndSelectedNodes()
+      : paint_range(MakeGarbageCollected<SelectionPaintRange>()) {}
   NewPaintRangeAndSelectedNodes(
       SelectionPaintRange* passed_paint_range,
       HeapHashSet<Member<const Node>>&& passed_selected_objects)
@@ -280,9 +299,10 @@ static void SetSelectionStateIfNeeded(const Node& node, SelectionState state) {
 static void SetShouldInvalidateSelection(
     const NewPaintRangeAndSelectedNodes& new_range,
     const OldSelectedNodes& old_selected_objects) {
-  // We invalidate each LayoutObject in new SelectionPaintRange which
-  // has SelectionState of kStart, kEnd, kStartAndEnd, or kInside
-  // and is not in old SelectionPaintRange.
+  // We invalidate each LayoutObject in
+  // MakeGarbageCollected<SelectionPaintRange> which has SelectionState of
+  // kStart, kEnd, kStartAndEnd, or kInside and is not in old
+  // SelectionPaintRange.
   for (const Node* node : new_range.selected_objects) {
     if (old_selected_objects.selected_map.Contains(node))
       continue;
@@ -464,7 +484,7 @@ static base::Optional<unsigned> GetTextContentOffset(const Position& position) {
 #if DCHECK_IS_ON()
   DCHECK(IsPositionValidText(position));
 #endif
-  DCHECK(position.AnchorNode()->GetLayoutObject()->EnclosingNGBlockFlow());
+  DCHECK(ShouldUseLayoutNGTextContent(*position.AnchorNode()));
   const NGOffsetMapping* const offset_mapping =
       NGOffsetMapping::GetFor(position);
   DCHECK(offset_mapping);
@@ -514,18 +534,18 @@ static SelectionPaintRange* ComputeNewPaintRange(
   const Node& start_node = *paint_range.start_node;
   // If LayoutObject is not in NG, use legacy offset.
   const base::Optional<unsigned> start_offset =
-      start_node.GetLayoutObject()->EnclosingNGBlockFlow()
+      ShouldUseLayoutNGTextContent(start_node)
           ? GetTextContentOffsetStart(start_node, paint_range.start_offset)
           : paint_range.start_offset;
 
   const Node& end_node = *paint_range.end_node;
   const base::Optional<unsigned> end_offset =
-      end_node.GetLayoutObject()->EnclosingNGBlockFlow()
+      ShouldUseLayoutNGTextContent(end_node)
           ? GetTextContentOffsetEnd(end_node, paint_range.end_offset)
           : paint_range.end_offset;
 
-  return new SelectionPaintRange(*paint_range.start_node, start_offset,
-                                 *paint_range.end_node, end_offset);
+  return MakeGarbageCollected<SelectionPaintRange>(
+      *paint_range.start_node, start_offset, *paint_range.end_node, end_offset);
 }
 
 // ClampOffset modifies |offset| fixed in a range of |text_fragment| start/end
@@ -547,7 +567,7 @@ static bool IsLastLineInInlineBlock(const NGPaintFragment& line) {
   NGPaintFragment* parent = line.Parent();
   if (!parent->PhysicalFragment().IsAtomicInline())
     return false;
-  return parent->Children().back().get() == &line;
+  return &parent->Children().back() == &line;
 }
 
 static bool IsBeforeSoftLineBreak(const NGPaintFragment& fragment) {
@@ -569,9 +589,8 @@ static bool IsBeforeSoftLineBreak(const NGPaintFragment& fragment) {
   // Even If |fragment| is before linebreak, if its direction differs to line
   // direction, we don't paint line break. See
   // paint/selection/text-selection-newline-mixed-ltr-rtl.html.
-  const ShapeResult* shape_result =
-      ToNGPhysicalTextFragment(fragment.PhysicalFragment()).TextShapeResult();
-  return physical_line_box.BaseDirection() == shape_result->Direction();
+  return physical_line_box.BaseDirection() ==
+         fragment.PhysicalFragment().ResolvedDirection();
 }
 
 static Text* AssociatedTextNode(const LayoutText& text) {
@@ -773,8 +792,8 @@ static NewPaintRangeAndSelectedNodes CalcSelectionRangeAndSetSelectionState(
     selected_objects.insert(end_node);
   }
 
-  SelectionPaintRange* new_range =
-      new SelectionPaintRange(*start_node, start_offset, *end_node, end_offset);
+  SelectionPaintRange* new_range = MakeGarbageCollected<SelectionPaintRange>(
+      *start_node, start_offset, *end_node, end_offset);
   if (!RuntimeEnabledFeatures::LayoutNGEnabled())
     return {new_range, std::move(selected_objects)};
   return {ComputeNewPaintRange(*new_range), std::move(selected_objects)};

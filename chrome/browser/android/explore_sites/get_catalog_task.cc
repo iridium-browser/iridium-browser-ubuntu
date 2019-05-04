@@ -13,15 +13,21 @@
 namespace explore_sites {
 namespace {
 
-static const char kSelectCategorySql[] = R"(SELECT category_id, type, label
+static const char kSelectCategorySql[] = R"(SELECT
+category_id, type, label, ntp_shown_count, activityCount.count
 FROM categories
+LEFT JOIN (SELECT COUNT(url) as count, category_type
+FROM activity GROUP BY category_type) AS activityCount
+ON categories.type = activityCount.category_type
 WHERE version_token = ?
 ORDER BY category_id ASC;)";
 
-static const char kSelectSiteSql[] = R"(SELECT site_id, sites.url, title
+static const char kSelectSiteSql[] =
+    R"(SELECT site_id, sites.url, title,
+    site_blacklist.url IS NOT NULL as blacklisted
 FROM sites
 LEFT JOIN site_blacklist ON (sites.url = site_blacklist.url)
-WHERE category_id = ? AND site_blacklist.url IS NULL;)";
+WHERE category_id = ? ;)";
 
 const char kDeleteSiteSql[] = R"(DELETE FROM sites
 WHERE category_id NOT IN
@@ -121,8 +127,10 @@ GetCatalogSync(bool update_current, sql::Database* db) {
   while (category_statement.Step()) {
     result->emplace_back(category_statement.ColumnInt(0),  // category_id
                          catalog_version_token,
-                         category_statement.ColumnInt(1),      // type
-                         category_statement.ColumnString(2));  // label
+                         category_statement.ColumnInt(1),     // type
+                         category_statement.ColumnString(2),  // label
+                         category_statement.ColumnInt(3),     // ntp_shown_count
+                         category_statement.ColumnInt(4));  // interaction_count
   }
   if (!category_statement.Succeeded())
     return std::make_pair(GetCatalogStatus::kFailed, nullptr);
@@ -134,10 +142,12 @@ GetCatalogSync(bool update_current, sql::Database* db) {
     site_statement.BindInt64(0, category.category_id);
 
     while (site_statement.Step()) {
-      category.sites.emplace_back(site_statement.ColumnInt(0),  // site_id
-                                  category.category_id,
-                                  GURL(site_statement.ColumnString(1)),  // url
-                                  site_statement.ColumnString(2));  // title
+      category.sites.emplace_back(
+          site_statement.ColumnInt(0),  // site_id
+          category.category_id,
+          GURL(site_statement.ColumnString(1)),  // url
+          site_statement.ColumnString(2),        // title
+          site_statement.ColumnBool(3));         // is_blacklisted
     }
     if (!site_statement.Succeeded())
       return std::make_pair(GetCatalogStatus::kFailed, nullptr);

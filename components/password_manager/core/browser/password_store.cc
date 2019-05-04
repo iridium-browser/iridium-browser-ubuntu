@@ -26,8 +26,12 @@
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
-#include "components/password_manager/core/browser/password_syncable_service.h"
 #include "components/password_manager/core/browser/statistics_table.h"
+#include "components/password_manager/core/browser/sync/password_sync_bridge.h"
+#include "components/password_manager/core/browser/sync/password_syncable_service.h"
+#include "components/sync/driver/sync_driver_switches.h"
+#include "components/sync/model_impl/client_tag_based_model_type_processor.h"
+#include "components/sync/model_impl/proxy_model_type_controller_delegate.h"
 
 #if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
 #include "components/password_manager/core/browser/password_store_signin_notifier.h"
@@ -347,6 +351,11 @@ bool PasswordStore::ScheduleTask(base::OnceClosure task) {
   return false;
 }
 
+scoped_refptr<base::SequencedTaskRunner>
+PasswordStore::GetBackgroundTaskRunner() {
+  return background_task_runner_;
+}
+
 bool PasswordStore::IsAbleToSavePasswords() const {
   return init_status_ == InitStatus::kSuccess;
 }
@@ -367,6 +376,20 @@ PasswordStore::GetPasswordSyncableService() {
   DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
   DCHECK(syncable_service_);
   return syncable_service_->AsWeakPtr();
+}
+
+std::unique_ptr<syncer::ProxyModelTypeControllerDelegate>
+PasswordStore::CreateSyncControllerDelegate() {
+  DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
+  // Note that a callback is bound for
+  // GetSyncControllerDelegateOnBackgroundSequence() because this getter itself
+  // must also run in the backend sequence, and the proxy object below will take
+  // care of that.
+  return std::make_unique<syncer::ProxyModelTypeControllerDelegate>(
+      background_task_runner_,
+      base::BindRepeating(
+          &PasswordStore::GetSyncControllerDelegateOnBackgroundSequence,
+          base::Unretained(this)));
 }
 
 // TODO(crbug.com/706392): Fix password reuse detection for Android.
@@ -487,9 +510,16 @@ PasswordStore::CreateBackgroundTaskRunner() const {
 bool PasswordStore::InitOnBackgroundSequence(
     const syncer::SyncableService::StartSyncFlare& flare) {
   DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
-  DCHECK(!syncable_service_);
-  syncable_service_.reset(new PasswordSyncableService(this));
-  syncable_service_->InjectStartSyncFlare(flare);
+  if (base::FeatureList::IsEnabled(switches::kSyncUSSPasswords)) {
+    sync_bridge_.reset(new PasswordSyncBridge(
+        std::make_unique<syncer::ClientTagBasedModelTypeProcessor>(
+            syncer::PASSWORDS, base::DoNothing()),
+        /*password_store_sync=*/this));
+  } else {
+    DCHECK(!syncable_service_);
+    syncable_service_.reset(new PasswordSyncableService(this));
+    syncable_service_->InjectStartSyncFlare(flare);
+  }
 // TODO(crbug.com/706392): Fix password reuse detection for Android.
 #if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
   reuse_detector_ = new PasswordReuseDetector;
@@ -555,6 +585,8 @@ void PasswordStore::NotifyLoginsChanged(
     observers_->Notify(FROM_HERE, &Observer::OnLoginsChanged, changes);
     if (syncable_service_)
       syncable_service_->ActOnPasswordStoreChanges(changes);
+    if (sync_bridge_)
+      sync_bridge_->ActOnPasswordStoreChanges(changes);
 // TODO(crbug.com/706392): Fix password reuse detection for Android.
 #if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
     if (reuse_detector_)
@@ -638,36 +670,55 @@ void PasswordStore::Schedule(
       base::BindOnce(func, this, std::move(request)));
 }
 
-void PasswordStore::WrapModificationTask(ModificationTask task) {
-  PasswordStoreChangeList changes = task.Run();
-  NotifyLoginsChanged(changes);
-}
-
 void PasswordStore::AddLoginInternal(const PasswordForm& form) {
   SCOPED_UMA_HISTOGRAM_TIMER("PasswordManager.StorePerformance.AddLogin");
+  BeginTransaction();
   PasswordStoreChangeList changes = AddLoginImpl(form);
   NotifyLoginsChanged(changes);
+  // Sync metadata get updated in NotifyLoginsChanged(). Therefore,
+  // CommitTransaction() must be called after NotifyLoginsChanged(), because
+  // sync codebase needs to update metadata atomically together with the login
+  // data.
+  CommitTransaction();
 }
 
 void PasswordStore::UpdateLoginInternal(const PasswordForm& form) {
   SCOPED_UMA_HISTOGRAM_TIMER("PasswordManager.StorePerformance.UpdateLogin");
+  BeginTransaction();
   PasswordStoreChangeList changes = UpdateLoginImpl(form);
   NotifyLoginsChanged(changes);
+  // Sync metadata get updated in NotifyLoginsChanged(). Therefore,
+  // CommitTransaction() must be called after NotifyLoginsChanged(), because
+  // sync codebase needs to update metadata atomically together with the login
+  // data.
+  CommitTransaction();
 }
 
 void PasswordStore::RemoveLoginInternal(const PasswordForm& form) {
   SCOPED_UMA_HISTOGRAM_TIMER("PasswordManager.StorePerformance.RemoveLogin");
+  BeginTransaction();
   PasswordStoreChangeList changes = RemoveLoginImpl(form);
   NotifyLoginsChanged(changes);
+  // Sync metadata get updated in NotifyLoginsChanged(). Therefore,
+  // CommitTransaction() must be called after NotifyLoginsChanged(), because
+  // sync codebase needs to update metadata atomically together with the login
+  // data.
+  CommitTransaction();
 }
 
 void PasswordStore::UpdateLoginWithPrimaryKeyInternal(
     const PasswordForm& new_form,
     const PasswordForm& old_primary_key) {
+  BeginTransaction();
   PasswordStoreChangeList all_changes = RemoveLoginImpl(old_primary_key);
   PasswordStoreChangeList changes = AddLoginImpl(new_form);
   all_changes.insert(all_changes.end(), changes.begin(), changes.end());
   NotifyLoginsChanged(all_changes);
+  // Sync metadata get updated in NotifyLoginsChanged(). Therefore,
+  // CommitTransaction() must be called after NotifyLoginsChanged(), because
+  // sync codebase needs to update metadata atomically together with the login
+  // data.
+  CommitTransaction();
 }
 
 void PasswordStore::RemoveLoginsByURLAndTimeInternal(
@@ -675,9 +726,15 @@ void PasswordStore::RemoveLoginsByURLAndTimeInternal(
     base::Time delete_begin,
     base::Time delete_end,
     const base::Closure& completion) {
+  BeginTransaction();
   PasswordStoreChangeList changes =
       RemoveLoginsByURLAndTimeImpl(url_filter, delete_begin, delete_end);
   NotifyLoginsChanged(changes);
+  // Sync metadata get updated in NotifyLoginsChanged(). Therefore,
+  // CommitTransaction() must be called after NotifyLoginsChanged(), because
+  // sync codebase needs to update metadata atomically together with the login
+  // data.
+  CommitTransaction();
   if (!completion.is_null())
     main_task_runner_->PostTask(FROM_HERE, completion);
 }
@@ -686,18 +743,30 @@ void PasswordStore::RemoveLoginsCreatedBetweenInternal(
     base::Time delete_begin,
     base::Time delete_end,
     const base::Closure& completion) {
+  BeginTransaction();
   PasswordStoreChangeList changes =
       RemoveLoginsCreatedBetweenImpl(delete_begin, delete_end);
   NotifyLoginsChanged(changes);
+  // Sync metadata get updated in NotifyLoginsChanged(). Therefore,
+  // CommitTransaction() must be called after NotifyLoginsChanged(), because
+  // sync codebase needs to update metadata atomically together with the login
+  // data.
+  CommitTransaction();
   if (!completion.is_null())
     main_task_runner_->PostTask(FROM_HERE, completion);
 }
 
 void PasswordStore::RemoveLoginsSyncedBetweenInternal(base::Time delete_begin,
                                                       base::Time delete_end) {
+  BeginTransaction();
   PasswordStoreChangeList changes =
       RemoveLoginsSyncedBetweenImpl(delete_begin, delete_end);
   NotifyLoginsChanged(changes);
+  // Sync metadata get updated in NotifyLoginsChanged(). Therefore,
+  // CommitTransaction() must be called after NotifyLoginsChanged(), because
+  // sync codebase needs to update metadata atomically together with the login
+  // data.
+  CommitTransaction();
 }
 
 void PasswordStore::RemoveStatisticsByOriginAndTimeInternal(
@@ -880,6 +949,7 @@ void PasswordStore::UpdateAffiliatedWebLoginsImpl(
     const PasswordForm& updated_android_form,
     const std::vector<std::string>& affiliated_web_realms) {
   DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
+  BeginTransaction();
   PasswordStoreChangeList all_changes;
   for (const std::string& affiliated_web_realm : affiliated_web_realms) {
     std::vector<std::unique_ptr<PasswordForm>> web_logins(FillMatchingLogins(
@@ -954,6 +1024,11 @@ void PasswordStore::UpdateAffiliatedWebLoginsImpl(
     }
   }
   NotifyLoginsChanged(all_changes);
+  // Sync metadata get updated in NotifyLoginsChanged(). Therefore,
+  // CommitTransaction() must be called after NotifyLoginsChanged(), because
+  // sync codebase needs to update metadata atomically together with the login
+  // data.
+  CommitTransaction();
 }
 
 void PasswordStore::ScheduleUpdateAffiliatedWebLoginsImpl(
@@ -963,9 +1038,17 @@ void PasswordStore::ScheduleUpdateAffiliatedWebLoginsImpl(
                           updated_android_form, affiliated_web_realms));
 }
 
+base::WeakPtr<syncer::ModelTypeControllerDelegate>
+PasswordStore::GetSyncControllerDelegateOnBackgroundSequence() {
+  DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
+  DCHECK(sync_bridge_);
+  return sync_bridge_->change_processor()->GetControllerDelegate();
+}
+
 void PasswordStore::DestroyOnBackgroundSequence() {
   DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
   syncable_service_.reset();
+  sync_bridge_.reset();
 // TODO(crbug.com/706392): Fix password reuse detection for Android.
 #if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
   delete reuse_detector_;

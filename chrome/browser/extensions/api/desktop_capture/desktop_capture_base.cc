@@ -17,6 +17,7 @@
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/webrtc/native_desktop_media_list.h"
 #include "chrome/browser/media/webrtc/tab_desktop_media_list.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/grit/chromium_strings.h"
@@ -153,6 +154,7 @@ bool DesktopCaptureChooseDesktopMediaFunctionBase::Execute(
   picker_params.app_name = base::UTF8ToUTF16(GetCallerDisplayName());
   picker_params.target_name = target_name;
   picker_params.request_audio = request_audio;
+  picker_params.created_by_extension = true;
   picker_->Show(picker_params, std::move(source_lists), callback);
   origin_ = origin;
   return true;

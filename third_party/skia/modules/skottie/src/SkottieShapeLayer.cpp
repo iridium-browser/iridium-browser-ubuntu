@@ -42,6 +42,10 @@ sk_sp<sksg::GeometryNode> AttachRRectGeometry(const skjson::ObjectValue& jrect,
                                               const AnimationBuilder* abuilder,
                                               AnimatorScope* ascope) {
     auto rect_node = sksg::RRect::Make();
+    rect_node->setDirection(ParseDefault(jrect["d"], -1) == 3 ? SkPath::kCCW_Direction
+                                                              : SkPath::kCW_Direction);
+    rect_node->setInitialPointIndex(2); // starting point: (Right, Top - radius.y)
+
     auto adapter = sk_make_sp<RRectAdapter>(rect_node);
 
     auto p_attached = abuilder->bindProperty<VectorValue>(jrect["p"], ascope,
@@ -68,6 +72,10 @@ sk_sp<sksg::GeometryNode> AttachEllipseGeometry(const skjson::ObjectValue& jelli
                                                 const AnimationBuilder* abuilder,
                                                 AnimatorScope* ascope) {
     auto rect_node = sksg::RRect::Make();
+    rect_node->setDirection(ParseDefault(jellipse["d"], -1) == 3 ? SkPath::kCCW_Direction
+                                                                 : SkPath::kCW_Direction);
+    rect_node->setInitialPointIndex(1); // starting point: (Center, Top)
+
     auto adapter = sk_make_sp<RRectAdapter>(rect_node);
 
     auto p_attached = abuilder->bindProperty<VectorValue>(jellipse["p"], ascope,
@@ -258,7 +266,7 @@ sk_sp<sksg::Merge> Merge(std::vector<sk_sp<sksg::GeometryNode>>&& geos, sksg::Me
     std::vector<sksg::Merge::Rec> merge_recs;
     merge_recs.reserve(geos.size());
 
-    for (const auto& geo : geos) {
+    for (auto& geo : geos) {
         merge_recs.push_back(
             {std::move(geo), merge_recs.empty() ? sksg::Merge::Mode::kMerge : mode});
     }
@@ -308,7 +316,7 @@ std::vector<sk_sp<sksg::GeometryNode>> AttachTrimGeometryEffect(
     std::vector<sk_sp<sksg::GeometryNode>> trimmed;
     trimmed.reserve(inputs.size());
     for (const auto& i : inputs) {
-        const auto trimEffect = sksg::TrimEffect::Make(i);
+        auto trimEffect = sksg::TrimEffect::Make(i);
         trimmed.push_back(trimEffect);
 
         const auto adapter = sk_make_sp<TrimEffectAdapter>(std::move(trimEffect));
@@ -336,7 +344,7 @@ std::vector<sk_sp<sksg::GeometryNode>> AttachRoundGeometryEffect(
     std::vector<sk_sp<sksg::GeometryNode>> rounded;
     rounded.reserve(geos.size());
 
-    for (const auto& g : geos) {
+    for (auto& g : geos) {
         const auto roundEffect = sksg::RoundEffect::Make(std::move(g));
         rounded.push_back(roundEffect);
 
@@ -587,7 +595,7 @@ sk_sp<sksg::RenderNode> AnimationBuilder::attachShape(const skjson::ArrayValue* 
         shape_wrapper = sksg::Group::Make(std::move(draws));
     }
 
-    sk_sp<sksg::Matrix> shape_matrix;
+    sk_sp<sksg::Transform> shape_transform;
     if (jtransform) {
         const AutoPropertyTracker apt(this, *jtransform);
 
@@ -596,8 +604,8 @@ sk_sp<sksg::RenderNode> AnimationBuilder::attachShape(const skjson::ArrayValue* 
         // of the dangling/uncommitted ones.
         AnimatorScope local_scope;
 
-        if ((shape_matrix = this->attachMatrix(*jtransform, &local_scope, nullptr))) {
-            shape_wrapper = sksg::Transform::Make(std::move(shape_wrapper), shape_matrix);
+        if ((shape_transform = this->attachMatrix2D(*jtransform, &local_scope, nullptr))) {
+            shape_wrapper = sksg::TransformEffect::Make(std::move(shape_wrapper), shape_transform);
         }
         shape_wrapper = this->attachOpacity(*jtransform, &local_scope, std::move(shape_wrapper));
 
@@ -608,9 +616,9 @@ sk_sp<sksg::RenderNode> AnimationBuilder::attachShape(const skjson::ArrayValue* 
     }
 
     // Push transformed local geometries to parent list, for subsequent paints.
-    for (const auto& geo : geos) {
-        ctx->fGeometryStack->push_back(shape_matrix
-            ? sksg::GeometryTransform::Make(std::move(geo), shape_matrix)
+    for (auto& geo : geos) {
+        ctx->fGeometryStack->push_back(shape_transform
+            ? sksg::GeometryTransform::Make(std::move(geo), shape_transform)
             : std::move(geo));
     }
 

@@ -28,6 +28,8 @@
 
 #include <algorithm>
 #include <memory>
+
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/core/css/css_markup.h"
 #include "third_party/blink/renderer/core/css/css_selector_list.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
@@ -43,8 +45,6 @@
 #endif
 
 namespace blink {
-
-using namespace HTMLNames;
 
 struct SameSizeAsCSSSelector {
   unsigned bitfields;
@@ -118,7 +118,7 @@ inline unsigned CSSSelector::SpecificityForOneSelector() const {
         // FIXME: PseudoAny should base the specificity on the sub-selectors.
         // See http://lists.w3.org/Archives/Public/www-style/2010Sep/0530.html
         case kPseudoAny:
-        case kPseudoMatches:
+        case kPseudoIs:
         default:
           break;
       }
@@ -217,8 +217,8 @@ PseudoId CSSSelector::GetPseudoId(PseudoType type) {
     case kPseudoLink:
     case kPseudoVisited:
     case kPseudoAny:
-    case kPseudoMatches:
-    case kPseudoIS:
+    case kPseudoIs:
+    case kPseudoWhere:
     case kPseudoAnyLink:
     case kPseudoWebkitAnyLink:
     case kPseudoAutofill:
@@ -399,9 +399,8 @@ const static NameToPseudoStruct kPseudoTypeWithArgumentsMap[] = {
     {"cue", CSSSelector::kPseudoCue},
     {"host", CSSSelector::kPseudoHost},
     {"host-context", CSSSelector::kPseudoHostContext},
-    {"is", CSSSelector::kPseudoIS},
+    {"is", CSSSelector::kPseudoIs},
     {"lang", CSSSelector::kPseudoLang},
-    {"matches", CSSSelector::kPseudoMatches},
     {"not", CSSSelector::kPseudoNot},
     {"nth-child", CSSSelector::kPseudoNthChild},
     {"nth-last-child", CSSSelector::kPseudoNthLastChild},
@@ -409,24 +408,7 @@ const static NameToPseudoStruct kPseudoTypeWithArgumentsMap[] = {
     {"nth-of-type", CSSSelector::kPseudoNthOfType},
     {"part", CSSSelector::kPseudoPart},
     {"slotted", CSSSelector::kPseudoSlotted},
-};
-
-class NameToPseudoCompare {
- public:
-  NameToPseudoCompare(const AtomicString& key) : key_(key) {
-    DCHECK(key_.Is8Bit());
-  }
-
-  bool operator()(const NameToPseudoStruct& entry, const NameToPseudoStruct&) {
-    DCHECK(entry.string);
-    const char* key = reinterpret_cast<const char*>(key_.Characters8());
-    // If strncmp returns 0, then either the keys are equal, or |key_| sorts
-    // before |entry|.
-    return strncmp(entry.string, key, key_.length()) < 0;
-  }
-
- private:
-  const AtomicString& key_;
+    {"where", CSSSelector::kPseudoWhere},
 };
 
 static CSSSelector::PseudoType NameToPseudoType(const AtomicString& name,
@@ -439,16 +421,23 @@ static CSSSelector::PseudoType NameToPseudoType(const AtomicString& name,
   if (has_arguments) {
     pseudo_type_map = kPseudoTypeWithArgumentsMap;
     pseudo_type_map_end =
-        kPseudoTypeWithArgumentsMap + arraysize(kPseudoTypeWithArgumentsMap);
+        kPseudoTypeWithArgumentsMap + base::size(kPseudoTypeWithArgumentsMap);
   } else {
     pseudo_type_map = kPseudoTypeWithoutArgumentsMap;
     pseudo_type_map_end = kPseudoTypeWithoutArgumentsMap +
-                          arraysize(kPseudoTypeWithoutArgumentsMap);
+                          base::size(kPseudoTypeWithoutArgumentsMap);
   }
-  NameToPseudoStruct dummy_key = {nullptr, CSSSelector::kPseudoUnknown};
-  const NameToPseudoStruct* match =
-      std::lower_bound(pseudo_type_map, pseudo_type_map_end, dummy_key,
-                       NameToPseudoCompare(name));
+  const NameToPseudoStruct* match = std::lower_bound(
+      pseudo_type_map, pseudo_type_map_end, name,
+      [](const NameToPseudoStruct& entry, const AtomicString& name) -> bool {
+        DCHECK(name.Is8Bit());
+        DCHECK(entry.string);
+        // If strncmp returns 0, then either the keys are equal, or |name| sorts
+        // before |entry|.
+        return strncmp(entry.string,
+                       reinterpret_cast<const char*>(name.Characters8()),
+                       name.length()) < 0;
+      });
   if (match == pseudo_type_map_end || match->string != name.GetString())
     return CSSSelector::kPseudoUnknown;
 
@@ -619,12 +608,12 @@ void CSSSelector::UpdatePseudoType(const AtomicString& value,
     case kPseudoIncrement:
     case kPseudoIndeterminate:
     case kPseudoInvalid:
-    case kPseudoIS:
+    case kPseudoWhere:
     case kPseudoLang:
     case kPseudoLastChild:
     case kPseudoLastOfType:
     case kPseudoLink:
-    case kPseudoMatches:
+    case kPseudoIs:
     case kPseudoNoButton:
     case kPseudoNot:
     case kPseudoNthChild:
@@ -770,8 +759,8 @@ const CSSSelector* CSSSelector::SerializeCompound(
         case kPseudoHost:
         case kPseudoHostContext:
         case kPseudoAny:
-        case kPseudoMatches:
-        case kPseudoIS:
+        case kPseudoIs:
+        case kPseudoWhere:
           break;
         default:
           break;
@@ -1049,6 +1038,31 @@ bool CSSSelector::MatchesPseudoElement() const {
   return false;
 }
 
+bool CSSSelector::IsTreeAbidingPseudoElement() const {
+  return Match() == CSSSelector::kPseudoElement &&
+         (GetPseudoType() == kPseudoBefore || GetPseudoType() == kPseudoAfter ||
+          GetPseudoType() == kPseudoPlaceholder);
+}
+
+bool CSSSelector::IsAllowedAfterPart() const {
+  if (Match() != CSSSelector::kPseudoElement) {
+    return false;
+  }
+  // Everything that makes sense should work following ::part. This whitelist
+  // restricts it to what has been tested.
+  switch (GetPseudoType()) {
+    case kPseudoBefore:
+    case kPseudoAfter:
+    case kPseudoPlaceholder:
+    case kPseudoFirstLine:
+    case kPseudoFirstLetter:
+    case kPseudoSelection:
+      return true;
+    default:
+      return false;
+  }
+}
+
 template <typename Functor>
 static bool ForAnyInTagHistory(const Functor& functor,
                                const CSSSelector& selector) {
@@ -1093,6 +1107,13 @@ bool CSSSelector::HasDeepCombinatorOrShadowPseudo() const {
       *this);
 }
 
+bool CSSSelector::FollowsPart() const {
+  const CSSSelector* previous = TagHistory();
+  if (!previous)
+    return false;
+  return previous->GetPseudoType() == kPseudoPart;
+}
+
 bool CSSSelector::NeedsUpdatedDistribution() const {
   return ForAnyInTagHistory(
       [](const CSSSelector& selector) -> bool {
@@ -1102,17 +1123,17 @@ bool CSSSelector::NeedsUpdatedDistribution() const {
       *this);
 }
 
-bool CSSSelector::HasPseudoMatches() const {
+bool CSSSelector::HasPseudoIs() const {
   for (const CSSSelector* s = this; s; s = s->TagHistory()) {
-    if (s->GetPseudoType() == CSSSelector::kPseudoMatches)
+    if (s->GetPseudoType() == CSSSelector::kPseudoIs)
       return true;
   }
   return false;
 }
 
-bool CSSSelector::HasPseudoIS() const {
+bool CSSSelector::HasPseudoWhere() const {
   for (const CSSSelector* s = this; s; s = s->TagHistory()) {
-    if (s->GetPseudoType() == CSSSelector::kPseudoIS)
+    if (s->GetPseudoType() == CSSSelector::kPseudoWhere)
       return true;
   }
   return false;

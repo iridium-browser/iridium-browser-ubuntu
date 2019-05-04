@@ -39,7 +39,7 @@ SelectToSpeakTray::SelectToSpeakTray(Shelf* shelf)
   const int horizontal_padding = (kTrayItemSize - inactive_image_.width()) / 2;
   icon_->SetBorder(views::CreateEmptyBorder(
       gfx::Insets(vertical_padding, horizontal_padding)));
-  icon_->SetTooltipText(l10n_util::GetStringUTF16(
+  icon_->set_tooltip_text(l10n_util::GetStringUTF16(
       IDS_ASH_STATUS_TRAY_ACCESSIBILITY_SELECT_TO_SPEAK));
   tray_container()->AddChildView(icon_);
   CheckStatusAndUpdateIcon();
@@ -90,7 +90,7 @@ void SelectToSpeakTray::UpdateIconsForSession() {
 }
 
 void SelectToSpeakTray::CheckStatusAndUpdateIcon() {
-  if (!Shell::Get()->accessibility_controller()->IsSelectToSpeakEnabled()) {
+  if (!Shell::Get()->accessibility_controller()->select_to_speak_enabled()) {
     SetVisible(false);
     return;
   }

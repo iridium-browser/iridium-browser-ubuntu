@@ -138,7 +138,7 @@ void ObjectPaintInvalidator::
 
 void ObjectPaintInvalidator::
     InvalidatePaintIncludingNonCompositingDescendants() {
-  DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV2Enabled());
+  DCHECK(!RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
   SlowSetPaintingLayerNeedsRepaint();
   // This method may be used to invalidate paint of objects changing paint
   // invalidation container. Visual rects don't have to be cleared, since they
@@ -178,7 +178,7 @@ bool IsClientNGPaintFragmentForObject(const DisplayItemClient& client,
   if (!RuntimeEnabledFeatures::LayoutNGEnabled())
     return false;
   // TODO(crbug.com/880519): This hack only makes current invalidation tracking
-  // layout tests pass with LayoutNG. More work is needed if we want to launch
+  // web tests pass with LayoutNG. More work is needed if we want to launch
   // the invalidation tracking feature.
   return object.IsLayoutBlockFlow() &&
          &client == ToLayoutBlockFlow(object).PaintFragment();
@@ -199,7 +199,7 @@ void ObjectPaintInvalidator::InvalidateDisplayItemClient(
     TRACE_EVENT_INSTANT1(
         TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"),
         "PaintInvalidationTracking", TRACE_EVENT_SCOPE_THREAD, "data",
-        InspectorPaintInvalidationTrackingEvent::Data(object_));
+        inspector_paint_invalidation_tracking_event::Data(object_));
   }
 
   client.Invalidate(reason);
@@ -336,7 +336,10 @@ PaintInvalidationReason ObjectPaintInvalidatorWithContext::InvalidateSelection(
 
   if (full_invalidation)
     return reason;
-
+  // We should invalidate LayoutSVGText always.
+  // See layout_selection.cc SetShouldInvalidateIfNeeded for more detail.
+  if (object_.IsSVGText())
+    return PaintInvalidationReason::kSelection;
   const LayoutRect invalidation_rect =
       UnionRect(new_selection_rect, old_selection_rect);
   if (invalidation_rect.IsEmpty())

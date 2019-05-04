@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.download.home;
 
 import android.app.Activity;
-import android.content.Intent;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -60,8 +59,8 @@ class DownloadManagerCoordinatorImpl
                 OfflineContentAggregatorFactory.forProfile(profile),
                 mDeleteCoordinator::showSnackbar, mSelectionDelegate, this ::notifyFilterChanged,
                 createDateOrderedListObserver());
-        mToolbarCoordinator = new ToolbarCoordinator(
-                mActivity, this, mListCoordinator, mSelectionDelegate, config.isSeparateActivity);
+        mToolbarCoordinator = new ToolbarCoordinator(mActivity, this, mListCoordinator,
+                mSelectionDelegate, config.isSeparateActivity, profile);
 
         initializeView();
         RecordUserAction.record("Android.DownloadManager.Open");
@@ -156,9 +155,7 @@ class DownloadManagerCoordinatorImpl
     @Override
     public void openSettings() {
         RecordUserAction.record("Android.DownloadManager.Settings");
-        Intent intent = PreferencesLauncher.createIntentForSettingsPage(
-                mActivity, DownloadPreferences.class.getName());
-        mActivity.startActivity(intent);
+        PreferencesLauncher.launchSettingsPage(mActivity, DownloadPreferences.class);
     }
 
     private void notifyFilterChanged(@FilterType int filter) {

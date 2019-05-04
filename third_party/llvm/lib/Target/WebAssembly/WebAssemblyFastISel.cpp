@@ -37,7 +37,10 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/PatternMatch.h"
+
 using namespace llvm;
+using namespace PatternMatch;
 
 #define DEBUG_TYPE "wasm-fastisel"
 
@@ -134,10 +137,13 @@ private:
     case MVT::v16i8:
     case MVT::v8i16:
     case MVT::v4i32:
-    case MVT::v2i64:
     case MVT::v4f32:
-    case MVT::v2f64:
       if (Subtarget->hasSIMD128())
+        return VT;
+      break;
+    case MVT::v2i64:
+    case MVT::v2f64:
+      if (Subtarget->hasUnimplementedSIMD128())
         return VT;
       break;
     default:
@@ -417,9 +423,10 @@ unsigned WebAssemblyFastISel::getRegForI1Value(const Value *V, bool &Not) {
         return getRegForValue(ICmp->getOperand(0));
       }
 
-  if (BinaryOperator::isNot(V) && V->getType()->isIntegerTy(32)) {
+  Value *NotV;
+  if (match(V, m_Not(m_Value(NotV))) && V->getType()->isIntegerTy(32)) {
     Not = true;
-    return getRegForValue(BinaryOperator::getNotArgument(V));
+    return getRegForValue(NotV);
   }
 
   Not = false;
@@ -436,13 +443,12 @@ unsigned WebAssemblyFastISel::zeroExtendToI32(unsigned Reg, const Value *V,
 
   switch (From) {
   case MVT::i1:
-    // If the value is naturally an i1, we don't need to mask it.
-    // TODO: Recursively examine selects, phis, and, or, xor, constants.
-    if (From == MVT::i1 && V != nullptr) {
-      if (isa<CmpInst>(V) ||
-          (isa<Argument>(V) && cast<Argument>(V)->hasZExtAttr()))
-        return copyValue(Reg);
-    }
+    // If the value is naturally an i1, we don't need to mask it. We only know
+    // if a value is naturally an i1 if it is definitely lowered by FastISel,
+    // not a DAG ISel fallback.
+    if (V != nullptr && isa<Argument>(V) && cast<Argument>(V)->hasZExtAttr())
+      return copyValue(Reg);
+    break;
   case MVT::i8:
   case MVT::i16:
     break;
@@ -646,19 +652,19 @@ bool WebAssemblyFastISel::fastLowerArguments() {
     case MVT::i8:
     case MVT::i16:
     case MVT::i32:
-      Opc = WebAssembly::ARGUMENT_I32;
+      Opc = WebAssembly::ARGUMENT_i32;
       RC = &WebAssembly::I32RegClass;
       break;
     case MVT::i64:
-      Opc = WebAssembly::ARGUMENT_I64;
+      Opc = WebAssembly::ARGUMENT_i64;
       RC = &WebAssembly::I64RegClass;
       break;
     case MVT::f32:
-      Opc = WebAssembly::ARGUMENT_F32;
+      Opc = WebAssembly::ARGUMENT_f32;
       RC = &WebAssembly::F32RegClass;
       break;
     case MVT::f64:
-      Opc = WebAssembly::ARGUMENT_F64;
+      Opc = WebAssembly::ARGUMENT_f64;
       RC = &WebAssembly::F64RegClass;
       break;
     case MVT::v16i8:
@@ -686,7 +692,7 @@ bool WebAssemblyFastISel::fastLowerArguments() {
       RC = &WebAssembly::V128RegClass;
       break;
     case MVT::ExceptRef:
-      Opc = WebAssembly::ARGUMENT_EXCEPT_REF;
+      Opc = WebAssembly::ARGUMENT_ExceptRef;
       RC = &WebAssembly::EXCEPT_REFRegClass;
       break;
     default:

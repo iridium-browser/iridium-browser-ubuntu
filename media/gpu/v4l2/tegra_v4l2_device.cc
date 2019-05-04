@@ -8,11 +8,9 @@
 
 #include "base/posix/eintr_wrapper.h"
 #include "base/trace_event/trace_event.h"
+#include "media/gpu/macros.h"
 #include "media/gpu/v4l2/tegra_v4l2_device.h"
 #include "ui/gl/gl_bindings.h"
-
-#define DVLOGF(level) DVLOG(level) << __func__ << "(): "
-#define VLOGF(level) VLOG(level) << __func__ << "(): "
 
 namespace media {
 
@@ -258,11 +256,12 @@ GLenum TegraV4L2Device::GetTextureTarget() {
   return GL_TEXTURE_2D;
 }
 
-uint32_t TegraV4L2Device::PreferredInputFormat(Type type) {
-  if (type == Type::kEncoder)
-    return V4L2_PIX_FMT_YUV420M;
+std::vector<uint32_t> TegraV4L2Device::PreferredInputFormat(Type type) {
+  if (type == Type::kEncoder) {
+    return {V4L2_PIX_FMT_YUV420M};
+  }
 
-  return 0;
+  return {};
 }
 
 std::vector<uint32_t> TegraV4L2Device::GetSupportedImageProcessorPixelformats(
@@ -299,6 +298,10 @@ bool TegraV4L2Device::IsImageProcessingSupported() {
 }
 
 bool TegraV4L2Device::IsJpegDecodingSupported() {
+  return false;
+}
+
+bool TegraV4L2Device::IsJpegEncodingSupported() {
   return false;
 }
 

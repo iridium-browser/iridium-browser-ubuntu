@@ -9,7 +9,6 @@
 #include "SkBitmap.h"
 #include "SkColorData.h"
 #include "SkColorSpaceXformer.h"
-#include "SkFlattenablePriv.h"
 #include "SkImageFilterPriv.h"
 #include "SkPoint3.h"
 #include "SkReadBuffer.h"
@@ -465,11 +464,14 @@ sk_sp<SkSpecialImage> SkLightingImageFilterInternal::filterImageGPU(
     sk_sp<GrTextureProxy> inputProxy(input->asTextureProxyRef(context));
     SkASSERT(inputProxy);
 
+    SkColorType colorType = outputProperties.colorType();
+    GrBackendFormat format =
+            context->contextPriv().caps()->getBackendFormatFromColorType(colorType);
 
     sk_sp<GrRenderTargetContext> renderTargetContext(
         context->contextPriv().makeDeferredRenderTargetContext(
-                                SkBackingFit::kApprox, offsetBounds.width(), offsetBounds.height(),
-                                SkColorType2GrPixelConfig(outputProperties.colorType()),
+                                format, SkBackingFit::kApprox, offsetBounds.width(),
+                                offsetBounds.height(), SkColorType2GrPixelConfig(colorType),
                                 sk_ref_sp(outputProperties.colorSpace())));
     if (!renderTargetContext) {
         return nullptr;
@@ -529,7 +531,6 @@ public:
                                      sk_sp<SkImageFilter>,
                                      const CropRect*);
 
-    SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkDiffuseLightingImageFilter)
     SkScalar kd() const { return fKD; }
 
 protected:
@@ -550,6 +551,7 @@ protected:
 #endif
 
 private:
+    SK_FLATTENABLE_HOOKS(SkDiffuseLightingImageFilter)
     friend class SkLightingImageFilter;
     SkScalar fKD;
 
@@ -562,8 +564,6 @@ public:
                                      SkScalar surfaceScale,
                                      SkScalar ks, SkScalar shininess,
                                      sk_sp<SkImageFilter>, const CropRect*);
-
-    SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkSpecularLightingImageFilter)
 
     SkScalar ks() const { return fKS; }
     SkScalar shininess() const { return fShininess; }
@@ -587,6 +587,8 @@ protected:
 #endif
 
 private:
+    SK_FLATTENABLE_HOOKS(SkSpecularLightingImageFilter)
+
     SkScalar fKS;
     SkScalar fShininess;
     friend class SkLightingImageFilter;
@@ -1674,8 +1676,8 @@ private:
 static GrTextureDomain create_domain(GrTextureProxy* proxy, const SkIRect* srcBounds,
                                      GrTextureDomain::Mode mode) {
     if (srcBounds) {
-        SkRect texelDomain = GrTextureDomain::MakeTexelDomainForMode(*srcBounds, mode);
-        return GrTextureDomain(proxy, texelDomain, mode);
+        SkRect texelDomain = GrTextureDomain::MakeTexelDomain(*srcBounds, mode);
+        return GrTextureDomain(proxy, texelDomain, mode, mode);
     } else {
         return GrTextureDomain::IgnoredDomain();
     }
@@ -1924,7 +1926,7 @@ void GrGLLightingEffect::onSetData(const GrGLSLProgramDataManager& pdman,
     pdman.set1f(fSurfaceScaleUni, lighting.surfaceScale());
     sk_sp<SkImageFilterLight> transformedLight(
             lighting.light()->transform(lighting.filterMatrix()));
-    fDomain.setData(pdman, lighting.domain(), proxy);
+    fDomain.setData(pdman, lighting.domain(), proxy, lighting.textureSampler(0).samplerState());
     fLight->setData(pdman, transformedLight.get());
 }
 
@@ -2190,7 +2192,7 @@ void GrGLSpotLight::emitLightColor(GrGLSLUniformHandler* uniformHandler,
 
 #endif
 
-SK_DEFINE_FLATTENABLE_REGISTRAR_GROUP_START(SkLightingImageFilter)
-    SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkDiffuseLightingImageFilter)
-    SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkSpecularLightingImageFilter)
-SK_DEFINE_FLATTENABLE_REGISTRAR_GROUP_END
+void SkLightingImageFilter::RegisterFlattenables() {
+    SK_REGISTER_FLATTENABLE(SkDiffuseLightingImageFilter);
+    SK_REGISTER_FLATTENABLE(SkSpecularLightingImageFilter);
+}

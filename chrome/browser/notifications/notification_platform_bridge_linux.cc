@@ -189,6 +189,14 @@ void ForwardNotificationOperationOnUiThread(
     const std::string& profile_id,
     bool is_incognito) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  // Profile ID can be empty for system notifications, which are not bound to a
+  // profile, but system notifications are transient and thus not handled by
+  // this NotificationPlatformBridge.
+  // When transient notifications are supported, this should route the
+  // notification response to the system NotificationDisplayService.
+  DCHECK(!profile_id.empty());
+
   g_browser_process->profile_manager()->LoadProfile(
       profile_id, is_incognito,
       base::Bind(&NotificationDisplayServiceImpl::ProfileLoadedCallback,
@@ -235,8 +243,9 @@ std::unique_ptr<ResourceFile> WriteDataToTmpFile(
 }  // namespace
 
 // static
-NotificationPlatformBridge* NotificationPlatformBridge::Create() {
-  return new NotificationPlatformBridgeLinux();
+std::unique_ptr<NotificationPlatformBridge>
+NotificationPlatformBridge::Create() {
+  return std::make_unique<NotificationPlatformBridgeLinux>();
 }
 
 // static
@@ -322,6 +331,8 @@ class NotificationPlatformBridgeLinuxImpl
       on_connected_callbacks_.push_back(std::move(callback));
     }
   }
+
+  void DisplayServiceShutDown(Profile* profile) override {}
 
   void CleanUp() {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -1008,6 +1019,9 @@ void NotificationPlatformBridgeLinux::GetDisplayed(
 void NotificationPlatformBridgeLinux::SetReadyCallback(
     NotificationBridgeReadyCallback callback) {
   impl_->SetReadyCallback(std::move(callback));
+}
+
+void NotificationPlatformBridgeLinux::DisplayServiceShutDown(Profile* profile) {
 }
 
 void NotificationPlatformBridgeLinux::CleanUp() {

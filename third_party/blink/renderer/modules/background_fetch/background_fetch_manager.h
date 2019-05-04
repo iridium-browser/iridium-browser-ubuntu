@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_FETCH_BACKGROUND_FETCH_MANAGER_H_
 
 #include "base/time/time.h"
-#include "third_party/blink/public/platform/modules/background_fetch/background_fetch.mojom-blink.h"
+#include "third_party/blink/public/mojom/background_fetch/background_fetch.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
@@ -28,7 +28,6 @@ class RequestOrUSVStringOrRequestOrUSVStringSequence;
 class ScriptPromiseResolver;
 class ScriptState;
 class ServiceWorkerRegistration;
-class WebServiceWorkerRequest;
 
 // Implementation of the BackgroundFetchManager JavaScript object, accessible
 // by developers through ServiceWorkerRegistration.backgroundFetch.
@@ -39,10 +38,12 @@ class MODULES_EXPORT BackgroundFetchManager final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
+  explicit BackgroundFetchManager(ServiceWorkerRegistration* registration);
   ~BackgroundFetchManager() override = default;
+
   static BackgroundFetchManager* Create(
       ServiceWorkerRegistration* registration) {
-    return new BackgroundFetchManager(registration);
+    return MakeGarbageCollected<BackgroundFetchManager>(registration);
   }
 
   // Web Exposed methods defined in the IDL file.
@@ -50,7 +51,7 @@ class MODULES_EXPORT BackgroundFetchManager final
       ScriptState* script_state,
       const String& id,
       const RequestOrUSVStringOrRequestOrUSVStringSequence& requests,
-      const BackgroundFetchOptions& options,
+      const BackgroundFetchOptions* options,
       ExceptionState& exception_state);
   ScriptPromise get(ScriptState* script_state, const String& id);
   ScriptPromise getIds(ScriptState* script_state);
@@ -63,19 +64,17 @@ class MODULES_EXPORT BackgroundFetchManager final
  private:
   friend class BackgroundFetchManagerTest;
 
-  explicit BackgroundFetchManager(ServiceWorkerRegistration* registration);
-
-  // Creates a vector of WebServiceWorkerRequest objects for the given set of
-  // |requests|, which can be either Request objects or URL strings.
+  // Creates a vector of mojom::blink::FetchAPIRequestPtr objects for the given
+  // set of |requests|, which can be either Request objects or URL strings.
   // |has_requests_with_body| will be set if any of the |requests| has a body.
-  static Vector<WebServiceWorkerRequest> CreateWebRequestVector(
+  static Vector<mojom::blink::FetchAPIRequestPtr> CreateFetchAPIRequestVector(
       ScriptState* script_state,
       const RequestOrUSVStringOrRequestOrUSVStringSequence& requests,
       ExceptionState& exception_state,
       bool* has_requests_with_body);
 
   void DidLoadIcons(const String& id,
-                    Vector<WebServiceWorkerRequest> web_requests,
+                    Vector<mojom::blink::FetchAPIRequestPtr> requests,
                     mojom::blink::BackgroundFetchOptionsPtr options,
                     ScriptPromiseResolver* resolver,
                     BackgroundFetchIconLoader* loader,

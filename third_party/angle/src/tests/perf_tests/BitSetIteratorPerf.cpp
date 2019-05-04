@@ -11,7 +11,6 @@
 
 #include <gmock/gmock.h>
 
-#include "angle_unittests_utils.h"
 #include "common/bitset_utils.h"
 
 using namespace testing;
@@ -31,9 +30,8 @@ class BitSetIteratorPerfTest : public ANGLEPerfTest
 };
 
 template <typename T>
-BitSetIteratorPerfTest<T>::BitSetIteratorPerfTest() : ANGLEPerfTest("BitSetIteratorPerf", "_run")
-{
-}
+BitSetIteratorPerfTest<T>::BitSetIteratorPerfTest() : ANGLEPerfTest("BitSetIteratorPerf", "_run", 1)
+{}
 
 template <typename T>
 void BitSetIteratorPerfTest<T>::step()

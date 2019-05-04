@@ -125,8 +125,10 @@ class ManagePasswordsUIController
   void ChooseCredential(
       const autofill::PasswordForm& form,
       password_manager::CredentialType credential_type) override;
-  void NavigateToPasswordManagerAccountDashboard() override;
-  void NavigateToPasswordManagerSettingsPage() override;
+  void NavigateToPasswordManagerAccountDashboard(
+      password_manager::ManagePasswordsReferrer referrer) override;
+  void NavigateToPasswordManagerSettingsPage(
+      password_manager::ManagePasswordsReferrer referrer) override;
   void EnableSync(const AccountInfo& account,
                   bool is_default_promo_account) override;
   void OnDialogHidden() override;
@@ -254,6 +256,8 @@ class ManagePasswordsUIController
   // with the old bubble.
   // Invalidating all the weak pointers will detach the current bubble.
   base::WeakPtrFactory<ManagePasswordsUIController> weak_ptr_factory_;
+
+  WEB_CONTENTS_USER_DATA_KEY_DECL();
 
   DISALLOW_COPY_AND_ASSIGN(ManagePasswordsUIController);
 };

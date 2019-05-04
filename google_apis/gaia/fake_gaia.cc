@@ -14,7 +14,6 @@
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/memory/linked_ptr.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -180,7 +179,6 @@ void FakeGaia::MapEmailToGaiaId(const std::string& email,
 }
 
 std::string FakeGaia::GetGaiaIdOfEmail(const std::string& email) const {
-  DCHECK(!email.empty());
   const auto it = email_to_gaia_id_map_.find(email);
   return it == email_to_gaia_id_map_.end() ? std::string(kDefaultGaiaId) :
       it->second;
@@ -189,7 +187,6 @@ std::string FakeGaia::GetGaiaIdOfEmail(const std::string& email) const {
 void FakeGaia::AddGoogleAccountsSigninHeader(
     net::test_server::BasicHttpResponse* http_response,
     const std::string& email) const {
-  DCHECK(!email.empty());
   http_response->AddCustomHeader("google-accounts-signin",
       base::StringPrintf(
           "email=\"%s\", obfuscatedid=\"%s\", sessionindex=0",
@@ -200,9 +197,8 @@ void FakeGaia::SetOAuthCodeCookie(
     net::test_server::BasicHttpResponse* http_response) const {
   http_response->AddCustomHeader(
       "Set-Cookie",
-      base::StringPrintf(
-          "oauth_code=%s; Path=/o/GetOAuth2Token; Secure; HttpOnly;",
-          merge_session_params_.auth_code.c_str()));
+      base::StringPrintf("oauth_code=%s; Path=/; Secure; HttpOnly;",
+                         merge_session_params_.auth_code.c_str()));
 }
 
 void FakeGaia::Initialize() {
@@ -581,8 +577,7 @@ void FakeGaia::HandleSSO(const HttpRequest& request,
   http_response->AddCustomHeader("Location", redirect_url);
   http_response->AddCustomHeader("Google-Accounts-SAML", "End");
 
-  if (!merge_session_params_.email.empty())
-    AddGoogleAccountsSigninHeader(http_response, merge_session_params_.email);
+  AddGoogleAccountsSigninHeader(http_response, merge_session_params_.email);
 
   if (issue_oauth_code_cookie_)
     SetOAuthCodeCookie(http_response);

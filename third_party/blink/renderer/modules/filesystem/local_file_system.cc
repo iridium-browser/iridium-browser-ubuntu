@@ -31,6 +31,8 @@
 #include "third_party/blink/renderer/modules/filesystem/local_file_system.h"
 
 #include <memory>
+#include <utility>
+
 #include "base/feature_list.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -65,7 +67,7 @@ void ReportFailure(std::unique_ptr<AsyncFileSystemCallbacks> callbacks,
 class CallbackWrapper final
     : public GarbageCollectedFinalized<CallbackWrapper> {
  public:
-  CallbackWrapper(std::unique_ptr<AsyncFileSystemCallbacks> c)
+  explicit CallbackWrapper(std::unique_ptr<AsyncFileSystemCallbacks> c)
       : callbacks_(std::move(c)) {}
   virtual ~CallbackWrapper() = default;
   std::unique_ptr<AsyncFileSystemCallbacks> Release() {
@@ -85,7 +87,8 @@ void LocalFileSystem::ResolveURL(
     const KURL& file_system_url,
     std::unique_ptr<AsyncFileSystemCallbacks> callbacks,
     SynchronousType type) {
-  CallbackWrapper* wrapper = new CallbackWrapper(std::move(callbacks));
+  CallbackWrapper* wrapper =
+      MakeGarbageCollected<CallbackWrapper>(std::move(callbacks));
   RequestFileSystemAccessInternal(
       context,
       WTF::Bind(&LocalFileSystem::ResolveURLInternal,
@@ -102,7 +105,8 @@ void LocalFileSystem::RequestFileSystem(
     long long size,
     std::unique_ptr<AsyncFileSystemCallbacks> callbacks,
     SynchronousType sync_type) {
-  CallbackWrapper* wrapper = new CallbackWrapper(std::move(callbacks));
+  CallbackWrapper* wrapper =
+      MakeGarbageCollected<CallbackWrapper>(std::move(callbacks));
   RequestFileSystemAccessInternal(
       context,
       WTF::Bind(&LocalFileSystem::FileSystemAllowedInternal,
@@ -151,16 +155,14 @@ void LocalFileSystem::FileSystemAllowedInternal(
     mojom::blink::FileSystemType type,
     CallbackWrapper* callbacks,
     SynchronousType sync_type) {
-  KURL storage_partition =
-      KURL(NullURL(), context->GetSecurityOrigin()->ToString());
   std::unique_ptr<AsyncFileSystemCallbacks> async_callbacks =
       callbacks->Release();
   FileSystemDispatcher& dispatcher = FileSystemDispatcher::From(context);
   if (sync_type == kSynchronous) {
-    dispatcher.OpenFileSystemSync(storage_partition, type,
+    dispatcher.OpenFileSystemSync(context->GetSecurityOrigin(), type,
                                   std::move(async_callbacks));
   } else {
-    dispatcher.OpenFileSystem(storage_partition, type,
+    dispatcher.OpenFileSystem(context->GetSecurityOrigin(), type,
                               std::move(async_callbacks));
   }
 }
@@ -206,7 +208,7 @@ LocalFileSystem* LocalFileSystem::From(ExecutionContext& context) {
     return file_system;
   }
 
-  WorkerClients* clients = ToWorkerGlobalScope(context).Clients();
+  WorkerClients* clients = To<WorkerGlobalScope>(context).Clients();
   DCHECK(clients);
   LocalFileSystem* file_system =
       Supplement<WorkerClients>::From<LocalFileSystem>(clients);
@@ -216,13 +218,15 @@ LocalFileSystem* LocalFileSystem::From(ExecutionContext& context) {
 
 void ProvideLocalFileSystemTo(LocalFrame& frame,
                               std::unique_ptr<FileSystemClient> client) {
-  frame.ProvideSupplement(new LocalFileSystem(frame, std::move(client)));
+  frame.ProvideSupplement(
+      MakeGarbageCollected<LocalFileSystem>(frame, std::move(client)));
 }
 
 void ProvideLocalFileSystemToWorker(WorkerClients* worker_clients,
                                     std::unique_ptr<FileSystemClient> client) {
-  Supplement<WorkerClients>::ProvideTo(
-      *worker_clients, new LocalFileSystem(*worker_clients, std::move(client)));
+  Supplement<WorkerClients>::ProvideTo(*worker_clients,
+                                       MakeGarbageCollected<LocalFileSystem>(
+                                           *worker_clients, std::move(client)));
 }
 
 }  // namespace blink

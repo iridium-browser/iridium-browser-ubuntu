@@ -102,8 +102,7 @@ public:
     // This unit test verifies blob bounds computation.
     static void TestBounds(skiatest::Reporter* reporter) {
         SkTextBlobBuilder builder;
-        SkPaint font;
-        font.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+        SkFont font;
 
         // Explicit bounds.
         {
@@ -155,19 +154,15 @@ public:
         {
             // Exercise the empty bounds path, and ensure that RunRecord-aligned pos buffers
             // don't trigger asserts (http://crbug.com/542643).
-            SkPaint p;
-            p.setTextSize(0);
-            p.setTextEncoding(SkPaint::kUTF8_TextEncoding);
+            SkFont font;
+            font.setSize(0);
 
             const char* txt = "BOOO";
             const size_t txtLen = strlen(txt);
-            const int glyphCount = p.textToGlyphs(txt, txtLen, nullptr);
+            const int glyphCount = font.countText(txt, txtLen, kUTF8_SkTextEncoding);
+            const SkTextBlobBuilder::RunBuffer& buffer = builder.allocRunPos(font, glyphCount);
 
-            p.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
-            const SkTextBlobBuilder::RunBuffer& buffer = builder.allocRunPos(p, glyphCount);
-
-            p.setTextEncoding(SkPaint::kUTF8_TextEncoding);
-            p.textToGlyphs(txt, txtLen, buffer.glyphs);
+            font.textToGlyphs(txt, txtLen, kUTF8_SkTextEncoding, buffer.glyphs, glyphCount);
 
             memset(buffer.pos, 0, sizeof(SkScalar) * glyphCount * 2);
             sk_sp<SkTextBlob> blob(builder.make());
@@ -177,43 +172,34 @@ public:
 
     // Verify that text-related properties are captured in run paints.
     static void TestPaintProps(skiatest::Reporter* reporter) {
-        SkPaint font;
-        font.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
-
+        SkFont font;
         // Kitchen sink font.
-        font.setTextSize(42);
-        font.setTextScaleX(4.2f);
-        font.setTypeface(SkTypeface::MakeDefault());
-        font.setTextSkewX(0.42f);
-        font.setTextAlign(SkPaint::kCenter_Align);
-        font.setHinting(SkPaint::kFull_Hinting);
-        font.setAntiAlias(true);
-        font.setFakeBoldText(true);
-        font.setLinearText(true);
-        font.setSubpixelText(true);
-        font.setDevKernText(true);
-        font.setLCDRenderText(true);
-        font.setEmbeddedBitmapText(true);
-        font.setAutohinted(true);
-        font.setVerticalText(true);
+        font.setSize(42);
+        font.setScaleX(4.2f);
+        font.setTypeface(sk_tool_utils::create_portable_typeface());
+        font.setSkewX(0.42f);
+        font.setHinting(kFull_SkFontHinting);
+        font.setEdging(SkFont::Edging::kSubpixelAntiAlias);
+        font.setEmbolden(true);
+        font.setLinearMetrics(true);
+        font.setSubpixel(true);
+        font.setEmbeddedBitmaps(true);
+        font.setForceAutoHinting(true);
 
         // Ensure we didn't pick default values by mistake.
-        SkPaint defaultPaint;
-        REPORTER_ASSERT(reporter, defaultPaint.getTextSize() != font.getTextSize());
-        REPORTER_ASSERT(reporter, defaultPaint.getTextScaleX() != font.getTextScaleX());
-        REPORTER_ASSERT(reporter, defaultPaint.getTypeface() != font.getTypeface());
-        REPORTER_ASSERT(reporter, defaultPaint.getTextSkewX() != font.getTextSkewX());
-        REPORTER_ASSERT(reporter, defaultPaint.getTextAlign() != font.getTextAlign());
-        REPORTER_ASSERT(reporter, defaultPaint.getHinting() != font.getHinting());
-        REPORTER_ASSERT(reporter, defaultPaint.isAntiAlias() != font.isAntiAlias());
-        REPORTER_ASSERT(reporter, defaultPaint.isFakeBoldText() != font.isFakeBoldText());
-        REPORTER_ASSERT(reporter, defaultPaint.isLinearText() != font.isLinearText());
-        REPORTER_ASSERT(reporter, defaultPaint.isSubpixelText() != font.isSubpixelText());
-        REPORTER_ASSERT(reporter, defaultPaint.isLCDRenderText() != font.isLCDRenderText());
+        SkFont defaultFont;
+        REPORTER_ASSERT(reporter, defaultFont.getSize() != font.getSize());
+        REPORTER_ASSERT(reporter, defaultFont.getScaleX() != font.getScaleX());
+        REPORTER_ASSERT(reporter, defaultFont.getTypefaceOrDefault() != font.getTypefaceOrDefault());
+        REPORTER_ASSERT(reporter, defaultFont.getSkewX() != font.getSkewX());
+        REPORTER_ASSERT(reporter, defaultFont.getHinting() != font.getHinting());
+        REPORTER_ASSERT(reporter, defaultFont.getEdging() != font.getEdging());
+        REPORTER_ASSERT(reporter, defaultFont.isEmbolden() != font.isEmbolden());
+        REPORTER_ASSERT(reporter, defaultFont.isLinearMetrics() != font.isLinearMetrics());
+        REPORTER_ASSERT(reporter, defaultFont.isSubpixel() != font.isSubpixel());
         REPORTER_ASSERT(reporter,
-                        defaultPaint.isEmbeddedBitmapText() != font.isEmbeddedBitmapText());
-        REPORTER_ASSERT(reporter, defaultPaint.isAutohinted() != font.isAutohinted());
-        REPORTER_ASSERT(reporter, defaultPaint.isVerticalText() != font.isVerticalText());
+                        defaultFont.isEmbeddedBitmaps() != font.isEmbeddedBitmaps());
+        REPORTER_ASSERT(reporter, defaultFont.isForceAutoHinting() != font.isForceAutoHinting());
 
         SkTextBlobBuilder builder;
         AddRun(font, 1, SkTextBlobRunIterator::kDefault_Positioning, SkPoint::Make(0, 0), builder);
@@ -224,24 +210,7 @@ public:
 
         SkTextBlobRunIterator it(blob.get());
         while (!it.done()) {
-            SkPaint paint;
-            it.applyFontToPaint(&paint);
-
-            REPORTER_ASSERT(reporter, paint.getTextSize() == font.getTextSize());
-            REPORTER_ASSERT(reporter, paint.getTextScaleX() == font.getTextScaleX());
-            REPORTER_ASSERT(reporter, paint.getTypeface() == font.getTypeface());
-            REPORTER_ASSERT(reporter, paint.getTextSkewX() == font.getTextSkewX());
-            REPORTER_ASSERT(reporter, paint.getTextAlign() == font.getTextAlign());
-            REPORTER_ASSERT(reporter, paint.getHinting() == font.getHinting());
-            REPORTER_ASSERT(reporter, paint.isAntiAlias() == font.isAntiAlias());
-            REPORTER_ASSERT(reporter, paint.isFakeBoldText() == font.isFakeBoldText());
-            REPORTER_ASSERT(reporter, paint.isLinearText() == font.isLinearText());
-            REPORTER_ASSERT(reporter, paint.isSubpixelText() == font.isSubpixelText());
-            REPORTER_ASSERT(reporter, paint.isLCDRenderText() == font.isLCDRenderText());
-            REPORTER_ASSERT(reporter, paint.isEmbeddedBitmapText() == font.isEmbeddedBitmapText());
-            REPORTER_ASSERT(reporter, paint.isAutohinted() == font.isAutohinted());
-            REPORTER_ASSERT(reporter, paint.isVerticalText() == font.isVerticalText());
-
+            REPORTER_ASSERT(reporter, it.font() == font);
             it.next();
         }
 
@@ -257,8 +226,7 @@ private:
     static void RunBuilderTest(skiatest::Reporter* reporter, SkTextBlobBuilder& builder,
                                const RunDef in[], unsigned inCount,
                                const RunDef out[], unsigned outCount) {
-        SkPaint font;
-        font.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+        SkFont font;
 
         unsigned glyphCount = 0;
         unsigned posCount = 0;
@@ -303,7 +271,7 @@ private:
         REPORTER_ASSERT(reporter, it.done());
     }
 
-    static void AddRun(const SkPaint& font, int count, SkTextBlobRunIterator::GlyphPositioning pos,
+    static void AddRun(const SkFont& font, int count, SkTextBlobRunIterator::GlyphPositioning pos,
                        const SkPoint& offset, SkTextBlobBuilder& builder,
                        const SkRect* bounds = nullptr) {
         switch (pos) {
@@ -347,17 +315,16 @@ DEF_TEST(TextBlob_paint, reporter) {
 
 DEF_TEST(TextBlob_extended, reporter) {
     SkTextBlobBuilder textBlobBuilder;
-    SkPaint paint;
+    SkFont font;
     const char text1[] = "Foo";
     const char text2[] = "Bar";
 
-    int glyphCount = paint.textToGlyphs(text1, strlen(text1), nullptr);
+    int glyphCount = font.countText(text1, strlen(text1), kUTF8_SkTextEncoding);
     SkAutoTMalloc<uint16_t> glyphs(glyphCount);
-    (void)paint.textToGlyphs(text1, strlen(text1), glyphs.get());
-    paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+    (void)font.textToGlyphs(text1, strlen(text1), kUTF8_SkTextEncoding, glyphs.get(), glyphCount);
 
     auto run = SkTextBlobBuilderPriv::AllocRunText(&textBlobBuilder,
-            paint, glyphCount, 0, 0, SkToInt(strlen(text2)), SkString(), nullptr);
+            font, glyphCount, 0, 0, SkToInt(strlen(text2)), SkString(), nullptr);
     memcpy(run.glyphs, glyphs.get(), sizeof(uint16_t) * glyphCount);
     memcpy(run.utf8text, text2, strlen(text2));
     for (int i = 0; i < glyphCount; ++i) {
@@ -389,19 +356,17 @@ DEF_TEST(TextBlob_extended, reporter) {
 
 static void add_run(SkTextBlobBuilder* builder, const char text[], SkScalar x, SkScalar y,
                     sk_sp<SkTypeface> tf) {
-    SkPaint paint;
-    paint.setAntiAlias(true);
-    paint.setSubpixelText(true);
-    paint.setTextSize(16);
-    paint.setTypeface(tf);
+    SkFont font;
+    font.setEdging(SkFont::Edging::kAntiAlias);
+    font.setSubpixel(true);
+    font.setSize(16);
+    font.setTypeface(tf);
 
-    int glyphCount = paint.textToGlyphs(text, strlen(text), nullptr);
+    int glyphCount = font.countText(text, strlen(text), kUTF8_SkTextEncoding);
 
-    paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
-    SkTextBlobBuilder::RunBuffer buffer = builder->allocRun(paint, glyphCount, x, y);
+    SkTextBlobBuilder::RunBuffer buffer = builder->allocRun(font, glyphCount, x, y);
 
-    paint.setTextEncoding(SkPaint::kUTF8_TextEncoding);
-    (void)paint.textToGlyphs(text, strlen(text), buffer.glyphs);
+    (void)font.textToGlyphs(text, strlen(text), kUTF8_SkTextEncoding, buffer.glyphs, glyphCount);
 }
 
 static sk_sp<SkImage> render(const SkTextBlob* blob) {
@@ -445,8 +410,8 @@ DEF_TEST(TextBlob_serialize, reporter) {
         sk_sp<SkTypeface> tf = SkTypeface::MakeDefault();
 
         SkTextBlobBuilder builder;
-        add_run(&builder, "Hello", 10, 20, nullptr);    // we don't flatten this in the paint
-        add_run(&builder, "World", 10, 40, tf);         // we will flatten this in the paint
+        add_run(&builder, "Hello", 10, 20, nullptr);    // don't flatten a typeface
+        add_run(&builder, "World", 10, 40, tf);         // do flatten this typeface
         return builder.make();
     }();
 
@@ -455,7 +420,7 @@ DEF_TEST(TextBlob_serialize, reporter) {
     serializeProcs.fTypefaceProc = &SerializeTypeface;
     serializeProcs.fTypefaceCtx = (void*) &array;
     sk_sp<SkData> data = blob0->serialize(serializeProcs);
-    REPORTER_ASSERT(reporter, array.count() == 2);
+    REPORTER_ASSERT(reporter, array.count() == 1);
     SkDeserialProcs deserializeProcs;
     deserializeProcs.fTypefaceProc = &DeserializeTypeface;
     deserializeProcs.fTypefaceCtx = (void*) &array;
@@ -469,10 +434,8 @@ DEF_TEST(TextBlob_serialize, reporter) {
 }
 
 DEF_TEST(TextBlob_MakeAsDrawText, reporter) {
-    SkPaint paint;
-    paint.setTextEncoding(SkPaint::kUTF8_TextEncoding);
     const char text[] = "Hello";
-    auto blob = SkTextBlob::MakeFromText(text, strlen(text), paint);
+    auto blob = SkTextBlob::MakeFromString(text, SkFont(), kUTF8_SkTextEncoding);
 
     int runs = 0;
     for(SkTextBlobRunIterator it(blob.get()); !it.done(); it.next()) {

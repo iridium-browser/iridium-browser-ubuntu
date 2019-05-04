@@ -7,21 +7,34 @@ package org.chromium.chrome.browser.customtabs.dynamicmodule;
 import android.content.ComponentCallbacks2;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Process;
 import android.support.annotation.Nullable;
 
+import dalvik.system.DexClassLoader;
+
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.FileUtils;
 import org.chromium.base.Log;
+import org.chromium.base.ObserverList;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.crash.CrashKeyIndex;
-import org.chromium.chrome.browser.crash.CrashKeys;
 import org.chromium.chrome.browser.customtabs.dynamicmodule.ModuleMetrics.DestructionReason;
+import org.chromium.components.crash.CrashKeyIndex;
+import org.chromium.components.crash.CrashKeys;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Dynamically loads a module from another apk.
@@ -29,8 +42,16 @@ import org.chromium.chrome.browser.customtabs.dynamicmodule.ModuleMetrics.Destru
 public class ModuleLoader {
     private static final String TAG = "ModuleLoader";
 
+    private static final String DEX_FILE_PREFIX = "custom_tabs_module_dex_";
+    private static final String DEX_LAST_UPDATE_TIME_PREF_PREFIX =
+            "pref_local_custom_tabs_module_dex_last_update_time_";
+
     /** Specifies the module package name and entry point class name. */
     private final ComponentName mComponentName;
+    private final int mDexResourceId;
+    private final DexInputStreamProvider mDexInputStreamProvider;
+    private final DexClassLoaderProvider mDexClassLoaderProvider;
+    private final long mModuleLastUpdateTime;
     private final String mModuleId;
 
     /**
@@ -38,6 +59,11 @@ public class ModuleLoader {
      * the time of destruction depends on the caching policy.
      */
     private int mModuleUseCount;
+
+    private boolean mIsModuleLoading;
+
+    private final ObserverList<Callback<ModuleEntryPoint>> mCallbacks = new ObserverList<>();
+    private final List<Bundle> mPendingBundles = new ArrayList<>();
 
     /**
      * The timestamp of the moment the module became unused. This is used to determine whether or
@@ -62,22 +88,38 @@ public class ModuleLoader {
     /**
      * Instantiates a new {@link ModuleLoader}.
      * @param componentName Specifies the module package name and entry point class name.
+     * @param dexResourceId Identifier for the resource that contains the dex file to load the
+     *         module from. {@code 0} if the module should not be loaded from a dex file.
      */
-    public ModuleLoader(ComponentName componentName) {
+    public ModuleLoader(ComponentName componentName, int dexResourceId) {
+        this(componentName, dexResourceId, new DexInputStreamProviderImpl(),
+                new DexClassLoaderProviderImpl());
+    }
+
+    @VisibleForTesting
+    /* package */ ModuleLoader(ComponentName componentName, int dexResourceId,
+            DexInputStreamProvider dexInputStreamProvider,
+            DexClassLoaderProvider dexClassLoaderProvider) {
         mComponentName = componentName;
+        mDexResourceId = dexResourceId;
+        mDexInputStreamProvider = dexInputStreamProvider;
+        mDexClassLoaderProvider = dexClassLoaderProvider;
         String packageName = componentName.getPackageName();
         int versionCode = 0;
         String versionName = "";
+        long lastUpdateTime = 0;
         try {
             PackageInfo info = ContextUtils.getApplicationContext()
                                      .getPackageManager()
                                      .getPackageInfo(packageName, 0);
             versionCode = info.versionCode;
             versionName = info.versionName;
+            lastUpdateTime = info.lastUpdateTime;
         } catch (PackageManager.NameNotFoundException ignored) {
             // Ignore the exception. Failure to find the package name will be handled in
-            // getModuleContext() below.
+            // createModuleContext() below.
         }
+        mModuleLastUpdateTime = lastUpdateTime;
         mModuleId = String.format("%s v%s (%s)", packageName, versionCode, versionName);
     }
 
@@ -85,47 +127,74 @@ public class ModuleLoader {
         return mComponentName;
     }
 
+    public int getDexResourceId() {
+        return mDexResourceId;
+    }
+
     /**
-     * If the module is not loaded yet, dynamically loads the module entry point class. If
-     * successful, the callback will receive a {@link ModuleEntryPoint} asynchronously. If the
-     * module fails to load, the callback will receive null. If the module was already loaded and a
-     * reference to it is still held, the callback will synchronously receive a
-     * {@link ModuleEntryPoint}.
+     * If the module is not loaded yet, dynamically loads the module entry point class.
+     */
+    public void loadModule() {
+        if (mIsModuleLoading) return;
+
+        // If module has been already loaded all callbacks must be notified synchronously.
+        // {@see #addCallbackAndIncrementUseCount}
+        if (mModuleEntryPoint != null) {
+            assert mCallbacks.isEmpty();
+            return;
+        }
+
+        Context moduleContext = createModuleContext(
+                mComponentName.getPackageName(), /* resourcesOnly = */ mDexResourceId != 0);
+        if (moduleContext == null) {
+            runAndClearCallbacks();
+            return;
+        }
+
+        ModuleMetrics.registerLifecycleState(ModuleMetrics.LifecycleState.NOT_LOADED);
+
+        mIsModuleLoading = true;
+        new LoadClassTask(moduleContext).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
+    /**
+     * Loads the dynamic module if it is not loaded yet,
+     * and transfers the bundle to it regardless of the previous loaded state.
+     */
+    public void sendBundleToModule(Bundle bundle) {
+        if (mModuleEntryPoint != null) {
+            mModuleEntryPoint.onBundleReceived(bundle);
+            return;
+        }
+        mPendingBundles.add(bundle);
+        loadModule();
+    }
+
+    /**
+     * Register a callback to receive a {@link ModuleEntryPoint} asynchronously.
+     * If the module fails to load, the callback will receive null.
+     * If the module was already loaded and a reference to it is still held,
+     * the callback will synchronously receive a {@link ModuleEntryPoint}.
+     *
+     * Module use count is incremented when a callback notified.
      *
      * @param callback The callback to receive the result.
-     * @return If the module is not loaded yet, an {@link AsyncTask} will be used to load it and
-     *     a {@link Runnable} returned to the caller for cancelling the task if necessary. If the
-     *     module was already loaded, null is returned.
      */
-    @Nullable
-    public Runnable loadModule(Callback<ModuleEntryPoint> callback) {
+    public void addCallbackAndIncrementUseCount(Callback<ModuleEntryPoint> callback) {
         if (mModuleEntryPoint != null) {
             mModuleUseCount++;
             mModuleUnusedTimeMs = -1;
             ModuleMetrics.recordLoadResult(ModuleMetrics.LoadResult.SUCCESS_CACHED);
             callback.onResult(mModuleEntryPoint);
-            return null;
+            return;
         }
-
-        Context moduleContext = getModuleContext(mComponentName.getPackageName());
-        if (moduleContext == null) {
-            callback.onResult(null);
-            return null;
-        }
-
-        // TODO(crbug.com/864520): Define and return a CancellablePromise instead.
-        final LoadClassTask task = new LoadClassTask(moduleContext, callback);
-        task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-        return new Runnable() {
-            @Override
-            public void run() {
-                task.cancel(false);
-            }
-        };
+        mCallbacks.addObserver(callback);
     }
 
-    public void decrementModuleUseCount() {
-        if (mModuleEntryPoint == null) return;
+    public void removeCallbackAndDecrementUseCount(Callback<ModuleEntryPoint> callback) {
+        boolean isPendingCallback = mCallbacks.removeObserver(callback);
+        if (mModuleEntryPoint == null || isPendingCallback) return;
+
         mModuleUseCount--;
         if (mModuleUseCount == 0) {
             mModuleUnusedTimeMs = ModuleMetrics.now();
@@ -163,31 +232,95 @@ public class ModuleLoader {
         return ModuleMetrics.now() - mModuleUnusedTimeMs > limit;
     }
 
-    private void destroyModule(@DestructionReason int reason) {
-        assert mModuleEntryPoint != null;
+    public void destroyModule(@DestructionReason int reason) {
+        if (mModuleEntryPoint == null) return;
+
         ModuleMetrics.recordDestruction(reason);
         mModuleEntryPoint.onDestroy();
         CrashKeys.getInstance().set(CrashKeyIndex.ACTIVE_DYNAMIC_MODULE, null);
+        ModuleMetrics.registerLifecycleState(ModuleMetrics.LifecycleState.DESTROYED);
         mModuleEntryPoint = null;
         mModuleUnusedTimeMs = -1;
+    }
+
+    /**
+     * Notify all callbacks which are waiting for module loading. Each callback is needed to notify
+     * only once therefore all callbacks are cleared after call.
+     */
+    private void runAndClearCallbacks() {
+        assert !mIsModuleLoading;
+        if (mModuleEntryPoint != null && mCallbacks.size() > 0) {
+            mModuleUseCount += mCallbacks.size();
+            mModuleUnusedTimeMs = -1;
+        }
+
+        for (Callback<ModuleEntryPoint> callback: mCallbacks) {
+            callback.onResult(mModuleEntryPoint);
+        }
+        mCallbacks.clear();
+    }
+
+    private void sendAllBundles() {
+        assert !mIsModuleLoading;
+        for (Bundle bundle: mPendingBundles) {
+            mModuleEntryPoint.onBundleReceived(bundle);
+        }
+        mPendingBundles.clear();
+    }
+
+    @VisibleForTesting
+    /* package */ void cleanUpLocalDex() {
+        ContextUtils.getAppSharedPreferences()
+                .edit()
+                .remove(getDexLastUpdateTimePrefName())
+                .apply();
+        FileUtils.recursivelyDeleteFile(getDexDirectory());
+    }
+
+    @VisibleForTesting
+    /* package */ File getDexDirectory() {
+        return ContextUtils.getApplicationContext().getDir(
+                getDexDirectoryName(mComponentName.getPackageName()), Context.MODE_PRIVATE);
+    }
+
+    @VisibleForTesting
+    /* package */ File getDexFile() {
+        return new File(getDexDirectory(), getDexFileName(mComponentName.getPackageName()));
+    }
+
+    @VisibleForTesting
+    /* package */ long getModuleLastUpdateTime() {
+        return mModuleLastUpdateTime;
+    }
+
+    @VisibleForTesting
+    /* package */ String getDexLastUpdateTimePrefName() {
+        return DEX_LAST_UPDATE_TIME_PREF_PREFIX + mComponentName.getPackageName();
+    }
+
+    private static String getDexDirectoryName(String packageName) {
+        return DEX_FILE_PREFIX + packageName;
+    }
+
+    private static String getDexFileName(String packageName) {
+        return DEX_FILE_PREFIX + packageName;
     }
 
     /**
      * A task for loading the module entry point class on a background thread.
      */
     private class LoadClassTask extends AsyncTask<Class<?>> {
+        /** Buffer size to use while copying an input stream into the disk. */
+        private static final int BUFFER_SIZE = 16 * 1024;
+
         private final Context mModuleContext;
-        private final Callback<ModuleEntryPoint> mCallback;
 
         /**
          * Constructs the task.
          * @param moduleContext The context for the package to load the class from.
-         * @param callback The callback to receive the result of the task. If there was a problem
-         *     the result will be null.
          */
-        LoadClassTask(Context moduleContext, Callback<ModuleEntryPoint> callback) {
+        LoadClassTask(Context moduleContext) {
             mModuleContext = moduleContext;
-            mCallback = callback;
         }
 
         @Override
@@ -203,24 +336,83 @@ public class ModuleLoader {
                 // influences priority once we have a task scheduler in Java.
                 Process.setThreadPriority(Process.THREAD_PRIORITY_DEFAULT);
 
+                boolean loadFromDex = updateModuleDexInDiskIfNeeded();
                 long entryPointLoadClassStartTime = ModuleMetrics.now();
                 Class<?> clazz =
-                        mModuleContext.getClassLoader().loadClass(mComponentName.getClassName());
+                        getModuleClassLoader(loadFromDex).loadClass(mComponentName.getClassName());
                 ModuleMetrics.recordLoadClassTime(entryPointLoadClassStartTime);
                 return clazz;
             } catch (ClassNotFoundException e) {
                 Log.e(TAG, "Could not find class %s", mComponentName.getClassName(), e);
                 ModuleMetrics.recordLoadResult(ModuleMetrics.LoadResult.CLASS_NOT_FOUND_EXCEPTION);
+            } catch (IOException e) {
+                Log.e(TAG, "Could not copy dex to local storage", e);
+                ModuleMetrics.recordLoadResult(
+                        ModuleMetrics.LoadResult.FAILED_TO_COPY_DEX_EXCEPTION);
             } finally {
                 Process.setThreadPriority(oldPriority);
             }
             return null;
         }
 
+        /**
+         * Updates the local copy of the module dex file in disk if necessary.
+         *
+         * <p>This method first checks the existing module lastUpdateTime in shared preferences and
+         * compares it to the new lastUpdateTime of the module.
+         *
+         * @return Whether the module code should be loaded from the dex file.
+         */
+        private boolean updateModuleDexInDiskIfNeeded() throws IOException {
+            SharedPreferences preferences = ContextUtils.getAppSharedPreferences();
+            String dexLastUpdateTimePref = getDexLastUpdateTimePrefName();
+            long localDexLastUpdateTime = preferences.getLong(dexLastUpdateTimePref, -1);
+
+            if (mDexResourceId == 0) {
+                if (localDexLastUpdateTime != -1) {
+                    // The module had a dex before but now it doesn't. Clean up previous local dex.
+                    cleanUpLocalDex();
+                }
+                return false;
+            } else if (localDexLastUpdateTime != mModuleLastUpdateTime) {
+                try {
+                    copyDexToDisk(mDexResourceId);
+                    preferences.edit()
+                            .putLong(dexLastUpdateTimePref, mModuleLastUpdateTime)
+                            .apply();
+                } catch (IOException e) {
+                    if (localDexLastUpdateTime != -1) {
+                        cleanUpLocalDex();
+                    }
+                    throw e;
+                }
+            }
+            return true;
+        }
+
+        /**
+         * Copies the dex file with the given {@code dexResourceId} from the module's context
+         * into the local storage.
+         */
+        private void copyDexToDisk(int dexResourceId) throws IOException {
+            InputStream in =
+                    mDexInputStreamProvider.createInputStream(dexResourceId, mModuleContext);
+            FileUtils.copyFileStreamAtomicWithBuffer(in, getDexFile(), new byte[BUFFER_SIZE]);
+        }
+
+        private ClassLoader getModuleClassLoader(boolean loadFromDex) {
+            if (mDexResourceId == 0 || !loadFromDex) {
+                // Load directly from the APK if an extra dex file is not provided.
+                return mModuleContext.getClassLoader();
+            }
+            return mDexClassLoaderProvider.createClassLoader(getDexFile());
+        }
+
         @Override
         protected void onPostExecute(@Nullable Class<?> clazz) {
+            mIsModuleLoading = false;
             if (clazz == null) {
-                mCallback.onResult(null);
+                runAndClearCallbacks();
                 return;
             }
 
@@ -242,7 +434,7 @@ public class ModuleLoader {
                             moduleHost.getHostVersion(), entryPoint.getMinimumHostVersion(),
                             entryPoint.getModuleVersion(), moduleHost.getMinimumModuleVersion());
                     ModuleMetrics.recordLoadResult(ModuleMetrics.LoadResult.INCOMPATIBLE_VERSION);
-                    mCallback.onResult(null);
+                    runAndClearCallbacks();
                     return;
                 }
 
@@ -250,12 +442,20 @@ public class ModuleLoader {
                 crashKeys.set(CrashKeyIndex.LOADED_DYNAMIC_MODULE, mModuleId);
                 crashKeys.set(CrashKeyIndex.ACTIVE_DYNAMIC_MODULE, mModuleId);
 
+                ModuleMetrics.registerLifecycleState(ModuleMetrics.LifecycleState.INSTANTIATED);
+
+                long entryPointInitStartTime = ModuleMetrics.now();
                 entryPoint.init(moduleHost);
+                ModuleMetrics.recordEntryPointInitTime(entryPointInitStartTime);
+
                 ModuleMetrics.recordLoadResult(ModuleMetrics.LoadResult.SUCCESS_NEW);
+
                 mModuleEntryPoint = entryPoint;
-                mModuleUseCount = 1;
-                mModuleUnusedTimeMs = -1;
-                mCallback.onResult(entryPoint);
+                mModuleUnusedTimeMs = ModuleMetrics.now();
+                runAndClearCallbacks();
+                sendAllBundles();
+
+                ModuleMetrics.recordCodeMemoryFootprint(mComponentName.getPackageName());
                 return;
             } catch (Exception e) {
                 // No multi-catch below API level 19 for reflection exceptions.
@@ -263,18 +463,21 @@ public class ModuleLoader {
                 Log.e(TAG, "Could not instantiate class %s", mComponentName.getClassName(), e);
                 ModuleMetrics.recordLoadResult(ModuleMetrics.LoadResult.INSTANTIATION_EXCEPTION);
             }
-            mCallback.onResult(null);
+            runAndClearCallbacks();
         }
     }
 
     @Nullable
-    private static Context getModuleContext(String packageName) {
+    private static Context createModuleContext(String packageName, boolean resourcesOnly) {
         try {
             // The flags Context.CONTEXT_INCLUDE_CODE and Context.CONTEXT_IGNORE_SECURITY are
             // needed to be able to load classes via the classloader of the returned context.
             long createPackageContextStartTime = ModuleMetrics.now();
-            Context moduleContext = ContextUtils.getApplicationContext().createPackageContext(
-                    packageName, Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY);
+            int flags = resourcesOnly
+                    ? 0
+                    : Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY;
+            Context moduleContext =
+                    ContextUtils.getApplicationContext().createPackageContext(packageName, flags);
             ModuleMetrics.recordCreatePackageContextTime(createPackageContextStartTime);
             return moduleContext;
         } catch (PackageManager.NameNotFoundException e) {
@@ -288,5 +491,48 @@ public class ModuleLoader {
     private static boolean isCompatible(ModuleHostImpl moduleHost, ModuleEntryPoint entryPoint) {
         return entryPoint.getModuleVersion() >= moduleHost.getMinimumModuleVersion()
                 && moduleHost.getHostVersion() >= entryPoint.getMinimumHostVersion();
+    }
+
+    @VisibleForTesting
+    public int getModuleUseCount() {
+        return mModuleUseCount;
+    }
+
+    /**
+     * Provides an {@link InputStream} for the dex file content. This is abstracted to use a fake
+     * for testing.
+     */
+    @VisibleForTesting
+    public interface DexInputStreamProvider {
+        InputStream createInputStream(int dexResourceId, Context moduleContext);
+    }
+
+    private static class DexInputStreamProviderImpl implements DexInputStreamProvider {
+        @Override
+        public InputStream createInputStream(int dexResourceId, Context moduleContext) {
+            return moduleContext.getResources().openRawResource(dexResourceId);
+        }
+    }
+
+    /** Creates a ClassLoader from a dex file. This is abstracted to use a fake for testing. */
+    @VisibleForTesting
+    public interface DexClassLoaderProvider {
+        ClassLoader createClassLoader(File dexFile);
+    }
+
+    private static class DexClassLoaderProviderImpl implements DexClassLoaderProvider {
+        @Override
+        public ClassLoader createClassLoader(File dexFile) {
+            File optimizedDexDirectory = dexFile.getParentFile();
+
+            // It is important to use the system ClassLoader as the base ClassLoader. Class
+            // loading is performed top-down, which means if we use Chrome ClassLoader as the
+            // base it will be used first to find class references. This is a problem as the
+            // the loaded module and Chrome could possibly use same classes but different
+            // versions of it. Such a case would cause RuntimeExceptions in the module.
+            return new DexClassLoader(dexFile.getAbsolutePath(),
+                    optimizedDexDirectory.getAbsolutePath(), null,
+                    ClassLoader.getSystemClassLoader());
+        }
     }
 }

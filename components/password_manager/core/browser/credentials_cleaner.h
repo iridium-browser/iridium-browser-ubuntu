@@ -5,6 +5,13 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_CREDENTIALS_CLEANER_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_CREDENTIALS_CLEANER_H_
 
+#include <memory>
+#include <vector>
+
+namespace autofill {
+struct PasswordForm;
+}
+
 namespace password_manager {
 
 // Interface that allows CredentialsCleanerRunner class to easily manipulate
@@ -28,6 +35,11 @@ class CredentialsCleaner {
 
   virtual ~CredentialsCleaner() = default;
 
+  // Returns whether the clean-up associated with this CredentialsCleaner
+  // instance needs to be executed. For example, this might return false, if the
+  // clean-up only needs to happen once and has been executed in the past.
+  virtual bool NeedsCleaning() = 0;
+
   // Calling this initiates the clean-up. The function should only be called
   // once in the lifetime of this class. The clean-up may consist of
   // asynchronous tasks, so exiting from StartCleaning does not mean the
@@ -35,6 +47,13 @@ class CredentialsCleaner {
   // notified about the completion of the clean-up, so the |observer| should not
   // be null.
   virtual void StartCleaning(Observer* observer) = 0;
+
+  // Iterates through |forms| and removes credentials whose signon_realm does
+  // not correspond to a HTTP or HTTPS scheme. In particular, this filters out
+  // Android and federated credentials. Returns the result.
+  static std::vector<std::unique_ptr<autofill::PasswordForm>>
+  RemoveNonHTTPOrHTTPSForms(
+      std::vector<std::unique_ptr<autofill::PasswordForm>> forms);
 };
 
 }  // namespace password_manager

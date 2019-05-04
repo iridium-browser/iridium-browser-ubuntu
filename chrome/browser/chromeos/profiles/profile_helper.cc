@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/strings/string_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/chromeos/base/file_flusher.h"
@@ -19,10 +20,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chromeos/chromeos_constants.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_constants.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "components/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -49,6 +51,11 @@ bool ShouldAddProfileDirPrefix(const std::string& user_id_hash) {
   // based on whether multi profile is enabled or not.
   return user_id_hash != chrome::kLegacyProfileDir &&
       user_id_hash != chrome::kTestUserProfileDir;
+}
+
+void WrapAsBrowsersCloseCallback(const base::RepeatingClosure& callback,
+                                 const base::FilePath& path) {
+  callback.Run();
 }
 
 class UsernameHashMatcher {
@@ -100,6 +107,7 @@ ProfileHelper* ProfileHelper::Get() {
 // static
 Profile* ProfileHelper::GetProfileByUserIdHashForTest(
     const std::string& user_id_hash) {
+  base::ScopedAllowBlockingForTesting allow_io;
   return g_browser_process->profile_manager()->GetProfile(
       ProfileHelper::GetProfilePathByUserIdHash(user_id_hash));
 }
@@ -190,11 +198,6 @@ std::string ProfileHelper::GetLockScreenAppProfileName() {
 
 // static
 bool ProfileHelper::IsOwnerProfile(const Profile* profile) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kStubCrosSettings)) {
-    return true;
-  }
-
   if (!profile)
     return false;
   const user_manager::User* user =
@@ -284,7 +287,7 @@ void ProfileHelper::ClearSigninProfile(const base::Closure& on_clear_callback) {
     return;
   }
   on_clear_profile_stage_finished_ =
-      base::BarrierClosure(2, base::Bind(&ProfileHelper::OnSigninProfileCleared,
+      base::BarrierClosure(3, base::Bind(&ProfileHelper::OnSigninProfileCleared,
                                          weak_factory_.GetWeakPtr()));
   LOG_ASSERT(!browsing_data_remover_);
   browsing_data_remover_ =
@@ -300,6 +303,16 @@ void ProfileHelper::ClearSigninProfile(const base::Closure& on_clear_callback) {
   login::SigninPartitionManager::Factory::GetForBrowserContext(
       GetSigninProfile())
       ->CloseCurrentSigninSession(on_clear_profile_stage_finished_);
+
+  BrowserList::CloseAllBrowsersWithProfile(
+      GetSigninProfile(),
+      base::BindRepeating(
+          &WrapAsBrowsersCloseCallback,
+          on_clear_profile_stage_finished_) /* on_close_success */,
+      base::BindRepeating(
+          &WrapAsBrowsersCloseCallback,
+          on_clear_profile_stage_finished_) /* on_close_aborted */,
+      true /* skip_beforeunload */);
 }
 
 Profile* ProfileHelper::GetProfileByAccountId(const AccountId& account_id) {
@@ -485,8 +498,8 @@ void ProfileHelper::SetProfileToUserForTestingEnabled(bool enabled) {
 
 // static
 void ProfileHelper::SetAlwaysReturnPrimaryUserForTesting(bool value) {
-  always_return_primary_user_for_testing = true;
-  ProfileHelper::SetProfileToUserForTestingEnabled(true);
+  always_return_primary_user_for_testing = value;
+  ProfileHelper::SetProfileToUserForTestingEnabled(value);
 }
 
 void ProfileHelper::SetUserToProfileMappingForTesting(

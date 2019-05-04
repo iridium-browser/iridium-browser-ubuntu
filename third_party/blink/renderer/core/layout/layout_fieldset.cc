@@ -23,15 +23,12 @@
 
 #include "third_party/blink/renderer/core/layout/layout_fieldset.h"
 
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/html/forms/html_legend_element.h"
-#include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/paint/fieldset_painter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
-
-using namespace HTMLNames;
 
 LayoutFieldset::LayoutFieldset(Element* element) : LayoutBlockFlow(element) {}
 
@@ -44,8 +41,8 @@ void LayoutFieldset::ComputePreferredLogicalWidths() {
   if (LayoutBox* legend = FindInFlowLegend()) {
     int legend_min_width = legend->MinPreferredLogicalWidth().ToInt();
 
-    Length legend_margin_left = legend->StyleRef().MarginLeft();
-    Length legend_margin_right = legend->StyleRef().MarginRight();
+    const Length& legend_margin_left = legend->StyleRef().MarginLeft();
+    const Length& legend_margin_right = legend->StyleRef().MarginRight();
 
     if (legend_margin_left.IsFixed())
       legend_min_width += legend_margin_left.Value();
@@ -65,9 +62,10 @@ LayoutObject* LayoutFieldset::LayoutSpecialExcludedChild(bool relayout_children,
   if (legend) {
     LayoutRect old_legend_frame_rect = legend->FrameRect();
 
-    if (relayout_children)
+    if (relayout_children) {
       legend->SetNeedsLayoutAndFullPaintInvalidation(
-          LayoutInvalidationReason::kFieldsetChanged);
+          layout_invalidation_reason::kFieldsetChanged);
+    }
     legend->LayoutIfNeeded();
 
     LayoutUnit logical_left;
@@ -173,6 +171,16 @@ void LayoutFieldset::PaintBoxDecorationBackground(
 void LayoutFieldset::PaintMask(const PaintInfo& paint_info,
                                const LayoutPoint& paint_offset) const {
   FieldsetPainter(*this).PaintMask(paint_info, paint_offset);
+}
+
+bool LayoutFieldset::BackgroundIsKnownToBeOpaqueInRect(
+    const LayoutRect& local_rect) const {
+  // If the field set has a legend, then it probably does not completely fill
+  // its background.
+  if (FindInFlowLegend())
+    return false;
+
+  return LayoutBlockFlow::BackgroundIsKnownToBeOpaqueInRect(local_rect);
 }
 
 }  // namespace blink

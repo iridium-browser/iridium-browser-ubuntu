@@ -6,7 +6,7 @@
 
 #include "services/ws/client_change.h"
 #include "services/ws/client_change_tracker.h"
-#include "services/ws/server_window.h"
+#include "services/ws/proxy_window.h"
 #include "services/ws/window_properties.h"
 #include "services/ws/window_service.h"
 #include "services/ws/window_service_delegate.h"
@@ -31,45 +31,32 @@ bool FocusHandler::SetFocus(aura::Window* window) {
     return false;
   }
 
+  // The client shouldn't set focus with nullptr. When window is giving up its
+  // focus (like closing or hiding), the client should reset the focus within
+  // the client but the reset shouldn't be propagated to the server. The window
+  // server will pick up a new focused window meanwhile, on other hooks like
+  // visibility change or window state change. See https://crbug.com/897875.
+  if (!window) {
+    DVLOG(1) << "SetFocus failed (nullptr)";
+    return false;
+  }
+
   aura::client::FocusClient* focus_client =
       window_tree_->window_service_->focus_client();
-  ServerWindow* server_window = ServerWindow::GetMayBeNull(window);
+  ProxyWindow* proxy_window = ProxyWindow::GetMayBeNull(window);
   if (window == focus_client->GetFocusedWindow()) {
-    if (!window)
-      return true;
-
-    if (server_window->focus_owner() != window_tree_) {
+    if (proxy_window->focus_owner() != window_tree_) {
       // The focused window didn't change, but the client that owns focus did
-      // (see |ServerWindow::focus_owner_| for details on this). Notify the
+      // (see |ProxyWindow::focus_owner_| for details on this). Notify the
       // current owner that it lost focus.
-      if (server_window->focus_owner()) {
-        server_window->focus_owner()->window_tree_client_->OnWindowFocused(
+      if (proxy_window->focus_owner()) {
+        proxy_window->focus_owner()->window_tree_client_->OnWindowFocused(
             kInvalidTransportId);
       }
-      server_window->set_focus_owner(window_tree_);
+      proxy_window->set_focus_owner(window_tree_);
     }
     return true;
   }
-
-  // The client is asking to remove focus from a window. This is typically a
-  // side effect of the window becoming, or about to become, an unfocusable
-  // Window (for example, the Window is hiding). Windows becoming unfocusable is
-  // handled locally. Assume the request is for such a scenario and return
-  // true. Returning false means the client will attempt to revert to the
-  // previously focused window, which may cause unexpected activation changes.
-  //
-  // To process null requests conflicts with top-level activation changes. For
-  // example, the typical sequence when a window is hidden is to first remove
-  // focus, and then hide the window. FocusController keys off window hiding to
-  // move activation. If this code were to set focus to null, FocusController
-  // would not see the window hiding (because the active window was set to null)
-  // and not automatically activate the next window.
-  //
-  // Another possibility for this code is to handle null as a signal to move
-  // focus to the active window (if there is one). I'm going with the simpler
-  // approach for now.
-  if (!window)
-    return true;
 
   ClientChange change(window_tree_->property_change_tracker_.get(), window,
                       ClientChangeType::kFocus);
@@ -88,8 +75,8 @@ bool FocusHandler::SetFocus(aura::Window* window) {
                  << " failed for " << window->GetName() << ")";
         return false;
       }
-      if (server_window)
-        server_window->set_focus_owner(window_tree_);
+      if (proxy_window)
+        proxy_window->set_focus_owner(window_tree_);
       return true;
     }
   }
@@ -101,8 +88,8 @@ bool FocusHandler::SetFocus(aura::Window* window) {
     return false;
   }
 
-  if (server_window)
-    server_window->set_focus_owner(window_tree_);
+  if (proxy_window)
+    proxy_window->set_focus_owner(window_tree_);
   return true;
 }
 
@@ -126,12 +113,12 @@ bool FocusHandler::IsFocusableWindow(aura::Window* window) const {
           window_tree_->IsClientRootWindow(window));
 }
 
-bool FocusHandler::IsEmbeddedClient(ServerWindow* server_window) const {
-  return server_window->embedded_window_tree() == window_tree_;
+bool FocusHandler::IsEmbeddedClient(ProxyWindow* proxy_window) const {
+  return proxy_window->embedded_window_tree() == window_tree_;
 }
 
-bool FocusHandler::IsOwningClient(ServerWindow* server_window) const {
-  return server_window->owning_window_tree() == window_tree_;
+bool FocusHandler::IsOwningClient(ProxyWindow* proxy_window) const {
+  return proxy_window->owning_window_tree() == window_tree_;
 }
 
 void FocusHandler::OnWindowFocused(aura::Window* gained_focus,
@@ -150,11 +137,11 @@ void FocusHandler::OnWindowFocused(aura::Window* gained_focus,
   // Prefer the embedded client over the owning client.
   bool notified_gained = false;
   if (gained_focus) {
-    ServerWindow* server_window = ServerWindow::GetMayBeNull(gained_focus);
-    if (server_window && (IsEmbeddedClient(server_window) ||
-                          (!server_window->embedded_window_tree() &&
-                           IsOwningClient(server_window)))) {
-      server_window->set_focus_owner(window_tree_);
+    ProxyWindow* proxy_window = ProxyWindow::GetMayBeNull(gained_focus);
+    if (proxy_window && (IsEmbeddedClient(proxy_window) ||
+                         (!proxy_window->embedded_window_tree() &&
+                          IsOwningClient(proxy_window)))) {
+      proxy_window->set_focus_owner(window_tree_);
       window_tree_->window_tree_client_->OnWindowFocused(
           window_tree_->TransportIdForWindow(gained_focus));
       notified_gained = true;
@@ -162,9 +149,9 @@ void FocusHandler::OnWindowFocused(aura::Window* gained_focus,
   }
 
   if (lost_focus && !notified_gained) {
-    ServerWindow* server_window = ServerWindow::GetMayBeNull(lost_focus);
-    if (server_window && server_window->focus_owner() == window_tree_) {
-      server_window->set_focus_owner(nullptr);
+    ProxyWindow* proxy_window = ProxyWindow::GetMayBeNull(lost_focus);
+    if (proxy_window && proxy_window->focus_owner() == window_tree_) {
+      proxy_window->set_focus_owner(nullptr);
       window_tree_->window_tree_client_->OnWindowFocused(kInvalidTransportId);
     }
   }

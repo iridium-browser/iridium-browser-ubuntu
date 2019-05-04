@@ -30,7 +30,7 @@ NSString* const kFindInPageInit = @"window.__gCrWeb.findInPage && "
 // to spend any time at runtime to format this constant into another constant.
 NSString* const kFindInPageVerbatim =
     @"window.__gCrWeb.findInPage && "
-     "window.__gCrWeb.findInPage.highlightWord(%@, false, 100.0);";
+     "window.__gCrWeb.findInPage.highlightWord(%@, 100.0);";
 
 // The timeout of 100ms is hardcoded into this string so we don't have
 // to spend any time at runtime to format this constant into another constant.
@@ -169,11 +169,12 @@ const FindInPageEntry kFindInPageEntryZero = {{0.0, 0.0}, 0};
 #pragma mark FindInPageEntry
 
 - (BOOL)processFindInPageResult:(id)result scrollPosition:(CGPoint*)point {
-  if (!result)
+  NSString* result_str = base::mac::ObjCCastStrict<NSString>(result);
+  if (!result_str)
     return NO;
 
   // Parse JSONs.
-  std::string json = base::SysNSStringToUTF8(result);
+  std::string json = base::SysNSStringToUTF8(result_str);
   std::unique_ptr<base::Value> root(base::JSONReader::Read(json, false));
   if (!root.get())
     return YES;

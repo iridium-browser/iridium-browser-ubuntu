@@ -10,15 +10,16 @@
 
 #include "base/lazy_instance.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
@@ -448,11 +449,16 @@ ExtensionActionSetIconFunction::RunExtensionAction() {
       return RespondNow(Error("Icon invalid."));
 
     gfx::Image icon_image(icon);
-
-    const bool is_visible =
-        image_util::IsIconSufficientlyVisible(icon_image.AsBitmap());
+    const SkBitmap bitmap = icon_image.AsBitmap();
+    const bool is_visible = image_util::IsIconSufficientlyVisible(bitmap);
     UMA_HISTOGRAM_BOOLEAN("Extensions.DynamicExtensionActionIconWasVisible",
                           is_visible);
+    const bool is_visible_rendered =
+        extensions::ui_util::IsRenderedIconSufficientlyVisibleForBrowserContext(
+            bitmap, browser_context());
+    UMA_HISTOGRAM_BOOLEAN(
+        "Extensions.DynamicExtensionActionIconWasVisibleRendered",
+        is_visible_rendered);
 
     if (!is_visible && g_report_error_for_invisible_icon)
       return RespondNow(Error("Icon not sufficiently visible."));
@@ -515,7 +521,7 @@ ExtensionActionSetBadgeBackgroundColorFunction::RunExtensionAction() {
     EXTENSION_FUNCTION_VALIDATE(list->GetSize() == 4);
 
     int color_array[4] = {0};
-    for (size_t i = 0; i < arraysize(color_array); ++i) {
+    for (size_t i = 0; i < base::size(color_array); ++i) {
       EXTENSION_FUNCTION_VALIDATE(list->GetInteger(i, &color_array[i]));
     }
 

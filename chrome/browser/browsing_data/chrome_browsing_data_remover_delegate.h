@@ -25,6 +25,7 @@
 #include "extensions/buildflags/buildflags.h"
 #include "media/media_buildflags.h"
 #include "ppapi/buildflags/buildflags.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 #include "chrome/browser/pepper_flash_settings_manager.h"
@@ -82,16 +83,16 @@ class ChromeBrowsingDataRemoverDelegate
 
     // "Site data" includes storage backend accessible to websites and some
     // additional metadata kept by the browser (e.g. site usage data).
-    DATA_TYPE_SITE_DATA = content::BrowsingDataRemover::DATA_TYPE_COOKIES |
-                          content::BrowsingDataRemover::DATA_TYPE_CHANNEL_IDS |
-                          content::BrowsingDataRemover::DATA_TYPE_DOM_STORAGE |
-                          DATA_TYPE_PLUGIN_DATA |
+    DATA_TYPE_SITE_DATA =
+        content::BrowsingDataRemover::DATA_TYPE_COOKIES |
+        content::BrowsingDataRemover::DATA_TYPE_DOM_STORAGE |
+        content::BrowsingDataRemover::DATA_TYPE_MEDIA_LICENSES |
+        DATA_TYPE_PLUGIN_DATA |
 #if defined(OS_ANDROID)
-                          DATA_TYPE_WEB_APP_DATA |
+        DATA_TYPE_WEB_APP_DATA |
 #endif
-                          DATA_TYPE_SITE_USAGE_DATA |
-                          DATA_TYPE_DURABLE_PERMISSION |
-                          DATA_TYPE_EXTERNAL_PROTOCOL_DATA,
+        DATA_TYPE_SITE_USAGE_DATA | DATA_TYPE_DURABLE_PERMISSION |
+        DATA_TYPE_EXTERNAL_PROTOCOL_DATA,
 
     // Datatypes protected by Important Sites.
     IMPORTANT_SITES_DATA_TYPES =
@@ -109,10 +110,9 @@ class ChromeBrowsingDataRemoverDelegate
     ALL_DATA_TYPES = DATA_TYPE_SITE_DATA |  //
                      content::BrowsingDataRemover::DATA_TYPE_CACHE |
                      content::BrowsingDataRemover::DATA_TYPE_DOWNLOADS |
-                     DATA_TYPE_FORM_DATA |  //
-                     DATA_TYPE_HISTORY |    //
-                     DATA_TYPE_PASSWORDS |
-                     content::BrowsingDataRemover::DATA_TYPE_MEDIA_LICENSES |
+                     DATA_TYPE_FORM_DATA |         //
+                     DATA_TYPE_HISTORY |           //
+                     DATA_TYPE_PASSWORDS |         //
                      DATA_TYPE_CONTENT_SETTINGS |  //
                      DATA_TYPE_BOOKMARKS,
 
@@ -181,6 +181,13 @@ class ChromeBrowsingDataRemoverDelegate
       scoped_refptr<BrowsingDataFlashLSOHelper> flash_lso_helper);
 #endif
 
+  using DomainReliabilityClearer = base::RepeatingCallback<void(
+      const content::BrowsingDataFilterBuilder& filter_builder,
+      network::mojom::NetworkContext_DomainReliabilityClearMode,
+      network::mojom::NetworkContext::ClearDomainReliabilityCallback)>;
+  void OverrideDomainReliabilityClearerForTesting(
+      DomainReliabilityClearer clearer);
+
  private:
   using WebRtcEventLogManager = webrtc_event_logging::WebRtcEventLogManager;
 
@@ -206,7 +213,7 @@ class ChromeBrowsingDataRemoverDelegate
   // A helper method that checks if time period is for "all time".
   bool IsForAllTime() const;
 
-#if defined (OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
   void OnClearPlatformKeys(base::OnceClosure done, base::Optional<bool> result);
 #endif
 
@@ -257,6 +264,8 @@ class ChromeBrowsingDataRemoverDelegate
   // Used to deauthorize content licenses for Pepper Flash.
   std::unique_ptr<PepperFlashSettingsManager> pepper_flash_settings_manager_;
 #endif
+
+  DomainReliabilityClearer domain_reliability_clearer_;
 
   // Used if we need to clear history.
   base::CancelableTaskTracker history_task_tracker_;

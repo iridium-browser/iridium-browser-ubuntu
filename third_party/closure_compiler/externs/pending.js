@@ -81,4 +81,48 @@ class ResizeObserver {
  * @param {...*} args The function arguments.
  * TODO(rbpotter): Remove this once it is added to Closure Compiler itself.
  */
-Polymer.RenderStatus.beforeNextRender = function(element, fn, args) {}
+Polymer.RenderStatus.beforeNextRender = function(element, fn, args) {};
+
+/**
+ * @see
+ * https://www.webcomponents.org/element/@polymer/iron-iconset-svg
+ * Polymer iconset of SVGs.
+ * @implements {Polymer.Iconset}
+ * @constructor
+ * TODO(rbpotter): Remove this once it is added to Closure Compiler itself.
+ */
+Polymer.IronIconsetSvg = function() {};
+
+/**
+ * Added to IronIconsetSvg in chromium.patch.
+ * @param {string} iconName Name of the icon to apply.
+ * @param {boolean} targetIsRTL Whether the target element is RTL.
+ * @return {Element} Returns an installable clone of the SVG element
+ *     matching `id`.
+ * TODO(rbpotter): Remove this once it is added to Closure Compiler itself.
+ */
+Polymer.IronIconsetSvg.prototype.createIcon = function(iconName, targetIsRTL) {};
+
+/**
+ * @see
+ * https://github.com/tc39/proposal-bigint
+ * This supports wrapping and operating on arbitrarily large integers.
+ *
+ * @param {number} value
+ */
+let BigInt = function(value) {};
+
+/** @const {!Clipboard} */
+Navigator.prototype.clipboard;
+
+/**
+ * TODO(manukh): remove this once it is added to Closure Compiler itself.
+ * @see https://tc39.github.io/proposal-flatMap/#sec-Array.prototype.flatMap
+ * @param {?function(this:S, T, number, !Array<T>): R} callback
+ * @param {S=} opt_this
+ * @return {!Array<R>}
+ * @this {IArrayLike<T>|string}
+ * @template T,S,R
+ * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/flatMap
+ */
+Array.prototype.flatMap = function(callback, opt_this) {};

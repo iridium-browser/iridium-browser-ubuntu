@@ -57,11 +57,11 @@ class ASH_EXPORT AppListPresenterDelegateImpl
       aura::Window* root_window) override;
   base::TimeDelta GetVisibilityAnimationDuration(aura::Window* root_window,
                                                  bool is_visible) override;
-  bool IsHomeLauncherEnabledInTabletMode() override;
+  bool IsTabletMode() const override;
   app_list::AppListViewDelegate* GetAppListViewDelegate() override;
   bool GetOnScreenKeyboardShown() override;
   aura::Window* GetRootWindowForDisplayId(int64_t display_id) override;
-  void OnVisibilityChanged(bool visible, aura::Window* root_window) override;
+  void OnVisibilityChanged(bool visible, int64_t display_id) override;
   void OnTargetVisibilityChanged(bool visible) override;
 
   // DisplayObserver overrides:
@@ -74,6 +74,10 @@ class ASH_EXPORT AppListPresenterDelegateImpl
   // ui::EventHandler overrides:
   void OnMouseEvent(ui::MouseEvent* event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
+
+  // Snaps the app list window bounds to fit the screen size. (See
+  // https://crbug.com/884889).
+  void SnapAppListBoundsToDisplayEdge();
 
   // Whether the app list is visible (or in the process of being shown).
   bool is_visible_ = false;

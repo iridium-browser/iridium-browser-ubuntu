@@ -42,7 +42,7 @@ namespace blink {
 
 class SharedWorkerThread;
 
-class SharedWorkerGlobalScope final : public WorkerGlobalScope {
+class CORE_EXPORT SharedWorkerGlobalScope final : public WorkerGlobalScope {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -64,18 +64,27 @@ class SharedWorkerGlobalScope final : public WorkerGlobalScope {
       network::mojom::FetchCredentialsMode) override;
 
   // Setters/Getters for attributes in SharedWorkerGlobalScope.idl
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(connect);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(connect, kConnect);
   String name() const { return name_; }
 
-  void ConnectPausable(MessagePortChannel channel);
+  void Connect(MessagePortChannel channel);
 
   void Trace(blink::Visitor*) override;
 
  private:
   void ExceptionThrown(ErrorEvent*) override;
+  mojom::RequestContextType GetDestinationForMainScript() override;
 
   const String name_;
 };
+
+template <>
+struct DowncastTraits<SharedWorkerGlobalScope> {
+  static bool AllowFrom(const ExecutionContext& context) {
+    return context.IsSharedWorkerGlobalScope();
+  }
+};
+
 }  // namespace blink
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_WORKERS_SHARED_WORKER_GLOBAL_SCOPE_H_

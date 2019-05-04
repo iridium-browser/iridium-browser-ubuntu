@@ -9,6 +9,7 @@
 #include "SkBlendMode.h"
 #include "SkCanvas.h"
 #include "SkColor.h"
+#include "SkFont.h"
 #include "SkGeometry.h"
 #include "SkImageInfo.h"
 #include "SkMatrix.h"
@@ -27,6 +28,7 @@
 #include "SkSurface.h"
 #include "SkTArray.h"
 #include "SkTemplates.h"
+#include "SkTextUtils.h"
 #include "SkTypes.h"
 #include "sk_tool_utils.h"
 
@@ -324,6 +326,7 @@ protected:
         SkPaint paint, labelP;
         paint.setColor(color);
         labelP.setColor(color & 0xff5f9f5f);
+        SkFont font;
         SkPoint pos, tan;
         int index = 0;
         for (SkScalar dist = 0; dist <= total; dist += delta) {
@@ -338,7 +341,7 @@ protected:
                     SkRect dot = SkRect::MakeXYWH(pos.x() - 2, pos.y() - 2, 4, 4);
                     canvas->drawRect(dot, labelP);
                     canvas->drawString(label,
-                        pos.x() - tan.x() * 1.25f, pos.y() - tan.y() * 1.25f, labelP);
+                        pos.x() - tan.x() * 1.25f, pos.y() - tan.y() * 1.25f, font, labelP);
                 }
             }
             ++index;
@@ -398,7 +401,7 @@ protected:
                 SkString label;
                 label.appendS32(index);
                 canvas->drawString(label,
-                    pos.x() + tan.x() * 1.25f, pos.y() + tan.y() * 1.25f, paint);
+                    pos.x() + tan.x() * 1.25f, pos.y() + tan.y() * 1.25f, SkFont(), paint);
             }
         }
     }
@@ -502,12 +505,13 @@ protected:
         paint.setStyle(SkPaint::kStroke_Style);
         paint.setColor(button.fEnabled ? 0xFF3F0000 : 0x6F3F0000);
         canvas->drawRect(button.fBounds, paint);
-        paint.setTextSize(25.0f);
         paint.setColor(button.fEnabled ? 0xFF3F0000 : 0x6F3F0000);
-        paint.setTextAlign(SkPaint::kCenter_Align);
         paint.setStyle(SkPaint::kFill_Style);
-        canvas->drawText(&button.fLabel, 1, button.fBounds.centerX(), button.fBounds.fBottom - 5,
-                paint);
+        SkFont font;
+        font.setSize(25.0f);
+        SkTextUtils::Draw(canvas, &button.fLabel, 1, kUTF8_SkTextEncoding,
+                button.fBounds.centerX(), button.fBounds.fBottom - 5,
+                font, paint, SkTextUtils::kCenter_Align);
     }
 
     void draw_control(SkCanvas* canvas, const SkRect& bounds, SkScalar value,
@@ -523,11 +527,11 @@ protected:
         SkString label;
         label.printf("%0.3g", value);
         paint.setColor(0xFF000000);
-        paint.setTextSize(11.0f);
         paint.setStyle(SkPaint::kFill_Style);
-        canvas->drawString(label, bounds.fLeft + 5, yPos - 5, paint);
-        paint.setTextSize(13.0f);
-        canvas->drawString(name, bounds.fLeft, bounds.bottom() + 11, paint);
+        SkFont font(nullptr, 11.0f);
+        canvas->drawString(label, bounds.fLeft + 5, yPos - 5, font, paint);
+        font.setSize(13.0f);
+        canvas->drawString(name, bounds.fLeft, bounds.bottom() + 11, font, paint);
     }
 
     void setForGeometry() {
@@ -676,10 +680,10 @@ protected:
 
         if (fTextButton.fEnabled) {
             path.reset();
-            SkPaint paint;
-            paint.setAntiAlias(true);
-            paint.setTextSize(fTextSize);
-            paint.getTextPath(fText.c_str(), fText.size(), 0, fTextSize, &path);
+            SkFont font;
+            font.setSize(fTextSize);
+            SkTextUtils::GetPath(fText.c_str(), fText.size(), kUTF8_SkTextEncoding,
+                                 0, fTextSize, font, &path);
             setForText();
             draw_stroke(canvas, path, width * fWidthScale / fTextSize, fTextSize, true);
         }

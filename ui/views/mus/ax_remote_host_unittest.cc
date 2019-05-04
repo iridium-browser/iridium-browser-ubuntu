@@ -26,7 +26,7 @@ namespace {
 // Returns a well-known tree ID for the test widget.
 const ui::AXTreeID& TestAXTreeID() {
   static const base::NoDestructor<ui::AXTreeID> test_ax_tree_id(
-      ui::AXTreeID::FromString("123"));
+      ui::AXTreeID::CreateNewAXTreeID());
   return *test_ax_tree_id;
 }
 
@@ -62,7 +62,7 @@ class TestAXHostService : public ax::mojom::AXHost {
                                 const std::vector<ui::AXTreeUpdate>& updates,
                                 const ui::AXEvent& event) override {
     ++event_count_;
-    last_tree_id_ = ui::AXTreeID::FromString(tree_id);
+    last_tree_id_ = tree_id;
     last_updates_ = updates;
     last_event_ = event;
   }
@@ -117,8 +117,9 @@ AXRemoteHost* CreateRemote(TestAXHostService* service) {
   remote->InitForTesting(service->CreateInterfacePtr());
   remote->FlushForTesting();
   // Install the AXRemoteHost on MusClient so it monitors Widget creation.
+  AXRemoteHost* remote_raw = remote.get();
   MusClientTestApi::SetAXRemoteHost(std::move(remote));
-  return MusClient::Get()->ax_remote_host();
+  return remote_raw;
 }
 
 std::unique_ptr<Widget> CreateTestWidget() {
@@ -130,7 +131,7 @@ std::unique_ptr<Widget> CreateTestWidget() {
   return widget;
 }
 
-using AXRemoteHostTest = ViewsTestBase;
+using AXRemoteHostTest = ViewsTestWithDesktopNativeWidget;
 
 TEST_F(AXRemoteHostTest, CreateRemote) {
   TestAXHostService service(false /*automation_enabled*/);
@@ -193,7 +194,7 @@ TEST_F(AXRemoteHostTest, SendEventOnViewWithNoWidget) {
 
   // Create a view that is not yet associated with the widget.
   views::View view;
-  remote->HandleEvent(&view, ax::mojom::Event::kLocationChanged);
+  remote->OnViewEvent(&view, ax::mojom::Event::kLocationChanged);
   // No crash.
 }
 
@@ -315,7 +316,8 @@ TEST_F(AXRemoteHostTest, ScaleFactor) {
 
   // Widget transform is scaled by a factor of 2.
   ASSERT_FALSE(service.last_updates_.empty());
-  gfx::Transform* transform = service.last_updates_[0].nodes[0].transform.get();
+  gfx::Transform* transform =
+      service.last_updates_[0].nodes[0].relative_bounds.transform.get();
   ASSERT_TRUE(transform);
   EXPECT_TRUE(transform->IsScale2d());
   EXPECT_EQ(gfx::Vector2dF(2.f, 2.f), transform->Scale2d());

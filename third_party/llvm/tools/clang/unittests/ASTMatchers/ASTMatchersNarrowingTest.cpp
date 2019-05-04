@@ -667,6 +667,14 @@ TEST(Matcher, VarDecl_Storage) {
   EXPECT_TRUE(matches("void f() { static int X; }", M));
 }
 
+TEST(Matcher, VarDecl_IsStaticLocal) {
+  auto M = varDecl(isStaticLocal());
+  EXPECT_TRUE(matches("void f() { static int X; }", M));
+  EXPECT_TRUE(notMatches("static int X;", M));
+  EXPECT_TRUE(notMatches("void f() { int X; }", M));
+  EXPECT_TRUE(notMatches("int X;", M));
+}
+
 TEST(Matcher, VarDecl_StorageDuration) {
   std::string T =
     "void f() { int x; static int y; } int a;static int b;extern int c;";
@@ -1376,6 +1384,10 @@ TEST(ObjCIvarRefExprMatcher, IvarExpr) {
         hasDeclaration(namedDecl(hasName("x"))))));
   EXPECT_FALSE(matchesObjC(ObjCString, objcIvarRefExpr(
         hasDeclaration(namedDecl(hasName("y"))))));
+}
+
+TEST(BlockExprMatcher, BlockExpr) {
+  EXPECT_TRUE(matchesObjC("void f() { ^{}(); }", blockExpr()));
 }
 
 TEST(StatementCountIs, FindsNoStatementsInAnEmptyCompoundStatement) {
@@ -2241,6 +2253,18 @@ TEST(IsAssignmentOperator, Basic) {
                       CXXAsgmtOperator));
   EXPECT_TRUE(
       notMatches("void x() { int a; if(a == 0) return; }", BinAsgmtOperator));
+}
+
+TEST(HasInit, Basic) {
+  EXPECT_TRUE(
+    matches("int x{0};",
+            initListExpr(hasInit(0, expr()))));
+  EXPECT_FALSE(
+    matches("int x{0};",
+            initListExpr(hasInit(1, expr()))));
+  EXPECT_FALSE(
+    matches("int x;",
+            initListExpr(hasInit(0, expr()))));
 }
 
 TEST(Matcher, isMain) {

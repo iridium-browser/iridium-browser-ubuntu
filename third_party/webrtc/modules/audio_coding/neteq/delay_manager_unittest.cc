@@ -27,6 +27,7 @@ using ::testing::_;
 class DelayManagerTest : public ::testing::Test {
  protected:
   static const int kMaxNumberOfPackets = 240;
+  static const int kMinDelayMs = 0;
   static const int kTimeStepMs = 10;
   static const int kFs = 8000;
   static const int kFrameSizeMs = 20;
@@ -45,10 +46,14 @@ class DelayManagerTest : public ::testing::Test {
   MockDelayPeakDetector detector_;
   uint16_t seq_no_;
   uint32_t ts_;
+  bool enable_rtx_handling_ = false;
 };
 
 DelayManagerTest::DelayManagerTest()
-    : dm_(nullptr), detector_(&tick_timer_), seq_no_(0x1234), ts_(0x12345678) {}
+    : dm_(nullptr),
+      detector_(&tick_timer_, false),
+      seq_no_(0x1234),
+      ts_(0x12345678) {}
 
 void DelayManagerTest::SetUp() {
   RecreateDelayManager();
@@ -56,7 +61,8 @@ void DelayManagerTest::SetUp() {
 
 void DelayManagerTest::RecreateDelayManager() {
   EXPECT_CALL(detector_, Reset()).Times(1);
-  dm_.reset(new DelayManager(kMaxNumberOfPackets, &detector_, &tick_timer_));
+  dm_.reset(new DelayManager(kMaxNumberOfPackets, kMinDelayMs,
+                             enable_rtx_handling_, &detector_, &tick_timer_));
 }
 
 void DelayManagerTest::SetPacketAudioLength(int lengt_ms) {
@@ -124,7 +130,7 @@ TEST_F(DelayManagerTest, UpdateNormal) {
   // Expect detector update method to be called once with inter-arrival time
   // equal to 1 packet, and (base) target level equal to 1 as well.
   // Return false to indicate no peaks found.
-  EXPECT_CALL(detector_, Update(1, 1)).WillOnce(Return(false));
+  EXPECT_CALL(detector_, Update(1, false, 1)).WillOnce(Return(false));
   InsertNextPacket();
   EXPECT_EQ(1 << 8, dm_->TargetLevel());  // In Q8.
   EXPECT_EQ(1, dm_->base_target_level());
@@ -147,7 +153,7 @@ TEST_F(DelayManagerTest, UpdateLongInterArrivalTime) {
   // Expect detector update method to be called once with inter-arrival time
   // equal to 1 packet, and (base) target level equal to 1 as well.
   // Return false to indicate no peaks found.
-  EXPECT_CALL(detector_, Update(2, 2)).WillOnce(Return(false));
+  EXPECT_CALL(detector_, Update(2, false, 2)).WillOnce(Return(false));
   InsertNextPacket();
   EXPECT_EQ(2 << 8, dm_->TargetLevel());  // In Q8.
   EXPECT_EQ(2, dm_->base_target_level());
@@ -170,7 +176,7 @@ TEST_F(DelayManagerTest, UpdatePeakFound) {
   // Expect detector update method to be called once with inter-arrival time
   // equal to 1 packet, and (base) target level equal to 1 as well.
   // Return true to indicate that peaks are found. Let the peak height be 5.
-  EXPECT_CALL(detector_, Update(1, 1)).WillOnce(Return(true));
+  EXPECT_CALL(detector_, Update(1, false, 1)).WillOnce(Return(true));
   EXPECT_CALL(detector_, MaxPeakHeight()).WillOnce(Return(5));
   InsertNextPacket();
   EXPECT_EQ(5 << 8, dm_->TargetLevel());
@@ -192,7 +198,7 @@ TEST_F(DelayManagerTest, TargetDelay) {
   // Expect detector update method to be called once with inter-arrival time
   // equal to 1 packet, and (base) target level equal to 1 as well.
   // Return false to indicate no peaks found.
-  EXPECT_CALL(detector_, Update(1, 1)).WillOnce(Return(false));
+  EXPECT_CALL(detector_, Update(1, false, 1)).WillOnce(Return(false));
   InsertNextPacket();
   const int kExpectedTarget = 1;
   EXPECT_EQ(kExpectedTarget << 8, dm_->TargetLevel());  // In Q8.
@@ -214,7 +220,7 @@ TEST_F(DelayManagerTest, MaxDelay) {
   // Second packet arrival.
   // Expect detector update method to be called once with inter-arrival time
   // equal to |kExpectedTarget| packet. Return true to indicate peaks found.
-  EXPECT_CALL(detector_, Update(kExpectedTarget, _))
+  EXPECT_CALL(detector_, Update(kExpectedTarget, false, _))
       .WillRepeatedly(Return(true));
   EXPECT_CALL(detector_, MaxPeakHeight())
       .WillRepeatedly(Return(kExpectedTarget));
@@ -244,7 +250,7 @@ TEST_F(DelayManagerTest, MinDelay) {
   // Second packet arrival.
   // Expect detector update method to be called once with inter-arrival time
   // equal to |kExpectedTarget| packet. Return true to indicate peaks found.
-  EXPECT_CALL(detector_, Update(kExpectedTarget, _))
+  EXPECT_CALL(detector_, Update(kExpectedTarget, false, _))
       .WillRepeatedly(Return(true));
   EXPECT_CALL(detector_, MaxPeakHeight())
       .WillRepeatedly(Return(kExpectedTarget));
@@ -260,6 +266,40 @@ TEST_F(DelayManagerTest, MinDelay) {
   IncreaseTime(kTimeIncrement);
   InsertNextPacket();
   EXPECT_EQ(kMinDelayPackets << 8, dm_->TargetLevel());
+}
+
+TEST_F(DelayManagerTest, UpdateReorderedPacket) {
+  SetPacketAudioLength(kFrameSizeMs);
+  InsertNextPacket();
+
+  // Insert packet that was sent before the previous packet.
+  EXPECT_CALL(detector_, Update(_, true, _));
+  EXPECT_EQ(0, dm_->Update(seq_no_ - 1, ts_ - kFrameSizeMs, kFs));
+}
+
+TEST_F(DelayManagerTest, EnableRtxHandling) {
+  enable_rtx_handling_ = true;
+  RecreateDelayManager();
+
+  // Insert first packet.
+  SetPacketAudioLength(kFrameSizeMs);
+  InsertNextPacket();
+
+  // Insert reordered packet.
+  // TODO(jakobi): Test estimated inter-arrival time by mocking the histogram
+  // instead of checking the call to the peak detector.
+  EXPECT_CALL(detector_, Update(3, true, _));
+  EXPECT_EQ(0, dm_->Update(seq_no_ - 3, ts_ - 3 * kFrameSizeMs, kFs));
+
+  // Insert another reordered packet.
+  EXPECT_CALL(detector_, Update(2, true, _));
+  EXPECT_EQ(0, dm_->Update(seq_no_ - 2, ts_ - 2 * kFrameSizeMs, kFs));
+
+  // Insert the next packet in order and verify that the inter-arrival time is
+  // estimated correctly.
+  IncreaseTime(kFrameSizeMs);
+  EXPECT_CALL(detector_, Update(1, false, _));
+  InsertNextPacket();
 }
 
 // Tests that skipped sequence numbers (simulating empty packets) are handled
@@ -283,7 +323,7 @@ TEST_F(DelayManagerTest, EmptyPacketsReported) {
   // Expect detector update method to be called once with inter-arrival time
   // equal to 1 packet, and (base) target level equal to 1 as well.
   // Return false to indicate no peaks found.
-  EXPECT_CALL(detector_, Update(1, 1)).WillOnce(Return(false));
+  EXPECT_CALL(detector_, Update(1, false, 1)).WillOnce(Return(false));
   InsertNextPacket();
 
   EXPECT_EQ(1 << 8, dm_->TargetLevel());  // In Q8.
@@ -307,7 +347,7 @@ TEST_F(DelayManagerTest, EmptyPacketsNotReported) {
   // Expect detector update method to be called once with inter-arrival time
   // equal to 1 packet, and (base) target level equal to 1 as well.
   // Return false to indicate no peaks found.
-  EXPECT_CALL(detector_, Update(10, 10)).WillOnce(Return(false));
+  EXPECT_CALL(detector_, Update(10, false, 10)).WillOnce(Return(false));
   InsertNextPacket();
 
   // Note 10 times higher target value.
@@ -346,7 +386,7 @@ TEST_F(DelayManagerTest, TargetDelayGreaterThanOne) {
   // Second packet arrival.
   // Expect detector update method to be called once with inter-arrival time
   // equal to 1 packet.
-  EXPECT_CALL(detector_, Update(1, 1)).WillOnce(Return(false));
+  EXPECT_CALL(detector_, Update(1, false, 1)).WillOnce(Return(false));
   InsertNextPacket();
   constexpr int kExpectedTarget = 1;
   EXPECT_EQ(kExpectedTarget << 8, dm_->TargetLevel());  // In Q8.

@@ -10,8 +10,13 @@
 #ifndef MODULES_RTP_RTCP_SOURCE_RTP_VIDEO_HEADER_H_
 #define MODULES_RTP_RTCP_SOURCE_RTP_VIDEO_HEADER_H_
 
+#include <cstdint>
+
 #include "absl/container/inlined_vector.h"
+#include "absl/types/optional.h"
 #include "absl/types/variant.h"
+#include "api/video/color_space.h"
+#include "api/video/video_codec_type.h"
 #include "api/video/video_content_type.h"
 #include "api/video/video_frame_marking.h"
 #include "api/video/video_rotation.h"
@@ -56,9 +61,10 @@ struct RTPVideoHeader {
   uint8_t simulcastIdx = 0;
   VideoCodecType codec = VideoCodecType::kVideoCodecGeneric;
 
-  PlayoutDelay playout_delay;
+  PlayoutDelay playout_delay = {-1, -1};
   VideoSendTiming video_timing;
   FrameMarking frame_marking;
+  absl::optional<ColorSpace> color_space;
   RTPVideoTypeHeader video_type_header;
 };
 

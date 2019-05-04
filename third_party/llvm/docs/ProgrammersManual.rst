@@ -2905,37 +2905,6 @@ For example:
   GV->eraseFromParent();
 
 
-.. _create_types:
-
-How to Create Types
--------------------
-
-In generating IR, you may need some complex types.  If you know these types
-statically, you can use ``TypeBuilder<...>::get()``, defined in
-``llvm/Support/TypeBuilder.h``, to retrieve them.  ``TypeBuilder`` has two forms
-depending on whether you're building types for cross-compilation or native
-library use.  ``TypeBuilder<T, true>`` requires that ``T`` be independent of the
-host environment, meaning that it's built out of types from the ``llvm::types``
-(`doxygen <http://llvm.org/doxygen/namespacellvm_1_1types.html>`__) namespace
-and pointers, functions, arrays, etc. built of those.  ``TypeBuilder<T, false>``
-additionally allows native C types whose size may depend on the host compiler.
-For example,
-
-.. code-block:: c++
-
-  FunctionType *ft = TypeBuilder<types::i<8>(types::i<32>*), true>::get();
-
-is easier to read and write than the equivalent
-
-.. code-block:: c++
-
-  std::vector<const Type*> params;
-  params.push_back(PointerType::getUnqual(Type::Int32Ty));
-  FunctionType *ft = FunctionType::get(Type::Int8Ty, params, false);
-
-See the `class comment
-<http://llvm.org/doxygen/TypeBuilder_8h_source.html#l00001>`_ for more details.
-
 .. _threading:
 
 Threads and LLVM
@@ -3736,13 +3705,6 @@ Important Subclasses of the ``Instruction`` class
   `ICmpInst <LangRef.html#i_icmp>`_ (integer opreands), and
   `FCmpInst <LangRef.html#i_fcmp>`_ (floating point operands).
 
-.. _TerminatorInst:
-
-* ``TerminatorInst``
-
-  This subclass is the parent of all terminator instructions (those which can
-  terminate a block).
-
 .. _m_Instruction:
 
 Important Public Members of the ``Instruction`` class
@@ -4068,7 +4030,7 @@ This class represents a single entry single exit section of the code, commonly
 known as a basic block by the compiler community.  The ``BasicBlock`` class
 maintains a list of Instruction_\ s, which form the body of the block.  Matching
 the language definition, the last element of this list of instructions is always
-a terminator instruction (a subclass of the TerminatorInst_ class).
+a terminator instruction.
 
 In addition to tracking the list of instructions that make up the block, the
 ``BasicBlock`` class also keeps track of the :ref:`Function <c_Function>` that
@@ -4119,7 +4081,7 @@ Important Public Members of the ``BasicBlock`` class
   Returns a pointer to :ref:`Function <c_Function>` the block is embedded into,
   or a null pointer if it is homeless.
 
-* ``TerminatorInst *getTerminator()``
+* ``Instruction *getTerminator()``
 
   Returns a pointer to the terminator instruction that appears at the end of the
   ``BasicBlock``.  If there is no terminator instruction, or if the last

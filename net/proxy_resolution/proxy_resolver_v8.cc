@@ -13,7 +13,7 @@
 #include "base/debug/leak_annotations.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -69,7 +69,7 @@
 // --------------------+-------------+-------------------+--------------
 //                     | Firefox3    | InternetExplorer8 |  --> Us <---
 // --------------------+-------------+-------------------+--------------
-// myIpAddress()       | IPv4/IPv6   |  IPv4             |  IPv4
+// myIpAddress()       | IPv4/IPv6   |  IPv4             |  IPv4/IPv6
 // dnsResolve()        | IPv4/IPv6   |  IPv4             |  IPv4
 // isResolvable()      | IPv4/IPv6   |  IPv4             |  IPv4
 // myIpAddressEx()     | N/A         |  IPv4/IPv6        |  IPv4/IPv6
@@ -385,9 +385,13 @@ class SharedIsolateFactory {
         static const char kNoOpt[] = "--noopt";
         v8::V8::SetFlagsFromString(kNoOpt, strlen(kNoOpt));
 
+        // WebAssembly isn't encountered during resolution, so reduce the
+        // potential attack surface.
+        static const char kNoExposeWasm[] = "--no-expose-wasm";
+        v8::V8::SetFlagsFromString(kNoExposeWasm, strlen(kNoExposeWasm));
+
         gin::IsolateHolder::Initialize(
             gin::IsolateHolder::kNonStrictMode,
-            gin::IsolateHolder::kStableV8Extras,
             gin::ArrayBufferAllocator::SharedInstance());
 
         has_initialized_v8_ = true;
@@ -465,7 +469,7 @@ class ProxyResolverV8::Context {
     v8::TryCatch try_catch(isolate_);
     v8::Local<v8::Value> ret;
     if (!v8::Function::Cast(*function)
-             ->Call(context, context->Global(), arraysize(argv), argv)
+             ->Call(context, context->Global(), base::size(argv), argv)
              .ToLocal(&ret)) {
       DCHECK(try_catch.HasCaught());
       HandleError(try_catch.Message());

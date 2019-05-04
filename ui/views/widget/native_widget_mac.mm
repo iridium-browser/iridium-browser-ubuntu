@@ -42,6 +42,9 @@ namespace {
 base::LazyInstance<ui::GestureRecognizerImplMac>::Leaky
     g_gesture_recognizer_instance = LAZY_INSTANCE_INITIALIZER;
 
+static base::RepeatingCallback<void(NativeWidgetMac*)>*
+    g_init_native_widget_callback = nullptr;
+
 NSInteger StyleMaskForParams(const Widget::InitParams& params) {
   // If the Widget is modal, it will be displayed as a sheet. This works best if
   // it has NSTitledWindowMask. For example, with NSBorderlessWindowMask, the
@@ -96,10 +99,24 @@ void NativeWidgetMac::WindowDestroyed() {
     delete this;
 }
 
-int NativeWidgetMac::SheetPositionY() {
-  NSView* view = GetNativeView();
-  return
-      [view convertPoint:NSMakePoint(0, NSHeight([view frame])) toView:nil].y;
+int32_t NativeWidgetMac::SheetOffsetY() {
+  return 0;
+}
+
+void NativeWidgetMac::GetWindowFrameTitlebarHeight(
+    bool* override_titlebar_height,
+    float* titlebar_height) {
+  *override_titlebar_height = false;
+  *titlebar_height = 0;
+}
+
+bool NativeWidgetMac::ExecuteCommand(
+    int32_t command,
+    WindowOpenDisposition window_open_disposition,
+    bool is_before_first_responder) {
+  // This is supported only by subclasses in chrome/browser/ui.
+  NOTIMPLEMENTED();
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -109,36 +126,40 @@ void NativeWidgetMac::InitNativeWidget(const Widget::InitParams& params) {
   ownership_ = params.ownership;
   name_ = params.name;
   BridgedNativeWidgetHostImpl* parent_host =
-      BridgedNativeWidgetHostImpl::GetFromNativeWindow([params.parent window]);
+      BridgedNativeWidgetHostImpl::GetFromNativeView(params.parent);
 
   // Determine the factory through which to create the bridge
   BridgeFactoryHost* bridge_factory_host =
       parent_host ? parent_host->bridge_factory_host() : GetBridgeFactoryHost();
-  if (bridge_factory_host) {
-    // Compute the parameters to describe the NSWindow.
-    // TODO(ccameron): This is not yet adequate to capture all NSWindow
-    // sub-classes that may be used. Make the parameter structure more
-    // expressive.
-    auto create_window_params =
-        views_bridge_mac::mojom::CreateWindowParams::New();
-    create_window_params->style_mask = StyleMaskForParams(params);
 
+  // Compute the parameters to describe the NSWindow.
+  auto create_window_params =
+      views_bridge_mac::mojom::CreateWindowParams::New();
+  create_window_params->window_class =
+      views_bridge_mac::mojom::WindowClass::kDefault;
+  create_window_params->style_mask = StyleMaskForParams(params);
+  create_window_params->titlebar_appears_transparent = false;
+  create_window_params->window_title_hidden = false;
+  PopulateCreateWindowParams(params, create_window_params.get());
+
+  if (bridge_factory_host) {
     bridge_host_->CreateRemoteBridge(bridge_factory_host,
                                      std::move(create_window_params));
   } else {
     base::scoped_nsobject<NativeWidgetMacNSWindow> window(
-        [CreateNSWindow(params) retain]);
+        [CreateNSWindow(create_window_params.get()) retain]);
     bridge_host_->CreateLocalBridge(std::move(window));
   }
   bridge_host_->SetParent(parent_host);
   bridge_host_->InitWindow(params);
+  OnWindowInitialized();
 
   // Only set always-on-top here if it is true since setting it may affect how
   // the window is treated by Expose.
   if (params.keep_on_top)
     SetAlwaysOnTop(true);
 
-  delegate_->OnNativeWidgetCreated(true);
+  delegate_->OnNativeWidgetCreated();
 
   DCHECK(GetWidget()->GetRootView());
   bridge_host_->SetRootView(GetWidget()->GetRootView());
@@ -150,6 +171,9 @@ void NativeWidgetMac::InitNativeWidget(const Widget::InitParams& params) {
   }
 
   bridge_host_->CreateCompositor(params);
+
+  if (g_init_native_widget_callback)
+    g_init_native_widget_callback->Run(this);
 }
 
 void NativeWidgetMac::OnWidgetInitDone() {
@@ -188,7 +212,7 @@ const Widget* NativeWidgetMac::GetWidget() const {
 
 gfx::NativeView NativeWidgetMac::GetNativeView() const {
   // Returns a BridgedContentView, unless there is no views::RootView set.
-  return [GetNativeWindow() contentView];
+  return [GetNativeWindow().GetNativeNSWindow() contentView];
 }
 
 gfx::NativeWindow NativeWidgetMac::GetNativeWindow() const {
@@ -344,8 +368,9 @@ void NativeWidgetMac::SetSize(const gfx::Size& size) {
 }
 
 void NativeWidgetMac::StackAbove(gfx::NativeView native_view) {
-  NSInteger view_parent = native_view.window.windowNumber;
-  [GetNativeWindow() orderWindow:NSWindowAbove relativeTo:view_parent];
+  NSInteger view_parent = native_view.GetNativeNSView().window.windowNumber;
+  [GetNativeWindow().GetNativeNSWindow() orderWindow:NSWindowAbove
+                                          relativeTo:view_parent];
 }
 
 void NativeWidgetMac::StackAtTop() {
@@ -362,9 +387,9 @@ void NativeWidgetMac::Close() {
 }
 
 void NativeWidgetMac::CloseNow() {
-  if (bridge())
-    bridge()->CloseWindowNow();
-  // Note: |bridge_host_| will be deleted her, and |this| will be deleted here
+  if (bridge_host_)
+    bridge_host_->CloseWindowNow();
+  // Note: |bridge_host_| will be deleted here, and |this| will be deleted here
   // when ownership_ == NATIVE_WIDGET_OWNS_WIDGET,
 }
 
@@ -424,11 +449,12 @@ bool NativeWidgetMac::IsActive() const {
 }
 
 void NativeWidgetMac::SetAlwaysOnTop(bool always_on_top) {
-  gfx::SetNSWindowAlwaysOnTop(GetNativeWindow(), always_on_top);
+  gfx::SetNSWindowAlwaysOnTop(GetNativeWindow().GetNativeNSWindow(),
+                              always_on_top);
 }
 
 bool NativeWidgetMac::IsAlwaysOnTop() const {
-  return gfx::IsNSWindowAlwaysOnTop(GetNativeWindow());
+  return gfx::IsNSWindowAlwaysOnTop(GetNativeWindow().GetNativeNSWindow());
 }
 
 void NativeWidgetMac::SetVisibleOnAllWorkspaces(bool always_visible) {
@@ -507,14 +533,14 @@ void NativeWidgetMac::RunShellDrag(View* view,
 
 void NativeWidgetMac::SchedulePaintInRect(const gfx::Rect& rect) {
   // |rect| is relative to client area of the window.
-  NSWindow* window = GetNativeWindow();
+  NSWindow* window = GetNativeWindow().GetNativeNSWindow();
   NSRect client_rect = [window contentRectForFrameRect:[window frame]];
   NSRect target_rect = rect.ToCGRect();
 
   // Convert to Appkit coordinate system (origin at bottom left).
   target_rect.origin.y =
       NSHeight(client_rect) - target_rect.origin.y - NSHeight(target_rect);
-  [GetNativeView() setNeedsDisplayInRect:target_rect];
+  [GetNativeView().GetNativeNSView() setNeedsDisplayInRect:target_rect];
   if (bridge_host_ && bridge_host_->layer())
     bridge_host_->layer()->SchedulePaint(rect);
 }
@@ -522,6 +548,13 @@ void NativeWidgetMac::SchedulePaintInRect(const gfx::Rect& rect) {
 void NativeWidgetMac::SetCursor(gfx::NativeCursor cursor) {
   if (bridge_impl())
     bridge_impl()->SetCursor(cursor);
+}
+
+void NativeWidgetMac::ShowEmojiPanel() {
+  // We must plumb the call to ui::ShowEmojiPanel() over the bridge so that it
+  // is called from the correct process.
+  if (bridge())
+    bridge()->ShowEmojiPanel();
 }
 
 bool NativeWidgetMac::IsMouseEventsEnabled() const {
@@ -556,6 +589,7 @@ Widget::MoveLoopResult NativeWidgetMac::RunMoveLoop(
   if (!bridge_impl())
     return Widget::MOVE_LOOP_CANCELED;
 
+  ReleaseCapture();
   return bridge_impl()->RunMoveLoop(drag_offset) ? Widget::MOVE_LOOP_SUCCESSFUL
                                                  : Widget::MOVE_LOOP_CANCELED;
 }
@@ -566,8 +600,8 @@ void NativeWidgetMac::EndMoveLoop() {
 }
 
 void NativeWidgetMac::SetVisibilityChangedAnimationsEnabled(bool value) {
-  if (bridge_impl())
-    bridge_impl()->SetAnimationEnabled(value);
+  if (bridge())
+    bridge()->SetAnimationEnabled(value);
 }
 
 void NativeWidgetMac::SetVisibilityAnimationDuration(
@@ -613,28 +647,51 @@ void NativeWidgetMac::OnSizeConstraintsChanged() {
                                widget->widget_delegate()->CanMaximize());
 }
 
-void NativeWidgetMac::RepostNativeEvent(gfx::NativeEvent native_event) {
-  NOTIMPLEMENTED();
-}
-
 std::string NativeWidgetMac::GetName() const {
   return name_;
+}
+
+// static
+void NativeWidgetMac::SetInitNativeWidgetCallback(
+    const base::RepeatingCallback<void(NativeWidgetMac*)>& callback) {
+  DCHECK(!g_init_native_widget_callback || callback.is_null());
+  if (callback.is_null()) {
+    if (g_init_native_widget_callback) {
+      delete g_init_native_widget_callback;
+      g_init_native_widget_callback = nullptr;
+    }
+    return;
+  }
+  g_init_native_widget_callback =
+      new base::RepeatingCallback<void(NativeWidgetMac*)>(callback);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetMac, protected:
 
 NativeWidgetMacNSWindow* NativeWidgetMac::CreateNSWindow(
-    const Widget::InitParams& params) {
-  return [[[NativeWidgetMacNSWindow alloc]
-      initWithContentRect:ui::kWindowSizeDeterminedLater
-                styleMask:StyleMaskForParams(params)
-                  backing:NSBackingStoreBuffered
-                    defer:NO] autorelease];
+    const views_bridge_mac::mojom::CreateWindowParams* params) {
+  return BridgedNativeWidgetImpl::CreateNSWindow(params).autorelease();
 }
 
 BridgeFactoryHost* NativeWidgetMac::GetBridgeFactoryHost() {
   return nullptr;
+}
+
+bool NativeWidgetMac::RedispatchKeyEvent(NSEvent* event) {
+  // If the target window is in-process, then redispatch the event directly,
+  // and give an accurate return value.
+  if (bridge_impl())
+    return bridge_impl()->RedispatchKeyEvent(event);
+
+  // If the target window is out of process then always report the event as
+  // handled (because it should never be handled in this process).
+  bridge()->RedispatchKeyEvent(
+      [event type], [event modifierFlags], [event timestamp],
+      base::SysNSStringToUTF16([event characters]),
+      base::SysNSStringToUTF16([event charactersIgnoringModifiers]),
+      [event keyCode]);
+  return true;
 }
 
 views_bridge_mac::mojom::BridgedNativeWidget* NativeWidgetMac::bridge() const {
@@ -694,7 +751,7 @@ NativeWidgetPrivate* NativeWidgetPrivate::CreateNativeWidget(
 // static
 NativeWidgetPrivate* NativeWidgetPrivate::GetNativeWidgetForNativeView(
     gfx::NativeView native_view) {
-  return GetNativeWidgetForNativeWindow([native_view window]);
+  return GetNativeWidgetForNativeWindow([native_view.GetNativeNSView() window]);
 }
 
 // static
@@ -711,7 +768,7 @@ NativeWidgetPrivate* NativeWidgetPrivate::GetNativeWidgetForNativeWindow(
 NativeWidgetPrivate* NativeWidgetPrivate::GetTopLevelNativeWidget(
     gfx::NativeView native_view) {
   BridgedNativeWidgetHostImpl* bridge_host =
-      BridgedNativeWidgetHostImpl::GetFromNativeWindow([native_view window]);
+      BridgedNativeWidgetHostImpl::GetFromNativeView(native_view);
   if (!bridge_host)
     return nullptr;
   while (bridge_host->parent())
@@ -723,22 +780,23 @@ NativeWidgetPrivate* NativeWidgetPrivate::GetTopLevelNativeWidget(
 void NativeWidgetPrivate::GetAllChildWidgets(gfx::NativeView native_view,
                                              Widget::Widgets* children) {
   BridgedNativeWidgetHostImpl* bridge_host =
-      BridgedNativeWidgetHostImpl::GetFromNativeWindow([native_view window]);
+      BridgedNativeWidgetHostImpl::GetFromNativeView(native_view);
   if (!bridge_host) {
+    NSView* ns_view = native_view.GetNativeNSView();
     // The NSWindow is not itself a views::Widget, but it may have children that
     // are. Support returning Widgets that are parented to the NSWindow, except:
     // - Ignore requests for children of an NSView that is not a contentView.
     // - We do not add a Widget for |native_view| to |children| (there is none).
-    if ([[native_view window] contentView] != native_view)
+    if ([[ns_view window] contentView] != ns_view)
       return;
 
     // Collect -sheets and -childWindows. A window should never appear in both,
     // since that causes AppKit to glitch.
-    NSArray* sheet_children = [[native_view window] sheets];
+    NSArray* sheet_children = [[ns_view window] sheets];
     for (NSWindow* native_child in sheet_children)
       GetAllChildWidgets([native_child contentView], children);
 
-    for (NSWindow* native_child in [[native_view window] childWindows]) {
+    for (NSWindow* native_child in [[ns_view window] childWindows]) {
       DCHECK(![sheet_children containsObject:native_child]);
       GetAllChildWidgets([native_child contentView], children);
     }
@@ -770,7 +828,7 @@ void NativeWidgetPrivate::GetAllChildWidgets(gfx::NativeView native_view,
 void NativeWidgetPrivate::GetAllOwnedWidgets(gfx::NativeView native_view,
                                              Widget::Widgets* owned) {
   BridgedNativeWidgetHostImpl* bridge_host =
-      BridgedNativeWidgetHostImpl::GetFromNativeWindow([native_view window]);
+      BridgedNativeWidgetHostImpl::GetFromNativeView(native_view);
   if (!bridge_host) {
     GetAllChildWidgets(native_view, owned);
     return;
@@ -785,24 +843,28 @@ void NativeWidgetPrivate::GetAllOwnedWidgets(gfx::NativeView native_view,
 void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
                                              gfx::NativeView new_parent) {
   DCHECK_NE(native_view, new_parent);
-  DCHECK([new_parent window]);
-  if (!new_parent || [native_view superview] == new_parent) {
+  DCHECK([new_parent.GetNativeNSView() window]);
+  if (!new_parent || [native_view.GetNativeNSView() superview] ==
+                         new_parent.GetNativeNSView()) {
     NOTREACHED();
     return;
   }
 
   BridgedNativeWidgetHostImpl* bridge_host =
-      BridgedNativeWidgetHostImpl::GetFromNativeWindow([native_view window]);
+      BridgedNativeWidgetHostImpl::GetFromNativeView(native_view);
   DCHECK(bridge_host);
-  NSView* bridge_view = bridge_host->native_widget_mac()->GetNativeView();
-  NSWindow* bridge_window = bridge_host->native_widget_mac()->GetNativeWindow();
+  gfx::NativeView bridge_view =
+      bridge_host->native_widget_mac()->GetNativeView();
+  gfx::NativeWindow bridge_window =
+      bridge_host->native_widget_mac()->GetNativeWindow();
   bool bridge_is_top_level =
       bridge_host->native_widget_mac()->GetWidget()->is_top_level();
-  DCHECK([native_view isDescendantOf:bridge_view]);
-  DCHECK(bridge_window && ![bridge_window isSheet]);
+  DCHECK([native_view.GetNativeNSView()
+      isDescendantOf:bridge_view.GetNativeNSView()]);
+  DCHECK(bridge_window && ![bridge_window.GetNativeNSWindow() isSheet]);
 
   BridgedNativeWidgetHostImpl* parent_bridge_host =
-      BridgedNativeWidgetHostImpl::GetFromNativeWindow([new_parent window]);
+      BridgedNativeWidgetHostImpl::GetFromNativeView(new_parent);
 
   // Early out for no-op changes.
   if (native_view == bridge_view && bridge_is_top_level &&
@@ -831,16 +893,16 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
       // path is unused and remove it.
       LOG(ERROR) << "Reparenting a non-top-level BridgedNativeWidget. This is "
                     "likely unsupported.";
-      [new_parent addSubview:native_view];
-      [bridge_window setAlphaValue:0];
-      [bridge_window setIgnoresMouseEvents:YES];
+      [new_parent.GetNativeNSView() addSubview:native_view.GetNativeNSView()];
+      [bridge_window.GetNativeNSWindow() setAlphaValue:0];
+      [bridge_window.GetNativeNSWindow() setIgnoresMouseEvents:YES];
     }
   } else {
     // TODO(ccameron): This path likely violates assumptions. Verify that this
     // path is unused and remove it.
     LOG(ERROR) << "Reparenting with a non-root BridgedNativeWidget NSView. "
                   "This is likely unsupported.";
-    [new_parent addSubview:native_view];
+    [new_parent.GetNativeNSView() addSubview:native_view.GetNativeNSView()];
   }
 
   // And now, notify them that they have a brand new parent.

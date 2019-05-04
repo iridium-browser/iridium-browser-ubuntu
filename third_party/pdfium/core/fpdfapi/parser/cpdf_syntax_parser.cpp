@@ -45,7 +45,9 @@ class ReadableSubStream final : public IFX_SeekableReadStream {
   ~ReadableSubStream() override = default;
 
   // IFX_SeekableReadStream overrides:
-  bool ReadBlock(void* buffer, FX_FILESIZE offset, size_t size) override {
+  bool ReadBlockAtOffset(void* buffer,
+                         FX_FILESIZE offset,
+                         size_t size) override {
     FX_SAFE_FILESIZE safe_end = offset;
     safe_end += size;
     // Check that requested range is valid, to prevent calling of ReadBlock
@@ -53,7 +55,7 @@ class ReadableSubStream final : public IFX_SeekableReadStream {
     if (!safe_end.IsValid() || safe_end.ValueOrDie() > m_PartSize)
       return false;
 
-    return m_pFileRead->ReadBlock(buffer, m_PartOffset + offset, size);
+    return m_pFileRead->ReadBlockAtOffset(buffer, m_PartOffset + offset, size);
   }
 
   FX_FILESIZE GetSize() override { return m_PartSize; }
@@ -111,7 +113,8 @@ bool CPDF_SyntaxParser::ReadBlockAt(FX_FILESIZE read_pos) {
     read_size = m_FileLen - read_pos;
 
   m_pFileBuf.resize(read_size);
-  if (!m_pFileAccess->ReadBlock(m_pFileBuf.data(), read_pos, read_size)) {
+  if (!m_pFileAccess->ReadBlockAtOffset(m_pFileBuf.data(), read_pos,
+                                        read_size)) {
     m_pFileBuf.clear();
     return false;
   }
@@ -154,7 +157,7 @@ bool CPDF_SyntaxParser::GetCharAtBackward(FX_FILESIZE pos, uint8_t* ch) {
 }
 
 bool CPDF_SyntaxParser::ReadBlock(uint8_t* pBuf, uint32_t size) {
-  if (!m_pFileAccess->ReadBlock(pBuf, m_Pos + m_HeaderOffset, size))
+  if (!m_pFileAccess->ReadBlockAtOffset(pBuf, m_Pos + m_HeaderOffset, size))
     return false;
   m_Pos += size;
   return true;
@@ -252,7 +255,7 @@ ByteString CPDF_SyntaxParser::ReadString() {
           buf << static_cast<char>(ch);
         break;
       case ReadStatus::Backslash:
-        if (ch >= '0' && ch <= '7') {
+        if (FXSYS_IsOctalDigit(ch)) {
           iEscCode = FXSYS_DecimalCharToInt(static_cast<wchar_t>(ch));
           status = ReadStatus::Octal;
           break;
@@ -278,7 +281,7 @@ ByteString CPDF_SyntaxParser::ReadString() {
         status = ReadStatus::Normal;
         break;
       case ReadStatus::Octal:
-        if (ch >= '0' && ch <= '7') {
+        if (FXSYS_IsOctalDigit(ch)) {
           iEscCode =
               iEscCode * 8 + FXSYS_DecimalCharToInt(static_cast<wchar_t>(ch));
           status = ReadStatus::FinishOctal;
@@ -290,7 +293,7 @@ ByteString CPDF_SyntaxParser::ReadString() {
         break;
       case ReadStatus::FinishOctal:
         status = ReadStatus::Normal;
-        if (ch >= '0' && ch <= '7') {
+        if (FXSYS_IsOctalDigit(ch)) {
           iEscCode =
               iEscCode * 8 + FXSYS_DecimalCharToInt(static_cast<wchar_t>(ch));
           buf << static_cast<char>(iEscCode);
@@ -578,7 +581,7 @@ unsigned int CPDF_SyntaxParser::ReadEOLMarkers(FX_FILESIZE pos) {
   return 0;
 }
 
-FX_FILESIZE CPDF_SyntaxParser::FindWordPos(const ByteStringView& word) {
+FX_FILESIZE CPDF_SyntaxParser::FindWordPos(ByteStringView word) {
   AutoRestorer<FX_FILESIZE> pos_restorer(&m_Pos);
   FX_FILESIZE end_offset = FindTag(word);
   while (end_offset >= 0) {
@@ -738,7 +741,7 @@ uint32_t CPDF_SyntaxParser::GetDirectNum() {
 
 bool CPDF_SyntaxParser::IsWholeWord(FX_FILESIZE startpos,
                                     FX_FILESIZE limit,
-                                    const ByteStringView& tag,
+                                    ByteStringView tag,
                                     bool checkKeyword) {
   const uint32_t taglen = tag.GetLength();
 
@@ -764,7 +767,7 @@ bool CPDF_SyntaxParser::IsWholeWord(FX_FILESIZE startpos,
   return true;
 }
 
-bool CPDF_SyntaxParser::BackwardsSearchToWord(const ByteStringView& tag,
+bool CPDF_SyntaxParser::BackwardsSearchToWord(ByteStringView tag,
                                               FX_FILESIZE limit) {
   int32_t taglen = tag.GetLength();
   if (taglen == 0)
@@ -798,7 +801,7 @@ bool CPDF_SyntaxParser::BackwardsSearchToWord(const ByteStringView& tag,
   }
 }
 
-FX_FILESIZE CPDF_SyntaxParser::FindTag(const ByteStringView& tag) {
+FX_FILESIZE CPDF_SyntaxParser::FindTag(ByteStringView tag) {
   const FX_FILESIZE startpos = GetPos();
   const int32_t taglen = tag.GetLength();
   ASSERT(taglen > 0);

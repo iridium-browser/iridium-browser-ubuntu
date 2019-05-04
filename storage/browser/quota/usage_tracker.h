@@ -14,13 +14,12 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/containers/flat_map.h"
+#include "base/component_export.h"
 #include "base/macros.h"
 #include "storage/browser/quota/quota_callbacks.h"
 #include "storage/browser/quota/quota_client.h"
 #include "storage/browser/quota/quota_task.h"
 #include "storage/browser/quota/special_storage_policy.h"
-#include "storage/browser/storage_browser_export.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom.h"
 #include "url/origin.h"
 
@@ -32,7 +31,8 @@ class StorageMonitor;
 // A helper class that gathers and tracks the amount of data stored in
 // all quota clients.
 // An instance of this class is created per storage type.
-class STORAGE_EXPORT UsageTracker : public QuotaTaskObserver {
+class COMPONENT_EXPORT(STORAGE_BROWSER) UsageTracker
+    : public QuotaTaskObserver {
  public:
   UsageTracker(const std::vector<QuotaClient*>& clients,
                blink::mojom::StorageType type,
@@ -57,8 +57,7 @@ class STORAGE_EXPORT UsageTracker : public QuotaTaskObserver {
       std::map<url::Origin, int64_t>* origin_usage) const;
   void GetCachedOrigins(std::set<url::Origin>* origins) const;
   bool IsWorking() const {
-    return global_usage_callbacks_.HasCallbacks() ||
-           host_usage_callbacks_.HasAnyCallbacks();
+    return !global_usage_callbacks_.empty() || !host_usage_callbacks_.empty();
   }
 
   void SetUsageCacheEnabled(QuotaClient::ID client_id,
@@ -72,7 +71,8 @@ class STORAGE_EXPORT UsageTracker : public QuotaTaskObserver {
     int pending_clients = 0;
     int64_t usage = 0;
     int64_t unlimited_usage = 0;
-    base::flat_map<QuotaClient::ID, int64_t> usage_breakdown;
+    blink::mojom::UsageBreakdownPtr usage_breakdown =
+        blink::mojom::UsageBreakdown::New();
   };
 
   friend class ClientUsageTracker;
@@ -93,13 +93,9 @@ class STORAGE_EXPORT UsageTracker : public QuotaTaskObserver {
   std::map<QuotaClient::ID, std::unique_ptr<ClientUsageTracker>>
       client_tracker_map_;
 
-  CallbackQueue<UsageCallback, int64_t> global_limited_usage_callbacks_;
-  CallbackQueue<GlobalUsageCallback, int64_t, int64_t> global_usage_callbacks_;
-
-  CallbackQueueMap<UsageWithBreakdownCallback,
-                   std::string,
-                   int64_t,
-                   base::flat_map<QuotaClient::ID, int64_t>>
+  std::vector<UsageCallback> global_limited_usage_callbacks_;
+  std::vector<GlobalUsageCallback> global_usage_callbacks_;
+  std::map<std::string, std::vector<UsageWithBreakdownCallback>>
       host_usage_callbacks_;
 
   StorageMonitor* storage_monitor_;

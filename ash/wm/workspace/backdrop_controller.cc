@@ -15,9 +15,11 @@
 #include "ash/public/cpp/app_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
+#include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/wallpaper/wallpaper_controller.h"
-#include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/overview/overview_controller.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/backdrop_delegate.h"
 #include "base/auto_reset.h"
@@ -48,8 +50,6 @@ class BackdropEventHandler : public ui::EventHandler {
         case ui::ET_MOUSE_PRESSED:
         case ui::ET_MOUSEWHEEL:
         case ui::ET_TOUCH_PRESSED:
-        case ui::ET_POINTER_DOWN:
-        case ui::ET_POINTER_WHEEL_CHANGED:
         case ui::ET_GESTURE_BEGIN:
         case ui::ET_SCROLL:
         case ui::ET_SCROLL_FLING_START:
@@ -70,10 +70,11 @@ class BackdropEventHandler : public ui::EventHandler {
 }  // namespace
 
 BackdropController::BackdropController(aura::Window* container)
-    : container_(container), in_restacking_(false) {
+    : container_(container) {
   DCHECK(container_);
   Shell::Get()->AddShellObserver(this);
   Shell::Get()->accessibility_controller()->AddObserver(this);
+  Shell::Get()->app_list_controller()->AddObserver(this);
   Shell::Get()->wallpaper_controller()->AddObserver(this);
 }
 
@@ -81,6 +82,10 @@ BackdropController::~BackdropController() {
   Shell::Get()->accessibility_controller()->RemoveObserver(this);
   Shell::Get()->wallpaper_controller()->RemoveObserver(this);
   Shell::Get()->RemoveShellObserver(this);
+  // AppListController is destroyed early when Shell is being destroyed, it may
+  // not exist.
+  if (Shell::Get()->app_list_controller())
+    Shell::Get()->app_list_controller()->RemoveObserver(this);
   // TODO(oshima): animations won't work right with mus:
   // http://crbug.com/548396.
   Hide();
@@ -103,6 +108,10 @@ void BackdropController::OnWindowStackingChanged(aura::Window* window) {
   UpdateBackdrop();
 }
 
+void BackdropController::OnDisplayMetricsChanged() {
+  UpdateBackdrop();
+}
+
 void BackdropController::OnPostWindowStateTypeChange(
     wm::WindowState* window_state,
     mojom::WindowStateType old_type) {
@@ -117,10 +126,9 @@ void BackdropController::SetBackdropDelegate(
 
 void BackdropController::UpdateBackdrop() {
   // No need to continue update for recursive calls or in overview mode.
-  WindowSelectorController* window_selector_controller =
-      Shell::Get()->window_selector_controller();
-  if (in_restacking_ || (window_selector_controller &&
-                         window_selector_controller->IsSelecting())) {
+  OverviewController* overview_controller = Shell::Get()->overview_controller();
+  if (pause_update_ ||
+      (overview_controller && overview_controller->IsSelecting())) {
     return;
   }
 
@@ -131,12 +139,14 @@ void BackdropController::UpdateBackdrop() {
     return;
   }
   // We are changing the order of windows which will cause recursion.
-  base::AutoReset<bool> lock(&in_restacking_, true);
+  base::AutoReset<bool> lock(&pause_update_, true);
   EnsureBackdropWidget();
   UpdateAccessibilityMode();
 
-  if (window == backdrop_window_ && backdrop_->IsVisible())
+  if (window == backdrop_window_ && backdrop_->IsVisible()) {
+    Layout();
     return;
+  }
   if (window->GetRootWindow() != backdrop_window_->GetRootWindow())
     return;
 
@@ -150,16 +160,21 @@ void BackdropController::UpdateBackdrop() {
 }
 
 void BackdropController::OnOverviewModeStarting() {
+  if (backdrop_window_)
+    backdrop_window_->SetProperty(aura::client::kAnimationsDisabledKey, true);
   Hide();
 }
 
-void BackdropController::OnOverviewModeEnded() {
-  UpdateBackdrop();
+void BackdropController::OnOverviewModeEnding(
+    OverviewSession* overview_session) {
+  pause_update_ = true;
 }
 
-void BackdropController::OnAppListVisibilityChanged(bool shown,
-                                                    aura::Window* root_window) {
+void BackdropController::OnOverviewModeEndingAnimationComplete(bool canceled) {
+  pause_update_ = false;
   UpdateBackdrop();
+  if (backdrop_window_)
+    backdrop_window_->ClearProperty(aura::client::kAnimationsDisabledKey);
 }
 
 void BackdropController::OnSplitViewModeStarting() {
@@ -168,6 +183,11 @@ void BackdropController::OnSplitViewModeStarting() {
 
 void BackdropController::OnSplitViewModeEnded() {
   Shell::Get()->split_view_controller()->RemoveObserver(this);
+}
+
+void BackdropController::OnAppListVisibilityChanged(bool shown,
+                                                    int64_t display_id) {
+  UpdateBackdrop();
 }
 
 void BackdropController::OnAccessibilityStatusChanged() {
@@ -211,6 +231,8 @@ void BackdropController::EnsureBackdropWidget() {
   ::wm::SetWindowVisibilityAnimationType(
       backdrop_window_, ::wm::WINDOW_VISIBILITY_ANIMATION_TYPE_FADE);
   backdrop_window_->layer()->SetColor(SK_ColorBLACK);
+
+  wm::GetWindowState(backdrop_window_)->set_allow_set_bounds_direct(true);
 }
 
 void BackdropController::UpdateAccessibilityMode() {
@@ -218,7 +240,7 @@ void BackdropController::UpdateAccessibilityMode() {
     return;
 
   bool enabled =
-      Shell::Get()->accessibility_controller()->IsSpokenFeedbackEnabled();
+      Shell::Get()->accessibility_controller()->spoken_feedback_enabled();
   if (enabled) {
     if (!backdrop_event_handler_) {
       backdrop_event_handler_ = std::make_unique<BackdropEventHandler>();
@@ -259,7 +281,7 @@ bool BackdropController::WindowShouldHaveBackdrop(aura::Window* window) {
   if (window->GetProperty(aura::client::kAppType) ==
           static_cast<int>(AppType::ARC_APP) &&
       wm::IsActiveWindow(window) &&
-      Shell::Get()->accessibility_controller()->IsSpokenFeedbackEnabled()) {
+      Shell::Get()->accessibility_controller()->spoken_feedback_enabled()) {
     return true;
   }
 
@@ -267,11 +289,7 @@ bool BackdropController::WindowShouldHaveBackdrop(aura::Window* window) {
 }
 
 void BackdropController::Show() {
-  // Makes sure that the backdrop has the correct bounds if it should not be
-  // fullscreen size.
-  backdrop_->SetFullscreen(BackdropShouldFullscreen());
-  if (!BackdropShouldFullscreen())
-    backdrop_->SetBounds(GetBackdropBounds());
+  Layout();
   backdrop_->Show();
 }
 
@@ -315,6 +333,23 @@ gfx::Rect BackdropController::GetBackdropBounds() {
                                                    : SplitViewController::RIGHT;
   return split_view_controller->GetSnappedWindowBoundsInScreenUnadjusted(
       snapped_window, snap_position);
+}
+
+void BackdropController::Layout() {
+  // Makes sure that the backdrop has the correct bounds if it should not be
+  // fullscreen size.
+  backdrop_->SetFullscreen(BackdropShouldFullscreen());
+  if (backdrop_->IsFullscreen()) {
+    // TODO(oshima): The size of solid color layer can be smaller than texture's
+    // layer with fractional scale (crbug.com/9000220). Use adjusted bounds so
+    // that it can cover texture layer. Fix the bug and remove this.
+    auto* window = backdrop_window_;
+    gfx::Rect bounds = screen_util::GetDisplayBoundsInParent(window);
+    backdrop_window_->SetBounds(
+        screen_util::SnapBoundsToDisplayEdge(bounds, window));
+  } else {
+    backdrop_->SetBounds(GetBackdropBounds());
+  }
 }
 
 }  // namespace ash

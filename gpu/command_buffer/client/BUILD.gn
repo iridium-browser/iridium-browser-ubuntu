@@ -4,6 +4,11 @@
 
 import("//build/config/jumbo.gni")
 
+declare_args() {
+  # Enable GPU client logging without DCHECK being on.
+  enable_gpu_client_logging = false
+}
+
 # The files here go into the "gpu" component in a component build (with
 # "command_buffer_client" and "gles2_cmd_helper" just forwarding) and goes into
 # separate static libraries in non-component build.
@@ -72,6 +77,7 @@ jumbo_source_set("client_sources") {
     "gpu_control.h",
     "gpu_memory_buffer_manager.cc",
     "gpu_memory_buffer_manager.h",
+    "image_decode_accelerator_interface.h",
     "mapped_memory.cc",
     "mapped_memory.h",
     "ring_buffer.cc",
@@ -79,6 +85,7 @@ jumbo_source_set("client_sources") {
     "shared_image_interface.h",
     "transfer_buffer.cc",
     "transfer_buffer.h",
+    "transfer_buffer_cmd_copy_helpers.h",
   ]
 
   configs += [ "//gpu:gpu_implementation" ]
@@ -184,6 +191,7 @@ source_set("raster_interface") {
   deps = [
     "//base",
     "//components/viz/common:resource_format",
+    "//gpu/command_buffer/common",
     "//ui/gfx:buffer_types",
   ]
 }
@@ -203,6 +211,9 @@ jumbo_component("gles2_implementation") {
   sources = gles2_implementation_source_files
 
   defines = [ "GLES2_IMPL_IMPLEMENTATION" ]
+  if (enable_gpu_client_logging) {
+    defines += [ "GPU_ENABLE_CLIENT_LOGGING" ]
+  }
   all_dependent_configs = [ "//third_party/khronos:khronos_headers" ]
 
   deps = [
@@ -293,6 +304,9 @@ jumbo_component("gles2_implementation_no_check") {
     "GLES2_IMPL_IMPLEMENTATION",
     "GLES2_CONFORMANCE_TESTS=1",
   ]
+  if (enable_gpu_client_logging) {
+    defines += [ "GPU_ENABLE_CLIENT_LOGGING" ]
+  }
 
   deps = [
     ":client",

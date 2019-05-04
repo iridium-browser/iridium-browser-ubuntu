@@ -35,6 +35,11 @@ FakeUsbDevice::FakeUsbDevice(scoped_refptr<FakeUsbDeviceInfo> device,
     : device_(device), observer_(this), client_(std::move(client)) {
   DCHECK(device_);
   observer_.Add(device_.get());
+
+  if (client_) {
+    client_.set_connection_error_handler(base::BindOnce(
+        &FakeUsbDevice::OnClientConnectionError, base::Unretained(this)));
+  }
 }
 
 void FakeUsbDevice::CloseHandle() {
@@ -46,6 +51,11 @@ void FakeUsbDevice::CloseHandle() {
 
 // Device implementation:
 void FakeUsbDevice::Open(OpenCallback callback) {
+  if (is_opened_) {
+    std::move(callback).Run(mojom::UsbOpenDeviceError::ALREADY_OPEN);
+    return;
+  }
+
   is_opened_ = true;
   if (client_)
     client_->OnDeviceOpened();
@@ -57,36 +67,48 @@ void FakeUsbDevice::Close(CloseCallback callback) {
   CloseHandle();
   std::move(callback).Run();
 }
+
 void FakeUsbDevice::SetConfiguration(uint8_t value,
                                      SetConfigurationCallback callback) {
   std::move(callback).Run(true);
 }
+
 void FakeUsbDevice::ClaimInterface(uint8_t interface_number,
                                    ClaimInterfaceCallback callback) {
-  std::move(callback).Run(true);
+  bool success = claimed_interfaces_.insert(interface_number).second;
+
+  std::move(callback).Run(success);
 }
+
 void FakeUsbDevice::ReleaseInterface(uint8_t interface_number,
                                      ReleaseInterfaceCallback callback) {
-  std::move(callback).Run(true);
+  bool success = claimed_interfaces_.erase(interface_number) > 0;
+
+  std::move(callback).Run(success);
 }
+
 void FakeUsbDevice::SetInterfaceAlternateSetting(
     uint8_t interface_number,
     uint8_t alternate_setting,
     SetInterfaceAlternateSettingCallback callback) {
   std::move(callback).Run(true);
 }
+
 void FakeUsbDevice::Reset(ResetCallback callback) {
   std::move(callback).Run(true);
 }
+
 void FakeUsbDevice::ClearHalt(uint8_t endpoint, ClearHaltCallback callback) {
   std::move(callback).Run(true);
 }
+
 void FakeUsbDevice::ControlTransferIn(mojom::UsbControlTransferParamsPtr params,
                                       uint32_t length,
                                       uint32_t timeout,
                                       ControlTransferInCallback callback) {
   std::move(callback).Run(mojom::UsbTransferStatus::COMPLETED, {});
 }
+
 void FakeUsbDevice::ControlTransferOut(
     mojom::UsbControlTransferParamsPtr params,
     const std::vector<uint8_t>& data,
@@ -94,18 +116,21 @@ void FakeUsbDevice::ControlTransferOut(
     ControlTransferOutCallback callback) {
   std::move(callback).Run(mojom::UsbTransferStatus::COMPLETED);
 }
+
 void FakeUsbDevice::GenericTransferIn(uint8_t endpoint_number,
                                       uint32_t length,
                                       uint32_t timeout,
                                       GenericTransferInCallback callback) {
   std::move(callback).Run(mojom::UsbTransferStatus::COMPLETED, {});
 }
+
 void FakeUsbDevice::GenericTransferOut(uint8_t endpoint_number,
                                        const std::vector<uint8_t>& data,
                                        uint32_t timeout,
                                        GenericTransferOutCallback callback) {
   std::move(callback).Run(mojom::UsbTransferStatus::COMPLETED);
 }
+
 void FakeUsbDevice::IsochronousTransferIn(
     uint8_t endpoint_number,
     const std::vector<uint32_t>& packet_lengths,
@@ -115,6 +140,7 @@ void FakeUsbDevice::IsochronousTransferIn(
       {}, BuildIsochronousPacketArray(packet_lengths,
                                       mojom::UsbTransferStatus::COMPLETED));
 }
+
 void FakeUsbDevice::IsochronousTransferOut(
     uint8_t endpoint_number,
     const std::vector<uint8_t>& data,
@@ -127,6 +153,12 @@ void FakeUsbDevice::IsochronousTransferOut(
 
 void FakeUsbDevice::OnDeviceRemoved(scoped_refptr<FakeUsbDeviceInfo> device) {
   DCHECK_EQ(device_, device);
+  binding_->Close();
+}
+
+void FakeUsbDevice::OnClientConnectionError() {
+  // Close the binding with Blink when WebUsbService finds permission revoked
+  // from setting UI.
   binding_->Close();
 }
 

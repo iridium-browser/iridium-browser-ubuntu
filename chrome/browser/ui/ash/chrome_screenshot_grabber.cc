@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "ash/public/cpp/notification_utils.h"
 #include "ash/public/cpp/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "base/base64.h"
@@ -39,7 +40,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
-#include "chromeos/login/login_state.h"
+#include "chromeos/login/login_state/login_state.h"
 #include "components/drive/chromeos/file_system_interface.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -334,7 +335,7 @@ void SaveScreenshot(scoped_refptr<base::TaskRunner> ui_task_runner,
                     scoped_refptr<base::RefCountedMemory> png_data,
                     ScreenshotFileResult result,
                     const base::FilePath& local_path) {
-  DCHECK(!base::MessageLoopForUI::IsCurrent());
+  DCHECK(!base::MessageLoopCurrentForUI::IsSet());
   DCHECK(!screenshot_path.empty());
 
   ScreenshotResult screenshot_result = ScreenshotResult::SUCCESS;
@@ -368,7 +369,7 @@ void SaveScreenshot(scoped_refptr<base::TaskRunner> ui_task_runner,
 void EnsureLocalDirectoryExists(
     const base::FilePath& path,
     ChromeScreenshotGrabber::FileCallback callback) {
-  DCHECK(!base::MessageLoopForUI::IsCurrent());
+  DCHECK(!base::MessageLoopCurrentForUI::IsSet());
   DCHECK(!path.empty());
 
   if (!base::CreateDirectory(path.DirName())) {
@@ -668,16 +669,11 @@ void ChromeScreenshotGrabber::OnReadScreenshotFileForPreviewCompleted(
     // ScreenshotGrabberNotificationDelegate::ButtonIndex.
     message_center::ButtonInfo copy_button(l10n_util::GetStringUTF16(
         IDS_SCREENSHOT_NOTIFICATION_BUTTON_COPY_TO_CLIPBOARD));
-    copy_button.icon = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-        IDR_NOTIFICATION_SCREENSHOT_COPY_TO_CLIPBOARD);
     optional_field.buttons.push_back(copy_button);
 
     if (chromeos::NoteTakingHelper::Get()->IsAppAvailable(GetProfile())) {
       message_center::ButtonInfo annotate_button(l10n_util::GetStringUTF16(
           IDS_SCREENSHOT_NOTIFICATION_BUTTON_ANNOTATE));
-      annotate_button.icon =
-          ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-              IDR_NOTIFICATION_SCREENSHOT_ANNOTATE);
       optional_field.buttons.push_back(annotate_button);
     }
 
@@ -686,7 +682,7 @@ void ChromeScreenshotGrabber::OnReadScreenshotFileForPreviewCompleted(
   }
 
   std::unique_ptr<message_center::Notification> notification =
-      message_center::Notification::CreateSystemNotification(
+      ash::CreateSystemNotification(
           image.IsEmpty() ? message_center::NOTIFICATION_TYPE_SIMPLE
                           : message_center::NOTIFICATION_TYPE_IMAGE,
           kNotificationId,
@@ -695,7 +691,7 @@ void ChromeScreenshotGrabber::OnReadScreenshotFileForPreviewCompleted(
           l10n_util::GetStringUTF16(IDS_SCREENSHOT_NOTIFICATION_NOTIFIER_NAME),
           GURL(kNotificationOriginUrl),
           message_center::NotifierId(
-              message_center::NotifierId::SYSTEM_COMPONENT,
+              message_center::NotifierType::SYSTEM_COMPONENT,
               kNotifierScreenshot),
           optional_field,
           new ScreenshotGrabberNotificationDelegate(success, GetProfile(),

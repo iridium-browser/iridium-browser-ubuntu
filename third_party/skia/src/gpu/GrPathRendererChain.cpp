@@ -34,10 +34,14 @@ GrPathRendererChain::GrPathRendererChain(GrContext* context, const Options& opti
             fChain.push_back(std::move(pr));
         }
     }
+    if (options.fGpuPathRenderers & GpuPathRenderers::kAAConvex) {
+        fChain.push_back(sk_make_sp<GrAAConvexPathRenderer>());
+    }
     if (options.fGpuPathRenderers & GpuPathRenderers::kCoverageCounting) {
         using AllowCaching = GrCoverageCountingPathRenderer::AllowCaching;
         if (auto ccpr = GrCoverageCountingPathRenderer::CreateIfSupported(
-                                caps, AllowCaching(options.fAllowPathMaskCaching))) {
+                                caps, AllowCaching(options.fAllowPathMaskCaching),
+                                context->uniqueID())) {
             fCoverageCountingPathRenderer = ccpr.get();
             context->contextPriv().addOnFlushCallbackObject(fCoverageCountingPathRenderer);
             fChain.push_back(std::move(ccpr));
@@ -45,9 +49,6 @@ GrPathRendererChain::GrPathRendererChain(GrContext* context, const Options& opti
     }
     if (options.fGpuPathRenderers & GpuPathRenderers::kAAHairline) {
         fChain.push_back(sk_make_sp<GrAAHairLinePathRenderer>());
-    }
-    if (options.fGpuPathRenderers & GpuPathRenderers::kAAConvex) {
-        fChain.push_back(sk_make_sp<GrAAConvexPathRenderer>());
     }
     if (options.fGpuPathRenderers & GpuPathRenderers::kAALinearizing) {
         fChain.push_back(sk_make_sp<GrAALinearizingConvexPathRenderer>());

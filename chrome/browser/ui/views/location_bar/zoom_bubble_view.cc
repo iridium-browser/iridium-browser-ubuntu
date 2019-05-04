@@ -219,7 +219,9 @@ void ZoomBubbleView::ShowBubble(content::WebContents* web_contents,
   if (is_fullscreen)
     zoom_bubble_->AdjustForFullscreen(browser->window()->GetBounds());
 
-  zoom_bubble_->ShowForReason(reason);
+  // Do not announce hotkey for refocusing inactive Zoom bubble as it
+  // disappears after a short timeout.
+  zoom_bubble_->ShowForReason(reason, /* allow_refocus_alert */ false);
   zoom_bubble_->UpdateZoomIconVisibility();
 }
 
@@ -273,6 +275,8 @@ ZoomBubbleView* ZoomBubbleView::GetZoomBubble() {
 
 void ZoomBubbleView::Refresh() {
   UpdateZoomPercent();
+  GetWidget()->GetRootView()->NotifyAccessibilityEvent(ax::mojom::Event::kAlert,
+                                                       true);
   StartTimerIfNecessary();
 }
 
@@ -317,10 +321,6 @@ base::string16 ZoomBubbleView::GetAccessibleWindowTitle() const {
       page_action_icon_container_view->GetPageActionIconView(
           PageActionIconType::kZoom);
   return zoom_view->GetTextForTooltipAndAccessibleName();
-}
-
-views::View* ZoomBubbleView::GetInitiallyFocusedView() {
-  return reset_button_;
 }
 
 int ZoomBubbleView::GetDialogButtons() const {
@@ -475,6 +475,21 @@ void ZoomBubbleView::CloseBubble() {
   LocationBarBubbleDelegateView::CloseBubble();
 }
 
+void ZoomBubbleView::Layout() {
+  View::Layout();
+
+  for (auto* button : {zoom_in_button_, zoom_out_button_}) {
+    constexpr int kCircleDiameterDp = 24;
+    auto highlight_path = std::make_unique<SkPath>();
+    // Use a centered circular shape for inkdrops and focus rings.
+    gfx::Rect circle_rect(button->GetLocalBounds());
+    circle_rect.ClampToCenteredSize(
+        gfx::Size(kCircleDiameterDp, kCircleDiameterDp));
+    highlight_path->addOval(gfx::RectToSkRect(circle_rect));
+    button->SetProperty(views::kHighlightPathKey, highlight_path.release());
+  }
+}
+
 void ZoomBubbleView::ButtonPressed(views::Button* sender,
                                    const ui::Event& event) {
   // No button presses in this dialog should cause the dialog to close,
@@ -558,7 +573,6 @@ void ZoomBubbleView::SetExtensionInfo(const extensions::Extension* extension) {
 void ZoomBubbleView::UpdateZoomPercent() {
   label_->SetText(base::FormatPercent(
       zoom::ZoomController::FromWebContents(web_contents())->GetZoomPercent()));
-  label_->NotifyAccessibilityEvent(ax::mojom::Event::kTextChanged, true);
 }
 
 void ZoomBubbleView::UpdateZoomIconVisibility() {

@@ -23,7 +23,7 @@
         android:hint="@string/hint_find_in_page"
         android:imeOptions="actionSearch|flagNoExtractUi"
         android:singleLine="true"
-        android:textAppearance="@style/BlackTitle1" />
+        android:textAppearance="@style/TextAppearance.BlackTitle1" />
     <TextView
         android:id="@+id/find_status"
         android:layout_width="wrap_content"
@@ -32,7 +32,7 @@
         android:layout_marginEnd="16dp"
         android:background="@null"
         android:singleLine="true"
-        android:textAppearance="@style/BlackDisabledText1" />
+        android:textAppearance="@style/TextAppearance.BlackDisabledText1" />
     <View
         android:id="@+id/find_separator"
         android:layout_width="1dp"
@@ -41,21 +41,21 @@
         android:layout_marginBottom="8dp"
         android:background="#000000"
         android:alpha="0.1" />
-    <android.support.v7.widget.AppCompatImageButton
+    <org.chromium.ui.widget.ChromeImageButton
         android:id="@+id/find_prev_button"
         style="@style/ToolbarButton"
         android:layout_height="match_parent"
         android:src="@drawable/ic_expand_less_black_24dp"
         android:contentDescription="@string/accessibility_find_toolbar_btn_prev"
         app:tint="@color/dark_mode_tint" />
-    <android.support.v7.widget.AppCompatImageButton
+    <org.chromium.ui.widget.ChromeImageButton
         android:id="@+id/find_next_button"
         style="@style/ToolbarButton"
         android:layout_height="match_parent"
         android:src="@drawable/ic_expand_more_black_24dp"
         android:contentDescription="@string/accessibility_find_toolbar_btn_next"
         app:tint="@color/dark_mode_tint" />
-    <android.support.v7.widget.AppCompatImageButton
+    <org.chromium.ui.widget.ChromeImageButton
         android:id="@+id/close_find_button"
         style="@style/ToolbarButton"
         android:layout_height="match_parent"

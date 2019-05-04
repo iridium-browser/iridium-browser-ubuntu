@@ -6,7 +6,7 @@
 
 #include "base/strings/string_util.h"
 #include "base/strings/stringize_macros.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "remoting/base/name_value_map.h"
 #include "remoting/base/platform_details.h"
 
@@ -120,6 +120,7 @@ const char ChromotingEvent::kSessionDurationKey[] = "session_duration";
 const char ChromotingEvent::kSessionEntryPointKey[] = "session_entry_point";
 const char ChromotingEvent::kSessionIdKey[] = "session_id";
 const char ChromotingEvent::kSessionStateKey[] = "session_state";
+const char ChromotingEvent::kSignalStrategyTypeKey[] = "signal_strategy_type";
 const char ChromotingEvent::kTypeKey[] = "type";
 const char ChromotingEvent::kVideoBandwidthKey[] = "video_bandwidth";
 const char ChromotingEvent::kWebAppVersionKey[] = "webapp_version";

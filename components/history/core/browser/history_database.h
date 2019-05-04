@@ -90,10 +90,6 @@ class HistoryDatabase : public DownloadDatabase,
   // Counts the number of unique Hosts visited in the last month.
   int CountUniqueHostsVisitedLastMonth();
 
-  // Computes the |num_hosts| most-visited hostnames in the past 30 days. See
-  // history_service.h for details.
-  TopHostsList TopHosts(size_t num_hosts);
-
   // Call to set the mode on the database to exclusive. The default locking mode
   // is "normal" but we want to run in exclusive mode for slightly better
   // performance since we know nobody else is using the database. This is
@@ -141,9 +137,8 @@ class HistoryDatabase : public DownloadDatabase,
   // unused space in the file. It can be VERY SLOW.
   void Vacuum();
 
-  // Try to trim the cache memory used by the database.  If |aggressively| is
-  // true try to trim all unused cache, otherwise trim by half.
-  void TrimMemory(bool aggressively);
+  // Release all non-essential memory associated with this database connection.
+  void TrimMemory();
 
   // Razes the database. Returns true if successful.
   bool Raze();

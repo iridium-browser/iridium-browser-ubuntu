@@ -37,14 +37,15 @@ class MockUi : public UiInterface {
   MOCK_METHOD4(SetContentOverlayAlertDialogEnabled,
                void(bool, PlatformUiInputDelegate*, float, float));
   MOCK_METHOD0(OnPause, void());
-  void OnControllerUpdated(const ControllerModel&,
-                           const ReticleModel&) override {}
+  void OnControllersUpdated(const std::vector<ControllerModel>&,
+                            const ReticleModel&) override {}
   void OnProjMatrixChanged(const gfx::Transform&) override {}
   MOCK_METHOD0(AcceptDoffPromptForTesting, void());
   MOCK_METHOD2(GetTargetPointForTesting,
                gfx::Point3F(UserFriendlyElementName,
                             const gfx::PointF& position));
   MOCK_METHOD1(GetElementVisibilityForTesting, bool(UserFriendlyElementName));
+  MOCK_METHOD1(SetUiInputManagerForTesting, void(bool));
   MOCK_METHOD0(IsContentVisibleAndOpaque, bool());
   MOCK_METHOD1(SetContentUsesQuadLayer, void(bool));
   gfx::Transform GetContentWorldSpaceTransform() override { return {}; }

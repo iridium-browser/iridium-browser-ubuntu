@@ -48,12 +48,12 @@ void FeedLoggingBridge::OnContentViewed(
     JNIEnv* j_env,
     const base::android::JavaRef<jobject>& j_this,
     const jint j_position,
-    const jlong j_publishedTimeSeconds,
-    const jlong j_timeContentBecameAvailableSeconds,
+    const jlong j_publishedTimeMs,
+    const jlong j_timeContentBecameAvailableMs,
     const jfloat j_score) {
   feed_logging_metrics_->OnSuggestionShown(
-      j_position, base::Time::FromJavaTime(j_publishedTimeSeconds), j_score,
-      base::Time::FromJavaTime(j_timeContentBecameAvailableSeconds));
+      j_position, base::Time::FromJavaTime(j_publishedTimeMs), j_score,
+      base::Time::FromJavaTime(j_timeContentBecameAvailableMs));
 }
 
 void FeedLoggingBridge::OnContentDismissed(
@@ -65,20 +65,21 @@ void FeedLoggingBridge::OnContentDismissed(
       j_position, GURL(ConvertJavaStringToUTF8(j_env, j_url)));
 }
 
-void FeedLoggingBridge::OnContentClicked(
+void FeedLoggingBridge::OnContentSwiped(
     JNIEnv* j_env,
-    const base::android::JavaRef<jobject>& j_this,
-    const jint j_position,
-    const jlong j_publishedTimeSeconds,
-    const jfloat j_score) {
-  feed_logging_metrics_->OnSuggestionOpened(
-      j_position, base::Time::FromJavaTime(j_publishedTimeSeconds), j_score);
+    const base::android::JavaRef<jobject>& j_this) {
+  feed_logging_metrics_->OnSuggestionSwiped();
 }
 
 void FeedLoggingBridge::OnClientAction(
     JNIEnv* j_env,
     const base::android::JavaRef<jobject>& j_this,
-    const jint j_window_open_disposition) {
+    const jint j_window_open_disposition,
+    const jint j_position,
+    const jlong j_publishedTimeMs,
+    const jfloat j_score) {
+  feed_logging_metrics_->OnSuggestionOpened(
+      j_position, base::Time::FromJavaTime(j_publishedTimeMs), j_score);
   feed_logging_metrics_->OnSuggestionWindowOpened(
       static_cast<WindowOpenDisposition>(j_window_open_disposition));
 }
@@ -87,10 +88,10 @@ void FeedLoggingBridge::OnContentContextMenuOpened(
     JNIEnv* j_env,
     const base::android::JavaRef<jobject>& j_this,
     const jint j_position,
-    const jlong j_publishedTimeSeconds,
+    const jlong j_publishedTimeMs,
     const jfloat j_score) {
   feed_logging_metrics_->OnSuggestionMenuOpened(
-      j_position, base::Time::FromJavaTime(j_publishedTimeSeconds), j_score);
+      j_position, base::Time::FromJavaTime(j_publishedTimeMs), j_score);
 }
 
 void FeedLoggingBridge::OnMoreButtonViewed(JNIEnv* j_env,
@@ -107,9 +108,11 @@ void FeedLoggingBridge::OnMoreButtonClicked(JNIEnv* j_env,
 
 void FeedLoggingBridge::OnOpenedWithContent(JNIEnv* j_env,
                                             const JavaRef<jobject>& j_this,
-                                            const jint j_time_to_Populate,
+                                            const jlong j_time_to_populate,
                                             const jint j_content_count) {
   feed_logging_metrics_->OnPageShown(j_content_count);
+  feed_logging_metrics_->OnPagePopulated(
+      base::TimeDelta::FromMilliseconds(j_time_to_populate));
 }
 
 void FeedLoggingBridge::OnOpenedWithNoImmediateContent(
@@ -118,22 +121,37 @@ void FeedLoggingBridge::OnOpenedWithNoImmediateContent(
 
 void FeedLoggingBridge::OnOpenedWithNoContent(
     JNIEnv* j_env,
-    const base::android::JavaRef<jobject>& j_this) {}
+    const base::android::JavaRef<jobject>& j_this) {
+  feed_logging_metrics_->OnPageShown(/*suggestions_count=*/0);
+}
+
+void FeedLoggingBridge::OnSpinnerShown(
+    JNIEnv* j_env,
+    const base::android::JavaRef<jobject>& j_this,
+    const jlong j_shownTimeMs) {
+  feed_logging_metrics_->OnSpinnerShown(
+      base::TimeDelta::FromMilliseconds(j_shownTimeMs));
+}
 
 void FeedLoggingBridge::OnContentTargetVisited(
     JNIEnv* j_env,
     const base::android::JavaRef<jobject>& j_this,
-    const jlong visit_time_ms) {
-  feed_logging_metrics_->OnSuggestionArticleVisited(
-      base::TimeDelta::FromMilliseconds(visit_time_ms));
+    const jlong visit_time_ms,
+    const jboolean is_offline,
+    const jboolean return_to_ntp) {
+  if (is_offline) {
+    feed_logging_metrics_->OnSuggestionOfflinePageVisited(
+        base::TimeDelta::FromMilliseconds(visit_time_ms), return_to_ntp);
+  } else {
+    feed_logging_metrics_->OnSuggestionArticleVisited(
+        base::TimeDelta::FromMilliseconds(visit_time_ms), return_to_ntp);
+  }
 }
 
-void FeedLoggingBridge::OnOfflinePageVisited(
+void FeedLoggingBridge::ReportScrolledAfterOpen(
     JNIEnv* j_env,
-    const base::android::JavaRef<jobject>& j_this,
-    const jlong visit_time_ms) {
-  feed_logging_metrics_->OnSuggestionOfflinePageVisited(
-      base::TimeDelta::FromMilliseconds(visit_time_ms));
+    const base::android::JavaRef<jobject>& j_this) {
+  feed_logging_metrics_->ReportScrolledAfterOpen();
 }
 
 }  // namespace feed

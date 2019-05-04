@@ -23,9 +23,8 @@
 #include "api/test/simulated_network.h"
 #include "call/call.h"
 #include "call/simulated_packet_receiver.h"
-#include "common_types.h"  // NOLINT(build/include)
-#include "rtc_base/constructormagic.h"
-#include "rtc_base/criticalsection.h"
+#include "rtc_base/constructor_magic.h"
+#include "rtc_base/critical_section.h"
 #include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
@@ -78,8 +77,8 @@ class NetworkPacket {
   absl::optional<PacketOptions> packet_options_;
   bool is_rtcp_;
   // If using a PacketReceiver for incoming degradation, populate with
-  // appropriate MediaType and PacketTime. This type/timing will be kept and
-  // forwarded. The PacketTime might be altered to reflect time spent in fake
+  // appropriate MediaType and packet time. This type/timing will be kept and
+  // forwarded. The packet time might be altered to reflect time spent in fake
   // network pipe.
   MediaType media_type_;
   absl::optional<int64_t> packet_time_us_;
@@ -125,8 +124,8 @@ class FakeNetworkPipe : public webrtc::SimulatedPacketReceiverInterface,
 
   // Implements the PacketReceiver interface. When/if packets are delivered,
   // they will be passed directly to the receiver instance given in
-  // SetReceiver(), without passing through a Demuxer. The receive time in
-  // PacketTime will be increased by the amount of time the packet spent in the
+  // SetReceiver(), without passing through a Demuxer. The receive time
+  // will be increased by the amount of time the packet spent in the
   // fake network pipe.
   PacketReceiver::DeliveryStatus DeliverPacket(MediaType media_type,
                                                rtc::CopyOnWriteBuffer packet,
@@ -140,6 +139,7 @@ class FakeNetworkPipe : public webrtc::SimulatedPacketReceiverInterface,
   // packets ready to be delivered.
   void Process() override;
   int64_t TimeUntilNextProcess() override;
+  void ProcessThreadAttached(ProcessThread* process_thread) override;
 
   // Get statistics.
   float PercentageLoss();
@@ -150,9 +150,6 @@ class FakeNetworkPipe : public webrtc::SimulatedPacketReceiverInterface,
 
  protected:
   void DeliverPacketWithLock(NetworkPacket* packet);
-  void AddToPacketDropCount();
-  void AddToPacketSentCount(int count);
-  void AddToTotalDelay(int delay_us);
   int64_t GetTimeInMicroseconds() const;
   bool ShouldProcess(int64_t time_now_us) const;
   void SetTimeToNextProcess(int64_t skip_us);
@@ -197,6 +194,9 @@ class FakeNetworkPipe : public webrtc::SimulatedPacketReceiverInterface,
   // processes, such as the packet queues.
   rtc::CriticalSection process_lock_;
 
+  rtc::CriticalSection process_thread_lock_;
+  ProcessThread* process_thread_ RTC_GUARDED_BY(process_thread_lock_) = nullptr;
+
   // Packets  are added at the back of the deque, this makes the deque ordered
   // by increasing send time. The common case when removing packets from the
   // deque is removing early packets, which will be close to the front of the
@@ -210,9 +210,6 @@ class FakeNetworkPipe : public webrtc::SimulatedPacketReceiverInterface,
   size_t dropped_packets_ RTC_GUARDED_BY(process_lock_);
   size_t sent_packets_ RTC_GUARDED_BY(process_lock_);
   int64_t total_packet_delay_us_ RTC_GUARDED_BY(process_lock_);
-
-  int64_t next_process_time_us_;
-
   int64_t last_log_time_us_;
 
   RTC_DISALLOW_COPY_AND_ASSIGN(FakeNetworkPipe);

@@ -28,10 +28,10 @@ import org.chromium.chrome.browser.download.home.StableIds;
 import org.chromium.chrome.browser.download.home.filter.OfflineItemFilterSource;
 import org.chromium.chrome.browser.download.home.list.ListItem.OfflineItemListItem;
 import org.chromium.chrome.browser.download.home.list.ListItem.SectionHeaderListItem;
-import org.chromium.chrome.browser.modelutil.ListObservable.ListObserver;
 import org.chromium.components.offline_items_collection.OfflineItem;
 import org.chromium.components.offline_items_collection.OfflineItemFilter;
 import org.chromium.components.offline_items_collection.OfflineItemState;
+import org.chromium.ui.modelutil.ListObservable.ListObserver;
 
 import java.util.Calendar;
 import java.util.Collections;
@@ -779,6 +779,55 @@ public class DateOrderedListMutatorTest {
                 OfflineItemFilter.FILTER_VIDEO, true, true);
         assertOfflineItem(mModel.get(4), buildCalendar(2018, 1, 1, 6), item1);
         assertOfflineItem(mModel.get(5), buildCalendar(2018, 1, 1, 4), item2);
+    }
+
+    /**
+     * Action                                          List
+     * 1. Set(item1 @ 6:00 IN_PROGRESS 1/1/2018)       [ DATE    @ 0:00 1/1/2018,
+     *                                                   SECTION @ Video,
+     *                                                   item1  @ 3:00 1/1/2018 IN_PROGRESS]
+     *
+     * 2. Update(item1 @ 6:00 COMPLETE 1/1/2018)
+     *
+     * 3. Add(item2 @ 4:00 IN_PROGRESS 1/1/2018)       [ SECTION @ Video,
+     *                                                   DATE    @ 0:00  1/1/2018,
+     *                                                   item1  @ 6:00  1/1/2018 COMPLETE,
+     *                                                   item2  @ 4:00  1/1/2018 IN_PROGRESS]
+     */
+    @Test
+    public void testFirstItemUpdatedAfterSecondItemAdded() {
+        when(mSource.getItems()).thenReturn(Collections.emptySet());
+        DateOrderedListMutator list = createMutatorWithoutJustNowProvider();
+        mModel.addObserver(mObserver);
+
+        OfflineItem item1 =
+                buildItem("1", buildCalendar(2018, 1, 1, 6), OfflineItemFilter.FILTER_VIDEO);
+
+        when(mSource.getItems()).thenReturn(CollectionUtil.newArrayList(item1));
+        list.onItemsAdded(CollectionUtil.newArrayList(item1));
+
+        Assert.assertEquals(2, mModel.size());
+        assertSectionHeader(mModel.get(0), buildCalendar(2018, 1, 1, 0),
+                OfflineItemFilter.FILTER_VIDEO, true, false);
+        assertOfflineItem(mModel.get(1), buildCalendar(2018, 1, 1, 6), item1);
+
+        // Complete the download.
+        OfflineItem update1 =
+                buildItem("1", buildCalendar(2018, 1, 1, 6), OfflineItemFilter.FILTER_VIDEO);
+        update1.state = OfflineItemState.COMPLETE;
+        when(mSource.getItems()).thenReturn(CollectionUtil.newArrayList(update1));
+        list.onItemUpdated(item1, update1);
+
+        // Add a new download.
+        OfflineItem item2 =
+                buildItem("2", buildCalendar(2018, 1, 1, 4), OfflineItemFilter.FILTER_VIDEO);
+        list.onItemsAdded(CollectionUtil.newArrayList(item2));
+
+        Assert.assertEquals(3, mModel.size());
+        assertSectionHeader(mModel.get(0), buildCalendar(2018, 1, 1, 0),
+                OfflineItemFilter.FILTER_VIDEO, true, false);
+        assertOfflineItem(mModel.get(1), buildCalendar(2018, 1, 1, 6), update1);
+        assertOfflineItem(mModel.get(2), buildCalendar(2018, 1, 1, 4), item2);
     }
 
     /**

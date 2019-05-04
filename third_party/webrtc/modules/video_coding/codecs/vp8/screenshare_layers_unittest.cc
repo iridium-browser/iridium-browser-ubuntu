@@ -8,16 +8,22 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <stdlib.h>
+#include <string.h>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
+#include "modules/video_coding/codecs/interface/common_constants.h"
 #include "modules/video_coding/codecs/vp8/libvpx_vp8_encoder.h"
 #include "modules/video_coding/codecs/vp8/screenshare_layers.h"
 #include "modules/video_coding/include/video_codec_interface.h"
+#include "rtc_base/checks.h"
 #include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/metrics.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "vpx/vp8cx.h"
 
 using ::testing::_;
 using ::testing::ElementsAre;
@@ -87,7 +93,7 @@ class ScreenshareLayerTest : public ::testing::Test {
     return flags;
   }
 
-  TemporalLayers::FrameConfig UpdateLayerConfig(uint32_t timestamp) {
+  Vp8TemporalLayers::FrameConfig UpdateLayerConfig(uint32_t timestamp) {
     int64_t timestamp_ms = timestamp / 90;
     clock_.AdvanceTimeMilliseconds(timestamp_ms - clock_.TimeInMilliseconds());
     return layers_->UpdateLayerConfig(timestamp);
@@ -167,7 +173,7 @@ class ScreenshareLayerTest : public ::testing::Test {
   std::unique_ptr<ScreenshareLayers> layers_;
 
   uint32_t timestamp_;
-  TemporalLayers::FrameConfig tl_config_;
+  Vp8TemporalLayers::FrameConfig tl_config_;
   Vp8EncoderConfig cfg_;
   bool config_updated_;
   CodecSpecificInfoVP8 vp8_info_;

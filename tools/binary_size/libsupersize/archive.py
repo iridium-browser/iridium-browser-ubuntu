@@ -41,6 +41,7 @@ _OWNERS_FILENAME = 'OWNERS'
 _COMPONENT_REGEX = re.compile(r'\s*#\s*COMPONENT\s*:\s*(\S+)')
 _FILE_PATH_REGEX = re.compile(r'\s*file://(\S+)')
 _UNCOMPRESSED_COMPRESSION_RATIO_THRESHOLD = 0.9
+_APKS_MAIN_APK = 'splits/base-master.apk'
 
 # Holds computation state that is live only when an output directory exists.
 _OutputDirectoryContext = collections.namedtuple('_OutputDirectoryContext', [
@@ -84,6 +85,8 @@ class SectionSizeKnobs(object):
       'assets/webapk_dex_version.txt': (
           '../../chrome/android/webapk/libs/runtime_library_version.gni'),
       'lib/armeabi-v7a/libarcore_sdk_c_minimal.so': (
+          '../../third_party/arcore-android-sdk'),
+      'lib/armeabi-v7a/libarcore_sdk_c.so': (
           '../../third_party/arcore-android-sdk'),
     }
 
@@ -376,8 +379,13 @@ def _AssignNmAliasPathsAndCreatePathAliases(raw_symbols, object_paths_by_name):
   for symbol in raw_symbols:
     ret.append(symbol)
     full_name = symbol.full_name
-    if (symbol.IsBss() or
-        symbol.IsStringLiteral() or
+    # Don't skip if symbol.IsBss(). This is needed for LLD-LTO to work, since
+    # .bss object_path data are unavailable for linker_map_parser, and need to
+    # be extracted here. For regular LLD flow, incorrect aliased symbols can
+    # arise. But that's a lesser evil compared to having LLD-LTO .bss missing
+    # object_path and source_path.
+    # TODO(huangs): Fix aliased symbols for the LLD case.
+    if (symbol.IsStringLiteral() or
         not full_name or
         full_name[0] in '*.' or  # e.g. ** merge symbols, .Lswitch.table
         full_name == 'startup'):
@@ -459,7 +467,7 @@ def _CreateMergeStringsReplacements(merge_string_syms,
   logging.debug('Created %d string literal symbols', sum(len(x) for x in ret))
   logging.debug('Sorting string literals')
   for symbols in ret:
-    # In order to achieve a total ordering in the presense of aliases, need to
+    # In order to achieve a total ordering in the presence of aliases, need to
     # include both |address| and |object_path|.
     # In order to achieve consistent deduping, need to include |size|.
     symbols.sort(key=lambda x: (x.address, -x.size, x.object_path))
@@ -596,7 +604,7 @@ def _FindComponentRoot(start_path, cache, knobs):
       SRC_ROOT.
     cache: Dict of OWNERS paths. Used instead of filesystem if paths are present
       in the dict.
-    knobs: Instance of SectionSizeKnobs. Tunable knobs and options.
+    knobs: Instance of SectionSizeKnobs with tunable knobs and options.
 
   Returns:
     COMPONENT belonging to |start_path|, or empty string if not found.
@@ -634,6 +642,22 @@ def _PopulateComponents(raw_symbols, knobs):
     if symbol.source_path:
       folder_path = os.path.dirname(symbol.source_path)
       symbol.component = _FindComponentRoot(folder_path, seen_paths, knobs)
+
+
+def _UpdateSymbolNamesFromNm(raw_symbols, names_by_address):
+  """Updates raw_symbols names with extra information from nm."""
+  logging.debug('Update symbol names')
+  # linker_map_parser extracts '** outlined function' without knowing how many
+  # such symbols exist at each address. nm has this information, and stores the
+  # value as, e.g., '** outlined function * 5'. Copy the information over.
+  for s in raw_symbols:
+    if s.full_name.startswith('** outlined function'):
+      name_list = names_by_address.get(s.address)
+      if name_list:
+        for name in name_list:
+          if name.startswith('** outlined function'):
+            s.full_name = name
+            break
 
 
 def _AddNmAliases(raw_symbols, names_by_address):
@@ -704,8 +728,24 @@ def LoadAndPostProcessSizeInfo(path, file_obj=None):
   return size_info
 
 
-def CreateMetadata(map_path, elf_path, apk_path, tool_prefix, output_directory,
-                   linker_name):
+def _CollectModuleSizes(minimal_apks_path):
+  sizes_by_module = collections.defaultdict(int)
+  with zipfile.ZipFile(minimal_apks_path) as z:
+    for info in z.infolist():
+      # E.g.:
+      # splits/base-master.apk
+      # splits/base-en.apk
+      # splits/vr-master.apk
+      # splits/vr-en.apk
+      # TODO(agrieve): Might be worth measuring a non-en locale as well.
+      m = re.match(r'splits/(.*)-master\.apk', info.filename)
+      if m:
+        sizes_by_module[m.group(1)] += info.file_size
+  return sizes_by_module
+
+
+def CreateMetadata(map_path, elf_path, apk_path, minimal_apks_path,
+                   tool_prefix, output_directory, linker_name):
   """Creates metadata dict.
 
   Args:
@@ -713,9 +753,10 @@ def CreateMetadata(map_path, elf_path, apk_path, tool_prefix, output_directory,
     elf_path: Path to the corresponding unstripped ELF file. Used to find symbol
         aliases and inlined functions. Can be None.
     apk_path: Path to the .apk file to measure.
+    minimal_apks_path: Path to the .minimal.apks file to measure.
     tool_prefix: Prefix for c++filt & nm.
     output_directory: Build output directory.
-    linker_name: 'gold', 'lld_v#' (# is a number), 'lld-lto_v#', or None.
+    linker_name: A coded linker name (see linker_map_parser.py).
 
   Returns:
     None if |elf_path| is not supplied. Otherwise returns dict mapping string
@@ -723,6 +764,7 @@ def CreateMetadata(map_path, elf_path, apk_path, tool_prefix, output_directory,
     If |elf_path| is supplied, git revision and elf info are included.
     If |output_directory| is also supplied, then filenames will be included.
   """
+  assert not (apk_path and minimal_apks_path)
   metadata = None
   if elf_path:
     logging.debug('Constructing metadata')
@@ -753,6 +795,15 @@ def CreateMetadata(map_path, elf_path, apk_path, tool_prefix, output_directory,
       if apk_path:
         metadata[models.METADATA_APK_FILENAME] = relative_to_out(apk_path)
         metadata[models.METADATA_APK_SIZE] = os.path.getsize(apk_path)
+      elif minimal_apks_path:
+        sizes_by_module = _CollectModuleSizes(minimal_apks_path)
+        metadata[models.METADATA_APK_FILENAME] = relative_to_out(
+            minimal_apks_path)
+        for name, size in sizes_by_module.iteritems():
+          key = models.METADATA_APK_SIZE
+          if name != 'base':
+            key += '-' + name
+          metadata[key] = size
   return metadata
 
 
@@ -840,6 +891,8 @@ def _ParseElfInfo(map_path, elf_path, tool_prefix, track_string_literals,
         'Adding symbols removed by identical code folding (as reported by nm)')
     # This normally does not block (it's finished by this time).
     names_by_address = elf_nm_result.get()
+    _UpdateSymbolNamesFromNm(raw_symbols, names_by_address)
+
     raw_symbols = _AddNmAliases(raw_symbols, names_by_address)
 
     if outdir_context:
@@ -848,7 +901,6 @@ def _ParseElfInfo(map_path, elf_path, tool_prefix, track_string_literals,
           'Fetched path information for %d symbols from %d files',
           len(object_paths_by_name),
           len(outdir_context.elf_object_paths) + len(missed_object_paths))
-
       # For aliases, this provides path information where there wasn't any.
       logging.info('Creating aliases for symbols shared by multiple paths')
       raw_symbols = _AssignNmAliasPathsAndCreatePathAliases(
@@ -925,9 +977,9 @@ def _IsPakContentUncompressed(content):
 
 
 class _ResourceSourceMapper(object):
-  def __init__(self, apk_path, output_directory, knobs):
+  def __init__(self, size_info_prefix, knobs):
     self._knobs = knobs
-    self._res_info = self._LoadResInfo(apk_path, output_directory)
+    self._res_info = self._LoadResInfo(size_info_prefix)
     self._pattern_dollar_underscore = re.compile(r'\$(.*?)__\d+')
     self._pattern_version_suffix = re.compile(r'-v\d+/')
 
@@ -952,11 +1004,8 @@ class _ResourceSourceMapper(object):
           res_info[dest] = actual_source
     return res_info
 
-  def _LoadResInfo(self, apk_path, output_directory):
-    apk_name = os.path.basename(apk_path)
-    apk_res_info_name = apk_name + '.res.info'
-    apk_res_info_path = os.path.join(
-        output_directory, 'size-info', apk_res_info_name)
+  def _LoadResInfo(self, size_info_prefix):
+    apk_res_info_path = size_info_prefix + '.res.info'
     res_info_without_root = self._ParseResInfoFile(apk_res_info_path)
     # We package resources in the res/ folder only in the apk.
     res_info = {
@@ -1057,16 +1106,18 @@ def _ParseApkElfSectionSize(section_sizes, metadata, apk_elf_result):
   return section_sizes, 0
 
 
-def _ParseDexSymbols(section_sizes, apk_path, output_directory):
-  symbols = apkanalyzer.CreateDexSymbols(apk_path, output_directory)
+def _ParseDexSymbols(section_sizes, apk_path, mapping_path, size_info_prefix,
+                     output_directory):
+  symbols = apkanalyzer.CreateDexSymbols(
+      apk_path, mapping_path, size_info_prefix, output_directory)
   prev = section_sizes.setdefault(models.SECTION_DEX, 0)
   section_sizes[models.SECTION_DEX] = prev + sum(s.size for s in symbols)
   return symbols
 
 
 def _ParseApkOtherSymbols(section_sizes, apk_path, apk_so_path,
-                          output_directory, knobs):
-  res_source_mapper = _ResourceSourceMapper(apk_path, output_directory, knobs)
+                          size_info_prefix, knobs):
+  res_source_mapper = _ResourceSourceMapper(size_info_prefix, knobs)
   apk_symbols = []
   zip_info_total = 0
   with zipfile.ZipFile(apk_path) as z:
@@ -1109,11 +1160,10 @@ def _CreatePakObjectMap(object_paths_by_name):
   return object_paths_by_pak_id
 
 
-def _FindPakSymbolsFromApk(apk_path, output_directory, knobs):
+def _FindPakSymbolsFromApk(apk_path, size_info_prefix, knobs):
   with zipfile.ZipFile(apk_path) as z:
     pak_zip_infos = (f for f in z.infolist() if f.filename.endswith('.pak'))
-    apk_info_name = os.path.basename(apk_path) + '.pak.info'
-    pak_info_path = os.path.join(output_directory, 'size-info', apk_info_name)
+    pak_info_path = size_info_prefix + '.pak.info'
     res_info = _ParsePakInfoFile(pak_info_path)
     symbols_by_id = {}
     total_compressed_size = 0
@@ -1165,20 +1215,28 @@ def _CalculateElfOverhead(section_sizes, elf_path):
 
 def CreateSectionSizesAndSymbols(
       map_path=None, tool_prefix=None, output_directory=None, elf_path=None,
-      apk_path=None, track_string_literals=True, metadata=None,
-      apk_so_path=None, pak_files=None, pak_info_file=None, linker_name=None,
-      knobs=SectionSizeKnobs()):
+      apk_path=None, mapping_path=None, track_string_literals=True,
+      metadata=None, apk_so_path=None, pak_files=None, pak_info_file=None,
+      linker_name=None, size_info_prefix=None, knobs=SectionSizeKnobs()):
   """Creates sections sizes and symbols for a SizeInfo.
 
   Args:
     map_path: Path to the linker .map(.gz) file to parse.
-    elf_path: Path to the corresponding unstripped ELF file. Used to find symbol
-        aliases and inlined functions. Can be None.
     tool_prefix: Prefix for c++filt & nm (required).
     output_directory: Build output directory. If None, source_paths and symbol
         alias information will not be recorded.
+    elf_path: Path to the corresponding unstripped ELF file. Used to find symbol
+        aliases and inlined functions. Can be None.
+    apk_path: Path to the .apk file to measure.
     track_string_literals: Whether to break down "** merge string" sections into
         smaller symbols (requires output_directory).
+    metadata: Metadata dict from CreateMetadata().
+    apk_so_path: Path to an .so file within an APK file.
+    pak_files: List of paths to .pak files.
+    pak_info_file: Path to a .pak.info file.
+    linker_name: A coded linker name (see linker_map_parser.py).
+    size_info_prefix: Path to $out/size-info/$ApkName.
+    knobs: Instance of SectionSizeKnobs with tunable knobs and options.
 
   Returns:
     A tuple of (section_sizes, raw_symbols).
@@ -1230,17 +1288,21 @@ def CreateSectionSizesAndSymbols(
   elf_overhead_size = _CalculateElfOverhead(section_sizes, elf_path)
 
   pak_symbols_by_id = None
-  if apk_path:
+  if apk_path and size_info_prefix:
     pak_symbols_by_id = _FindPakSymbolsFromApk(
-        apk_path, output_directory, knobs)
+        apk_path, size_info_prefix, knobs)
     if elf_path:
       section_sizes, elf_overhead_size = _ParseApkElfSectionSize(
           section_sizes, metadata, apk_elf_result)
     raw_symbols.extend(
-        _ParseDexSymbols(section_sizes, apk_path, output_directory))
+        _ParseDexSymbols(section_sizes,
+                         apk_path,
+                         mapping_path,
+                         size_info_prefix,
+                         output_directory))
     raw_symbols.extend(
         _ParseApkOtherSymbols(section_sizes, apk_path, apk_so_path,
-                              output_directory, knobs))
+                              size_info_prefix, knobs))
   elif pak_files and pak_info_file:
     pak_symbols_by_id = _FindPakSymbolsFromFiles(
         pak_files, pak_info_file, output_directory)
@@ -1377,34 +1439,35 @@ def _ElfInfoFromApk(apk_path, apk_so_path, tool_prefix):
 
 
 def _AutoIdentifyInputFile(args):
-  file_output = subprocess.check_output(['file', args.f])
-  format_text = file_output[file_output.find(': ') + 2:]
-  # File-not-found -> 'cannot ...' and directory -> 'directory', which don't
-  # match anything here, so they are handled by the final 'return False'.
-  if (format_text.startswith('Java archive data') or
-      format_text.startswith('Zip archive data')):
-    logging.info('Auto-identified --apk-file.')
+  if args.f.endswith('.minimal.apks'):
+    args.minimal_apks_file = args.f
+    logging.info('Auto-identified --minimal-apks-file.')
+  elif args.f.endswith('.apk'):
     args.apk_file = args.f
-    return True
-  if format_text.startswith('ELF '):
+    logging.info('Auto-identified --apk-file.')
+  elif args.f.endswith('.so') or '.' not in args.f:
     logging.info('Auto-identified --elf-file.')
     args.elf_file = args.f
-    return True
-  if format_text.startswith('ASCII text'):
+  elif args.f.endswith('.map') or args.f.endswith('.map.gz'):
     logging.info('Auto-identified --map-file.')
     args.map_file = args.f
-    return True
-  return False
+  else:
+    return False
+  return True
 
 
 def AddMainPathsArguments(parser):
-  """Add arguments for DeduceMainPaths()."""
+  """Add arguments for _DeduceMainPaths()."""
   parser.add_argument('-f', metavar='FILE',
                       help='Auto-identify input file type.')
   parser.add_argument('--apk-file',
-                      help='.apk file to measure. When set, --elf-file will be '
-                            'derived (if unset). Providing the .apk allows '
-                            'for the size of packed relocations to be recorded')
+                      help='.apk file to measure. Other flags can generally be '
+                           'derived when this is used.')
+  parser.add_argument('--minimal-apks-file',
+                      help='.minimal.apks file to measure. Other flags can '
+                           'generally be derived when this is used.')
+  parser.add_argument('--mapping-file',
+                      help='Proguard .mapping file for deobfuscation.')
   parser.add_argument('--elf-file',
                       help='Path to input ELF file. Currently used for '
                            'capturing metadata.')
@@ -1437,22 +1500,27 @@ def AddArguments(parser):
   AddMainPathsArguments(parser)
 
 
-def DeduceMainPaths(args, parser):
+def _DeduceMainPaths(args, parser, extracted_minimal_apk_path=None):
   """Computes main paths based on input, and deduces them if needed."""
-  if args.f is not None:
-    if not _AutoIdentifyInputFile(args):
-      parser.error('Cannot find or identify file %s' % args.f)
-
-  apk_path = args.apk_file
   elf_path = args.elf_file
   map_path = args.map_file
-  any_input = apk_path or elf_path or map_path
+  any_input = args.apk_file or args.minimal_apks_file or elf_path or map_path
   if not any_input:
-    parser.error('Must pass at least one of --apk-file, --elf-file, --map-file')
+    parser.error('Must pass at least one of --apk-file, --minimal-apks-file, '
+                 '--elf-file, --map-file')
   output_directory_finder = path_util.OutputDirectoryFinder(
       value=args.output_directory,
       any_path_within_output_directory=any_input)
 
+  aab_or_apk = args.apk_file or args.minimal_apks_file
+  mapping_path = args.mapping_file
+  if aab_or_apk:
+    aab_or_apk = aab_or_apk.replace('.minimal.apks', '.aab')
+    if not mapping_path:
+      mapping_path = aab_or_apk + '.mapping'
+      logging.debug('Detected --mapping-file=%s', mapping_path)
+
+  apk_path = extracted_minimal_apk_path or args.apk_file
   apk_so_path = None
   if apk_path:
     with zipfile.ZipFile(apk_path) as z:
@@ -1478,8 +1546,8 @@ def DeduceMainPaths(args, parser):
       map_path += '.gz'
     if not os.path.exists(map_path):
       parser.error('Could not find .map(.gz)? file. Ensure you have built with '
-                   'is_official_build=true, or use --map-file to point me a '
-                   'linker map file.')
+                   'is_official_build=true and generate_linker_map=true, or '
+                   'use --map-file to point me a linker map file.')
 
   linker_name = _DetectLinkerName(map_path)
   logging.info('Linker name: %s' % linker_name)
@@ -1491,18 +1559,49 @@ def DeduceMainPaths(args, parser):
   output_directory = None
   if not args.no_source_paths:
     output_directory = output_directory_finder.Finalized()
-  return (output_directory, tool_prefix, apk_path, apk_so_path, elf_path,
-          map_path, linker_name)
+
+  size_info_prefix = None
+  if output_directory and aab_or_apk:
+    size_info_prefix = os.path.join(
+        output_directory, 'size-info', os.path.basename(aab_or_apk))
+
+  return (output_directory, tool_prefix, apk_path, mapping_path, apk_so_path,
+          elf_path, map_path, linker_name, size_info_prefix)
 
 
 def Run(args, parser):
   if not args.size_file.endswith('.size'):
     parser.error('size_file must end with .size')
 
-  (output_directory, tool_prefix, apk_path, apk_so_path, elf_path, map_path,
-       linker_name) = (DeduceMainPaths(args, parser))
+  if args.f is not None:
+    if not _AutoIdentifyInputFile(args):
+      parser.error('Cannot identify file %s' % args.f)
+  if args.apk_file and args.minimal_apks_file:
+    parser.error('Cannot use both --apk-file and --minimal-apks-file.')
 
-  metadata = CreateMetadata(map_path, elf_path, apk_path, tool_prefix,
+  if args.minimal_apks_file:
+    # Can't use NamedTemporaryFile() because it uses atexit, which does
+    # not play nice with fork().
+    fd, extracted_minimal_apk_path = tempfile.mkstemp(suffix='.apk')
+    try:
+      logging.debug('Extracting %s', _APKS_MAIN_APK)
+      with zipfile.ZipFile(args.minimal_apks_file) as z:
+        os.write(fd, z.read(_APKS_MAIN_APK))
+      os.close(fd)
+      _RunInternal(args, parser, extracted_minimal_apk_path)
+    finally:
+      os.unlink(extracted_minimal_apk_path)
+  else:
+    _RunInternal(args, parser, None)
+
+
+def _RunInternal(args, parser, extracted_minimal_apk_path):
+  (output_directory, tool_prefix, apk_path, mapping_path, apk_so_path, elf_path,
+   map_path, linker_name, size_info_prefix) = _DeduceMainPaths(
+       args, parser, extracted_minimal_apk_path)
+
+  metadata = CreateMetadata(map_path, elf_path, args.apk_file,
+                            args.minimal_apks_file, tool_prefix,
                             output_directory, linker_name)
 
   knobs = SectionSizeKnobs()
@@ -1511,11 +1610,12 @@ def Run(args, parser):
 
   section_sizes, raw_symbols = CreateSectionSizesAndSymbols(
       map_path=map_path, tool_prefix=tool_prefix, elf_path=elf_path,
-      apk_path=apk_path, output_directory=output_directory,
+      apk_path=apk_path, mapping_path=mapping_path,
+      output_directory=output_directory,
       track_string_literals=args.track_string_literals,
       metadata=metadata, apk_so_path=apk_so_path,
       pak_files=args.pak_file, pak_info_file=args.pak_info_file,
-      linker_name=linker_name, knobs=knobs)
+      linker_name=linker_name, size_info_prefix=size_info_prefix, knobs=knobs)
   size_info = CreateSizeInfo(
       section_sizes, raw_symbols, metadata=metadata, normalize_names=False)
 

@@ -10,6 +10,26 @@
 
 namespace blink {
 
+namespace {
+
+// UScriptCode and OpenType script are not 1:1; specifically, both Hiragana and
+// Katakana map to 'kana' in OpenType. They will be mapped correctly in
+// HarfBuzz, but normalizing earlier helps to reduce splitting runs between
+// these scripts.
+// https://docs.microsoft.com/en-us/typography/opentype/spec/scripttags
+inline UScriptCode getScriptForOpenType(UChar32 ch, UErrorCode* status) {
+  UScriptCode script = uscript_getScript(ch, status);
+  if (UNLIKELY(U_FAILURE(*status)))
+    return script;
+  if (UNLIKELY(script == USCRIPT_KATAKANA ||
+               script == USCRIPT_KATAKANA_OR_HIRAGANA)) {
+    return USCRIPT_HIRAGANA;
+  }
+  return script;
+}
+
+}  // namespace
+
 typedef ScriptData::PairedBracketType PairedBracketType;
 
 constexpr int ScriptRunIterator::kMaxScriptCount;
@@ -27,6 +47,10 @@ void ICUScriptData::GetScripts(UChar32 ch, UScriptCodeList& dst) const {
   // regardless of the capacity passed to the call. So count can be greater
   // than dst->size(), if a later version of the unicode data has more
   // than kMaxScriptCount items.
+
+  // |uscript_getScriptExtensions| do not need to be collated to
+  // USCRIPT_HIRAGANA because when ScriptExtensions contains Kana, it contains
+  // Hira as well, and Hira is always before Kana.
   int count = uscript_getScriptExtensions(ch, &dst[0], dst.size(), &status);
   if (status == U_BUFFER_OVERFLOW_ERROR) {
     // Allow this, we'll just use what we have.
@@ -35,7 +59,7 @@ void ICUScriptData::GetScripts(UChar32 ch, UScriptCodeList& dst) const {
     count = dst.size();
     status = U_ZERO_ERROR;
   }
-  UScriptCode primary_script = uscript_getScript(ch, &status);
+  UScriptCode primary_script = getScriptForOpenType(ch, &status);
 
   if (U_FAILURE(status)) {
     DLOG(ERROR) << "Could not get icu script data: " << status << " for 0x"
@@ -144,7 +168,7 @@ ScriptRunIterator::ScriptRunIterator(const UChar* text,
 ScriptRunIterator::ScriptRunIterator(const UChar* text, wtf_size_t length)
     : ScriptRunIterator(text, length, ICUScriptData::Instance()) {}
 
-bool ScriptRunIterator::Consume(unsigned& limit, UScriptCode& script) {
+bool ScriptRunIterator::Consume(unsigned* limit, UScriptCode* script) {
   if (current_set_.IsEmpty()) {
     return false;
   }
@@ -164,16 +188,16 @@ bool ScriptRunIterator::Consume(unsigned& limit, UScriptCode& script) {
         break;
     }
     if (!MergeSets()) {
-      limit = pos;
-      script = ResolveCurrentScript();
-      FixupStack(script);
+      *limit = pos;
+      *script = ResolveCurrentScript();
+      FixupStack(*script);
       current_set_ = *next_set_;
       return true;
     }
   }
 
-  limit = length_;
-  script = ResolveCurrentScript();
+  *limit = length_;
+  *script = ResolveCurrentScript();
   current_set_.clear();
   return true;
 }

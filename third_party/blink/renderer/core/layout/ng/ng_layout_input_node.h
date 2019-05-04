@@ -10,7 +10,7 @@
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_logical_size.h"
 #include "third_party/blink/renderer/core/layout/ng/list/layout_ng_list_marker.h"
-#include "third_party/blink/renderer/platform/layout_unit.h"
+#include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
 
 namespace blink {
@@ -23,6 +23,7 @@ class NGBreakToken;
 class NGConstraintSpace;
 class NGInlineChildLayoutContext;
 class NGLayoutResult;
+class NGPaintFragment;
 struct MinMaxSize;
 struct NGLogicalSize;
 struct NGPhysicalSize;
@@ -31,14 +32,10 @@ enum class NGMinMaxSizeType { kContentBoxSize, kBorderBoxSize };
 
 // Input to the min/max inline size calculation algorithm for child nodes. Child
 // nodes within the same formatting context need to know which floats are beside
-// them. Additionally, orthogonal writing mode roots will need the extrinsic
-// block-size of the container.
+// them.
 struct MinMaxSizeInput {
   LayoutUnit float_left_inline_size;
   LayoutUnit float_right_inline_size;
-
-  // Extrinsic block-size of the containing block.
-  LayoutUnit extrinsic_block_size = NGSizeIndefinite;
 
   // Whether to return the size as a content-box size or border-box size.
   NGMinMaxSizeType size_type = NGMinMaxSizeType::kBorderBoxSize;
@@ -57,8 +54,17 @@ class CORE_EXPORT NGLayoutInputNode {
     // When adding new values, ensure type_ below has enough bits.
   };
 
+  static NGLayoutInputNode Create(LayoutBox* box, NGLayoutInputNodeType type) {
+    // This function should create an instance of the subclass. This works
+    // because subclasses are not virtual and do not add fields.
+    return NGLayoutInputNode(box, type);
+  }
+
   NGLayoutInputNode(std::nullptr_t) : box_(nullptr), type_(kBlock) {}
 
+  NGLayoutInputNodeType Type() const {
+    return static_cast<NGLayoutInputNodeType>(type_);
+  }
   bool IsInline() const { return type_ == kInline; }
   bool IsBlock() const { return type_ == kBlock; }
 
@@ -76,7 +82,7 @@ class CORE_EXPORT NGLayoutInputNode {
   }
   bool IsBody() const { return IsBlock() && box_->IsBody(); }
   bool IsDocumentElement() const { return box_->IsDocumentElement(); }
-  bool IsFlexItem() const { return IsBlock() && box_->IsFlexItem(); }
+  bool IsFlexItem() const { return IsBlock() && box_->IsFlexItemIncludingNG(); }
   bool ShouldBeConsideredAsReplaced() const {
     return box_->ShouldBeConsideredAsReplaced();
   }
@@ -109,6 +115,14 @@ class CORE_EXPORT NGLayoutInputNode {
            (box_->IsBody() || box_->IsTableCell());
   }
 
+  // In quirks mode, in-flow positioned BODY and root elements must completely
+  // fill the viewport. Return true if this is such a node.
+  bool IsQuirkyAndFillsViewport() const {
+    if (!GetDocument().InQuirksMode())
+      return false;
+    return (IsDocumentElement() || IsBody()) && !Style().HasOutOfFlowPosition();
+  }
+
   bool CreatesNewFormattingContext() const {
     return IsBlock() && box_->AvoidsFloats();
   }
@@ -125,11 +139,8 @@ class CORE_EXPORT NGLayoutInputNode {
 
   // Returns intrinsic sizing information for replaced elements.
   // ComputeReplacedSize can use it to compute actual replaced size.
-  // The function arguments return values from LegacyLayout intrinsic size
-  // computations: LayoutReplaced::IntrinsicSizingInfo,
-  // and LayoutReplaced::IntrinsicSize.
-  void IntrinsicSize(NGLogicalSize* default_intrinsic_size,
-                     base::Optional<LayoutUnit>* computed_inline_size,
+  // Corresponds to Legacy's LayoutReplaced::IntrinsicSizingInfo.
+  void IntrinsicSize(base::Optional<LayoutUnit>* computed_inline_size,
                      base::Optional<LayoutUnit>* computed_block_size,
                      NGLogicalSize* aspect_ratio) const;
 
@@ -151,6 +162,10 @@ class CORE_EXPORT NGLayoutInputNode {
   bool ShouldApplySizeContainment() const {
     return box_->ShouldApplySizeContainment();
   }
+
+  // Returns the first NGPaintFragment for this node. When block fragmentation
+  // occurs, there will be multiple NGPaintFragment for a node.
+  const NGPaintFragment* PaintFragment() const;
 
   String ToString() const;
 

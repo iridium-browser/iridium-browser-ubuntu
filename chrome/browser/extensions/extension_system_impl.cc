@@ -71,8 +71,8 @@
 #include "chrome/browser/chromeos/extensions/signin_screen_policy_provider.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chromeos/chromeos_switches.h"
-#include "chromeos/login/login_state.h"
+#include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/login/login_state/login_state.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -477,8 +477,7 @@ void ExtensionSystemImpl::RegisterExtensionWithRequestContexts(
 
   bool notifications_disabled = false;
   message_center::NotifierId notifier_id(
-      message_center::NotifierId::APPLICATION,
-      extension->id());
+      message_center::NotifierType::APPLICATION, extension->id());
 
   NotifierStateTracker* notifier_state_tracker =
       NotifierStateTrackerFactory::GetForProfile(profile_);

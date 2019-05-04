@@ -10,9 +10,9 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/files/memory_mapped_file.h"
 #include "base/gtest_prod_util.h"
@@ -156,11 +156,7 @@ class UI_BASE_EXPORT ResourceBundle {
       const base::MemoryMappedFile::Region& region);
 
   // Check if the .pak for the given locale exists.
-  bool LocaleDataPakExists(const std::string& locale);
-
-  // Inserts |data_pack| to |data_pack_| and updates |max_scale_factor_|
-  // accordingly.
-  void AddDataPack(std::unique_ptr<DataPack> data_pack);
+  static bool LocaleDataPakExists(const std::string& locale);
 
   // Registers additional data pack files with this ResourceBundle.  When
   // looking for a DataResource, we will search these files after searching the
@@ -256,6 +252,16 @@ class UI_BASE_EXPORT ResourceBundle {
       gfx::Font::FontStyle style = gfx::Font::NORMAL,
       gfx::Font::Weight weight = gfx::Font::Weight::NORMAL);
 
+  // Returns a font list derived from the user-specified typeface. The
+  // result is always cached and exists for the lifetime of the process.
+  // If typeface is empty, we default to the platform-specific "Base" font
+  // list.
+  const gfx::FontList& GetFontListWithTypefaceAndDelta(
+      const std::string& typeface,
+      int size_delta,
+      gfx::Font::FontStyle style = gfx::Font::NORMAL,
+      gfx::Font::Weight weight = gfx::Font::Weight::NORMAL);
+
   // Returns the primary font from the FontList given by GetFontListWithDelta().
   const gfx::Font& GetFontWithDelta(
       int size_delta,
@@ -287,8 +293,8 @@ class UI_BASE_EXPORT ResourceBundle {
   // string if no locale data files are found and |test_file_exists| is true.
   // Used on Android to load the local file in the browser process and pass it
   // to the sandboxed renderer process.
-  base::FilePath GetLocaleFilePath(const std::string& app_locale,
-                                   bool test_file_exists);
+  static base::FilePath GetLocaleFilePath(const std::string& app_locale,
+                                          bool test_file_exists);
 
   // Returns the maximum scale factor currently loaded.
   // Returns SCALE_FACTOR_100P if no resource is loaded.
@@ -328,7 +334,7 @@ class UI_BASE_EXPORT ResourceBundle {
 
   struct FontKey;
 
-  using IdToStringMap = base::hash_map<int, base::string16>;
+  using IdToStringMap = std::unordered_map<int, base::string16>;
 
   // Ctor/dtor are private, since we're a singleton.
   explicit ResourceBundle(Delegate* delegate);
@@ -351,6 +357,10 @@ class UI_BASE_EXPORT ResourceBundle {
   void AddDataPackFromPathInternal(const base::FilePath& path,
                                    ScaleFactor scale_factor,
                                    bool optional);
+
+  // Inserts |data_pack| to |data_pack_| and updates |max_scale_factor_|
+  // accordingly.
+  void AddDataPack(std::unique_ptr<DataPack> data_pack);
 
   // Try to load the locale specific strings from an external data module.
   // Returns the locale that is loaded.

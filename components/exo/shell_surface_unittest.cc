@@ -18,12 +18,14 @@
 #include "components/exo/buffer.h"
 #include "components/exo/client_controlled_shell_surface.h"
 #include "components/exo/display.h"
+#include "components/exo/shell_surface_util.h"
 #include "components/exo/sub_surface.h"
 #include "components/exo/surface.h"
 #include "components/exo/test/exo_test_base.h"
 #include "components/exo/test/exo_test_helper.h"
 #include "components/exo/wm_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/aura/client/capture_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/hit_test.h"
@@ -35,7 +37,6 @@
 #include "ui/events/base_event_utils.h"
 #include "ui/events/event.h"
 #include "ui/views/widget/widget.h"
-#include "ui/wm/core/capture_controller.h"
 #include "ui/wm/core/window_util.h"
 
 namespace exo {
@@ -283,13 +284,13 @@ TEST_F(ShellSurfaceTest, SetApplicationId) {
   surface->Attach(buffer.get());
   surface->Commit();
   aura::Window* window = shell_surface->GetWidget()->GetNativeWindow();
-  EXPECT_EQ("pre-widget-id", *ShellSurface::GetApplicationId(window));
+  EXPECT_EQ("pre-widget-id", *GetShellApplicationId(window));
   shell_surface->SetApplicationId("test");
-  EXPECT_EQ("test", *ShellSurface::GetApplicationId(window));
+  EXPECT_EQ("test", *GetShellApplicationId(window));
   EXPECT_FALSE(ash::wm::GetWindowState(window)->allow_set_bounds_direct());
 
   shell_surface->SetApplicationId(nullptr);
-  EXPECT_EQ(nullptr, ShellSurface::GetApplicationId(window));
+  EXPECT_EQ(nullptr, GetShellApplicationId(window));
 }
 
 TEST_F(ShellSurfaceTest, EmulateOverrideRedirect) {
@@ -332,12 +333,12 @@ TEST_F(ShellSurfaceTest, SetStartupId) {
   surface->Attach(buffer.get());
   surface->Commit();
   aura::Window* window = shell_surface->GetWidget()->GetNativeWindow();
-  EXPECT_EQ("pre-widget-id", *ShellSurface::GetStartupId(window));
+  EXPECT_EQ("pre-widget-id", *GetShellStartupId(window));
   shell_surface->SetStartupId("test");
-  EXPECT_EQ("test", *ShellSurface::GetStartupId(window));
+  EXPECT_EQ("test", *GetShellStartupId(window));
 
   shell_surface->SetStartupId(nullptr);
-  EXPECT_EQ(nullptr, ShellSurface::GetStartupId(window));
+  EXPECT_EQ(nullptr, GetShellStartupId(window));
 }
 
 TEST_F(ShellSurfaceTest, StartMove) {
@@ -675,7 +676,7 @@ TEST_F(ShellSurfaceTest, Popup) {
   // Verify that created shell surface is popup and has capture.
   EXPECT_EQ(aura::client::WINDOW_TYPE_POPUP,
             popup_shell_surface->GetWidget()->GetNativeWindow()->type());
-  EXPECT_EQ(wm::CaptureController::Get()->GetCaptureWindow(),
+  EXPECT_EQ(WMHelper::GetInstance()->GetCaptureClient()->GetCaptureWindow(),
             popup_shell_surface->GetWidget()->GetNativeWindow());
 
   // Setting frame type on popup should have no effect.
@@ -695,7 +696,7 @@ TEST_F(ShellSurfaceTest, Popup) {
             sub_popup_shell_surface->GetWidget()->GetWindowBoundsInScreen());
 
   // The capture should be on sub_popup_shell_surface.
-  EXPECT_EQ(wm::CaptureController::Get()->GetCaptureWindow(),
+  EXPECT_EQ(WMHelper::GetInstance()->GetCaptureClient()->GetCaptureWindow(),
             sub_popup_shell_surface->GetWidget()->GetNativeWindow());
   EXPECT_EQ(aura::client::WINDOW_TYPE_POPUP,
             sub_popup_shell_surface->GetWidget()->GetNativeWindow()->type());
@@ -704,34 +705,30 @@ TEST_F(ShellSurfaceTest, Popup) {
     // Mouse is on the top most popup.
     ui::MouseEvent event(ui::ET_MOUSE_MOVED, gfx::Point(0, 0),
                          gfx::Point(100, 50), ui::EventTimeForNow(), 0, 0);
-    EXPECT_EQ(sub_popup_surface.get(),
-              ShellSurfaceBase::GetTargetSurfaceForLocatedEvent(&event));
+    EXPECT_EQ(sub_popup_surface.get(), GetTargetSurfaceForLocatedEvent(&event));
   }
   {
     // Move the mouse to the parent popup.
     ui::MouseEvent event(ui::ET_MOUSE_MOVED, gfx::Point(-25, 0),
                          gfx::Point(75, 50), ui::EventTimeForNow(), 0, 0);
-    EXPECT_EQ(popup_surface.get(),
-              ShellSurfaceBase::GetTargetSurfaceForLocatedEvent(&event));
+    EXPECT_EQ(popup_surface.get(), GetTargetSurfaceForLocatedEvent(&event));
   }
   {
     // Move the mouse to the main window.
     ui::MouseEvent event(ui::ET_MOUSE_MOVED, gfx::Point(-25, -25),
                          gfx::Point(75, 25), ui::EventTimeForNow(), 0, 0);
-    EXPECT_EQ(surface.get(),
-              ShellSurfaceBase::GetTargetSurfaceForLocatedEvent(&event));
+    EXPECT_EQ(surface.get(), GetTargetSurfaceForLocatedEvent(&event));
   }
 
   // Removing top most popup moves the grab to parent popup.
   sub_popup_shell_surface.reset();
-  EXPECT_EQ(wm::CaptureController::Get()->GetCaptureWindow(),
+  EXPECT_EQ(WMHelper::GetInstance()->GetCaptureClient()->GetCaptureWindow(),
             popup_shell_surface->GetWidget()->GetNativeWindow());
   {
     // Targetting should still work.
     ui::MouseEvent event(ui::ET_MOUSE_MOVED, gfx::Point(0, 0),
                          gfx::Point(50, 50), ui::EventTimeForNow(), 0, 0);
-    EXPECT_EQ(popup_surface.get(),
-              ShellSurfaceBase::GetTargetSurfaceForLocatedEvent(&event));
+    EXPECT_EQ(popup_surface.get(), GetTargetSurfaceForLocatedEvent(&event));
   }
 }
 

@@ -3,7 +3,7 @@
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file. -->
 
-<ScrollView
+<org.chromium.chrome.browser.download.DownloadLocationCustomView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -19,7 +19,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:id="@+id/subtitle"
-            android:textAppearance="@style/BlackBody"
+            android:textAppearance="@style/TextAppearance.BlackBody"
             android:visibility="gone"
             android:layout_marginBottom="16dp" />
 
@@ -28,7 +28,7 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal">
 
-            <android.support.v7.widget.AppCompatImageView
+            <org.chromium.ui.widget.ChromeImageView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 app:srcCompat="@drawable/ic_drive_file_24dp"
@@ -39,7 +39,7 @@
                 android:id="@+id/file_name"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textAppearance="@style/BlackTitle1"
+                android:textAppearance="@style/TextAppearance.BlackTitle1"
                 android:singleLine="true" />
 
         </LinearLayout>
@@ -49,7 +49,7 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal">
 
-            <android.support.v7.widget.AppCompatImageView
+            <org.chromium.ui.widget.ChromeImageView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:src="@drawable/ic_folder_blue_24dp"
@@ -65,7 +65,7 @@
         </LinearLayout>
 
         <CheckBox
-            style="@style/BlackDisabledText3"
+            style="@style/TextAppearance.BlackDisabledText3"
             android:id="@+id/show_again_checkbox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -74,5 +74,5 @@
 
     </LinearLayout>
 
-</ScrollView>
+</org.chromium.chrome.browser.download.DownloadLocationCustomView>
 

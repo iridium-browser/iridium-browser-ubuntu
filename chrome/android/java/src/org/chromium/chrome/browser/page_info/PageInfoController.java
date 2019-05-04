@@ -6,21 +6,20 @@ package org.chromium.chrome.browser.page_info;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
-import android.os.Bundle;
 import android.provider.Settings;
 import android.support.annotation.IntDef;
+import android.support.v4.view.ViewCompat;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.TextAppearanceSpan;
+import android.view.Window;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.StrictModeContext;
@@ -32,17 +31,13 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
-import org.chromium.chrome.browser.modaldialog.DialogDismissalCause;
-import org.chromium.chrome.browser.modaldialog.ModalDialogView;
-import org.chromium.chrome.browser.modaldialog.ModalDialogView.ButtonType;
 import org.chromium.chrome.browser.offlinepages.OfflinePageItem;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.omnibox.OmniboxUrlEmphasizer;
 import org.chromium.chrome.browser.page_info.PageInfoView.ConnectionInfoParams;
 import org.chromium.chrome.browser.page_info.PageInfoView.PageInfoViewParams;
-import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
-import org.chromium.chrome.browser.preferences.website.ContentSetting;
+import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
 import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
 import org.chromium.chrome.browser.previews.PreviewsAndroidBridge;
 import org.chromium.chrome.browser.previews.PreviewsUma;
@@ -57,12 +52,17 @@ import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
+import org.chromium.net.GURLUtils;
+import org.chromium.ui.base.Clipboard;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.modaldialog.DialogDismissalCause;
+import org.chromium.ui.modaldialog.ModalDialogProperties;
+import org.chromium.ui.modaldialog.ModalDialogProperties.ButtonType;
+import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.text.NoUnderlineClickableSpan;
 import org.chromium.ui.text.SpanApplier;
 import org.chromium.ui.text.SpanApplier.SpanInfo;
-import org.chromium.ui.widget.Toast;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -75,7 +75,7 @@ import java.util.Date;
  * Java side of Android implementation of the page info UI.
  */
 public class PageInfoController
-        implements ModalDialogView.Controller, SystemSettingsActivityRequiredListener {
+        implements ModalDialogProperties.Controller, SystemSettingsActivityRequiredListener {
     @IntDef({OpenedFromSource.MENU, OpenedFromSource.TOOLBAR, OpenedFromSource.VR})
     @Retention(RetentionPolicy.SOURCE)
     public @interface OpenedFromSource {
@@ -120,9 +120,8 @@ public class PageInfoController
     // URL'.
     private String mFullUrl;
 
-    // A parsed version of mFullUrl. Is null if the URL is invalid/cannot be
-    // parsed.
-    private URI mParsedUrl;
+    // The scheme of the URL of this page.
+    private String mScheme;
 
     // Whether or not this page is an internal chrome page (e.g. the
     // chrome://settings page).
@@ -185,13 +184,8 @@ public class PageInfoController
             mView.toggleUrlTruncation();
         };
         // Long press the url text to copy it to the clipboard.
-        viewParams.urlTitleLongClickCallback = () -> {
-            ClipboardManager clipboard =
-                    (ClipboardManager) mContext.getSystemService(Context.CLIPBOARD_SERVICE);
-            ClipData clip = ClipData.newPlainText("url", mFullUrl);
-            clipboard.setPrimaryClip(clip);
-            Toast.makeText(mContext, R.string.url_copied, Toast.LENGTH_SHORT).show();
-        };
+        viewParams.urlTitleLongClickCallback =
+                () -> Clipboard.getInstance().copyUrlToClipboard(mFullUrl);
 
         // Work out the URL and connection message and status visibility.
         mFullUrl = isShowingOfflinePage() ? offlinePageUrl : mTab.getOriginalUrl();
@@ -199,12 +193,11 @@ public class PageInfoController
         // This can happen if an invalid chrome-distiller:// url was entered.
         if (mFullUrl == null) mFullUrl = "";
 
+        mScheme = GURLUtils.getScheme(mFullUrl);
         try {
-            mParsedUrl = new URI(mFullUrl);
-            mIsInternalPage = UrlUtilities.isInternalScheme(mParsedUrl);
+            mIsInternalPage = UrlUtilities.isInternalScheme(new URI(mFullUrl));
         } catch (URISyntaxException e) {
-            mParsedUrl = null;
-            mIsInternalPage = false;
+            // Ignore exception since this is for displaying some specific content on page info.
         }
 
         String displayUrl = UrlFormatter.formatUrlForCopy(mFullUrl);
@@ -212,33 +205,30 @@ public class PageInfoController
             displayUrl = UrlUtilities.stripScheme(mFullUrl);
         }
         SpannableStringBuilder displayUrlBuilder = new SpannableStringBuilder(displayUrl);
-        OmniboxUrlEmphasizer.emphasizeUrl(displayUrlBuilder, mContext.getResources(),
-                mTab.getProfile(), mSecurityLevel, mIsInternalPage, true, true);
         if (mSecurityLevel == ConnectionSecurityLevel.SECURE) {
             OmniboxUrlEmphasizer.EmphasizeComponentsResponse emphasizeResponse =
                     OmniboxUrlEmphasizer.parseForEmphasizeComponents(
                             mTab.getProfile(), displayUrlBuilder.toString());
             if (emphasizeResponse.schemeLength > 0) {
                 displayUrlBuilder.setSpan(
-                        new TextAppearanceSpan(mContext, R.style.RobotoMediumStyle), 0,
-                        emphasizeResponse.schemeLength, Spannable.SPAN_EXCLUSIVE_INCLUSIVE);
+                        new TextAppearanceSpan(mContext, R.style.TextAppearance_RobotoMediumStyle),
+                        0, emphasizeResponse.schemeLength, Spannable.SPAN_EXCLUSIVE_INCLUSIVE);
             }
         }
+        OmniboxUrlEmphasizer.emphasizeUrl(displayUrlBuilder, mContext.getResources(),
+                mTab.getProfile(), mSecurityLevel, mIsInternalPage, true, true);
         viewParams.url = displayUrlBuilder;
         viewParams.urlOriginLength = OmniboxUrlEmphasizer.getOriginEndIndex(
                 displayUrlBuilder.toString(), mTab.getProfile());
 
-        if (shouldShowSiteSettingsButton(mParsedUrl)) {
+        if (shouldShowSiteSettingsButton()) {
             viewParams.siteSettingsButtonClickCallback = () -> {
                 // Delay while the dialog closes.
                 runAfterDismiss(() -> {
                     recordAction(PageInfoAction.PAGE_INFO_SITE_SETTINGS_OPENED);
-                    Bundle fragmentArguments =
-                            SingleWebsitePreferences.createFragmentArgsForSite(mFullUrl);
                     Intent preferencesIntent = PreferencesLauncher.createIntentForSettingsPage(
-                            mContext, SingleWebsitePreferences.class.getName());
-                    preferencesIntent.putExtra(
-                            Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, fragmentArguments);
+                            mContext, SingleWebsitePreferences.class.getName(),
+                            SingleWebsitePreferences.createFragmentArgsForSite(mFullUrl));
                     // Disabling StrictMode to avoid violations (https://crbug.com/819410).
                     try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
                         mContext.startActivity(preferencesIntent);
@@ -347,7 +337,8 @@ public class PageInfoController
                     bridge.loadOriginal(mTab.getWebContents());
                 });
             };
-            final String previewOriginalHost = bridge.getOriginalHost(mTab.getWebContents());
+            final String previewOriginalHost =
+                    bridge.getOriginalHost(mTab.getWebContents().getVisibleUrl());
             final String loadOriginalText = mContext.getString(
                     R.string.page_info_preview_load_original, previewOriginalHost);
             final SpannableString loadOriginalSpan = SpanApplier.applySpans(loadOriginalText,
@@ -364,13 +355,10 @@ public class PageInfoController
     }
 
     /**
-     * Whether to show a 'Details' link to the connection info popup. The link is only shown for
-     * HTTPS connections.
+     * Whether to show a 'Details' link to the connection info popup.
      */
     private boolean isConnectionDetailsLinkVisible() {
-        return mContentPublisher == null && !isShowingOfflinePage() && !isShowingPreview()
-                && mParsedUrl != null && mParsedUrl.getScheme() != null
-                && mParsedUrl.getScheme().equals(UrlConstants.HTTPS_SCHEME);
+        return mContentPublisher == null && !isShowingOfflinePage() && !isShowingPreview();
     }
 
     /**
@@ -381,9 +369,9 @@ public class PageInfoController
      * @param currentSettingValue The ContentSetting value of the currently selected setting.
      */
     @CalledByNative
-    private void addPermissionSection(String name, int type, int currentSettingValue) {
-        mPermissionParamsListBuilder.addPermissionEntry(
-                name, type, ContentSetting.fromInt(currentSettingValue));
+    private void addPermissionSection(
+            String name, int type, @ContentSettingValues int currentSettingValue) {
+        mPermissionParamsListBuilder.addPermissionEntry(name, type, currentSettingValue);
     }
 
     /**
@@ -486,10 +474,10 @@ public class PageInfoController
     }
 
     @Override
-    public void onClick(@ButtonType int buttonType) {}
+    public void onClick(PropertyModel model, @ButtonType int buttonType) {}
 
     @Override
-    public void onDismiss(@DialogDismissalCause int dismissalCause) {
+    public void onDismiss(PropertyModel model, @DialogDismissalCause int dismissalCause) {
         assert mNativePageInfoController != 0;
         if (mPendingRunAfterDismissTask != null) {
             mPendingRunAfterDismissTask.run();
@@ -521,21 +509,12 @@ public class PageInfoController
     }
 
     /**
-     *  Whether the site settings button should be displayed for the given URI.
-     *
-     * @param uri The URI used to determine if the site settings button should be displayed.
+     * Whether the site settings button should be displayed for the given URL.
      */
-    private boolean shouldShowSiteSettingsButton(URI uri) {
-        if (uri == null || uri.getScheme() == null) {
-            return false;
-        }
-
-        if (isShowingOfflinePage() || isShowingPreview()) {
-            return false;
-        }
-
-        return uri.getScheme().equals(UrlConstants.HTTP_SCHEME)
-                || uri.getScheme().equals(UrlConstants.HTTPS_SCHEME);
+    private boolean shouldShowSiteSettingsButton() {
+        return !isShowingOfflinePage() && !isShowingPreview()
+                && (UrlConstants.HTTP_SCHEME.equals(mScheme)
+                           || UrlConstants.HTTPS_SCHEME.equals(mScheme));
     }
 
     private boolean isSheet() {
@@ -560,6 +539,12 @@ public class PageInfoController
      */
     public static void show(final Activity activity, final Tab tab, final String contentPublisher,
             @OpenedFromSource int source) {
+        // If the activity's decor view is not attached to window, we don't show the dialog because
+        // the window manager might have revoked the window token for this activity. See
+        // https://crbug.com/921450.
+        Window window = activity.getWindow();
+        if (window == null || !ViewCompat.isAttachedToWindow(window.getDecorView())) return;
+
         if (source == OpenedFromSource.MENU) {
             RecordUserAction.record("MobileWebsiteSettingsOpenedFromMenu");
         } else if (source == OpenedFromSource.TOOLBAR) {

@@ -82,8 +82,7 @@ class SyncManagerImpl
   void ConfigureSyncer(ConfigureReason reason,
                        ModelTypeSet to_download,
                        SyncFeatureState sync_feature_state,
-                       const base::Closure& ready_task,
-                       const base::Closure& retry_task) override;
+                       const base::Closure& ready_task) override;
   void SetInvalidatorEnabled(bool invalidator_enabled) override;
   void OnIncomingInvalidation(
       ModelType type,
@@ -112,6 +111,7 @@ class SyncManagerImpl
   void ClearServerData(const base::Closure& callback) override;
   void OnCookieJarChanged(bool account_mismatch, bool empty_jar) override;
   void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd) override;
+  void UpdateInvalidationClientId(const std::string& client_id) override;
 
   // SyncEncryptionHandler::Observer implementation.
   void OnPassphraseRequired(

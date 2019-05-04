@@ -33,6 +33,7 @@
 
 #include "base/macros.h"
 #include "mojo/public/cpp/bindings/strong_binding_set.h"
+#include "third_party/blink/public/mojom/ad_tagging/ad_frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/pause_subresource_loading_handle.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/previews_resource_loading_hints.mojom-blink.h"
 #include "third_party/blink/public/platform/reporting.mojom-blink.h"
@@ -68,7 +69,6 @@ class AssociatedInterfaceProvider;
 class Color;
 class ComputedAccessibleNode;
 class ContentSecurityPolicy;
-class ContentSettingsClient;
 class Document;
 class Editor;
 class Element;
@@ -76,6 +76,7 @@ class EventHandler;
 class EventHandlerRegistry;
 class FloatSize;
 class FrameConsole;
+class FrameOverlay;
 class FrameResourceCoordinator;
 // class FrameScheduler;
 class FrameSelection;
@@ -102,8 +103,15 @@ class SmoothScrollSequencer;
 class SpellChecker;
 class TextSuggestionController;
 class WebComputedAXTree;
+class WebContentSettingsClient;
 class WebPluginContainerImpl;
 class WebURLLoaderFactory;
+
+namespace mojom {
+namespace blink {
+class DocumentInterfaceBroker;
+}  // namespace blink
+}  // namespace mojom
 
 extern template class CORE_EXTERN_TEMPLATE_EXPORT Supplement<LocalFrame>;
 
@@ -117,6 +125,8 @@ class CORE_EXPORT LocalFrame final : public Frame,
                             Page&,
                             FrameOwner*,
                             InterfaceRegistry* = nullptr);
+
+  LocalFrame(LocalFrameClient*, Page&, FrameOwner*, InterfaceRegistry*);
 
   void Init();
   void SetView(LocalFrameView*);
@@ -148,7 +158,9 @@ class CORE_EXPORT LocalFrame final : public Frame,
                                          Frame* child) override;
 
   void DetachChildren();
-  void DocumentAttached();
+  // After Document is attached, resets state related to document, and sets
+  // context to the current document.
+  void DidAttachDocument();
 
   Frame* FindFrameForNavigation(const AtomicString& name,
                                 LocalFrame& active_frame,
@@ -290,6 +302,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
   bool CanNavigate(const Frame&, const KURL& destination_url = KURL());
 
   service_manager::InterfaceProvider& GetInterfaceProvider();
+  mojom::blink::DocumentInterfaceBroker& GetDocumentInterfaceBroker();
   InterfaceRegistry* GetInterfaceRegistry() { return interface_registry_; }
 
   // Returns an AssociatedInterfaceProvider the frame can use to request
@@ -307,7 +320,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
 
   LocalFrameClient* Client() const;
 
-  ContentSettingsClient* GetContentSettingsClient();
+  WebContentSettingsClient* GetContentSettingsClient();
 
   // GetFrameResourceCoordinator may return nullptr when it can not hook up to
   // services/resource_coordinator.
@@ -343,7 +356,9 @@ class CORE_EXPORT LocalFrame final : public Frame,
   // viewport intersection and occlusion/obscuration available that accounts for
   // remote ancestor frames and their respective scroll positions, clips, etc.
   void SetViewportIntersectionFromParent(const IntRect&, bool);
-  IntRect RemoteViewportIntersection() { return remote_viewport_intersection_; }
+  IntRect RemoteViewportIntersection() const {
+    return remote_viewport_intersection_;
+  }
   bool MayBeOccludedOrObscuredByRemoteAncestor() const {
     return occluded_or_obscured_by_ancestor_;
   }
@@ -376,15 +391,12 @@ class CORE_EXPORT LocalFrame final : public Frame,
   // Calculated in the constructor but LocalFrames created on behalf of OOPIF
   // aren't set until just before commit (ReadyToCommitNavigation time) by the
   // embedder.
-  bool IsAdSubframe() const { return is_ad_subframe_; }
-  void SetIsAdSubframe() {
-    DCHECK(!IsMainFrame());
-    if (is_ad_subframe_)
-      return;
-    is_ad_subframe_ = true;
-    frame_scheduler_->SetIsAdFrame();
-    InstanceCounters::IncrementCounter(InstanceCounters::kAdSubframeCounter);
-  }
+  bool IsAdSubframe() const;
+  bool IsAdRoot() const;
+  void SetIsAdSubframe(blink::mojom::AdFrameType ad_frame_type);
+
+  // Updates the frame color overlay to match the highlight ad setting.
+  void UpdateAdHighlight();
 
   // Binds |request| and prevents resource loading until either the frame is
   // navigated or the request pipe is closed.
@@ -404,16 +416,25 @@ class CORE_EXPORT LocalFrame final : public Frame,
 
   SmoothScrollSequencer& GetSmoothScrollSequencer();
 
-  // TODO(iclelland): Replace this with a method on Document
-  void DeprecatedReportFeaturePolicyViolation(
-      mojom::FeaturePolicyFeature) const override;
-
   const mojom::blink::ReportingServiceProxyPtr& GetReportingService() const;
+
+  // Overlays a color on top of this LocalFrameView if it is associated with
+  // the main frame. Should not have multiple consumers.
+  void SetMainFrameColorOverlay(SkColor color);
+
+  // Overlays a color on top of this LocalFrameView if it is associated with
+  // a subframe. Should not have multiple consumers.
+  void SetSubframeColorOverlay(SkColor color);
+  void PaintFrameColorOverlay();
+
+  // For CompositeAfterPaint.
+  void PaintFrameColorOverlay(GraphicsContext&);
+
+  // To be called from OomInterventionImpl.
+  void ForciblyPurgeV8Memory();
 
  private:
   friend class FrameNavigationDisabler;
-
-  LocalFrame(LocalFrameClient*, Page&, FrameOwner*, InterfaceRegistry*);
 
   // Frame protected overrides:
   void DetachImpl(FrameDetachType) override;
@@ -455,6 +476,8 @@ class CORE_EXPORT LocalFrame final : public Frame,
   // after updating all ancestor/descendant frames.
   bool ConsumeTransientUserActivation(UserActivationUpdateSource update_source);
 
+  void SetFrameColorOverlay(SkColor color);
+
   std::unique_ptr<FrameScheduler> frame_scheduler_;
 
   // Holds all PauseSubresourceLoadingHandles allowing either |this| to delete
@@ -492,11 +515,11 @@ class CORE_EXPORT LocalFrame final : public Frame,
 
   bool in_view_source_mode_;
 
-  // True if this frame is heuristically determined to have been created for
-  // advertising purposes. It's per-frame (as opposed to per-document) because
-  // when an iframe is created on behalf of ad script that same frame is not
-  // typically reused for non-ad purposes.
-  bool is_ad_subframe_ = false;
+  // Type of frame detected by heuristics checking if the frame was created
+  // for advertising purposes. It's per-frame (as opposed to per-document)
+  // because when an iframe is created on behalf of ad script that same frame is
+  // not typically reused for non-ad purposes.
+  blink::mojom::AdFrameType ad_frame_type_ = blink::mojom::AdFrameType::kNonAd;
 
   Member<CoreProbeSink> probe_sink_;
   scoped_refptr<InspectorTaskRunner> inspector_task_runner_;
@@ -528,6 +551,18 @@ class CORE_EXPORT LocalFrame final : public Frame,
       previews_resource_loading_hints_receiver_;
 
   ClientHintsPreferences client_hints_preferences_;
+
+  // The value of |is_save_data_enabled_| is read once per frame from
+  // NetworkStateNotifier, which is guarded by a mutex lock, and cached locally
+  // here for performance.
+  // TODO(sclittle): This field doesn't really belong here - we should find some
+  // way to make the state of NetworkStateNotifier accessible without needing to
+  // acquire a mutex, such as by adding thread-local objects to hold the network
+  // state that get updated whenever the network state changes. That way, this
+  // field would be no longer necessary.
+  const bool is_save_data_enabled_;
+
+  std::unique_ptr<FrameOverlay> frame_color_overlay_;
 };
 
 inline FrameLoader& LocalFrame::Loader() const {

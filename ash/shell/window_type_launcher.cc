@@ -12,9 +12,8 @@
 #include "ash/shell.h"
 #include "ash/shell/example_factory.h"
 #include "ash/shell/toplevel_window.h"
-#include "ash/system/message_center/notification_tray.h"
-#include "ash/system/status_area_widget.h"
 #include "ash/wm/test_child_modal_parent.h"
+#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -52,7 +51,7 @@ class ModalWindow : public views::WidgetDelegateView,
       : modal_type_(modal_type),
         color_(kColors[g_color_index]),
         open_button_(MdTextButton::Create(this, base::ASCIIToUTF16("Moar!"))) {
-    ++g_color_index %= arraysize(kColors);
+    ++g_color_index %= base::size(kColors);
     AddChildView(open_button_);
   }
   ~ModalWindow() override = default;
@@ -102,7 +101,7 @@ class ModalWindow : public views::WidgetDelegateView,
 class NonModalTransient : public views::WidgetDelegateView {
  public:
   NonModalTransient() : color_(kColors[g_color_index]) {
-    ++g_color_index %= arraysize(kColors);
+    ++g_color_index %= base::size(kColors);
   }
   ~NonModalTransient() override = default;
 
@@ -285,21 +284,18 @@ void WindowTypeLauncher::ButtonPressed(views::Button* sender,
   } else if (sender == show_hide_window_button_) {
     NonModalTransient::ToggleNonModalTransient(GetWidget()->GetNativeView());
   } else if (sender == show_web_notification_) {
-    std::unique_ptr<message_center::Notification> notification;
-    notification.reset(new message_center::Notification(
-        message_center::NOTIFICATION_TYPE_SIMPLE, "id0",
-        base::ASCIIToUTF16("Test Shell Web Notification"),
-        base::ASCIIToUTF16("Notification message body."), gfx::Image(),
-        base::ASCIIToUTF16("www.testshell.org"), GURL(),
-        message_center::NotifierId(message_center::NotifierId::APPLICATION,
-                                   "test-id"),
-        message_center::RichNotificationData(), NULL /* delegate */));
+    std::unique_ptr<message_center::Notification> notification =
+        std::make_unique<message_center::Notification>(
+            message_center::NOTIFICATION_TYPE_SIMPLE, "id0",
+            base::ASCIIToUTF16("Test Shell Web Notification"),
+            base::ASCIIToUTF16("Notification message body."), gfx::Image(),
+            base::ASCIIToUTF16("www.testshell.org"), GURL(),
+            message_center::NotifierId(
+                message_center::NotifierType::APPLICATION, "test-id"),
+            message_center::RichNotificationData(), nullptr /* delegate */);
 
-    Shell::GetPrimaryRootWindowController()
-        ->GetStatusAreaWidget()
-        ->notification_tray()
-        ->message_center()
-        ->AddNotification(std::move(notification));
+    message_center::MessageCenter::Get()->AddNotification(
+        std::move(notification));
   } else if (sender == examples_button_) {
     show_views_examples_callback_.Run();
   }

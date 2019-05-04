@@ -79,9 +79,12 @@ static void test_path(skiatest::Reporter* reporter,
     ctx->setResourceCacheLimits(100, 8000000);
     GrResourceCache* cache = ctx->contextPriv().getResourceCache();
 
+    const GrBackendFormat format =
+            ctx->contextPriv().caps()->getBackendFormatFromColorType(kRGBA_8888_SkColorType);
+
     sk_sp<GrRenderTargetContext> rtc(ctx->contextPriv().makeDeferredRenderTargetContext(
-            SkBackingFit::kApprox, 800, 800, kRGBA_8888_GrPixelConfig, nullptr, 1, GrMipMapped::kNo,
-            kTopLeft_GrSurfaceOrigin));
+            format, SkBackingFit::kApprox, 800, 800, kRGBA_8888_GrPixelConfig, nullptr, 1,
+            GrMipMapped::kNo, kTopLeft_GrSurfaceOrigin));
     if (!rtc) {
         return;
     }
@@ -135,9 +138,9 @@ DEF_GPUTEST(SoftwarePathRendererCacheTest, reporter, /* options */) {
         return new GrSoftwarePathRenderer(ctx->contextPriv().proxyProvider(), true);
     };
 
-    // Software path renderer creates a mask texture, but also renders with a non-AA rect, which
-    // refs the quad index buffer.
-    const int kExpectedResources = 2;
+    // Software path renderer creates a mask texture and renders with a non-AA rect, but the flush
+    // only contains a single quad so GrFillRectOp doesn't need to use the shared index buffer.
+    const int kExpectedResources = 1;
 
     test_path(reporter, create_concave_path, createPR, kExpectedResources, GrAAType::kCoverage);
 

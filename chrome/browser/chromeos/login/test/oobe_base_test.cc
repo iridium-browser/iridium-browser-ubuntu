@@ -24,7 +24,7 @@
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/fake_shill_manager_client.h"
 #include "components/policy/core/common/policy_switches.h"
 #include "components/user_manager/fake_user_manager.h"
@@ -55,12 +55,7 @@ const char OobeBaseTest::kEmptyUserServices[] = "[]";
 const char OobeBaseTest::kFakeSIDCookie[] = "fake-SID-cookie";
 const char OobeBaseTest::kFakeLSIDCookie[] = "fake-LSID-cookie";
 
-OobeBaseTest::OobeBaseTest()
-    : fake_gaia_(new FakeGaia()),
-      network_portal_detector_(NULL),
-      needs_background_networking_(false),
-      gaia_frame_parent_("signin-frame"),
-      initialize_fake_merge_session_(true) {
+OobeBaseTest::OobeBaseTest() : fake_gaia_(new FakeGaia()) {
   set_exit_when_last_browser_closes(false);
   set_chromeos_user_ = false;
 }
@@ -114,9 +109,6 @@ void OobeBaseTest::SetUpOnMainThread() {
       chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
       content::NotificationService::AllSources()));
 
-  js_checker_.set_web_contents(
-      LoginDisplayHost::default_host()->GetOobeWebContents());
-
   test::UserSessionManagerTestApi session_manager_test_api(
       UserSessionManager::GetInstance());
   session_manager_test_api.SetShouldObtainTokenHandleInTests(false);
@@ -142,7 +134,8 @@ void OobeBaseTest::TearDownOnMainThread() {
 void OobeBaseTest::SetUpCommandLine(base::CommandLine* command_line) {
   extensions::ExtensionApiTest::SetUpCommandLine(command_line);
 
-  command_line->AppendSwitch(ash::switches::kShowWebUiLogin);
+  if (ShouldForceWebUiLogin())
+    command_line->AppendSwitch(ash::switches::kShowWebUiLogin);
   command_line->AppendSwitch(chromeos::switches::kLoginManager);
   command_line->AppendSwitch(chromeos::switches::kForceLoginManagerInTests);
   if (!needs_background_networking_)
@@ -153,6 +146,8 @@ void OobeBaseTest::SetUpCommandLine(base::CommandLine* command_line) {
   command_line->AppendSwitchASCII(::switches::kGaiaUrl, gaia_url.spec());
   command_line->AppendSwitchASCII(::switches::kLsoUrl, gaia_url.spec());
   command_line->AppendSwitchASCII(::switches::kGoogleApisUrl, gaia_url.spec());
+  command_line->AppendSwitchASCII(::switches::kOAuthAccountManagerUrl,
+                                  gaia_url.spec());
 
   fake_gaia_->Initialize();
   fake_gaia_->set_issue_oauth_code_cookie(true);
@@ -161,6 +156,10 @@ void OobeBaseTest::SetUpCommandLine(base::CommandLine* command_line) {
 void OobeBaseTest::InitHttpsForwarders() {
   ASSERT_TRUE(gaia_https_forwarder_.Initialize(
       kGAIAHost, embedded_test_server()->base_url()));
+}
+
+bool OobeBaseTest::ShouldForceWebUiLogin() {
+  return true;
 }
 
 void OobeBaseTest::SimulateNetworkOffline() {
@@ -203,10 +202,6 @@ base::Closure OobeBaseTest::SimulateNetworkPortalClosure() {
                     base::Unretained(this));
 }
 
-void OobeBaseTest::JsExpect(const std::string& expression) {
-  JS().ExpectTrue(expression);
-}
-
 content::WebUI* OobeBaseTest::GetLoginUI() {
   return LoginDisplayHost::default_host()->GetOobeUI()->web_ui();
 }
@@ -238,16 +233,17 @@ void OobeBaseTest::WaitForGaiaPageEvent(const std::string& event) {
   // Starts listening to message before executing the JS code that generates
   // the message below.
   content::DOMMessageQueue message_queue;
-
-  JS().Evaluate(
-      "(function() {"
-      "  var authenticator = $('gaia-signin').gaiaAuthHost_;"
-      "  var f = function() {"
-      "    authenticator.removeEventListener('" + event + "', f);"
-      "    window.domAutomationController.send('Done');"
-      "  };"
-      "  authenticator.addEventListener('" + event + "', f);"
-      "})();");
+  std::string js =
+      R"((function() {
+            var authenticator = $('gaia-signin').gaiaAuthHost_;
+            var f = function() {
+              authenticator.removeEventListener('$Event', f);
+              window.domAutomationController.send('Done');
+            };
+            authenticator.addEventListener('$Event', f);
+          })();)";
+  base::ReplaceSubstringsAfterOffset(&js, 0, "$Event", event);
+  test::OobeJS().Evaluate(js);
 
   std::string message;
   do {
@@ -266,8 +262,9 @@ void OobeBaseTest::WaitForSigninScreen() {
 }
 
 void OobeBaseTest::ExecuteJsInSigninFrame(const std::string& js) {
-  content::RenderFrameHost* frame =
-      signin::GetAuthFrame(GetLoginUI()->GetWebContents(), gaia_frame_parent_);
+  content::RenderFrameHost* frame = signin::GetAuthFrame(
+      LoginDisplayHost::default_host()->GetOobeWebContents(),
+      gaia_frame_parent_);
   ASSERT_TRUE(content::ExecuteScript(frame, js));
 }
 

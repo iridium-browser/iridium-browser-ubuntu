@@ -97,6 +97,11 @@ void OAuth2TokenServiceDelegate::FireAuthErrorChanged(
     observer.OnAuthErrorChanged(account_id, error);
 }
 
+std::string OAuth2TokenServiceDelegate::GetTokenForMultilogin(
+    const std::string& account_id) const {
+  return std::string();
+}
+
 scoped_refptr<network::SharedURLLoaderFactory>
 OAuth2TokenServiceDelegate::GetURLLoaderFactory() const {
   return nullptr;
@@ -120,4 +125,14 @@ void OAuth2TokenServiceDelegate::LoadCredentials(
   NOTREACHED() << "OAuth2TokenServiceDelegate does not load credentials. "
                   "Subclasses that need to load credentials must provide "
                   "an implemenation of this method";
+}
+
+void OAuth2TokenServiceDelegate::ExtractCredentials(
+    OAuth2TokenService* to_service,
+    const std::string& account_id) {
+  NOTREACHED();
+}
+
+bool OAuth2TokenServiceDelegate::FixRequestErrorIfPossible() {
+  return false;
 }

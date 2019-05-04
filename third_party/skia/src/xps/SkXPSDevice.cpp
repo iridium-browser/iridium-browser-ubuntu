@@ -28,7 +28,6 @@
 #include "SkEndian.h"
 #include "SkFindAndPlaceGlyph.h"
 #include "SkGeometry.h"
-#include "SkGlyphCache.h"
 #include "SkHRESULT.h"
 #include "SkIStream.h"
 #include "SkImage.h"
@@ -333,7 +332,9 @@ static HRESULT subset_typeface(SkXPSDevice::TypefaceUse* current) {
     //CreateFontPackage wants unsigned short.
     //Microsoft, Y U NO stdint.h?
     std::vector<unsigned short> keepList;
-    current->glyphsUsed->exportTo(&keepList);
+    current->glyphsUsed->getSetValues([&keepList](unsigned v) {
+            keepList.push_back((unsigned short)v);
+    });
 
     int ttcCount = (current->ttcIndex + 1);
 
@@ -1871,8 +1872,8 @@ HRESULT SkXPSDevice::CreateTypefaceUse(const SkPaint& paint,
     newTypefaceUse.xpsFont = xpsFontResource.release();
     auto glyphCache =
         SkStrikeCache::FindOrCreateStrikeExclusive(
-            paint, &this->surfaceProps(),
-            SkScalerContextFlags::kNone, nullptr);
+            paint, this->surfaceProps(),
+            SkScalerContextFlags::kNone, SkMatrix::I());
     unsigned int glyphCount = glyphCache->getGlyphCount();
     newTypefaceUse.glyphsUsed = new SkBitSet(glyphCount);
 
@@ -1973,11 +1974,11 @@ HRESULT SkXPSDevice::AddGlyphs(IXpsOMObjectFactory* xpsFactory,
     return S_OK;
 }
 
-static int num_glyph_guess(SkPaint::TextEncoding encoding, const void* text, size_t byteLength) {
-    static_assert((int)SkTypeface::kUTF8_Encoding  == (int)SkPaint::kUTF8_TextEncoding,  "");
-    static_assert((int)SkTypeface::kUTF16_Encoding == (int)SkPaint::kUTF16_TextEncoding, "");
-    static_assert((int)SkTypeface::kUTF32_Encoding == (int)SkPaint::kUTF32_TextEncoding, "");
-    if (encoding == SkPaint::kGlyphID_TextEncoding) {
+static int num_glyph_guess(SkTextEncoding encoding, const void* text, size_t byteLength) {
+    static_assert((int)SkTypeface::kUTF8_Encoding  == (int)kUTF8_SkTextEncoding,  "");
+    static_assert((int)SkTypeface::kUTF16_Encoding == (int)kUTF16_SkTextEncoding, "");
+    static_assert((int)SkTypeface::kUTF32_Encoding == (int)kUTF32_SkTextEncoding, "");
+    if (encoding == kGlyphID_SkTextEncoding) {
         return SkToInt(byteLength / 2);
     }
     return SkUTFN_CountUnichars((SkTypeface::Encoding)encoding, text, byteLength);
@@ -2055,8 +2056,8 @@ void SkXPSDevice::drawPosText(const void* text, size_t byteLen,
 
     auto cache =
         SkStrikeCache::FindOrCreateStrikeExclusive(
-            paint, &this->surfaceProps(),
-            SkScalerContextFlags::kNone, nullptr);
+            paint, this->surfaceProps(),
+            SkScalerContextFlags::kNone, SkMatrix::I());
 
     // Advance width and offsets for glyphs measured in hundredths of the font em size
     // (XPS Spec 5.1.3).

@@ -37,7 +37,7 @@ class ScriptPrecondition {
       const ScriptPreconditionProto& script_precondition_proto);
 
   ScriptPrecondition(
-      const std::vector<std::vector<std::string>>& elements_exist,
+      const std::vector<Selector>& elements_exist,
       const std::set<std::string>& domain_match,
       std::vector<std::unique_ptr<re2::RE2>> path_pattern,
       const std::vector<ScriptParameterMatchProto>& parameter_match,
@@ -65,10 +65,10 @@ class ScriptPrecondition {
       const std::map<std::string, ScriptStatusProto>& executed_scripts) const;
 
   void OnCheckElementExists(bool exists);
-  void OnGetFieldValue(bool exists, const std::string& value);
+  void OnGetFieldValue(int index, bool exists, const std::string& value);
   void ReportCheckResult(bool success);
 
-  std::vector<std::vector<std::string>> elements_exist_;
+  std::vector<Selector> elements_exist_;
 
   // Domain (exact match) excluding the last '/' character.
   std::set<std::string> domain_match_;

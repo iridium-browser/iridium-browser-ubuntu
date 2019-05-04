@@ -10,17 +10,20 @@
 #include <sstream>
 
 #include "ANGLEPerfTest.h"
-#include "shader_utils.h"
+#include "util/shader_utils.h"
 
 using namespace angle;
 
 namespace
 {
+constexpr unsigned int kIterationsPerStep = 9;
 
 struct TexSubImageParams final : public RenderTestParams
 {
     TexSubImageParams()
     {
+        iterationsPerStep = kIterationsPerStep;
+
         // Common default parameters
         majorVersion = 2;
         minorVersion = 0;
@@ -31,7 +34,6 @@ struct TexSubImageParams final : public RenderTestParams
         imageHeight    = 1024;
         subImageWidth  = 64;
         subImageHeight = 64;
-        iterations     = 9;
     }
 
     std::string suffix() const override;
@@ -41,7 +43,6 @@ struct TexSubImageParams final : public RenderTestParams
     int imageHeight;
     int subImageWidth;
     int subImageHeight;
-    unsigned int iterations;
 };
 
 std::ostream &operator<<(std::ostream &os, const TexSubImageParams &params)
@@ -90,7 +91,7 @@ std::string TexSubImageParams::suffix() const
 }
 
 TexSubImageBenchmark::TexSubImageBenchmark()
-    : ANGLERenderTest("TexSubImage", GetParam(), {"GL_EXT_texture_storage"}),
+    : ANGLERenderTest("TexSubImage", GetParam()),
       mProgram(0),
       mPositionLoc(-1),
       mTexCoordLoc(-1),
@@ -100,13 +101,12 @@ TexSubImageBenchmark::TexSubImageBenchmark()
       mIndexBuffer(0),
       mPixels(nullptr)
 {
+    addExtensionPrerequisite("GL_EXT_texture_storage");
 }
 
 GLuint TexSubImageBenchmark::createTexture()
 {
     const auto &params = GetParam();
-
-    assert(params.iterations > 0);
 
     // Use tightly packed data
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -131,26 +131,24 @@ void TexSubImageBenchmark::initializeBenchmark()
 {
     const auto &params = GetParam();
 
-    const std::string vs =
-        R"(attribute vec4 a_position;
-        attribute vec2 a_texCoord;
-        varying vec2 v_texCoord;
-        void main()
-        {
-            gl_Position = a_position;
-            v_texCoord  = a_texCoord;
-        })";
+    constexpr char kVS[] = R"(attribute vec4 a_position;
+attribute vec2 a_texCoord;
+varying vec2 v_texCoord;
+void main()
+{
+    gl_Position = a_position;
+    v_texCoord  = a_texCoord;
+})";
 
-    const std::string fs =
-        R"(precision mediump float;
-        varying vec2 v_texCoord;
-        uniform sampler2D s_texture;
-        void main()
-        {
-            gl_FragColor = texture2D(s_texture, v_texCoord);
-        })";
+    constexpr char kFS[] = R"(precision mediump float;
+varying vec2 v_texCoord;
+uniform sampler2D s_texture;
+void main()
+{
+    gl_FragColor = texture2D(s_texture, v_texCoord);
+})";
 
-    mProgram = CompileProgram(vs, fs);
+    mProgram = CompileProgram(kVS, kFS);
     ASSERT_NE(0u, mProgram);
 
     // Get the attribute locations
@@ -248,7 +246,7 @@ void TexSubImageBenchmark::drawBenchmark()
 
     const auto &params = GetParam();
 
-    for (unsigned int iteration = 0; iteration < params.iterations; ++iteration)
+    for (unsigned int iteration = 0; iteration < params.iterationsPerStep; ++iteration)
     {
         glTexSubImage2D(GL_TEXTURE_2D, 0, rand() % (params.imageWidth - params.subImageWidth),
                         rand() % (params.imageHeight - params.subImageHeight), params.subImageWidth,

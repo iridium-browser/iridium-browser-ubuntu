@@ -17,6 +17,7 @@
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_list/internal_app_id_constants.h"
 #include "base/i18n/rtl.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
@@ -36,7 +37,7 @@ constexpr int kSeparatorLeftRightPadding = 4;
 constexpr int kSeparatorHeight = 46;
 constexpr int kSeparatorTopPadding = 10;
 
-constexpr SkColor kSeparatorColor = SkColorSetARGB(0x1F, 0x00, 0x00, 0x00);
+constexpr SkColor kSeparatorColor = SkColorSetA(gfx::kGoogleGrey900, 0x24);
 
 }  // namespace
 
@@ -114,12 +115,12 @@ int SearchResultTileItemListView::DoUpdate() {
     if (i >= display_results.size()) {
       if (is_play_store_app_search_enabled_)
         separator_views_[i]->SetVisible(false);
-      tile_views_[i]->SetSearchResult(nullptr);
+      tile_views_[i]->SetResult(nullptr);
       continue;
     }
 
     SearchResult* item = display_results[i];
-    tile_views_[i]->SetSearchResult(item);
+    tile_views_[i]->SetResult(item);
 
     if (is_play_store_app_search_enabled_) {
       if (i > 0 && item->result_type() != previous_type) {

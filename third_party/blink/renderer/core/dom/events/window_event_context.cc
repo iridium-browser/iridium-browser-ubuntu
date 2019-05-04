@@ -39,7 +39,7 @@ WindowEventContext::WindowEventContext(
     const NodeEventContext& top_node_event_context) {
   // We don't dispatch load events to the window. This quirk was originally
   // added because Mozilla doesn't propagate load events to the window object.
-  if (event.type() == EventTypeNames::load)
+  if (event.type() == event_type_names::kLoad)
     return;
   auto* document = DynamicTo<Document>(top_node_event_context.GetNode());
   if (!document)
@@ -61,7 +61,7 @@ bool WindowEventContext::HandleLocalEvents(Event& event) {
   return true;
 }
 
-void WindowEventContext::Trace(blink::Visitor* visitor) {
+void WindowEventContext::Trace(Visitor* visitor) {
   visitor->Trace(window_);
   visitor->Trace(target_);
   visitor->Trace(related_target_);

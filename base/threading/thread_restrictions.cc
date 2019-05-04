@@ -28,6 +28,8 @@ LazyInstance<ThreadLocalBoolean>::Leaky g_cpu_intensive_work_disallowed =
 
 }  // namespace
 
+namespace internal {
+
 void AssertBlockingAllowed() {
   DCHECK(!g_blocking_disallowed.Get().Get())
       << "Function marked as blocking was called from a scope that disallows "
@@ -35,6 +37,12 @@ void AssertBlockingAllowed() {
          "to have MayBlock() in its TaskTraits. Otherwise, consider making "
          "this blocking work asynchronous or, as a last resort, you may use "
          "ScopedAllowBlocking (see its documentation for best practices).";
+}
+
+}  // namespace internal
+
+void AssertBlockingAllowedDeprecated() {
+  internal::AssertBlockingAllowed();
 }
 
 void DisallowBlocking() {
@@ -178,13 +186,6 @@ bool ThreadRestrictions::SetWaitAllowed(bool allowed) {
   bool previous_disallowed = g_base_sync_primitives_disallowed.Get().Get();
   g_base_sync_primitives_disallowed.Get().Set(!allowed);
   return !previous_disallowed;
-}
-
-ThreadRestrictions::ScopedAllowWait::ScopedAllowWait()
-    : was_allowed_(SetWaitAllowed(true)) {}
-
-ThreadRestrictions::ScopedAllowWait::~ScopedAllowWait() {
-  SetWaitAllowed(was_allowed_);
 }
 
 }  // namespace base

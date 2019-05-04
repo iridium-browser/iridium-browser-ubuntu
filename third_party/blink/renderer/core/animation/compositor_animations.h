@@ -128,6 +128,7 @@ class CORE_EXPORT CompositorAnimations {
                                          double animation_playback_rate);
 
   static void GetAnimationOnCompositor(
+      const Element&,
       const Timing&,
       int group,
       base::Optional<double> start_time,
@@ -148,9 +149,9 @@ class CORE_EXPORT CompositorAnimations {
 
   friend class AnimationCompositorAnimationsTest;
   FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,
-                           CanStartElementOnCompositorTransformSPv2);
+                           CanStartElementOnCompositorTransformCAP);
   FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,
-                           CanStartElementOnCompositorEffectSPv2);
+                           CanStartElementOnCompositorEffectCAP);
   FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,
                            CanStartElementOnCompositorEffect);
   FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,

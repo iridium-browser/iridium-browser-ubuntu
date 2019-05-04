@@ -23,14 +23,12 @@
 #include "common_audio/smoothing_filter.h"
 #include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor.h"
 #include "modules/audio_coding/codecs/opus/opus_interface.h"
-#include "rtc_base/constructormagic.h"
+#include "rtc_base/constructor_magic.h"
 #include "rtc_base/protobuf_utils.h"
 
 namespace webrtc {
 
 class RtcEventLog;
-
-struct CodecInst;
 
 class AudioEncoderOpusImpl final : public AudioEncoder {
  public:
@@ -53,8 +51,6 @@ class AudioEncoderOpusImpl final : public AudioEncoder {
     const float slope_;
     RTC_DISALLOW_COPY_AND_ASSIGN(NewPacketLossRateOptimizer);
   };
-
-  static AudioEncoderOpusConfig CreateConfig(const CodecInst& codec_inst);
 
   // Returns empty if the current bitrate falls within the hysteresis window,
   // defined by complexity_threshold_bps +/- complexity_threshold_window_bps.
@@ -83,7 +79,6 @@ class AudioEncoderOpusImpl final : public AudioEncoder {
       const AudioNetworkAdaptorCreator& audio_network_adaptor_creator,
       std::unique_ptr<SmoothingFilter> bitrate_smoother);
 
-  explicit AudioEncoderOpusImpl(const CodecInst& codec_inst);
   AudioEncoderOpusImpl(int payload_type, const SdpAudioFormat& format);
   ~AudioEncoderOpusImpl() override;
 
@@ -119,6 +114,7 @@ class AudioEncoderOpusImpl final : public AudioEncoder {
   void OnReceivedUplinkBandwidth(
       int target_audio_bitrate_bps,
       absl::optional<int64_t> bwe_period_ms) override;
+  void OnReceivedUplinkAllocation(BitrateAllocationUpdate update) override;
   void OnReceivedRtt(int rtt_ms) override;
   void OnReceivedOverhead(size_t overhead_bytes_per_packet) override;
   void SetReceiverFrameLengthRange(int min_frame_length_ms,
@@ -164,6 +160,11 @@ class AudioEncoderOpusImpl final : public AudioEncoder {
   void SetNumChannelsToEncode(size_t num_channels_to_encode);
   void SetProjectedPacketLossRate(float fraction);
 
+  void OnReceivedUplinkBandwidth(
+      int target_audio_bitrate_bps,
+      absl::optional<int64_t> bwe_period_ms,
+      absl::optional<int64_t> link_capacity_allocation);
+
   // TODO(minyue): remove "override" when we can deprecate
   // |AudioEncoder::SetTargetBitrate|.
   void SetTargetBitrate(int target_bps) override;
@@ -178,6 +179,7 @@ class AudioEncoderOpusImpl final : public AudioEncoder {
   AudioEncoderOpusConfig config_;
   const int payload_type_;
   const bool send_side_bwe_with_overhead_;
+  const bool use_link_capacity_for_adaptation_;
   const bool adjust_bandwidth_;
   bool bitrate_changed_;
   float packet_loss_rate_;
@@ -195,6 +197,7 @@ class AudioEncoderOpusImpl final : public AudioEncoder {
   absl::optional<size_t> overhead_bytes_per_packet_;
   const std::unique_ptr<SmoothingFilter> bitrate_smoother_;
   absl::optional<int64_t> bitrate_smoother_last_update_time_;
+  absl::optional<int64_t> link_capacity_allocation_bps_;
   int consecutive_dtx_frames_;
 
   friend struct AudioEncoderOpus;

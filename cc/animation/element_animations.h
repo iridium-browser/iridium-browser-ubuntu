@@ -55,7 +55,7 @@ class CC_ANIMATION_EXPORT ElementAnimations
   void SetAnimationHost(AnimationHost* host);
 
   void InitAffectedElementTypes();
-  void ClearAffectedElementTypes();
+  void ClearAffectedElementTypes(const PropertyToElementIdMap& element_id_map);
 
   void ElementRegistered(ElementId element_id, ElementListType list_type);
   void ElementUnregistered(ElementId element_id, ElementListType list_type);
@@ -164,6 +164,15 @@ class CC_ANIMATION_EXPORT ElementAnimations
 
   gfx::ScrollOffset ScrollOffsetForAnimation() const;
 
+  // Returns a map of target property to the ElementId for that property, for
+  // KeyframeEffects associated with this ElementAnimations.
+  //
+  // This method makes the assumption that a given target property doesn't map
+  // to more than one ElementId. While conceptually this isn't true for
+  // cc/animations, it is true for the two current clients (ui/ and blink) and
+  // this is required to let BGPT ship (see http://crbug.com/912574).
+  PropertyToElementIdMap GetPropertyToElementIdMap() const;
+
  private:
   friend class base::RefCounted<ElementAnimations>;
 
@@ -171,12 +180,17 @@ class CC_ANIMATION_EXPORT ElementAnimations
   ~ElementAnimations() override;
 
   void OnFilterAnimated(ElementListType list_type,
-                        const FilterOperations& filters);
-  void OnOpacityAnimated(ElementListType list_type, float opacity);
+                        const FilterOperations& filters,
+                        KeyframeModel* keyframe_model);
+  void OnOpacityAnimated(ElementListType list_type,
+                         float opacity,
+                         KeyframeModel* keyframe_model);
   void OnTransformAnimated(ElementListType list_type,
-                           const gfx::Transform& transform);
+                           const gfx::Transform& transform,
+                           KeyframeModel* keyframe_model);
   void OnScrollOffsetAnimated(ElementListType list_type,
-                              const gfx::ScrollOffset& scroll_offset);
+                              const gfx::ScrollOffset& scroll_offset,
+                              KeyframeModel* keyframe_model);
 
   static TargetProperties GetPropertiesMaskForAnimationState();
 

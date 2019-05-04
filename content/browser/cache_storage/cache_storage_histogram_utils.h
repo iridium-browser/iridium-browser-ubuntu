@@ -5,9 +5,8 @@
 #ifndef CONTENT_BROWSER_CACHE_STORAGE_CACHE_STORAGE_HISTOGRAM_UTILS_H_
 #define CONTENT_BROWSER_CACHE_STORAGE_CACHE_STORAGE_HISTOGRAM_UTILS_H_
 
-#include "base/metrics/histogram_macros.h"
-#include "content/browser/cache_storage/cache_storage_scheduler_client.h"
-#include "third_party/blink/public/platform/modules/cache_storage/cache_storage.mojom.h"
+#include "content/browser/cache_storage/cache_storage_scheduler_types.h"
+#include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom.h"
 
 namespace content {
 
@@ -36,38 +35,32 @@ enum class ErrorStorageType {
   kDeleteImplBackendClosed = 20,
   kKeysImplBackendClosed = 21,
   kCreateBackendDidCreateFailed = 22,
-  kMaxValue = kCreateBackendDidCreateFailed,
+  kStorageGetAllMatchedEntriesBackendClosed = 23,
+  kStorageHandleNull = 24,
+  kMaxValue = kStorageHandleNull,
 };
 
 blink::mojom::CacheStorageError MakeErrorStorage(ErrorStorageType type);
 
-// Metrics to make it easier to write histograms for several clients.
-#define CACHE_STORAGE_SCHEDULER_UMA_THUNK(uma_type, args) \
-  UMA_HISTOGRAM_##uma_type args
-#define CACHE_STORAGE_SCHEDULER_UMA(uma_type, uma_name, client_type, ...)     \
-  do {                                                                        \
-    switch (client_type) {                                                    \
-      case CacheStorageSchedulerClient::CLIENT_STORAGE:                       \
-        CACHE_STORAGE_SCHEDULER_UMA_THUNK(                                    \
-            uma_type, ("ServiceWorkerCache.CacheStorage.Scheduler." uma_name, \
-                       ##__VA_ARGS__));                                       \
-        break;                                                                \
-      case CacheStorageSchedulerClient::CLIENT_CACHE:                         \
-        CACHE_STORAGE_SCHEDULER_UMA_THUNK(                                    \
-            uma_type,                                                         \
-            ("ServiceWorkerCache.Cache.Scheduler." uma_name, ##__VA_ARGS__)); \
-        break;                                                                \
-      case CacheStorageSchedulerClient::CLIENT_BACKGROUND_SYNC:               \
-        CACHE_STORAGE_SCHEDULER_UMA_THUNK(                                    \
-            uma_type,                                                         \
-            ("ServiceWorkerCache.BackgroundSyncManager.Scheduler." uma_name,  \
-             ##__VA_ARGS__));                                                 \
-        break;                                                                \
-      default:                                                                \
-        NOTREACHED();                                                         \
-        break;                                                                \
-    }                                                                         \
-  } while (0)
+enum class CacheStorageSchedulerUMA {
+  kIsOperationSlow = 0,
+  kOperationDuration = 1,
+  kQueueDuration = 2,
+  kQueueLength = 3,
+};
+
+// The following functions are used to record UMA histograms for the
+// scheduler.  There are two functions to handle the different argument types
+// without triggering template code bloat.
+void RecordCacheStorageSchedulerUMA(CacheStorageSchedulerUMA uma_type,
+                                    CacheStorageSchedulerClient client_type,
+                                    CacheStorageSchedulerOp op_type,
+                                    int value);
+
+void RecordCacheStorageSchedulerUMA(CacheStorageSchedulerUMA uma_type,
+                                    CacheStorageSchedulerClient client_type,
+                                    CacheStorageSchedulerOp op_type,
+                                    base::TimeDelta value);
 
 }  // namespace content
 

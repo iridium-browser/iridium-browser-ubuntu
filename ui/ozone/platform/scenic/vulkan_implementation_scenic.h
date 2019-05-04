@@ -5,18 +5,20 @@
 #ifndef UI_OZONE_PLATFORM_SCENIC_VULKAN_IMPLEMENTATION_SCENIC_H_
 #define UI_OZONE_PLATFORM_SCENIC_VULKAN_IMPLEMENTATION_SCENIC_H_
 
+#include <fuchsia/ui/scenic/cpp/fidl.h>
 #include <memory>
 
 #include "gpu/vulkan/vulkan_implementation.h"
 #include "gpu/vulkan/vulkan_instance.h"
+#include "ui/ozone/public/interfaces/scenic_gpu_host.mojom.h"
 
 namespace ui {
 
-class ScenicWindowManager;
+class ScenicSurfaceFactory;
 
 class VulkanImplementationScenic : public gpu::VulkanImplementation {
  public:
-  VulkanImplementationScenic(ScenicWindowManager* scenic_window_manager);
+  VulkanImplementationScenic(ScenicSurfaceFactory* scenic_surface_factory);
   ~VulkanImplementationScenic() override;
 
   // VulkanImplementation:
@@ -35,11 +37,11 @@ class VulkanImplementationScenic : public gpu::VulkanImplementation {
       VkFence vk_fence) override;
 
  private:
-  ScenicWindowManager* const scenic_window_manager_;
+  ScenicSurfaceFactory* const scenic_surface_factory_;
   gpu::VulkanInstance vulkan_instance_;
 
-  PFN_vkVoidFunction vkCreateMagmaSurfaceKHR_ = nullptr;
-  PFN_vkVoidFunction vkGetPhysicalDeviceMagmaPresentationSupportKHR_ = nullptr;
+  PFN_vkCreateImagePipeSurfaceFUCHSIA vkCreateImagePipeSurfaceFUCHSIA_ =
+      nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(VulkanImplementationScenic);
 };

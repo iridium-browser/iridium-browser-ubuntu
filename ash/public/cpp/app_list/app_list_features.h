@@ -32,10 +32,8 @@ ASH_PUBLIC_EXPORT extern const base::Feature kEnableBackgroundBlur;
 // Enables the Play Store app search.
 ASH_PUBLIC_EXPORT extern const base::Feature kEnablePlayStoreAppSearch;
 
-// Enables the home launcher in tablet mode. In this mode, the launcher will be
-// always shown right on top of the wallpaper. Home button will minimize all
-// windows instead of toggling the launcher.
-ASH_PUBLIC_EXPORT extern const base::Feature kEnableHomeLauncher;
+// Enables in-app data search.
+ASH_PUBLIC_EXPORT extern const base::Feature kEnableAppDataSearch;
 
 // Enables using gestures to show or hide the home launcher.
 // TODO(crbug.com/872319): Remove this after the feature is launched.
@@ -46,13 +44,6 @@ ASH_PUBLIC_EXPORT extern const base::Feature kEnableSettingsShortcutSearch;
 
 // Enables the apps grid gap feature.
 ASH_PUBLIC_EXPORT extern const base::Feature kEnableAppsGridGapFeature;
-
-// Enables the new style launcher (See details at http://crbug.com/857206).
-ASH_PUBLIC_EXPORT extern const base::Feature kEnableNewStyleLauncher;
-
-// Enables the feature to allow users to seamlessly continue reading a web page
-// when they switch from phones or tablets to Chromebook.
-ASH_PUBLIC_EXPORT extern const base::Feature kEnableContinueReading;
 
 // Enables the feature to display zero state suggestions.
 ASH_PUBLIC_EXPORT extern const base::Feature kEnableZeroStateSuggestions;
@@ -67,12 +58,10 @@ bool ASH_PUBLIC_EXPORT IsAnswerCardEnabled();
 bool ASH_PUBLIC_EXPORT IsAppShortcutSearchEnabled();
 bool ASH_PUBLIC_EXPORT IsBackgroundBlurEnabled();
 bool ASH_PUBLIC_EXPORT IsPlayStoreAppSearchEnabled();
-bool ASH_PUBLIC_EXPORT IsHomeLauncherEnabled();
+bool ASH_PUBLIC_EXPORT IsAppDataSearchEnabled();
 bool ASH_PUBLIC_EXPORT IsHomeLauncherGesturesEnabled();
 bool ASH_PUBLIC_EXPORT IsSettingsShortcutSearchEnabled();
 bool ASH_PUBLIC_EXPORT IsAppsGridGapFeatureEnabled();
-bool ASH_PUBLIC_EXPORT IsNewStyleLauncherEnabled();
-bool ASH_PUBLIC_EXPORT IsContinueReadingEnabled();
 bool ASH_PUBLIC_EXPORT IsZeroStateSuggestionsEnabled();
 bool ASH_PUBLIC_EXPORT IsAppListSearchAutocompleteEnabled();
 bool ASH_PUBLIC_EXPORT IsAppSearchResultRankerEnabled();

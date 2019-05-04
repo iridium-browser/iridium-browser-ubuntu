@@ -25,14 +25,6 @@ class InsecureInputTabHelper
   static InsecureInputTabHelper* GetOrCreateForWebState(
       web::WebState* web_state);
 
-  // This method should be called when a form containing a password field is
-  // parsed in a non-secure context.
-  void DidShowPasswordFieldInInsecureContext();
-
-  // This method should be called when the autofill component detects a credit
-  // card field was interacted with in a non-secure context.
-  void DidInteractWithNonsecureCreditCardInput();
-
   // This method should be called when the user edits a field in a non-secure
   // context.
   void DidEditFieldInInsecureContext();
@@ -48,6 +40,8 @@ class InsecureInputTabHelper
       const autofill::FormActivityParams& params) override;
 
   // WebStateObserver implementation.
+  void DidFinishNavigation(web::WebState* web_state,
+                           web::NavigationContext* navigation_context) override;
   void WebStateDestroyed(web::WebState* web_state) override;
 
   // The WebState this instance is observing. Will be null after

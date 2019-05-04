@@ -43,7 +43,6 @@
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/fonts/font_face_creation_params.h"
 #include "third_party/blink/renderer/platform/fonts/font_global_context.h"
-#include "third_party/blink/renderer/platform/fonts/font_unique_name_lookup.h"
 #include "third_party/blink/renderer/platform/fonts/simple_font_data.h"
 #include "third_party/blink/renderer/platform/fonts/skia/sktypeface_factory.h"
 #include "third_party/blink/renderer/platform/language.h"
@@ -56,25 +55,6 @@
 #include "third_party/skia/include/core/SkTypeface.h"
 
 namespace blink {
-
-#if defined(OS_ANDROID) || defined(OS_LINUX)
-namespace {
-
-static sk_sp<SkTypeface> CreateTypefaceFromUniqueName(
-    const FontFaceCreationParams& creation_params,
-    CString& name) {
-  FontUniqueNameLookup* unique_name_lookup =
-      FontGlobalContext::Get()->GetFontUniqueNameLookup();
-  DCHECK(unique_name_lookup);
-  sk_sp<SkTypeface> uniquely_identified_font =
-      unique_name_lookup->MatchUniqueName(creation_params.Family());
-  if (uniquely_identified_font) {
-    return uniquely_identified_font;
-  }
-  return nullptr;
-}
-}  // namespace
-#endif
 
 AtomicString ToAtomicString(const SkString& str) {
   return AtomicString::FromUTF8(str.c_str(), str.size());
@@ -166,14 +146,14 @@ scoped_refptr<SimpleFontData> FontCache::GetLastResortFallbackFont(
   if (!font_platform_data) {
     DEFINE_THREAD_SAFE_STATIC_LOCAL(const FontFaceCreationParams,
                                     sans_creation_params,
-                                    (FontFamilyNames::Sans));
+                                    (font_family_names::kSans));
     font_platform_data = GetFontPlatformData(description, sans_creation_params,
                                              AlternateFontName::kLastResort);
   }
   if (!font_platform_data) {
     DEFINE_THREAD_SAFE_STATIC_LOCAL(const FontFaceCreationParams,
                                     arial_creation_params,
-                                    (FontFamilyNames::Arial));
+                                    (font_family_names::kArial));
     font_platform_data = GetFontPlatformData(description, arial_creation_params,
                                              AlternateFontName::kLastResort);
   }
@@ -182,7 +162,7 @@ scoped_refptr<SimpleFontData> FontCache::GetLastResortFallbackFont(
   if (!font_platform_data) {
     DEFINE_THREAD_SAFE_STATIC_LOCAL(const FontFaceCreationParams,
                                     msuigothic_creation_params,
-                                    (FontFamilyNames::MS_UI_Gothic));
+                                    (font_family_names::kMSUIGothic));
     font_platform_data =
         GetFontPlatformData(description, msuigothic_creation_params,
                             AlternateFontName::kLastResort);
@@ -190,7 +170,7 @@ scoped_refptr<SimpleFontData> FontCache::GetLastResortFallbackFont(
   if (!font_platform_data) {
     DEFINE_THREAD_SAFE_STATIC_LOCAL(const FontFaceCreationParams,
                                     mssansserif_creation_params,
-                                    (FontFamilyNames::Microsoft_Sans_Serif));
+                                    (font_family_names::kMicrosoftSansSerif));
     font_platform_data =
         GetFontPlatformData(description, mssansserif_creation_params,
                             AlternateFontName::kLastResort);
@@ -198,21 +178,21 @@ scoped_refptr<SimpleFontData> FontCache::GetLastResortFallbackFont(
   if (!font_platform_data) {
     DEFINE_THREAD_SAFE_STATIC_LOCAL(const FontFaceCreationParams,
                                     segoeui_creation_params,
-                                    (FontFamilyNames::Segoe_UI));
+                                    (font_family_names::kSegoeUI));
     font_platform_data = GetFontPlatformData(
         description, segoeui_creation_params, AlternateFontName::kLastResort);
   }
   if (!font_platform_data) {
     DEFINE_THREAD_SAFE_STATIC_LOCAL(const FontFaceCreationParams,
                                     calibri_creation_params,
-                                    (FontFamilyNames::Calibri));
+                                    (font_family_names::kCalibri));
     font_platform_data = GetFontPlatformData(
         description, calibri_creation_params, AlternateFontName::kLastResort);
   }
   if (!font_platform_data) {
     DEFINE_THREAD_SAFE_STATIC_LOCAL(const FontFaceCreationParams,
                                     timesnewroman_creation_params,
-                                    (FontFamilyNames::Times_New_Roman));
+                                    (font_family_names::kTimesNewRoman));
     font_platform_data =
         GetFontPlatformData(description, timesnewroman_creation_params,
                             AlternateFontName::kLastResort);
@@ -220,7 +200,7 @@ scoped_refptr<SimpleFontData> FontCache::GetLastResortFallbackFont(
   if (!font_platform_data) {
     DEFINE_THREAD_SAFE_STATIC_LOCAL(const FontFaceCreationParams,
                                     couriernew_creation_params,
-                                    (FontFamilyNames::Courier_New));
+                                    (font_family_names::kCourierNew));
     font_platform_data =
         GetFontPlatformData(description, couriernew_creation_params,
                             AlternateFontName::kLastResort);
@@ -249,7 +229,7 @@ sk_sp<SkTypeface> FontCache::CreateTypeface(
 #endif
 
   AtomicString family = creation_params.Family();
-  DCHECK_NE(family, FontFamilyNames::system_ui);
+  DCHECK_NE(family, font_family_names::kSystemUi);
   // If we're creating a fallback font (e.g. "-webkit-monospace"), convert the
   // name into the fallback name (like "monospace") that fontconfig understands.
   if (!family.length() || family.StartsWith("-webkit-")) {

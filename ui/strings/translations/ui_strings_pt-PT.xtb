@@ -5,6 +5,7 @@
 <translation id="1127811143501539442">{DAYS,plural, =1{Há 1 dia}other{Há # dias}}</translation>
 <translation id="1156623771253174079">{SECONDS,plural, =1{Há 1 minuto}other{Há # minutos}}</translation>
 <translation id="1169783199079129864">{MINUTES,plural, =1{1 min}other{# min}}</translation>
+<translation id="1181037720776840403">Remover</translation>
 <translation id="1243314992276662751">Carregar</translation>
 <translation id="1269641567813814718">Win</translation>
 <translation id="1293699935367580298">Esc</translation>
@@ -30,16 +31,19 @@
 <translation id="1871244248791675517">Ins</translation>
 <translation id="1884435127456172652"><ph name="NUMBER" />%</translation>
 <translation id="1901303067676059328">Seleccion&amp;ar tudo</translation>
+<translation id="1938451708255335766">Para ajustar a densidade de apresentação da janela, reinicie a aplicação.</translation>
 <translation id="2141853158323869627">{DAYS,plural, =1{1 d}other{# d}}</translation>
 <translation id="2148716181193084225">Hoje</translation>
 <translation id="2168039046890040389">Página para cima</translation>
 <translation id="2190355936436201913">(vazio)</translation>
+<translation id="2192232475740621500">Utilizar densidade baixa</translation>
 <translation id="219905428774326614">Iniciador, todas as aplicações</translation>
 <translation id="2267918077332197517">Bloquear todas as notificações deste site</translation>
 <translation id="2289052229480071835">Toque nos alvos de toque no ecrã.</translation>
 <translation id="2295140143284145483">Inquérito</translation>
 <translation id="2297836609126180313"><ph name="QUANTITY" /> TB/s</translation>
 <translation id="24452542372838207">Expandir notificação</translation>
+<translation id="2445449901874883781">Utilizar densidade elevada</translation>
 <translation id="2482878487686419369">Notificações</translation>
 <translation id="2497284189126895209">Todos os ficheiros</translation>
 <translation id="2515586267016047495">Alt</translation>
@@ -60,7 +64,10 @@
 <translation id="3234408098842461169">Seta para baixo</translation>
 <translation id="3291688615589870984">{DAYS,plural, =1{1 dia}other{# dias}}</translation>
 <translation id="335581015389089642">Voz</translation>
+<translation id="3462241349431650993">Ao ocultar a sugestão, esta deixará de ser apresentada novamente na sua conta em todos os dispositivos.</translation>
+<translation id="3479552764303398839">Agora não</translation>
 <translation id="3600566671520689681">{DAYS,plural, =1{Falta 1 dia}other{Faltam # dias}}</translation>
+<translation id="3608915363409716668">Mais de <ph name="MAXIMUM_VALUE" /></translation>
 <translation id="3618849550573277856">Procurar "<ph name="LOOKUP_STRING" />"</translation>
 <translation id="364720409959344976">Selecionar Pasta a Carregar</translation>
 <translation id="3660179305079774227">Seta para cima</translation>
@@ -99,6 +106,7 @@
 <translation id="5613020302032141669">Seta para a esquerda</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{1 min}other{# min}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{1 dia e  }other{# dias e  }}</translation>
+<translation id="5895138241574237353">Reiniciar</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{Falta 1 segundo}other{Faltam # segundos}}</translation>
 <translation id="5941711191222866238">Minimizar</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 hora}other{# horas}}</translation>
@@ -120,6 +128,7 @@
 <translation id="6483402905448010557">{SECONDS,plural, =1{Há 1 segundo}other{Há # segundos}}</translation>
 <translation id="654149438358937226">Bloquear todas as notificações</translation>
 <translation id="6567071839949112727">clicar no predecessor</translation>
+<translation id="6578407462441924264">Sem nome</translation>
 <translation id="6612467943526193239">Para sair da calibração, prima Esc.</translation>
 <translation id="6620110761915583480">Guardar ficheiro</translation>
 <translation id="6699343763173986273">Faixa seguinte de multimédia</translation>
@@ -154,6 +163,7 @@
 <translation id="8087772101393322318"><ph name="KEY_MODIFIER_NAME" />+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{Há 1 hora}other{Há # horas}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{Falta 1 s}other{Faltam # s}}</translation>
+<translation id="8152264887680882389"><ph name="TEXT" />, preenchimento automático</translation>
 <translation id="815598010540052116">Deslocar-se para baixo</translation>
 <translation id="8179976553408161302">Enter</translation>
 <translation id="8210608804940886430">Página para baixo</translation>
@@ -165,6 +175,7 @@
 <translation id="838869780401515933">verificar</translation>
 <translation id="8393700583063109961">Enviar mensagem</translation>
 <translation id="8394908167088220973">Reproduzir/interromper multimédia</translation>
+<translation id="8420205633584771378">Pretende remover esta sugestão?</translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1 a}other{# a}}</translation>
 <translation id="8602707065186045623">Ficheiro <ph name="SAVEAS_EXTENSION_TYPE" /> (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KB/s</translation>
@@ -177,7 +188,6 @@
 <translation id="8841375032071747811">Botão Anterior</translation>
 <translation id="8901569739625249689"><ph name="QUANTITY" /> KB</translation>
 <translation id="9002566407876343676">abrir</translation>
-<translation id="9038489124413477075">Pasta sem nome</translation>
 <translation id="9044832324875206639">{SECONDS,plural, =1{1 seg}other{# seg}}</translation>
 <translation id="9059834730836941392">Reduzir notificação</translation>
 <translation id="9150735707954472829">Tabulação</translation>

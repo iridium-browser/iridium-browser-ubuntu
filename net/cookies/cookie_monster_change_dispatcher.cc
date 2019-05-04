@@ -51,7 +51,9 @@ CookieMonsterChangeDispatcher::Subscription::Subscription(
 CookieMonsterChangeDispatcher::Subscription::~Subscription() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  change_dispatcher_->UnlinkSubscription(this);
+  if (change_dispatcher_) {
+    change_dispatcher_->UnlinkSubscription(this);
+  }
 }
 
 void CookieMonsterChangeDispatcher::Subscription::DispatchChange(
@@ -59,7 +61,8 @@ void CookieMonsterChangeDispatcher::Subscription::DispatchChange(
     net::CookieChangeCause change_cause) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  if (!url_.is_empty() && !cookie.IncludeForRequestURL(url_, options_))
+  if (!url_.is_empty() && cookie.IncludeForRequestURL(url_, options_) !=
+                              CanonicalCookie::CookieInclusionStatus::INCLUDE)
     return;
 
   // TODO(mmenke, pwnall): Run callbacks synchronously?

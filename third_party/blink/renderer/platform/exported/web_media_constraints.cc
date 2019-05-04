@@ -161,6 +161,10 @@ BaseConstraint::BaseConstraint(const char* name) : name_(name) {}
 
 BaseConstraint::~BaseConstraint() = default;
 
+bool BaseConstraint::HasMandatory() const {
+  return HasMin() || HasMax() || HasExact();
+}
+
 LongConstraint::LongConstraint(const char* name)
     : BaseConstraint(name),
       min_(),
@@ -187,10 +191,6 @@ bool LongConstraint::Matches(int32_t value) const {
 
 bool LongConstraint::IsEmpty() const {
   return !has_min_ && !has_max_ && !has_exact_ && !has_ideal_;
-}
-
-bool LongConstraint::HasMandatory() const {
-  return has_min_ || has_max_ || has_exact_;
 }
 
 WebString LongConstraint::ToString() const {
@@ -235,10 +235,6 @@ bool DoubleConstraint::IsEmpty() const {
   return !has_min_ && !has_max_ && !has_exact_ && !has_ideal_;
 }
 
-bool DoubleConstraint::HasMandatory() const {
-  return has_min_ || has_max_ || has_exact_;
-}
-
 WebString DoubleConstraint::ToString() const {
   StringBuilder builder;
   builder.Append('{');
@@ -267,10 +263,6 @@ bool StringConstraint::Matches(WebString value) const {
 
 bool StringConstraint::IsEmpty() const {
   return exact_.empty() && ideal_.empty();
-}
-
-bool StringConstraint::HasMandatory() const {
-  return !exact_.empty();
 }
 
 const WebVector<WebString>& StringConstraint::Exact() const {
@@ -333,10 +325,6 @@ bool BooleanConstraint::IsEmpty() const {
   return !has_ideal_ && !has_exact_;
 }
 
-bool BooleanConstraint::HasMandatory() const {
-  return has_exact_;
-}
-
 WebString BooleanConstraint::ToString() const {
   StringBuilder builder;
   builder.Append('{');
@@ -352,6 +340,7 @@ WebMediaTrackConstraintSet::WebMediaTrackConstraintSet()
       aspect_ratio("aspectRatio"),
       frame_rate("frameRate"),
       facing_mode("facingMode"),
+      resize_mode("resizeMode"),
       volume("volume"),
       sample_rate("sampleRate"),
       sample_size("sampleSize"),
@@ -372,9 +361,9 @@ WebMediaTrackConstraintSet::WebMediaTrackConstraintSet()
       hotword_enabled("hotwordEnabled"),
       goog_echo_cancellation("googEchoCancellation"),
       goog_experimental_echo_cancellation("googExperimentalEchoCancellation"),
-      goog_auto_gain_control("googAutoGainControl"),
+      goog_auto_gain_control("autoGainControl"),
       goog_experimental_auto_gain_control("googExperimentalAutoGainControl"),
-      goog_noise_suppression("googNoiseSuppression"),
+      goog_noise_suppression("noiseSuppression"),
       goog_highpass_filter("googHighpassFilter"),
       goog_typing_noise_detection("googTypingNoiseDetection"),
       goog_experimental_noise_suppression("googExperimentalNoiseSuppression"),
@@ -413,6 +402,7 @@ std::vector<const BaseConstraint*> WebMediaTrackConstraintSet::AllConstraints()
                                   &aspect_ratio,
                                   &frame_rate,
                                   &facing_mode,
+                                  &resize_mode,
                                   &volume,
                                   &sample_rate,
                                   &sample_size,
@@ -494,6 +484,22 @@ bool WebMediaTrackConstraintSet::HasMandatoryOutsideSet(
 bool WebMediaTrackConstraintSet::HasMandatory() const {
   std::string dummy_string;
   return HasMandatoryOutsideSet(std::vector<std::string>(), dummy_string);
+}
+
+bool WebMediaTrackConstraintSet::HasMin() const {
+  for (auto* const constraint : AllConstraints()) {
+    if (constraint->HasMin())
+      return true;
+  }
+  return false;
+}
+
+bool WebMediaTrackConstraintSet::HasExact() const {
+  for (auto* const constraint : AllConstraints()) {
+    if (constraint->HasExact())
+      return true;
+  }
+  return false;
 }
 
 WebString WebMediaTrackConstraintSet::ToString() const {

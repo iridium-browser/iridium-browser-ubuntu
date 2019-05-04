@@ -9,6 +9,7 @@ import android.support.annotation.StringRes;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.download.home.DownloadManagerUiConfig;
+import org.chromium.chrome.browser.download.home.filter.Filters.FilterType;
 import org.chromium.chrome.browser.download.home.list.ListItem.OfflineItemListItem;
 import org.chromium.chrome.browser.download.home.list.ListItem.ViewListItem;
 import org.chromium.components.offline_items_collection.OfflineItem;
@@ -25,8 +26,8 @@ import java.util.List;
 public class ListUtils {
     /** The potential types of list items that could be displayed. */
     @IntDef({ViewType.DATE, ViewType.IN_PROGRESS, ViewType.GENERIC, ViewType.VIDEO, ViewType.IMAGE,
-            ViewType.CUSTOM_VIEW, ViewType.PREFETCH, ViewType.SECTION_HEADER,
-            ViewType.IN_PROGRESS_VIDEO, ViewType.IN_PROGRESS_IMAGE})
+            ViewType.IMAGE_FULL_WIDTH, ViewType.CUSTOM_VIEW, ViewType.PREFETCH,
+            ViewType.SECTION_HEADER, ViewType.IN_PROGRESS_VIDEO, ViewType.IN_PROGRESS_IMAGE})
     @Retention(RetentionPolicy.SOURCE)
     public @interface ViewType {
         int DATE = 0;
@@ -34,12 +35,24 @@ public class ListUtils {
         int GENERIC = 2;
         int VIDEO = 3;
         int IMAGE = 4;
-        int CUSTOM_VIEW = 5;
-        int PREFETCH = 6;
-        int SECTION_HEADER = 7;
-        int IN_PROGRESS_VIDEO = 8;
-        int IN_PROGRESS_IMAGE = 9;
+        int IMAGE_FULL_WIDTH = 5;
+        int CUSTOM_VIEW = 6;
+        int PREFETCH = 7;
+        int SECTION_HEADER = 8;
+        int IN_PROGRESS_VIDEO = 9;
+        int IN_PROGRESS_IMAGE = 10;
     }
+
+    /**
+     * A visual ordering of the {@link Filters#FilterType}s to determine what order the sections
+     * should appear in the UI.
+     *
+     * Note that this list should have an entry for each {@link Filters#FilterType} that can be
+     * shown visually and asserts will fire if it does not.
+     */
+    private static final int[] FILTER_TYPE_ORDER_LIST =
+            new int[] {FilterType.NONE, FilterType.VIDEOS, FilterType.MUSIC, FilterType.IMAGES,
+                    FilterType.SITES, FilterType.OTHER, FilterType.DOCUMENT, FilterType.PREFETCHED};
 
     /** Converts a given list of {@link ListItem}s to a list of {@link OfflineItem}s. */
     public static List<OfflineItem> toOfflineItems(Collection<ListItem> items) {
@@ -83,7 +96,9 @@ public class ListUtils {
                 case OfflineItemFilter.FILTER_VIDEO:
                     return inProgress ? ViewType.IN_PROGRESS_VIDEO : ViewType.VIDEO;
                 case OfflineItemFilter.FILTER_IMAGE:
-                    return inProgress ? ViewType.IN_PROGRESS_IMAGE : ViewType.IMAGE;
+                    return inProgress ? ViewType.IN_PROGRESS_IMAGE
+                                      : (offlineItem.spanFullWidth ? ViewType.IMAGE_FULL_WIDTH
+                                                                   : ViewType.IMAGE);
                 // case OfflineItemFilter.FILTER_PAGE:
                 // case OfflineItemFilter.FILTER_AUDIO:
                 // case OfflineItemFilter.FILTER_OTHER:
@@ -130,10 +145,6 @@ public class ListUtils {
      * @see             GridLayoutManager.SpanSizeLookup
      */
     public static int getSpanSize(ListItem item, DownloadManagerUiConfig config, int spanCount) {
-        if (item instanceof OfflineItemListItem && ((OfflineItemListItem) item).spanFullWidth) {
-            return spanCount;
-        }
-
         switch (getViewTypeForItem(item, config)) {
             case ViewType.IMAGE: // Intentional fallthrough.
             case ViewType.IN_PROGRESS_IMAGE:
@@ -141,5 +152,27 @@ public class ListUtils {
             default:
                 return spanCount;
         }
+    }
+
+    /**
+     * Helper method to determine which item type section to show first in the list.
+     * @return -1 if {@code a} should be shown before {@code b}.
+     *          0 if {@code a} == {@code b}.
+     *          1 if {@code a} should be shown after {@code b}.
+     */
+    public static int compareFilterTypesTo(@FilterType int a, @FilterType int b) {
+        int aPriority = getVisualPriorityForFilter(a);
+        int bPriority = getVisualPriorityForFilter(b);
+        return (aPriority < bPriority) ? -1 : ((aPriority == bPriority) ? 0 : 1);
+    }
+
+    private static int getVisualPriorityForFilter(@FilterType int type) {
+        for (int i = 0; i < FILTER_TYPE_ORDER_LIST.length; i++) {
+            if (FILTER_TYPE_ORDER_LIST[i] == type) return i;
+        }
+
+        assert false
+            : "Unexpected Filters.FilterType (did you forget to update FILTER_TYPE_ORDER_LIST?).";
+        return 0;
     }
 }

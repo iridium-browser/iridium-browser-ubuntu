@@ -43,6 +43,7 @@ class ChromeResourceDispatcherHostDelegate;
 class DevToolsAutoOpener;
 class RemoteDebuggingServer;
 class PrefRegistrySimple;
+class SystemNotificationHelper;
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 class PluginsResourceService;
@@ -68,10 +69,6 @@ namespace policy {
 class ChromeBrowserPolicyConnector;
 class PolicyService;
 }  // namespace policy
-
-namespace resource_coordinator {
-class TabLifecycleUnitSource;
-}
 
 namespace webrtc_event_logging {
 class WebRtcEventLogManager;
@@ -168,8 +165,7 @@ class BrowserProcessImpl : public BrowserProcess,
   printing::BackgroundPrintingManager* background_printing_manager() override;
   IntranetRedirectDetector* intranet_redirect_detector() override;
   const std::string& GetApplicationLocale() override;
-  void SetApplicationLocale(const std::string& actual_locale,
-                            const std::string& preferred_locale) override;
+  void SetApplicationLocale(const std::string& actual_locale) override;
   DownloadStatusUpdater* download_status_updater() override;
   DownloadRequestLimiter* download_request_limiter() override;
   BackgroundModeManager* background_mode_manager() override;
@@ -179,8 +175,8 @@ class BrowserProcessImpl : public BrowserProcess,
   safe_browsing::SafeBrowsingService* safe_browsing_service() override;
   safe_browsing::ClientSideDetectionService* safe_browsing_detection_service()
       override;
-  subresource_filter::ContentRulesetService*
-  subresource_filter_ruleset_service() override;
+  subresource_filter::RulesetService* subresource_filter_ruleset_service()
+      override;
   optimization_guide::OptimizationGuideService* optimization_guide_service()
       override;
 
@@ -197,6 +193,8 @@ class BrowserProcessImpl : public BrowserProcess,
   network_time::NetworkTimeTracker* network_time_tracker() override;
   gcm::GCMDriver* gcm_driver() override;
   resource_coordinator::TabManager* GetTabManager() override;
+  resource_coordinator::ResourceCoordinatorParts* resource_coordinator_parts()
+      override;
   shell_integration::DefaultWebClientState CachedDefaultWebClientState()
       override;
   prefs::InProcessPrefServiceFactory* pref_service_factory() const override;
@@ -233,9 +231,6 @@ class BrowserProcessImpl : public BrowserProcess,
 
   void ApplyAllowCrossOriginAuthPromptPolicy();
   void ApplyDefaultBrowserPolicy();
-#if !defined(OS_ANDROID)
-  void ApplyMetricsReportingPolicy();
-#endif
 
   void CacheDefaultWebClientState();
 
@@ -318,6 +313,9 @@ class BrowserProcessImpl : public BrowserProcess,
 
   std::unique_ptr<NotificationPlatformBridge> notification_bridge_;
 
+  // Use SystemNotificationHelper::GetInstance to get this instance.
+  std::unique_ptr<SystemNotificationHelper> system_notification_helper_;
+
 #if BUILDFLAG(ENABLE_BACKGROUND_MODE)
   std::unique_ptr<BackgroundModeManager> background_mode_manager_;
 #endif
@@ -326,7 +324,7 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_refptr<safe_browsing::SafeBrowsingService> safe_browsing_service_;
 
   bool created_subresource_filter_ruleset_service_ = false;
-  std::unique_ptr<subresource_filter::ContentRulesetService>
+  std::unique_ptr<subresource_filter::RulesetService>
       subresource_filter_ruleset_service_;
 
   bool created_optimization_guide_service_ = false;
@@ -409,17 +407,11 @@ class BrowserProcessImpl : public BrowserProcess,
 
   std::unique_ptr<ChromeDeviceClient> device_client_;
 
-#if !defined(OS_ANDROID)
-  // Any change to this #ifdef must be reflected as well in
-  // chrome/browser/resource_coordinator/tab_manager_browsertest.cc
-  std::unique_ptr<resource_coordinator::TabManager> tab_manager_;
-  std::unique_ptr<resource_coordinator::TabLifecycleUnitSource>
-      tab_lifecycle_unit_source_;
-#endif
-
   shell_integration::DefaultWebClientState cached_default_web_client_state_ =
       shell_integration::UNKNOWN_DEFAULT;
 
+  std::unique_ptr<resource_coordinator::ResourceCoordinatorParts>
+      resource_coordinator_parts_;
   std::unique_ptr<prefs::InProcessPrefServiceFactory> pref_service_factory_;
 
 #if !defined(OS_ANDROID)

@@ -14,13 +14,13 @@
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
-#include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/signin/core/browser/profile_management_switches.h"
+#include "components/signin/core/browser/account_consistency_method.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "services/network/test/test_network_connection_tracker.h"
@@ -131,33 +131,17 @@ TEST_F(ChromeSigninClientTest, DelayNetworkCallRunsAfterNetworkChange) {
 
 class MockChromeSigninClient : public ChromeSigninClient {
  public:
-  MockChromeSigninClient(Profile* profile, SigninErrorController* controller)
-      : ChromeSigninClient(profile, controller) {}
+  explicit MockChromeSigninClient(Profile* profile)
+      : ChromeSigninClient(profile) {}
 
   MOCK_METHOD1(ShowUserManager, void(const base::FilePath&));
   MOCK_METHOD1(LockForceSigninProfile, void(const base::FilePath&));
-};
 
-class MockSigninManager : public SigninManager {
- public:
-  explicit MockSigninManager(SigninClient* client,
-                             SigninErrorController* signin_error_controller)
-      : SigninManager(client,
-                      nullptr,
-                      &fake_service_,
-                      nullptr,
-                      signin_error_controller,
-                      signin::AccountConsistencyMethod::kDisabled) {
-    DCHECK(signin_error_controller);
-  }
-
-  MOCK_METHOD4(OnSignoutDecisionReached,
+  MOCK_METHOD4(SignOutCallback,
                void(signin_metrics::ProfileSignout,
                     signin_metrics::SignoutDelete,
-                    RemoveAccountsOption remove_option,
+                    SigninManager::RemoveAccountsOption remove_option,
                     SigninClient::SignoutDecision signout_decision));
-
-  AccountTrackerService fake_service_;
 };
 
 class ChromeSigninClientSignoutTest : public BrowserWithTestWindowTest {
@@ -167,8 +151,6 @@ class ChromeSigninClientSignoutTest : public BrowserWithTestWindowTest {
 
     signin_util::SetForceSigninForTesting(true);
     CreateClient(browser()->profile());
-    manager_ = std::make_unique<MockSigninManager>(client_.get(),
-                                                   fake_controller_.get());
   }
 
   void TearDown() override {
@@ -177,15 +159,20 @@ class ChromeSigninClientSignoutTest : public BrowserWithTestWindowTest {
   }
 
   void CreateClient(Profile* profile) {
-    SigninErrorController* controller = new SigninErrorController(
-        SigninErrorController::AccountMode::ANY_ACCOUNT);
-    client_.reset(new MockChromeSigninClient(profile, controller));
-    fake_controller_.reset(controller);
+    client_ = std::make_unique<MockChromeSigninClient>(profile);
   }
 
-  std::unique_ptr<SigninErrorController> fake_controller_;
+  void PreSignOut(signin_metrics::ProfileSignout source_metric,
+                  signin_metrics::SignoutDelete delete_metric) {
+    client_->PreSignOut(
+        base::BindOnce(&MockChromeSigninClient::SignOutCallback,
+                       base::Unretained(client_.get()), source_metric,
+                       delete_metric,
+                       SigninManager::RemoveAccountsOption::kRemoveAllAccounts),
+        source_metric);
+  }
+
   std::unique_ptr<MockChromeSigninClient> client_;
-  std::unique_ptr<MockSigninManager> manager_;
 };
 
 TEST_F(ChromeSigninClientSignoutTest, SignOut) {
@@ -198,14 +185,14 @@ TEST_F(ChromeSigninClientSignoutTest, SignOut) {
       .Times(1);
   EXPECT_CALL(*client_, LockForceSigninProfile(browser()->profile()->GetPath()))
       .Times(1);
-  EXPECT_CALL(*manager_,
-              OnSignoutDecisionReached(
-                  source_metric, delete_metric,
-                  SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
-                  SigninClient::SignoutDecision::ALLOW_SIGNOUT))
+  EXPECT_CALL(
+      *client_,
+      SignOutCallback(source_metric, delete_metric,
+                      SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
+                      SigninClient::SignoutDecision::ALLOW_SIGNOUT))
       .Times(1);
 
-  manager_->SignOut(source_metric, delete_metric);
+  PreSignOut(source_metric, delete_metric);
 }
 
 TEST_F(ChromeSigninClientSignoutTest, SignOutWithoutManager) {
@@ -214,41 +201,41 @@ TEST_F(ChromeSigninClientSignoutTest, SignOutWithoutManager) {
   signin_metrics::SignoutDelete delete_metric =
       signin_metrics::SignoutDelete::IGNORE_METRIC;
 
-  MockSigninManager other_manager(client_.get(), fake_controller_.get());
-  other_manager.CopyCredentialsFrom(*manager_.get());
+  // Call the method below instead calling SigninManager::CopyCredentialsFrom,
+  // keeping the same behavior.
+  client_->AfterCredentialsCopied();
 
   EXPECT_CALL(*client_, ShowUserManager(browser()->profile()->GetPath()))
       .Times(0);
   EXPECT_CALL(*client_, LockForceSigninProfile(browser()->profile()->GetPath()))
       .Times(1);
-  EXPECT_CALL(*manager_,
-              OnSignoutDecisionReached(
-                  source_metric, delete_metric,
-                  SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
-                  SigninClient::SignoutDecision::ALLOW_SIGNOUT))
+  EXPECT_CALL(
+      *client_,
+      SignOutCallback(source_metric, delete_metric,
+                      SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
+                      SigninClient::SignoutDecision::ALLOW_SIGNOUT))
       .Times(1);
-  manager_->SignOut(source_metric, delete_metric);
 
-  ::testing::Mock::VerifyAndClearExpectations(manager_.get());
+  PreSignOut(source_metric, delete_metric);
+
+  ::testing::Mock::VerifyAndClearExpectations(client_.get());
 
   EXPECT_CALL(*client_, ShowUserManager(browser()->profile()->GetPath()))
       .Times(1);
   EXPECT_CALL(*client_, LockForceSigninProfile(browser()->profile()->GetPath()))
       .Times(1);
-  EXPECT_CALL(*manager_,
-              OnSignoutDecisionReached(
-                  source_metric, delete_metric,
-                  SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
-                  SigninClient::SignoutDecision::ALLOW_SIGNOUT))
+  EXPECT_CALL(
+      *client_,
+      SignOutCallback(source_metric, delete_metric,
+                      SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
+                      SigninClient::SignoutDecision::ALLOW_SIGNOUT))
       .Times(1);
-  manager_->SignOut(source_metric, delete_metric);
+  PreSignOut(source_metric, delete_metric);
 }
 
 TEST_F(ChromeSigninClientSignoutTest, SignOutWithoutForceSignin) {
   signin_util::SetForceSigninForTesting(false);
   CreateClient(browser()->profile());
-  manager_ = std::make_unique<MockSigninManager>(client_.get(),
-                                                 fake_controller_.get());
 
   signin_metrics::ProfileSignout source_metric =
       signin_metrics::ProfileSignout::USER_CLICKED_SIGNOUT_SETTINGS;
@@ -259,40 +246,13 @@ TEST_F(ChromeSigninClientSignoutTest, SignOutWithoutForceSignin) {
       .Times(0);
   EXPECT_CALL(*client_, LockForceSigninProfile(browser()->profile()->GetPath()))
       .Times(0);
-  EXPECT_CALL(*manager_,
-              OnSignoutDecisionReached(
-                  source_metric, delete_metric,
-                  SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
-                  SigninClient::SignoutDecision::ALLOW_SIGNOUT))
+  EXPECT_CALL(
+      *client_,
+      SignOutCallback(source_metric, delete_metric,
+                      SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
+                      SigninClient::SignoutDecision::ALLOW_SIGNOUT))
       .Times(1);
-  manager_->SignOut(source_metric, delete_metric);
-}
-
-TEST_F(ChromeSigninClientSignoutTest, SignOutGuestSession) {
-  TestingProfile::Builder builder;
-  builder.SetGuestSession();
-  std::unique_ptr<TestingProfile> profile = builder.Build();
-
-  CreateClient(profile.get());
-  manager_ = std::make_unique<MockSigninManager>(client_.get(),
-                                                 fake_controller_.get());
-
-  signin_metrics::ProfileSignout source_metric =
-      signin_metrics::ProfileSignout::USER_CLICKED_SIGNOUT_SETTINGS;
-  signin_metrics::SignoutDelete delete_metric =
-      signin_metrics::SignoutDelete::IGNORE_METRIC;
-
-  EXPECT_CALL(*client_, ShowUserManager(browser()->profile()->GetPath()))
-      .Times(0);
-  EXPECT_CALL(*client_, LockForceSigninProfile(browser()->profile()->GetPath()))
-      .Times(0);
-  EXPECT_CALL(*manager_,
-              OnSignoutDecisionReached(
-                  source_metric, delete_metric,
-                  SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
-                  SigninClient::SignoutDecision::ALLOW_SIGNOUT))
-      .Times(1);
-  manager_->SignOut(source_metric, delete_metric);
+  PreSignOut(source_metric, delete_metric);
 }
 
 class ChromeSigninClientSignoutSourceTest
@@ -312,16 +272,20 @@ bool IsSignoutDisallowedByPolicy(
     case signin_metrics::ProfileSignout::TRANSFER_CREDENTIALS:
     case signin_metrics::ProfileSignout::
         AUTHENTICATION_FAILED_WITH_FORCE_SIGNIN:
+    case signin_metrics::ProfileSignout::SIGNIN_NOT_ALLOWED_ON_PROFILE_INIT:
     case signin_metrics::ProfileSignout::USER_TUNED_OFF_SYNC_FROM_DICE_UI:
       return true;
     case signin_metrics::ProfileSignout::ACCOUNT_REMOVED_FROM_DEVICE:
-      // TODO(chcunningham): Add more of the above cases to this "false" branch.
+      // TODO(msarda): Add more of the above cases to this "false" branch.
       // For now only ACCOUNT_REMOVED_FROM_DEVICE is here to preserve the status
       // quo. Additional internal sources of sign-out will be moved here in a
       // follow up CL.
       return false;
     case signin_metrics::ProfileSignout::ABORT_SIGNIN:
       // Allow signout because data has not been synced yet.
+      return false;
+    case signin_metrics::ProfileSignout::FORCE_SIGNOUT_ALWAYS_ALLOWED_FOR_TEST:
+      // Allow signout for tests that want to force it.
       return false;
     case signin_metrics::ProfileSignout::NUM_PROFILE_SIGNOUT_METRICS:
       NOTREACHED();
@@ -337,25 +301,22 @@ TEST_P(ChromeSigninClientSignoutSourceTest, UserSignoutAllowed) {
   std::unique_ptr<TestingProfile> profile = builder.Build();
 
   CreateClient(profile.get());
-  manager_ = std::make_unique<MockSigninManager>(client_.get(),
-                                                 fake_controller_.get());
-
-  // User sign-out is allowed for this test.
   ASSERT_TRUE(signin_util::IsUserSignoutAllowedForProfile(profile.get()));
 
   // Verify SigninManager gets callback indicating sign-out is always allowed.
   signin_metrics::SignoutDelete delete_metric =
       signin_metrics::SignoutDelete::IGNORE_METRIC;
-  EXPECT_CALL(*manager_,
-              OnSignoutDecisionReached(
-                  signout_source, delete_metric,
-                  SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
-                  SigninClient::SignoutDecision::ALLOW_SIGNOUT))
+  EXPECT_CALL(
+      *client_,
+      SignOutCallback(signout_source, delete_metric,
+                      SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
+                      SigninClient::SignoutDecision::ALLOW_SIGNOUT))
       .Times(1);
 
-  manager_->SignOut(signout_source, delete_metric);
+  PreSignOut(signout_source, delete_metric);
 }
 
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
 TEST_P(ChromeSigninClientSignoutSourceTest, UserSignoutDisallowed) {
   signin_metrics::ProfileSignout signout_source = GetParam();
 
@@ -364,10 +325,7 @@ TEST_P(ChromeSigninClientSignoutSourceTest, UserSignoutDisallowed) {
   std::unique_ptr<TestingProfile> profile = builder.Build();
 
   CreateClient(profile.get());
-  manager_ = std::make_unique<MockSigninManager>(client_.get(),
-                                                 fake_controller_.get());
 
-  // Disallow user sign-out.
   ASSERT_TRUE(signin_util::IsUserSignoutAllowedForProfile(profile.get()));
   signin_util::SetUserSignoutAllowedForProfile(profile.get(), false);
   ASSERT_FALSE(signin_util::IsUserSignoutAllowedForProfile(profile.get()));
@@ -380,18 +338,18 @@ TEST_P(ChromeSigninClientSignoutSourceTest, UserSignoutDisallowed) {
           : SigninClient::SignoutDecision::ALLOW_SIGNOUT;
   signin_metrics::SignoutDelete delete_metric =
       signin_metrics::SignoutDelete::IGNORE_METRIC;
-  EXPECT_CALL(*manager_,
-              OnSignoutDecisionReached(
-                  signout_source, delete_metric,
-                  SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
-                  signout_decision))
+  EXPECT_CALL(
+      *client_,
+      SignOutCallback(signout_source, delete_metric,
+                      SigninManager::RemoveAccountsOption::kRemoveAllAccounts,
+                      signout_decision))
       .Times(1);
 
-  manager_->SignOut(signout_source, delete_metric);
+  PreSignOut(signout_source, delete_metric);
 }
+#endif
 
 const signin_metrics::ProfileSignout kSignoutSources[] = {
-    // NOTE: SIGNOUT_TEST == SIGNOUT_PREF_CHANGED.
     signin_metrics::ProfileSignout::SIGNOUT_PREF_CHANGED,
     signin_metrics::ProfileSignout::GOOGLE_SERVICE_NAME_PATTERN_CHANGED,
     signin_metrics::ProfileSignout::SIGNIN_PREF_CHANGED_DURING_SIGNIN,
@@ -402,6 +360,8 @@ const signin_metrics::ProfileSignout kSignoutSources[] = {
     signin_metrics::ProfileSignout::AUTHENTICATION_FAILED_WITH_FORCE_SIGNIN,
     signin_metrics::ProfileSignout::USER_TUNED_OFF_SYNC_FROM_DICE_UI,
     signin_metrics::ProfileSignout::ACCOUNT_REMOVED_FROM_DEVICE,
+    signin_metrics::ProfileSignout::SIGNIN_NOT_ALLOWED_ON_PROFILE_INIT,
+    signin_metrics::ProfileSignout::FORCE_SIGNOUT_ALWAYS_ALLOWED_FOR_TEST,
 };
 static_assert(base::size(kSignoutSources) ==
                   signin_metrics::ProfileSignout::NUM_PROFILE_SIGNOUT_METRICS,

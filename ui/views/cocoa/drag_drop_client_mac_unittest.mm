@@ -56,7 +56,7 @@ using base::ASCIIToUTF16;
 @synthesize draggingFormation;
 @synthesize springLoadingHighlight;
 
-- (id)initWithPasteboard:(NSPasteboard*)pasteboard {
+- (instancetype)initWithPasteboard:(NSPasteboard*)pasteboard {
   if ((self = [super init])) {
     pasteboard_ = pasteboard;
   }
@@ -130,7 +130,7 @@ class DragDropView : public View {
   // View:
   bool GetDropFormats(
       int* formats,
-      std::set<ui::Clipboard::FormatType>* format_types) override {
+      std::set<ui::ClipboardFormatType>* format_types) override {
     *formats |= formats_;
     return true;
   }
@@ -188,10 +188,9 @@ class DragDropClientMacTest : public WidgetTest {
     gfx::Rect bounds(0, 0, 100, 100);
     widget_->SetBounds(bounds);
 
-    bridge_ = BridgedNativeWidgetImpl::GetFromNativeWindow(
-        widget_->GetNativeWindow());
     bridge_host_ = BridgedNativeWidgetHostImpl::GetFromNativeWindow(
         widget_->GetNativeWindow());
+    bridge_ = bridge_host_->bridge_impl();
     widget_->Show();
 
     target_ = new DragDropView();

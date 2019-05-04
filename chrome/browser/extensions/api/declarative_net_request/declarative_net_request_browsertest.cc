@@ -26,6 +26,7 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -481,9 +482,15 @@ class DeclarativeNetRequestBrowserTest
 using DeclarativeNetRequestBrowserTest_Packed =
     DeclarativeNetRequestBrowserTest;
 
+#if defined(OS_WIN) && !defined(NDEBUG)
+// TODO: test times out on win7-debug. http://crbug.com/900447.
+#define MAYBE_BlockRequests_UrlFilter DISABLED_BlockRequests_UrlFilter
+#else
+#define MAYBE_BlockRequests_UrlFilter BlockRequests_UrlFilter
+#endif
 // Tests the "urlFilter" property of a declarative rule condition.
 IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
-                       BlockRequests_UrlFilter) {
+                       MAYBE_BlockRequests_UrlFilter) {
   struct {
     std::string url_filter;
     int id;
@@ -1344,8 +1351,9 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
       ->FlushProxyConfigMonitorForTesting();
 
   // Verify that the extension can't intercept the network request.
-  ui_test_utils::NavigateToURL(browser(), embedded_test_server()->GetURL(
-                                              "/pages_with_script/page.html"));
+  ui_test_utils::NavigateToURL(
+      browser(),
+      GURL("http://does.not.resolve.test/pages_with_script/page.html"));
   EXPECT_TRUE(WasFrameWithScriptLoaded(GetMainFrame()));
   EXPECT_EQ(content::PAGE_TYPE_NORMAL, GetPageType());
 }
@@ -2192,31 +2200,17 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestHostPermissionsBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestHostPermissionsBrowserTest,
-                       SubframesWithNoInitiatorPermissions) {
-  // The extension has access to requests to "frame_1.com" and "frame_2.com",
-  // but not the initiator of those requests (example.com). No frames should be
-  // redirected.
+                       SubframesRequireNoInitiatorPermissions) {
+  // The extension has access to requests to "frame_1.com" and "frame_2.com".
+  // These should be redirected. Note: extensions don't need access to the
+  // initiator of a navigation request to redirect it (See crbug.com/918137).
   ASSERT_NO_FATAL_FAILURE(
       LoadExtensionWithHostPermissions({GetMatchPatternForDomain("frame_1"),
                                         GetMatchPatternForDomain("frame_2")}));
-  RunTests({{"frame_1", false},
-            {"frame_2", false},
+  RunTests({{"frame_1", true},
+            {"frame_2", true},
             {"frame_3", false},
             {"frame_4", false}});
-}
-
-IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestHostPermissionsBrowserTest,
-                       SubframesWithInitiatorPermission) {
-  // The extension has access to requests to "frame_1.com" and "frame_4.com",
-  // and also the initiator of those requests (example.com). Hence |frame_1| and
-  // |frame_4| should be redirected.
-  ASSERT_NO_FATAL_FAILURE(LoadExtensionWithHostPermissions(
-      {GetMatchPatternForDomain("frame_1"), GetMatchPatternForDomain("frame_4"),
-       GetMatchPatternForDomain("example")}));
-  RunTests({{"frame_1", true},
-            {"frame_2", false},
-            {"frame_3", false},
-            {"frame_4", true}});
 }
 
 // Fixture to test the "resourceTypes" and "excludedResourceTypes" fields of a

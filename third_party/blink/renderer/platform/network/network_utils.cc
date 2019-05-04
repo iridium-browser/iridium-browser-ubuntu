@@ -24,14 +24,15 @@
 namespace {
 
 net::registry_controlled_domains::PrivateRegistryFilter
-getNetPrivateRegistryFilter(blink::NetworkUtils::PrivateRegistryFilter filter) {
+getNetPrivateRegistryFilter(
+    blink::network_utils::PrivateRegistryFilter filter) {
   switch (filter) {
-    case blink::NetworkUtils::kIncludePrivateRegistries:
+    case blink::network_utils::kIncludePrivateRegistries:
       return net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES;
-    case blink::NetworkUtils::kExcludePrivateRegistries:
+    case blink::network_utils::kExcludePrivateRegistries:
       return net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES;
   }
-  // There are only two NetworkUtils::PrivateRegistryFilter enum entries, so
+  // There are only two network_utils::PrivateRegistryFilter enum entries, so
   // we should never reach this point. However, we must have a default return
   // value to avoid a compiler error.
   NOTREACHED();
@@ -42,7 +43,7 @@ getNetPrivateRegistryFilter(blink::NetworkUtils::PrivateRegistryFilter filter) {
 
 namespace blink {
 
-namespace NetworkUtils {
+namespace network_utils {
 
 bool IsReservedIPAddress(const String& host) {
   net::IPAddress address;
@@ -89,7 +90,7 @@ scoped_refptr<SharedBuffer> ParseDataURLAndPopulateResponse(
       SharedBuffer::Create(data_string.data(), data_string.size());
   response.SetHTTPStatusCode(200);
   response.SetHTTPStatusText("OK");
-  response.SetURL(url);
+  response.SetCurrentRequestUrl(url);
   response.SetMimeType(WebString::FromUTF8(utf8_mime_type));
   response.SetExpectedContentLength(data->size());
   response.SetTextEncodingName(WebString::FromUTF8(utf8_charset));
@@ -132,6 +133,21 @@ String GenerateAcceptLanguageHeader(const String& lang) {
       net::HttpUtil::GenerateAcceptLanguageHeader(string));
 }
 
-}  // NetworkUtils
+Vector<char> ParseMultipartBoundary(const AtomicString& content_type_header) {
+  CString cstring(content_type_header.Utf8());
+  std::string string(cstring.data(), cstring.length());
+  std::string mime_type;
+  std::string charset;
+  bool had_charset = false;
+  std::string boundary;
+  net::HttpUtil::ParseContentType(string, &mime_type, &charset, &had_charset,
+                                  &boundary);
+  base::TrimString(boundary, " \"", &boundary);
+  Vector<char> result;
+  result.Append(boundary.data(), boundary.size());
+  return result;
+}
+
+}  // namespace network_utils
 
 }  // namespace blink

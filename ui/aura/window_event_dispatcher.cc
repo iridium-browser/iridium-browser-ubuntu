@@ -34,6 +34,7 @@
 #include "ui/events/event_utils.h"
 #include "ui/events/gestures/gesture_recognizer.h"
 #include "ui/events/gestures/gesture_types.h"
+#include "ui/events/platform/platform_event_source.h"
 
 typedef ui::EventDispatchDetails DispatchDetails;
 
@@ -419,9 +420,10 @@ void WindowEventDispatcher::UpdateCapture(Window* old_capture,
 
   if (old_capture && old_capture->GetRootWindow() == window() &&
       old_capture->delegate()) {
-    // Send a capture changed event with bogus location data.
-    ui::MouseEvent event(ui::ET_MOUSE_CAPTURE_CHANGED, gfx::Point(),
-                         gfx::Point(), ui::EventTimeForNow(), 0, 0);
+    // Send a capture changed event with the most recent mouse screen location.
+    const gfx::Point location = host_->window()->env()->last_mouse_location();
+    ui::MouseEvent event(ui::ET_MOUSE_CAPTURE_CHANGED, location, location,
+                         ui::EventTimeForNow(), 0, 0);
 
     DispatchDetails details = DispatchEvent(old_capture, &event);
     if (details.dispatcher_destroyed)
@@ -836,15 +838,19 @@ ui::EventDispatchDetails WindowEventDispatcher::DispatchHeldEvents() {
   }
 
   if (held_move_event_) {
+    // |held_move_event_| should be cleared here. Some event handler can
+    // create its own run loop on an event (e.g. WindowMove loop for
+    // tab-dragging), which means the other move events need to be processed
+    // before this OnEventFromSource() finishes. See also b/119260190.
+    std::unique_ptr<ui::LocatedEvent> event = std::move(held_move_event_);
+
     // If a mouse move has been synthesized, the target location is suspect,
     // so drop the held mouse event.
-    if (held_move_event_->IsTouchEvent() ||
-        (held_move_event_->IsMouseEvent() && !synthesize_mouse_move_)) {
-      dispatching_held_event_ = held_move_event_.get();
-      dispatch_details = OnEventFromSource(held_move_event_.get());
+    if (event->IsTouchEvent() ||
+        (event->IsMouseEvent() && !synthesize_mouse_move_)) {
+      dispatching_held_event_ = event.get();
+      dispatch_details = OnEventFromSource(event.get());
     }
-    if (!dispatch_details.dispatcher_destroyed)
-      held_move_event_.reset();
   }
 
   if (!dispatch_details.dispatcher_destroyed) {
@@ -861,6 +867,11 @@ ui::EventDispatchDetails WindowEventDispatcher::DispatchHeldEvents() {
 }
 
 void WindowEventDispatcher::PostSynthesizeMouseMove() {
+  // No one should care where the real mouse is when this flag is on. So there
+  // is no need to send a synthetic mouse move here.
+  if (ui::PlatformEventSource::ShouldIgnoreNativePlatformEvents())
+    return;
+
   if (synthesize_mouse_move_ || in_shutdown_)
     return;
   synthesize_mouse_move_ = true;
@@ -1075,6 +1086,8 @@ DispatchDetails WindowEventDispatcher::PreDispatchTouchEvent(
     // The event is invalid - ignore it.
     event->StopPropagation();
     event->DisableSynchronousHandling();
+    for (auto& observer : env_->window_event_dispatcher_observers())
+      observer.OnWindowEventDispatcherIgnoredEvent(this);
     return DispatchDetails();
   }
 
@@ -1088,8 +1101,10 @@ DispatchDetails WindowEventDispatcher::PreDispatchTouchEvent(
 DispatchDetails WindowEventDispatcher::PreDispatchKeyEvent(
     ui::KeyEvent* event) {
   if (skip_ime_ || !host_->has_input_method() ||
-      (event->flags() & ui::EF_IS_SYNTHESIZED))
+      (event->flags() & ui::EF_IS_SYNTHESIZED) ||
+      !host_->ShouldSendKeyEventToIme()) {
     return DispatchDetails();
+  }
   DispatchDetails details = host_->GetInputMethod()->DispatchKeyEvent(event);
   event->StopPropagation();
   return details;

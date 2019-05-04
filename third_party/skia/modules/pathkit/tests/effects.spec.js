@@ -1,3 +1,4 @@
+jasmine.DEFAULT_TIMEOUT_INTERVAL = 20000;
 
 describe('PathKit\'s Path Behavior', function() {
     // Note, don't try to print the PathKit object - it can cause Karma/Jasmine to lock up.
@@ -8,7 +9,7 @@ describe('PathKit\'s Path Behavior', function() {
         } else {
             PathKitInit({
                 locateFile: (file) => '/pathkit/'+file,
-            }).then((_PathKit) => {
+            }).ready().then((_PathKit) => {
                 PathKit = _PathKit;
                 resolve();
             });
@@ -30,7 +31,7 @@ describe('PathKit\'s Path Behavior', function() {
 
     describe('Dash Path Effect', function() {
         it('performs dash in-place with start, stop, phase', function(done) {
-            LoadPathKit.then(() => {
+            LoadPathKit.then(catchException(done, () => {
                 let orig = drawStar();
                 let dashed = drawStar();
                 let notACopy = dashed.dash(10, 3, 0);
@@ -46,13 +47,13 @@ describe('PathKit\'s Path Behavior', function() {
                     dashed.delete();
                     phased.delete();
                 });
-            });
+            }));
         });
     });
 
     describe('Trim Path Effect', function() {
         it('performs trim in-place with start, stop, phase', function(done) {
-            LoadPathKit.then(() => {
+            LoadPathKit.then(catchException(done, () => {
                 let orig = drawStar();
                 let trimmed = drawStar();
                 let notACopy = trimmed.trim(0.25, .8);
@@ -69,14 +70,13 @@ describe('PathKit\'s Path Behavior', function() {
                     trimmed.delete();
                     complement.delete();
                 });
-
-            });
+            }));
         });
     });
 
     describe('Transform Path Effect', function() {
         it('performs matrix transform in-place', function(done) {
-            LoadPathKit.then(() => {
+            LoadPathKit.then(catchException(done, () => {
                 let orig = drawStar();
                 let scaled = drawStar();
                 let notACopy = scaled.transform(3, 0, 0,
@@ -97,13 +97,13 @@ describe('PathKit\'s Path Behavior', function() {
                     scaled.delete();
                     scaled2.delete();
                 });
-            });
+            }));
         });
     });
 
     describe('Stroke Path Effect', function() {
         it('creates a stroked path in-place', function(done) {
-            LoadPathKit.then(() => {
+            LoadPathKit.then(catchException(done, () => {
                 let orig = drawStar();
                 let stroked = drawStar();
                 let notACopy = stroked.stroke({
@@ -131,7 +131,7 @@ describe('PathKit\'s Path Behavior', function() {
                     stroked.delete();
                     rounded.delete();
                 });
-            });
+            }));
         });
     });
 

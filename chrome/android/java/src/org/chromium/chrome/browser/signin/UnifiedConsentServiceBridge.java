@@ -23,11 +23,9 @@ public class UnifiedConsentServiceBridge {
         return nativeIsUnifiedConsentGiven(Profile.getLastUsedProfile());
     }
 
-    /**
-     * Returns whether the consent bump should be shown as part of the migration to Unified Consent.
-     */
-    public static boolean shouldShowConsentBump() {
-        return nativeShouldShowConsentBump(Profile.getLastUsedProfile());
+    /** Enables Google services when the user is signing in. */
+    public static void enableGoogleServices() {
+        nativeEnableGoogleServices(Profile.getLastUsedProfile());
     }
 
     /** Returns whether collection of URL-keyed anonymized data is enabled. */
@@ -47,7 +45,7 @@ public class UnifiedConsentServiceBridge {
 
     private static native void nativeSetUnifiedConsentGiven(Profile profile, boolean consentGiven);
     private static native boolean nativeIsUnifiedConsentGiven(Profile profile);
-    private static native boolean nativeShouldShowConsentBump(Profile profile);
+    private static native void nativeEnableGoogleServices(Profile profile);
 
     private static native boolean nativeIsUrlKeyedAnonymizedDataCollectionEnabled(Profile profile);
     private static native void nativeSetUrlKeyedAnonymizedDataCollectionEnabled(

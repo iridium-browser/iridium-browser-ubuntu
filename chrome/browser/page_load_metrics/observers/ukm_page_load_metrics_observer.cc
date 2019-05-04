@@ -16,6 +16,7 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/network/public/cpp/network_quality_tracker.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/metrics_proto/system_profile.pb.h"
 
 // static
@@ -40,8 +41,10 @@ UkmPageLoadMetricsObserver::ObservePolicy UkmPageLoadMetricsObserver::OnStart(
     content::NavigationHandle* navigation_handle,
     const GURL& currently_committed_url,
     bool started_in_foreground) {
-  if (!started_in_foreground)
-    return STOP_OBSERVING;
+  if (!started_in_foreground) {
+    was_hidden_ = true;
+    return CONTINUE_OBSERVING;
+  }
 
   // When OnStart is invoked, we don't yet know whether we're observing a web
   // page load, vs another kind of load (e.g. a download or a PDF). Thus,
@@ -60,6 +63,13 @@ UkmPageLoadMetricsObserver::ObservePolicy UkmPageLoadMetricsObserver::OnStart(
   return CONTINUE_OBSERVING;
 }
 
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+UkmPageLoadMetricsObserver::OnRedirect(
+    content::NavigationHandle* navigation_handle) {
+  main_frame_request_redirect_count_++;
+  return CONTINUE_OBSERVING;
+}
+
 UkmPageLoadMetricsObserver::ObservePolicy UkmPageLoadMetricsObserver::OnCommit(
     content::NavigationHandle* navigation_handle,
     ukm::SourceId source_id) {
@@ -69,6 +79,8 @@ UkmPageLoadMetricsObserver::ObservePolicy UkmPageLoadMetricsObserver::OnCommit(
     http_response_code_ = response_headers->response_code();
   // The PageTransition for the navigation may be updated on commit.
   page_transition_ = navigation_handle->GetPageTransition();
+  was_cached_ = navigation_handle->WasResponseCached();
+  navigation_start_ = navigation_handle->NavigationStart();
   return CONTINUE_OBSERVING;
 }
 
@@ -76,23 +88,31 @@ UkmPageLoadMetricsObserver::ObservePolicy
 UkmPageLoadMetricsObserver::FlushMetricsOnAppEnterBackground(
     const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  RecordPageLoadExtraInfoMetrics(info, base::TimeTicks::Now());
-  RecordTimingMetrics(timing, info.source_id);
+  if (!was_hidden_) {
+    RecordPageLoadExtraInfoMetrics(info, base::TimeTicks::Now());
+    RecordTimingMetrics(timing, info);
+  }
+  ReportLayoutStability(info);
   return STOP_OBSERVING;
 }
 
 UkmPageLoadMetricsObserver::ObservePolicy UkmPageLoadMetricsObserver::OnHidden(
     const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  RecordPageLoadExtraInfoMetrics(
-      info, base::TimeTicks() /* no app_background_time */);
-  RecordTimingMetrics(timing, info.source_id);
-  return STOP_OBSERVING;
+  if (!was_hidden_) {
+    RecordPageLoadExtraInfoMetrics(
+        info, base::TimeTicks() /* no app_background_time */);
+    RecordTimingMetrics(timing, info);
+    was_hidden_ = true;
+  }
+  return CONTINUE_OBSERVING;
 }
 
 void UkmPageLoadMetricsObserver::OnFailedProvisionalLoad(
     const page_load_metrics::FailedProvisionalLoadInfo& failed_load_info,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
+  if (was_hidden_)
+    return;
   RecordPageLoadExtraInfoMetrics(
       extra_info, base::TimeTicks() /* no app_background_time */);
 
@@ -111,14 +131,19 @@ void UkmPageLoadMetricsObserver::OnFailedProvisionalLoad(
 void UkmPageLoadMetricsObserver::OnComplete(
     const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  RecordPageLoadExtraInfoMetrics(
-      info, base::TimeTicks() /* no app_background_time */);
-  RecordTimingMetrics(timing, info.source_id);
+  if (!was_hidden_) {
+    RecordPageLoadExtraInfoMetrics(
+        info, base::TimeTicks() /* no app_background_time */);
+    RecordTimingMetrics(timing, info);
+  }
+  ReportLayoutStability(info);
 }
 
 void UkmPageLoadMetricsObserver::OnLoadedResource(
     const page_load_metrics::ExtraRequestCompleteInfo&
         extra_request_complete_info) {
+  if (was_hidden_)
+    return;
   if (extra_request_complete_info.was_cached) {
     cache_bytes_ += extra_request_complete_info.raw_body_bytes;
   } else {
@@ -134,8 +159,18 @@ void UkmPageLoadMetricsObserver::OnLoadedResource(
 
 void UkmPageLoadMetricsObserver::RecordTimingMetrics(
     const page_load_metrics::mojom::PageLoadTiming& timing,
-    ukm::SourceId source_id) {
-  ukm::builders::PageLoad builder(source_id);
+    const page_load_metrics::PageLoadExtraInfo& info) {
+  ukm::builders::PageLoad builder(info.source_id);
+  bool is_user_initiated_navigation =
+      // All browser initiated page loads are user-initiated.
+      info.user_initiated_info.browser_initiated ||
+
+      // Renderer-initiated navigations are user-initiated if there is an
+      // associated input timestamp.
+      timing.input_to_navigation_start;
+
+  builder.SetExperimental_Navigation_UserInitiated(
+      is_user_initiated_navigation);
   if (timing.input_to_navigation_start) {
     builder.SetExperimental_InputToNavigationStart(
         timing.input_to_navigation_start.value().InMilliseconds());
@@ -165,6 +200,41 @@ void UkmPageLoadMetricsObserver::RecordTimingMetrics(
     builder.SetExperimental_PaintTiming_NavigationToFirstMeaningfulPaint(
         timing.paint_timing->first_meaningful_paint.value().InMilliseconds());
   }
+  if (timing.paint_timing->largest_image_paint.has_value() &&
+      WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->largest_image_paint, info)) {
+    builder.SetExperimental_PaintTiming_NavigationToLargestImagePaint(
+        timing.paint_timing->largest_image_paint.value().InMilliseconds());
+  }
+  if (timing.paint_timing->last_image_paint.has_value() &&
+      WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->last_image_paint, info)) {
+    builder.SetExperimental_PaintTiming_NavigationToLastImagePaint(
+        timing.paint_timing->last_image_paint.value().InMilliseconds());
+  }
+  if (timing.paint_timing->largest_text_paint.has_value() &&
+      WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->largest_text_paint, info)) {
+    builder.SetExperimental_PaintTiming_NavigationToLargestTextPaint(
+        timing.paint_timing->largest_text_paint.value().InMilliseconds());
+  }
+  if (timing.paint_timing->last_text_paint.has_value() &&
+      WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->last_text_paint, info)) {
+    builder.SetExperimental_PaintTiming_NavigationToLastTextPaint(
+        timing.paint_timing->last_text_paint.value().InMilliseconds());
+  }
+  base::Optional<base::TimeDelta> largest_content_paint_time;
+  uint64_t largest_content_paint_size;
+  AssignTimeAndSizeForLargestContentfulPaint(largest_content_paint_time,
+                                             largest_content_paint_size,
+                                             timing.paint_timing);
+  if (largest_content_paint_size > 0 &&
+      WasStartedInForegroundOptionalEventInForeground(
+          largest_content_paint_time, info)) {
+    builder.SetExperimental_PaintTiming_NavigationToLargestContentPaint(
+        largest_content_paint_time.value().InMilliseconds());
+  }
   if (timing.interactive_timing->interactive) {
     base::TimeDelta time_to_interactive =
         timing.interactive_timing->interactive.value();
@@ -178,26 +248,26 @@ void UkmPageLoadMetricsObserver::RecordTimingMetrics(
   if (timing.interactive_timing->first_input_delay) {
     base::TimeDelta first_input_delay =
         timing.interactive_timing->first_input_delay.value();
-    builder.SetInteractiveTiming_FirstInputDelay(
+    builder.SetInteractiveTiming_FirstInputDelay2(
         first_input_delay.InMilliseconds());
   }
   if (timing.interactive_timing->first_input_timestamp) {
     base::TimeDelta first_input_timestamp =
         timing.interactive_timing->first_input_timestamp.value();
-    builder.SetInteractiveTiming_FirstInputTimestamp(
+    builder.SetInteractiveTiming_FirstInputTimestamp2(
         first_input_timestamp.InMilliseconds());
   }
 
   if (timing.interactive_timing->longest_input_delay) {
     base::TimeDelta longest_input_delay =
         timing.interactive_timing->longest_input_delay.value();
-    builder.SetInteractiveTiming_LongestInputDelay(
+    builder.SetInteractiveTiming_LongestInputDelay2(
         longest_input_delay.InMilliseconds());
   }
   if (timing.interactive_timing->longest_input_timestamp) {
     base::TimeDelta longest_input_timestamp =
         timing.interactive_timing->longest_input_timestamp.value();
-    builder.SetInteractiveTiming_LongestInputTimestamp(
+    builder.SetInteractiveTiming_LongestInputTimestamp2(
         longest_input_timestamp.InMilliseconds());
   }
 
@@ -207,7 +277,7 @@ void UkmPageLoadMetricsObserver::RecordTimingMetrics(
       ukm::GetExponentialBucketMin(network_bytes_, 1.3));
 
   if (main_frame_timing_)
-    ReportMainResourceTimingMetrics(&builder);
+    ReportMainResourceTimingMetrics(timing, &builder);
 
   builder.Record(ukm::UkmRecorder::Get());
 }
@@ -256,12 +326,18 @@ void UkmPageLoadMetricsObserver::RecordPageLoadExtraInfoMetrics(
   // info.page_end_reason fits in a uint32_t, so we can safely cast to int64_t.
   builder.SetNavigation_PageEndReason(
       static_cast<int64_t>(info.page_end_reason));
+  if (info.did_commit && was_cached_) {
+    builder.SetWasCached(1);
+  }
   builder.Record(ukm::UkmRecorder::Get());
 }
 
 void UkmPageLoadMetricsObserver::ReportMainResourceTimingMetrics(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     ukm::builders::PageLoad* builder) {
   DCHECK(main_frame_timing_.has_value());
+
+  builder->SetMainFrameResource_SocketReused(main_frame_timing_->socket_reused);
 
   int64_t dns_start_ms =
       main_frame_timing_->connect_timing.dns_start.since_origin()
@@ -306,4 +382,40 @@ void UkmPageLoadMetricsObserver::ReportMainResourceTimingMetrics(
   }
   builder->SetMainFrameResource_RequestStartToReceiveHeadersEnd(
       request_start_to_receive_headers_end_ms);
+
+  if (!main_frame_timing_->request_start.is_null() &&
+      !navigation_start_.is_null()) {
+    base::TimeDelta navigation_start_to_request_start =
+        main_frame_timing_->request_start - navigation_start_;
+
+    builder->SetMainFrameResource_NavigationStartToRequestStart(
+        navigation_start_to_request_start.InMilliseconds());
+  }
+
+  if (main_frame_request_redirect_count_ > 0) {
+    builder->SetMainFrameResource_RedirectCount(
+        main_frame_request_redirect_count_);
+  }
+}
+
+void UkmPageLoadMetricsObserver::ReportLayoutStability(
+    const page_load_metrics::PageLoadExtraInfo& info) {
+  // Avoid reporting when the feature is disabled. This ensures that a report
+  // with score == 0 only occurs for a page that was actually jank-free.
+  if (!base::FeatureList::IsEnabled(blink::features::kJankTracking))
+    return;
+
+  // Report (jank_score * 100) as an int in the range [0, 1000].
+  float jank_score = info.main_frame_render_data.layout_jank_score;
+  int64_t ukm_value =
+      static_cast<int>(roundf(std::min(jank_score, 10.0f) * 100.0f));
+
+  ukm::builders::PageLoad builder(info.source_id);
+  builder.SetLayoutStability_JankScore(ukm_value);
+  builder.Record(ukm::UkmRecorder::Get());
+
+  int32_t uma_value =
+      static_cast<int>(roundf(std::min(jank_score, 10.0f) * 10.0f));
+  UMA_HISTOGRAM_COUNTS_100("PageLoad.Experimental.LayoutStability.JankScore",
+                           uma_value);
 }

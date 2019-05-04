@@ -38,15 +38,6 @@ void WebStateObserverBridge::NavigationItemsPruned(web::WebState* web_state,
   }
 }
 
-void WebStateObserverBridge::NavigationItemCommitted(
-    web::WebState* web_state,
-    const web::LoadCommittedDetails& load_detatils) {
-  SEL selector = @selector(webState:didCommitNavigationWithDetails:);
-  if ([observer_ respondsToSelector:selector]) {
-    [observer_ webState:web_state didCommitNavigationWithDetails:load_detatils];
-  }
-}
-
 void WebStateObserverBridge::DidStartNavigation(
     web::WebState* web_state,
     web::NavigationContext* navigation_context) {
@@ -122,12 +113,6 @@ void WebStateObserverBridge::DidChangeVisibleSecurityState(
   SEL selector = @selector(webStateDidChangeVisibleSecurityState:);
   if ([observer_ respondsToSelector:selector]) {
     [observer_ webStateDidChangeVisibleSecurityState:web_state];
-  }
-}
-
-void WebStateObserverBridge::DidSuppressDialog(web::WebState* web_state) {
-  if ([observer_ respondsToSelector:@selector(webStateDidSuppressDialog:)]) {
-    [observer_ webStateDidSuppressDialog:web_state];
   }
 }
 

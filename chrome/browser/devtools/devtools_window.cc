@@ -25,10 +25,10 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/task_manager/web_contents_tags.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/color_chooser.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -144,7 +144,7 @@ class DevToolsToolboxDelegate
   content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) override;
-  void HandleKeyboardEvent(
+  bool HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) override;
   void WebContentsDestroyed() override;
@@ -186,16 +186,15 @@ DevToolsToolboxDelegate::PreHandleKeyboardEvent(
   return content::KeyboardEventProcessingResult::NOT_HANDLED;
 }
 
-void DevToolsToolboxDelegate::HandleKeyboardEvent(
+bool DevToolsToolboxDelegate::HandleKeyboardEvent(
     content::WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
   if (event.windows_key_code == 0x08) {
     // Do not navigate back in history on Windows (http://crbug.com/74156).
-    return;
+    return false;
   }
   BrowserWindow* window = GetInspectedBrowserWindow();
-  if (window)
-    window->HandleKeyboardEvent(event);
+  return window && window->HandleKeyboardEvent(event);
 }
 
 void DevToolsToolboxDelegate::WebContentsDestroyed() {
@@ -695,6 +694,9 @@ void DevToolsWindow::ToggleDevToolsWindow(
         break;
       case DevToolsToggleAction::kShowConsolePanel:
         panel = "console";
+        break;
+      case DevToolsToggleAction::kPauseInDebugger:
+        panel = "sources";
         break;
       case DevToolsToggleAction::kShow:
       case DevToolsToggleAction::kToggle:
@@ -1249,16 +1251,15 @@ content::KeyboardEventProcessingResult DevToolsWindow::PreHandleKeyboardEvent(
   return content::KeyboardEventProcessingResult::NOT_HANDLED;
 }
 
-void DevToolsWindow::HandleKeyboardEvent(
+bool DevToolsWindow::HandleKeyboardEvent(
     WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
   if (event.windows_key_code == 0x08) {
     // Do not navigate back in history on Windows (http://crbug.com/74156).
-    return;
+    return true;
   }
   BrowserWindow* inspected_window = GetInspectedBrowserWindow();
-  if (inspected_window)
-    inspected_window->HandleKeyboardEvent(event);
+  return inspected_window && inspected_window->HandleKeyboardEvent(event);
 }
 
 content::JavaScriptDialogManager* DevToolsWindow::GetJavaScriptDialogManager(
@@ -1574,6 +1575,7 @@ void DevToolsWindow::DoAction(const DevToolsToggleAction& action) {
       break;
 
     case DevToolsToggleAction::kShowElementsPanel:
+    case DevToolsToggleAction::kPauseInDebugger:
     case DevToolsToggleAction::kShowConsolePanel:
     case DevToolsToggleAction::kShow:
     case DevToolsToggleAction::kToggle:

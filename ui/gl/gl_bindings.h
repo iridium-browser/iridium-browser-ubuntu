@@ -129,6 +129,9 @@
 #define GL_REQUESTABLE_EXTENSIONS_ANGLE 0x93A8
 #define GL_NUM_REQUESTABLE_EXTENSIONS_ANGLE 0x93A8
 
+// GL_ANGLE_memory_size
+#define GL_MEMORY_SIZE_ANGLE 0x93AD
+
 // GL_EXT_occlusion_query_boolean
 #define GL_ANY_SAMPLES_PASSED_EXT                        0x8C2F
 #define GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT           0x8D6A
@@ -419,6 +422,12 @@
 #define GL_COMPLETION_STATUS_KHR 0x91B1
 #endif /* GL_KHR_parallel_shader_compile */
 
+#ifndef GL_CHROMIUM_shared_image
+#define GL_CHROMIUM_shared_image 1
+#define GL_SHARED_IMAGE_ACCESS_MODE_READ_CHROMIUM 0x8AF5
+#define GL_SHARED_IMAGE_ACCESS_MODE_READWRITE_CHROMIUM 0x8AF6
+#endif /* GL_CHROMIUM_shared_image */
+
 #define GL_GLEXT_PROTOTYPES 1
 
 #if defined(OS_WIN)
@@ -427,11 +436,12 @@
 #define GL_BINDING_CALL
 #endif
 
+#if defined(NDEBUG) && !defined(GPU_ENABLE_SERVICE_LOGGING)
 #define GL_SERVICE_LOG(args) DLOG(INFO) << args;
-#if defined(NDEBUG)
-  #define GL_SERVICE_LOG_CODE_BLOCK(code)
+#define GL_SERVICE_LOG_CODE_BLOCK(code)
 #else
-  #define GL_SERVICE_LOG_CODE_BLOCK(code) code
+#define GL_SERVICE_LOG(args) LOG(INFO) << args;
+#define GL_SERVICE_LOG_CODE_BLOCK(code) code
 #endif
 
 // ANGLE_multiview constants.

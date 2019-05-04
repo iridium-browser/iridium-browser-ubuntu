@@ -19,6 +19,8 @@
 #include "base/observer_list.h"
 #include "base/optional.h"
 #include "base/strings/string16.h"
+#include "base/time/time.h"
+#include "components/viz/common/surfaces/local_surface_id_allocation.h"
 #include "components/viz/common/surfaces/scoped_surface_id_allocator.h"
 #include "ui/aura/aura_export.h"
 #include "ui/aura/client/window_types.h"
@@ -94,30 +96,36 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
     STACK_ABOVE,
     STACK_BELOW
   };
+
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
   enum class OcclusionState {
     // The window's occlusion state isn't tracked (Window::TrackOcclusionState)
     // or hasn't been computed yet.
-    UNKNOWN,
+    UNKNOWN = 0,
     // The window or one of its descendants IsVisible() [1] and:
     // - Its bounds aren't completely covered by fully opaque windows [2], or,
     // - Its transform, bounds or opacity is animated.
-    VISIBLE,
+    VISIBLE = 1,
     // The window or one of its descendants IsVisible() [1], but they all:
     // - Have bounds completely covered by fully opaque windows [2], and,
     // - Have no transform, bounds or opacity animation.
-    OCCLUDED,
+    OCCLUDED = 2,
     // The window is not IsVisible() [1].
-    HIDDEN,
+    HIDDEN = 3,
     // [1] A window can only be IsVisible() if all its parent are IsVisible().
     // [2] A window is "fully opaque" if:
     // - It's visible (IsVisible()).
     // - It's not transparent (transparent()).
     // - It's transform, bounds and opacity aren't animated.
     // - Its combined opacity is 1 (GetCombinedOpacity()).
-    // - The type of its layer is not ui::LAYER_NOT_DRAWN.
+    // - It has content to draw. Either the type of its layer is not
+    //     ui::LAYER_NOT_DRAWN, or it is a server window hosting remote client
+    //     content in Window Service.
     //
     // TODO(fdoray): A window that clips its children shouldn't be VISIBLE just
     // because it has an animated child.
+    kMaxValue = HIDDEN,
   };
 
   typedef std::vector<Window*> Windows;
@@ -198,6 +206,18 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // hasn't been computed yet. Is stale if called within the scope of a
   // WindowOcclusionTracker::ScopedPause.
   OcclusionState occlusion_state() const { return occlusion_state_; }
+
+  // Returns the currently occluded region. This will be empty unless
+  // the window is tracked and has a VISIBLE occlusion state. That is,
+  // this is only maintained when the window is partially occluded. Further,
+  // this region may extend outside the window bounds. For performance reasons,
+  // the actual intersection with the window is not computed. The occluded
+  // region is the set of window rectangles that may occlude this window.
+  // Note that this means that the occluded region may be updated if one of
+  // those windows moves, even if the actual intersection of the occluded
+  // region with this window does not change. Clients may compute the actual
+  // intersection region if necessary.
+  const SkRegion& occluded_region() const { return occluded_region_; }
 
   // Returns the window's bounds in root window's coordinates.
   gfx::Rect GetBoundsInRootWindow() const;
@@ -336,9 +356,6 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Returns true if the Window can be focused.
   bool CanFocus() const;
 
-  // Returns true if the Window can receive events.
-  bool CanReceiveEvents() const;
-
   // Does a capture on the window. This does nothing if the window isn't showing
   // (VISIBILITY_SHOWN) or isn't contained in a valid window hierarchy.
   void SetCapture();
@@ -397,22 +414,22 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // that does not involve a resize or a device scale factor change.
   void AllocateLocalSurfaceId();
 
-  // When a child-allocated viz::LocalSurfaceId is being processed, this returns
-  // true.
-  bool IsLocalSurfaceIdAllocationSuppressed() const;
-
   viz::ScopedSurfaceIdAllocator GetSurfaceIdAllocator(
       base::OnceCallback<void()> allocation_task);
 
-  // Gets the current viz::LocalSurfaceId.
-  const viz::LocalSurfaceId& GetLocalSurfaceId() const;
+  // Returns the current viz::LocalSurfaceIdAllocation.
+  const viz::LocalSurfaceIdAllocation& GetLocalSurfaceIdAllocation() const;
+
+  // Marks the current viz::LocalSurfaceId as invalid. AllocateLocalSurfaceId
+  // must be called before submitting new CompositorFrames.
+  void InvalidateLocalSurfaceId();
 
   // Sets the current viz::LocalSurfaceId, in cases where the embedded client
   // has allocated one. Also sets child sequence number component of the
   // viz::LocalSurfaceId allocator.
   void UpdateLocalSurfaceIdFromEmbeddedClient(
-      const base::Optional<viz::LocalSurfaceId>&
-          embedded_client_local_surface_id);
+      const base::Optional<viz::LocalSurfaceIdAllocation>&
+          local_surface_id_allocation);
 
   // Returns the FrameSinkId. In LOCAL mode, this returns a valid FrameSinkId
   // only if a LayerTreeFrameSink has been created. In MUS mode, this always
@@ -459,12 +476,13 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
                            int64_t old_value,
                            std::unique_ptr<ui::PropertyData> data) override;
  private:
+  friend class DefaultWindowOcclusionChangeBuilder;
   friend class HitTestDataProviderAura;
   friend class LayoutManager;
   friend class PropertyConverter;
-  friend class WindowOcclusionTracker;
   friend class WindowPort;
   friend class WindowPortForShutdown;
+  friend class WindowPortMus;
   friend class WindowTargeter;
   friend class test::WindowTestApi;
 
@@ -482,8 +500,9 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // specific changes. Called from Show()/Hide().
   void SetVisible(bool visible);
 
-  // Updates the occlusion state of the window.
-  void SetOcclusionState(OcclusionState occlusion_state);
+  // Updates the occlusion info of the window.
+  void SetOcclusionInfo(OcclusionState occlusion_state,
+                        const SkRegion& occluded_region);
 
   // Schedules a paint for the Window's entire bounds.
   void SchedulePaint();
@@ -577,6 +596,8 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   bool registered_frame_sink_id_ = false;
   bool disable_frame_sink_id_registration_ = false;
 
+  bool created_layer_tree_frame_sink_ = false;
+
   // Window owns its corresponding WindowPort, but the ref is held as a raw
   // pointer in |port_| so that it can still be accessed during destruction.
   // This is important as deleting the WindowPort may result in trying to lookup
@@ -617,6 +638,9 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Occlusion state of the window.
   OcclusionState occlusion_state_;
 
+  // Occluded region of the window.
+  SkRegion occluded_region_;
+
   int id_;
 
   // The FrameSinkId associated with this window. If this window is embedding
@@ -636,7 +660,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Makes the window pass all events through to any windows behind it.
   ws::mojom::EventTargetingPolicy event_targeting_policy_;
 
-  base::ObserverList<WindowObserver, true>::Unchecked observers_;
+  base::ReentrantObserverList<WindowObserver, true> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(Window);
 };

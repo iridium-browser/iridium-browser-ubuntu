@@ -22,7 +22,6 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_client.h"
 #include "net/base/load_flags.h"
 #include "net/base/url_util.h"
@@ -106,36 +105,6 @@ class ServiceWorkerControlleeRequestHandler::
   base::WeakPtr<ServiceWorkerProviderHost> provider_host_;
 
   DISALLOW_COPY_AND_ASSIGN(ScopedDisallowSetControllerRegistration);
-};
-
-class ServiceWorkerControlleeRequestHandler::MainResourceRequestTracker {
- public:
-  MainResourceRequestTracker() = default;
-
-  ~MainResourceRequestTracker() {
-    if (recorded_destination_)
-      return;
-    RecordDestination(
-        will_dispatch_fetch_
-            ? ServiceWorkerMetrics::MainResourceRequestDestination::
-                  kAbortedWhileDispatchingFetchEvent
-            : ServiceWorkerMetrics::MainResourceRequestDestination::
-                  kAbortedWithoutDispatchingFetchEvent);
-  }
-
-  void RecordDestination(
-      ServiceWorkerMetrics::MainResourceRequestDestination destination) {
-    CHECK(!recorded_destination_);
-    recorded_destination_ = true;
-    ServiceWorkerMetrics::RecordMainResourceRequestDestination(destination);
-  }
-
-  void WillDispatchFetchEvent() { will_dispatch_fetch_ = true; }
-
- private:
-  bool recorded_destination_ = false;
-  bool will_dispatch_fetch_ = false;
-  DISALLOW_COPY_AND_ASSIGN(MainResourceRequestTracker);
 };
 
 ServiceWorkerControlleeRequestHandler::ServiceWorkerControlleeRequestHandler(
@@ -243,10 +212,10 @@ net::URLRequestJob* ServiceWorkerControlleeRequestHandler::MaybeCreateJob(
 
   // It's for original request (A) or redirect case (B-a or B-b).
   auto job = std::make_unique<ServiceWorkerURLRequestJob>(
-      request, network_delegate, provider_host_->client_uuid(),
-      blob_storage_context_, resource_context, request_mode_, credentials_mode_,
-      redirect_mode_, integrity_, keepalive_, resource_type_,
-      request_context_type_, frame_type_, body_, this);
+      request, network_delegate, provider_host_, blob_storage_context_,
+      resource_context, request_mode_, credentials_mode_, redirect_mode_,
+      integrity_, keepalive_, resource_type_, request_context_type_,
+      frame_type_, body_, this);
   url_job_ = std::make_unique<ServiceWorkerURLJobWrapper>(job->GetWeakPtr());
 
   resource_context_ = resource_context;
@@ -310,7 +279,7 @@ void ServiceWorkerControlleeRequestHandler::MaybeCreateLoader(
   url_job_ = std::make_unique<ServiceWorkerURLJobWrapper>(
       std::make_unique<ServiceWorkerNavigationLoader>(
           std::move(callback), std::move(fallback_callback), this,
-          tentative_resource_request,
+          tentative_resource_request, provider_host_,
           base::WrapRefCounted(context_->loader_factory_getter())));
 
   resource_context_ = resource_context;
@@ -344,7 +313,7 @@ ServiceWorkerControlleeRequestHandler::MaybeCreateSubresourceLoaderParams() {
   // Otherwise let's send the controller service worker information along
   // with the navigation commit.
   SubresourceLoaderParams params;
-  auto controller_info = mojom::ControllerServiceWorkerInfo::New();
+  auto controller_info = blink::mojom::ControllerServiceWorkerInfo::New();
   controller_info->mode = provider_host_->GetControllerMode();
   // Note that |controller_info->endpoint| is null if the controller has no
   // fetch event handler. In that case the renderer frame won't get the
@@ -354,6 +323,10 @@ ServiceWorkerControlleeRequestHandler::MaybeCreateSubresourceLoaderParams() {
   controller_info->endpoint =
       provider_host_->GetControllerServiceWorkerPtr().PassInterface();
   controller_info->client_id = provider_host_->client_uuid();
+  if (provider_host_->fetch_request_window_id()) {
+    controller_info->fetch_request_window_id =
+        base::make_optional(provider_host_->fetch_request_window_id());
+  }
   base::WeakPtr<ServiceWorkerObjectHost> object_host =
       provider_host_->GetOrCreateServiceWorkerObjectHost(
           provider_host_->controller());
@@ -371,8 +344,6 @@ void ServiceWorkerControlleeRequestHandler::PrepareForMainResource(
   DCHECK(IsJobAlive());
   DCHECK(context_);
   DCHECK(provider_host_);
-  tracker_ = std::make_unique<MainResourceRequestTracker>();
-
   TRACE_EVENT_ASYNC_BEGIN1(
       "ServiceWorker",
       "ServiceWorkerControlleeRequestHandler::PrepareForMainResource", this,
@@ -388,8 +359,7 @@ void ServiceWorkerControlleeRequestHandler::PrepareForMainResource(
       std::make_unique<ScopedDisallowSetControllerRegistration>(provider_host_);
 
   stripped_url_ = net::SimplifyUrlForRequest(url);
-  provider_host_->SetDocumentUrl(stripped_url_);
-  provider_host_->SetTopmostFrameUrl(site_for_cookies);
+  provider_host_->UpdateUrls(stripped_url_, site_for_cookies);
   context_->storage()->FindRegistrationForDocument(
       stripped_url_, base::BindOnce(&ServiceWorkerControlleeRequestHandler::
                                         DidLookupRegistrationForMainResource,
@@ -408,9 +378,6 @@ void ServiceWorkerControlleeRequestHandler::
     return;
 
   if (status != blink::ServiceWorkerStatusCode::kOk) {
-    tracker_->RecordDestination(
-        ServiceWorkerMetrics::MainResourceRequestDestination::
-            kNetworkBecauseNoRegistration);
     url_job_->FallbackToNetwork();
     TRACE_EVENT_ASYNC_END1(
         "ServiceWorker",
@@ -421,9 +388,6 @@ void ServiceWorkerControlleeRequestHandler::
   DCHECK(registration);
 
   if (!provider_host_) {
-    tracker_->RecordDestination(
-        ServiceWorkerMetrics::MainResourceRequestDestination::
-            kNetworkBecauseNoProvider);
     url_job_->FallbackToNetwork();
     TRACE_EVENT_ASYNC_END1(
         "ServiceWorker",
@@ -434,9 +398,6 @@ void ServiceWorkerControlleeRequestHandler::
   provider_host_->AddMatchingRegistration(registration.get());
 
   if (!context_) {
-    tracker_->RecordDestination(
-        ServiceWorkerMetrics::MainResourceRequestDestination::
-            kNetworkBecauseNoContext);
     url_job_->FallbackToNetwork();
     TRACE_EVENT_ASYNC_END1(
         "ServiceWorker",
@@ -446,11 +407,8 @@ void ServiceWorkerControlleeRequestHandler::
   }
 
   if (!GetContentClient()->browser()->AllowServiceWorker(
-          registration->pattern(), provider_host_->topmost_frame_url(),
+          registration->scope(), provider_host_->site_for_cookies(),
           resource_context_, provider_host_->web_contents_getter())) {
-    tracker_->RecordDestination(
-        ServiceWorkerMetrics::MainResourceRequestDestination::
-            kNetworkBecauseNotAllowed);
     url_job_->FallbackToNetwork();
     TRACE_EVENT_ASYNC_END1(
         "ServiceWorker",
@@ -462,9 +420,6 @@ void ServiceWorkerControlleeRequestHandler::
   if (!provider_host_->IsContextSecureForServiceWorker()) {
     // TODO(falken): Figure out a way to surface in the page's DevTools
     // console that the service worker was blocked for security.
-    tracker_->RecordDestination(
-        ServiceWorkerMetrics::MainResourceRequestDestination::
-            kNetworkBecauseNotSecure);
     url_job_->FallbackToNetwork();
     TRACE_EVENT_ASYNC_END1(
         "ServiceWorker",
@@ -496,9 +451,6 @@ void ServiceWorkerControlleeRequestHandler::
   scoped_refptr<ServiceWorkerVersion> active_version =
       registration->active_version();
   if (!active_version) {
-    tracker_->RecordDestination(
-        ServiceWorkerMetrics::MainResourceRequestDestination::
-            kNetworkBecauseNoActiveVersion);
     url_job_->FallbackToNetwork();
     TRACE_EVENT_ASYNC_END1(
         "ServiceWorker",
@@ -538,8 +490,6 @@ void ServiceWorkerControlleeRequestHandler::
   // The job may have been destroyed before this was invoked. In that
   // case, |url_job_| can't be used, so return.
   if (!IsJobAlive()) {
-    tracker_->RecordDestination(
-        ServiceWorkerMetrics::MainResourceRequestDestination::kJobWasDestroyed);
     TRACE_EVENT_ASYNC_END1(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::PrepareForMainResource", this,
@@ -548,9 +498,6 @@ void ServiceWorkerControlleeRequestHandler::
   }
 
   if (!provider_host_) {
-    tracker_->RecordDestination(
-        ServiceWorkerMetrics::MainResourceRequestDestination::
-            kNetworkBecauseNoProviderAfterContinuing);
     url_job_->FallbackToNetwork();
     TRACE_EVENT_ASYNC_END1(
         "ServiceWorker",
@@ -578,9 +525,6 @@ void ServiceWorkerControlleeRequestHandler::
     //      retries.
     //   3) If the provider host does not have an active version, just fail the
     //      load.
-    tracker_->RecordDestination(
-        ServiceWorkerMetrics::MainResourceRequestDestination::
-            kNetworkBecauseNoActiveVersionAfterContinuing);
     url_job_->FallbackToNetwork();
     TRACE_EVENT_ASYNC_END2(
         "ServiceWorker",
@@ -611,11 +555,6 @@ void ServiceWorkerControlleeRequestHandler::
   }
   bool is_forwarded =
       MaybeForwardToServiceWorker(url_job_.get(), active_version.get());
-  if (!is_forwarded) {
-    tracker_->RecordDestination(
-        ServiceWorkerMetrics::MainResourceRequestDestination::
-            kNetworkBecauseNoFetchEventHandler);
-  }
   TRACE_EVENT_ASYNC_END1(
       "ServiceWorker",
       "ServiceWorkerControlleeRequestHandler::PrepareForMainResource", this,
@@ -748,18 +687,6 @@ void ServiceWorkerControlleeRequestHandler::MainResourceLoadFailed() {
   DCHECK(provider_host_);
   // Detach the controller so subresource requests also skip the worker.
   provider_host_->NotifyControllerLost();
-}
-
-void ServiceWorkerControlleeRequestHandler::ReportDestination(
-    ServiceWorkerMetrics::MainResourceRequestDestination destination) {
-  DCHECK(is_main_resource_load_);
-  tracker_->RecordDestination(destination);
-}
-
-void ServiceWorkerControlleeRequestHandler::
-    WillDispatchFetchEventForMainResource() {
-  DCHECK(is_main_resource_load_);
-  tracker_->WillDispatchFetchEvent();
 }
 
 void ServiceWorkerControlleeRequestHandler::ClearJob() {

@@ -10,6 +10,10 @@
 
 #include "api/stats/rtcstats_objects.h"
 
+#include <utility>
+
+#include "rtc_base/checks.h"
+
 namespace webrtc {
 
 const char* const RTCDataChannelState::kConnecting = "connecting";
@@ -356,6 +360,7 @@ WEBRTC_RTCSTATS_IMPL(RTCMediaStreamTrackStats, RTCStats, "track",
                      &detached,
                      &kind,
                      &jitter_buffer_delay,
+                     &jitter_buffer_emitted_count,
                      &frame_width,
                      &frame_height,
                      &frames_per_second,
@@ -374,7 +379,9 @@ WEBRTC_RTCSTATS_IMPL(RTCMediaStreamTrackStats, RTCStats, "track",
                      &total_samples_received,
                      &total_samples_duration,
                      &concealed_samples,
-                     &concealment_events);
+                     &concealment_events,
+                     &jitter_buffer_flushes,
+                     &delayed_packet_outage_samples);
 // clang-format on
 
 RTCMediaStreamTrackStats::RTCMediaStreamTrackStats(const std::string& id,
@@ -392,6 +399,7 @@ RTCMediaStreamTrackStats::RTCMediaStreamTrackStats(std::string&& id,
       detached("detached"),
       kind("kind", kind),
       jitter_buffer_delay("jitterBufferDelay"),
+      jitter_buffer_emitted_count("jitterBufferEmittedCount"),
       frame_width("frameWidth"),
       frame_height("frameHeight"),
       frames_per_second("framesPerSecond"),
@@ -410,7 +418,9 @@ RTCMediaStreamTrackStats::RTCMediaStreamTrackStats(std::string&& id,
       total_samples_received("totalSamplesReceived"),
       total_samples_duration("totalSamplesDuration"),
       concealed_samples("concealedSamples"),
-      concealment_events("concealmentEvents") {
+      concealment_events("concealmentEvents"),
+      jitter_buffer_flushes("jitterBufferFlushes"),
+      delayed_packet_outage_samples("delayedPacketOutageSamples") {
   RTC_DCHECK(kind == RTCMediaStreamTrackKind::kAudio ||
              kind == RTCMediaStreamTrackKind::kVideo);
 }
@@ -424,6 +434,7 @@ RTCMediaStreamTrackStats::RTCMediaStreamTrackStats(
       detached(other.detached),
       kind(other.kind),
       jitter_buffer_delay(other.jitter_buffer_delay),
+      jitter_buffer_emitted_count(other.jitter_buffer_emitted_count),
       frame_width(other.frame_width),
       frame_height(other.frame_height),
       frames_per_second(other.frames_per_second),
@@ -442,7 +453,9 @@ RTCMediaStreamTrackStats::RTCMediaStreamTrackStats(
       total_samples_received(other.total_samples_received),
       total_samples_duration(other.total_samples_duration),
       concealed_samples(other.concealed_samples),
-      concealment_events(other.concealment_events) {}
+      concealment_events(other.concealment_events),
+      jitter_buffer_flushes(other.jitter_buffer_flushes),
+      delayed_packet_outage_samples(other.delayed_packet_outage_samples) {}
 
 RTCMediaStreamTrackStats::~RTCMediaStreamTrackStats() {}
 

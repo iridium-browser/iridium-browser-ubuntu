@@ -51,8 +51,7 @@ config("skia_config") {
     configs = [ "//third_party/vulkan:vulkan_config" ]
   }
 
-  defines = skia_for_chromium_defines
-  defines += [
+  defines = [
     "SK_HAS_PNG_LIBRARY",
     "SK_HAS_WEBP_LIBRARY",
   ]
@@ -157,9 +156,7 @@ config("skia_library_config") {
     defines += [ "SK_FREETYPE_MINIMUM_RUNTIME_VERSION=(((FREETYPE_MAJOR) * 0x01000000) | ((FREETYPE_MINOR) * 0x00010000) | ((FREETYPE_PATCH) * 0x00000100))" ]
   }
 
-  if (is_component_build) {
-    defines += [ "SKIA_IMPLEMENTATION=1" ]
-  }
+  defines += [ "SKIA_IMPLEMENTATION=1" ]
 
   if (current_cpu == "arm") {
     if (arm_use_neon) {
@@ -232,7 +229,10 @@ config("skia_library_config") {
   }
 
   if (skia_support_skottie) {
-    include_dirs += [ "//third_party/skia/modules/sksg/include" ]
+    include_dirs += [
+      "//third_party/skia/modules/sksg/include",
+      "//third_party/skia/modules/skshaper/include",
+    ]
   }
 }
 
@@ -329,6 +329,13 @@ component("skia") {
     }
   }
 
+  if (is_win) {
+    sources += [
+      # Select the right BitmapPlatformDevice.
+      "ext/raster_handle_allocator_win.cc",
+    ]
+  }
+
   # The imported Skia gni source paths are made absolute by gn.
   defines = skia_core_defines
   sources += skia_utils_sources
@@ -379,21 +386,6 @@ component("skia") {
 
   if (current_cpu == "arm") {
     sources += [ "//third_party/skia/src/core/SkUtilsArm.cpp" ]
-  }
-
-  # GPU
-  if (skia_support_gpu) {
-    sources += skia_gpu_sources
-    sources += skia_null_gpu_sources
-    sources += skia_sksl_sources
-    if (enable_vulkan) {
-      sources += skia_vk_sources
-      sources += [
-        "//third_party/skia/third_party/vulkanmemoryallocator/GrVulkanMemoryAllocator.cpp",
-        "//third_party/skia/third_party/vulkanmemoryallocator/GrVulkanMemoryAllocator.h",
-      ]
-    }
-    deps += [ "//gpu/config:workaround_list" ]
   }
 
   # Remove unused util sources.
@@ -493,21 +485,14 @@ component("skia") {
   if (is_fuchsia) {
     sources += [
       "//third_party/skia/src/ports/SkFontMgr_custom.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_fuchsia.cpp",
       "ext/fontmgr_default_fuchsia.cc",
       "ext/fontmgr_default_fuchsia.h",
-      "ext/fontmgr_fuchsia.cc",
-      "ext/fontmgr_fuchsia.h",
     ]
     deps += [
       "//third_party/fuchsia-sdk/sdk:fonts",
+      "//third_party/fuchsia-sdk/sdk:zx",
       "//third_party/icu:icuuc",
-    ]
-  }
-
-  if (is_win) {
-    sources += [
-      # Select the right BitmapPlatformDevice.
-      "ext/raster_handle_allocator_win.cc",
     ]
   }
 
@@ -561,23 +546,6 @@ component("skia") {
     ]
   }
 
-  if (skia_support_pdf) {
-    deps += [
-      "//third_party/sfntly",
-      "//third_party/sfntly:sfntly_chromium",
-      "//third_party/zlib",
-    ]
-    sources += skia_pdf_sources
-  } else {
-    sources += [ "//third_party/skia/src/pdf/SkDocument_PDF_None.cpp" ]
-  }
-
-  if (skia_support_skottie) {
-    import("//third_party/skia/modules/skottie/skottie.gni")
-    import("//third_party/skia/modules/sksg/sksg.gni")
-    sources += skia_skottie_sources + skia_skottie_public + skia_sksg_sources
-  }
-
   if (!is_debug) {
     configs -= [ "//build/config/compiler:default_optimization" ]
     configs += [ "//build/config/compiler:optimize_max" ]
@@ -602,6 +570,40 @@ component("skia") {
 
   if (is_fuchsia) {
     deps += [ "//third_party/expat" ]
+  }
+
+  if (skia_support_gpu) {
+    sources += skia_gpu_sources
+    sources += skia_null_gpu_sources
+    sources += skia_sksl_sources
+    if (enable_vulkan) {
+      sources += skia_vk_sources
+      sources += [
+        "//third_party/skia/third_party/vulkanmemoryallocator/GrVulkanMemoryAllocator.cpp",
+        "//third_party/skia/third_party/vulkanmemoryallocator/GrVulkanMemoryAllocator.h",
+      ]
+    }
+    deps += [ "//gpu/config:workaround_list" ]
+  }
+
+  if (skia_support_pdf) {
+    deps += [
+      "//third_party/sfntly",
+      "//third_party/sfntly:sfntly_chromium",
+      "//third_party/zlib",
+    ]
+    sources += skia_pdf_sources
+  } else {
+    sources += [ "//third_party/skia/src/pdf/SkDocument_PDF_None.cpp" ]
+  }
+
+  if (skia_support_skottie) {
+    import("//third_party/skia/modules/skottie/skottie.gni")
+    import("//third_party/skia/modules/sksg/sksg.gni")
+    import("//third_party/skia/modules/skshaper/skshaper.gni")
+    sources += skia_skottie_sources + skia_skottie_public
+    sources += skia_sksg_sources
+    sources += skia_shaper_primitive_sources
   }
 }
 

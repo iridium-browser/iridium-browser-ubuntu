@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/arc/intent_helper/arc_external_protocol_dialog.h"
 
 #include <memory>
+#include <string>
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
@@ -25,8 +26,6 @@
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
-#include "third_party/blink/public/platform/web_referrer_policy.h"
-#include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
@@ -106,7 +105,7 @@ void OpenUrlInChrome(int render_process_host_id,
   const content::OpenURLParams params(
       url,
       content::Referrer(web_contents->GetLastCommittedURL(),
-                        blink::kWebReferrerPolicyDefault),
+                        network::mojom::ReferrerPolicy::kDefault),
       WindowOpenDisposition::CURRENT_TAB, page_transition_type,
       kIsRendererInitiated);
   web_contents->OpenURL(params);

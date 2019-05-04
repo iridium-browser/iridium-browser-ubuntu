@@ -14,16 +14,7 @@
 # Note that some of these tests only fail inconsistently (like with
 # --gtest_repeat=5, but might pass on a single invocation).
 
-# Chrome Desktop failures (Mac, Linux, Windows).
--MediaRouterElementsBrowserTest.MediaRouterContainerCastModeList
--MediaRouterElementsBrowserTest.MediaRouterContainerFilterPart1
-
 # ChromeOS only test failures.
--ActiveDirectoryJoinTest.TestActiveDirectoryEnrollment_DistinguishedName
--ActiveDirectoryJoinTest.TestActiveDirectoryEnrollment_ErrorCard
--ActiveDirectoryJoinTest.TestActiveDirectoryEnrollment_Success
--ActiveDirectoryJoinTest.TestActiveDirectoryEnrollment_UIErrors
--CrSettingsPeoplePageSetupPinDialogTest.All
 -DemoSetupTest.BackOnArcTermsScreen
 -DemoSetupTest.ClickConnectedNetworkOnNetworkScreen
 -DemoSetupTest.ClickNetworkOnNetworkScreen
@@ -44,8 +35,27 @@
 # enabled by default and run the full set of tests, and collect any missing
 # failing tests.
 
+ActiveDirectoryJoinTest.*
+AppManagementAppTest.*
 AudioPlayerBrowserTest.*
+AutofillBrowserTest.*
 BluetoothInternalsTest.*
+BookmarksActionsTest.*
+BookmarksAppTest.*
+BookmarksCommandManagerTest.*
+BookmarksDNDManagerTest.*
+BookmarksEditDialogTest.*
+BookmarksFocusTest.*
+BookmarksFolderNodeTest.*
+BookmarksItemTest.*
+BookmarksListTest.*
+BookmarksPolicyTest.*
+BookmarksReducersTest.*
+BookmarksRouterTest.*
+BookmarksStoreTest.*
+BookmarksToastManagerTest.*
+BookmarksToolbarTest.*
+BookmarksUtilTest.*
 CertificateViewerModalUITest.*
 CertificateViewerModalUITestAsync.*
 CertificateViewerUITest.*
@@ -59,6 +69,7 @@ CrElementsActionMenuTest.*
 CrElementsCheckboxTest.*
 CrElementsDialogTest.*
 CrElementsDrawerTest.*
+CrElementsFingerprintProgressArcTest.*
 CrElementsInputTest.*
 CrElementsLazyRenderTest.*
 CrElementsPolicyIndicatorBehaviorTest.*
@@ -68,12 +79,15 @@ CrElementsPolicyPrefIndicatorTest.*
 CrElementsProfileAvatarSelectorFocusTest.*
 CrElementsProfileAvatarSelectorTest.*
 CrElementsRadioButtonTest.*
+CrElementsRadioGroupTest.*
 CrElementsScrollableBehaviorTest.*
 CrElementsSearchableDropDownTest.*
 CrElementsSliderTest.*
 CrElementsToastTest.*
 CrElementsToggleTest.*
 CrElementsToolbarSearchFieldTest.*
+CrExtensionsActivityLogTest.*
+CrExtensionsActivityLogItemTest.*
 CrExtensionsA11yTest.*
 CrExtensionsA11yTestWithMultipleExensions.*
 CrExtensionsCodeSectionTest.*
@@ -86,6 +100,7 @@ CrExtensionsItemsTest.*
 CrExtensionsKioskModeTest.*
 CrExtensionsLoadErrorTest.*
 CrExtensionsManagerUnitTest.*
+CrExtensionsManagerUnitTestWithActivityLogFlag.*
 CrExtensionsNavigationHelperTest.*
 CrExtensionsOptionsDialogTest.*
 CrExtensionsPackDialogTest.*
@@ -105,6 +120,7 @@ CrSettingsAndroidAppsPageTest.*
 CrSettingsAnimatedPagesTest.*
 CrSettingsAppearanceFontsPageTest.*
 CrSettingsAppearancePageTest.*
+CrSettingsAutofillPageTest.*
 CrSettingsAutofillSectionTest.*
 CrSettingsBluetoothPageTest.*
 CrSettingsCategoryDefaultSettingTest.*
@@ -112,6 +128,8 @@ CrSettingsCategorySettingExceptionsTest.*
 CrSettingsCertificateManagerTest.*
 CrSettingsChangePasswordPageTest.*
 CrSettingsCheckboxTest.*
+CrSettingsChooserExceptionListTest.*
+CrSettingsChooserExceptionListEntryTest.*
 CrSettingsChromeCleanupPageTest.*
 CrSettingsCrostiniPageTest.*
 CrSettingsDateTimePageTest.*
@@ -168,6 +186,7 @@ CrSettingsSiteDataTest.*
 CrSettingsSiteDetailsPermissionTest.*
 CrSettingsSiteDetailsTest.*
 CrSettingsSiteEntryTest.*
+CrSettingsSiteFaviconTest.*
 CrSettingsSiteListEntryTest.*
 CrSettingsSiteListTest.*
 CrSettingsSliderTest.*
@@ -197,6 +216,7 @@ FileManagerJsTest.*
 FileManagerPathUtilConvertUrlTest.*
 FileManagerUITest.*
 FileTasksBrowserTest.*
+*/FilesAppBrowserTest.*
 GalleryBrowserTest.*
 GalleryBrowserTestInGuestMode.*
 GalleryJsTest.*
@@ -207,22 +227,6 @@ InvalidationsWebUITest.*
 LoadTimeDataTest.*
 LocalAndDriveFileSystemExtensionApiTest.*
 LocalFileSystemExtensionApiTest.*
-MaterialBookmarksActionsTest.*
-MaterialBookmarksAppTest.*
-MaterialBookmarksCommandManagerTest.*
-MaterialBookmarksDNDManagerTest.*
-MaterialBookmarksEditDialogTest.*
-MaterialBookmarksFocusTest.*
-MaterialBookmarksFolderNodeTest.*
-MaterialBookmarksItemTest.*
-MaterialBookmarksListTest.*
-MaterialBookmarksPolicyTest.*
-MaterialBookmarksReducersTest.*
-MaterialBookmarksRouterTest.*
-MaterialBookmarksStoreTest.*
-MaterialBookmarksToastManagerTest.*
-MaterialBookmarksToolbarTest.*
-MaterialBookmarksUtilTest.*
 MaterialHistoryBrowserServiceTest.*
 MaterialHistoryDrawerTest.*
 MaterialHistoryFocusTest.*
@@ -236,11 +240,7 @@ MaterialHistorySupervisedUserTest.*
 MaterialHistorySyncedTabsTest.*
 MaterialHistoryToolbarTest.*
 MediaEngagementWebUIBrowserTest.*
-MediaRouterElementsBrowserTest.IssueBanner
-MediaRouterElementsBrowserTest.MediaRouterContainerFirstRunFlow
-MediaRouterElementsBrowserTest.MediaRouterContainerSinkList
-MediaRouterElementsBrowserTest.MediaRouterHeader
-MediaRouterElementsBrowserTest.MediaRouterRouteDetails
+MediaRouterElementsBrowserTest.*
 Mock4JSWebUITest.*
 Mock4JSWebUITest.*
 Mock4JSWebUITestFails.*
@@ -250,8 +250,9 @@ MultiProfileFilesAppBrowserTest.*
 NetInternalsTest.*
 NoBackgroundTasksTest.*
 NTP4WebUITest.*
+OnboardingWelcomeEmailChooserTest.*
+OnboardingWelcomeWelcomeAppTest.*
 OpenAudioFiles/*
-PasswordsAndFormsBrowserTest.*
 PrintPreviewAdvancedDialogTest.*
 PrintPreviewAdvancedItemTest.*
 PrintPreviewBaseSettingsSectionTest.*
@@ -259,8 +260,10 @@ PrintPreviewCustomMarginsTest.*
 PrintPreviewDestinationDialogTest.*
 PrintPreviewDestinationItemTest.*
 PrintPreviewDestinationListTest.*
-PrintPreviewDestinationSearchTest.*
+PrintPreviewDestinationSelectTest.*
+PrintPreviewDestinationSettingsTest.*
 PrintPreviewHeaderTest.*
+PrintPreviewKeyEventTest.*
 PrintPreviewLinkContainerTest.*
 PrintPreviewModelTest.*
 PrintPreviewNewDestinationSearchTest.*
@@ -275,11 +278,10 @@ PrintPreviewSettingsSelectTest.*
 PrintPreviewSystemDialogBrowserTest.*
 RestrictedFileSystemExtensionApiTest.*
 SandboxStatusUITest.*
-SettingsA11yManagePasswords.*
+SettingsA11yPasswords.*
 SettingsA11ySignOut.*
 SettingsAccessibilityTest.*
 SettingsAdvancedPageBrowserTest.*
-SettingsAnimationBrowserTest.*
 SettingsAutofillSectionBrowserTest.*
 SettingsBasicPageBrowserTest.*
 SettingsEasyUnlockBrowserTest.*
@@ -291,7 +293,6 @@ SettingsUIBrowserTest.*
 SigninSyncConfirmationTest.*
 SiteEngagementBrowserTest.*
 SysInternalsBrowserTest.*
-TabIndex/FilesAppBrowserTest.*
 TextDefaultsTest.*
 TtsAccessibilityTest.*
 UserManagerBrowserTest.*

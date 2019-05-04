@@ -10,10 +10,14 @@
 
 #include "call/rtcp_demuxer.h"
 
+#include <stddef.h>
+#include <algorithm>
+#include <utility>
+
+#include "absl/types/optional.h"
 #include "api/rtp_headers.h"
 #include "call/rtcp_packet_sink_interface.h"
 #include "call/rtp_rtcp_demuxer_helper.h"
-#include "common_types.h"  // NOLINT(build/include)
 #include "rtc_base/checks.h"
 
 namespace webrtc {

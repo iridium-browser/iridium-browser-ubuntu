@@ -10,15 +10,14 @@
 #include <string>
 #include <vector>
 
-#include "base/containers/hash_tables.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/process/process_info.h"
+#include "base/process/process.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/threading/platform_thread.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -462,7 +461,7 @@ void RecordTimeSinceLastStartup(PrefService* pref_service) {
 
   // Get the timestamp of the current startup.
   const base::Time process_start_time =
-      base::CurrentProcessInfo::CreationTime();
+      base::Process::Current().CreationTime();
 
   // Get the timestamp of the last startup from |pref_service|.
   const int64_t last_startup_timestamp_internal =

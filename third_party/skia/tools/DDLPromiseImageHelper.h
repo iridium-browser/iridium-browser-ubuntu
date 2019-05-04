@@ -8,17 +8,20 @@
 #ifndef PromiseImageHelper_DEFINED
 #define PromiseImageHelper_DEFINED
 
-#include "SkBitmap.h"
-#include "SkTArray.h"
-
 #include "GrBackendSurface.h"
+#include "SkBitmap.h"
 #include "SkCachedData.h"
-#include "SkYUVSizeInfo.h"
+#include "SkDeferredDisplayListRecorder.h"
+#include "SkPromiseImageTexture.h"
+#include "SkTArray.h"
+#include "SkTLazy.h"
+#include "SkYUVAIndex.h"
+#include "SkYUVASizeInfo.h"
 
 class GrContext;
-class SkDeferredDisplayListRecorder;
 class SkImage;
 class SkPicture;
+struct SkYUVAIndex;
 
 // This class consolidates tracking & extraction of the original image data from an skp,
 // the upload of said data to the GPU and the fulfillment of promise images.
@@ -52,6 +55,10 @@ public:
 
     void uploadAllToGPU(GrContext* context);
 
+    // Change the backing store texture for half the images. (Must ensure all fulfilled images are
+    // released before calling this.).
+    void replaceEveryOtherPromiseTexture(GrContext*);
+
     // reinflate a deflated SKP, replacing all the indices with promise images.
     sk_sp<SkPicture> reinflateSKP(SkDeferredDisplayListRecorder*,
                                   SkData* compressedPicture,
@@ -74,18 +81,41 @@ private:
 
         ~PromiseImageCallbackContext();
 
-        void setBackendTexture(const GrBackendTexture& backendTexture) {
-            SkASSERT(!fBackendTexture.isValid());
-            fBackendTexture = backendTexture;
+        void setBackendTexture(const GrBackendTexture& backendTexture);
+
+        sk_sp<SkPromiseImageTexture> fulfill() {
+            SkASSERT(fPromiseImageTexture);
+            SkASSERT(fUnreleasedFulfills >= 0);
+            ++fUnreleasedFulfills;
+            ++fTotalFulfills;
+            return fPromiseImageTexture;
         }
 
-        const GrBackendTexture& backendTexture() const { return fBackendTexture; }
+        void release() {
+            SkASSERT(fUnreleasedFulfills > 0);
+            --fUnreleasedFulfills;
+            ++fTotalReleases;
+        }
 
-        const GrCaps* caps() const;
+        void done() {
+            ++fDoneCnt;
+            SkASSERT(fDoneCnt <= fNumImages);
+        }
+
+        void wasAddedToImage() { fNumImages++; }
+
+        const SkPromiseImageTexture* promiseImageTexture() const {
+          return fPromiseImageTexture.get();
+        }
 
     private:
-        GrContext*       fContext;
-        GrBackendTexture fBackendTexture;
+        GrContext* fContext;
+        sk_sp<SkPromiseImageTexture> fPromiseImageTexture;
+        int fNumImages = 0;
+        int fTotalFulfills = 0;
+        int fTotalReleases = 0;
+        int fUnreleasedFulfills = 0;
+        int fDoneCnt = 0;
 
         typedef SkRefCnt INHERITED;
     };
@@ -116,9 +146,13 @@ private:
             SkASSERT(this->isYUV());
             return fYUVColorSpace;
         }
+        const SkYUVAIndex* yuvaIndices() const {
+            SkASSERT(this->isYUV());
+            return fYUVAIndices;
+        }
         const SkPixmap& yuvPixmap(int index) const {
             SkASSERT(this->isYUV());
-            SkASSERT(index >= 0 && index < 3);
+            SkASSERT(index >= 0 && index < SkYUVASizeInfo::kMaxCount);
             return fYUVPlanes[index];
         }
         const SkBitmap& normalBitmap() const {
@@ -127,34 +161,35 @@ private:
         }
 
         void setCallbackContext(int index, sk_sp<PromiseImageCallbackContext> callbackContext) {
-            SkASSERT(index >= 0 && index < (this->isYUV() ? 3 : 1));
+            SkASSERT(index >= 0 && index < (this->isYUV() ? SkYUVASizeInfo::kMaxCount : 1));
             fCallbackContexts[index] = callbackContext;
         }
-        PromiseImageCallbackContext* callbackContext(int index) {
-            SkASSERT(index >= 0 && index < (this->isYUV() ? 3 : 1));
+        PromiseImageCallbackContext* callbackContext(int index) const {
+            SkASSERT(index >= 0 && index < (this->isYUV() ? SkYUVASizeInfo::kMaxCount : 1));
             return fCallbackContexts[index].get();
         }
         sk_sp<PromiseImageCallbackContext> refCallbackContext(int index) const {
-            SkASSERT(index >= 0 && index < (this->isYUV() ? 3 : 1));
+            SkASSERT(index >= 0 && index < (this->isYUV() ? SkYUVASizeInfo::kMaxCount : 1));
             return fCallbackContexts[index];
         }
 
-        const GrCaps* caps() const { return fCallbackContexts[0]->caps(); }
-
-        const GrBackendTexture& backendTexture(int index) const {
-            SkASSERT(index >= 0 && index < (this->isYUV() ? 3 : 1));
-            return fCallbackContexts[index]->backendTexture();
+        const SkPromiseImageTexture* promiseTexture(int index) const {
+            SkASSERT(index >= 0 && index < (this->isYUV() ? SkYUVASizeInfo::kMaxCount : 1));
+            return fCallbackContexts[index]->promiseImageTexture();
         }
 
         void setNormalBitmap(const SkBitmap& bm) { fBitmap = bm; }
 
-        void setYUVData(sk_sp<SkCachedData> yuvData, SkYUVColorSpace cs) {
+        void setYUVData(sk_sp<SkCachedData> yuvData,
+                        SkYUVAIndex yuvaIndices[SkYUVAIndex::kIndexCount],
+                        SkYUVColorSpace cs) {
             fYUVData = yuvData;
+            memcpy(fYUVAIndices, yuvaIndices, sizeof(fYUVAIndices));
             fYUVColorSpace = cs;
         }
         void addYUVPlane(int index, const SkImageInfo& ii, const void* plane, size_t widthBytes) {
             SkASSERT(this->isYUV());
-            SkASSERT(index >= 0 && index < 3);
+            SkASSERT(index >= 0 && index < SkYUVASizeInfo::kMaxCount);
             fYUVPlanes[index].reset(ii, plane, widthBytes);
         }
 
@@ -170,10 +205,11 @@ private:
         // CPU-side cache of a YUV SkImage's contents
         sk_sp<SkCachedData>                fYUVData;       // when !null, this is a YUV image
         SkYUVColorSpace                    fYUVColorSpace = kJPEG_SkYUVColorSpace;
-        SkPixmap                           fYUVPlanes[3];
+        SkYUVAIndex                        fYUVAIndices[SkYUVAIndex::kIndexCount];
+        SkPixmap                           fYUVPlanes[SkYUVASizeInfo::kMaxCount];
 
-        // Up to 3 for a YUV image. Only one for a normal image.
-        sk_sp<PromiseImageCallbackContext> fCallbackContexts[3];
+        // Up to SkYUVASizeInfo::kMaxCount for a YUVA image. Only one for a normal image.
+        sk_sp<PromiseImageCallbackContext> fCallbackContexts[SkYUVASizeInfo::kMaxCount];
     };
 
     // This stack-based context allows each thread to re-inflate the image indices into
@@ -184,21 +220,19 @@ private:
         SkTArray<sk_sp<SkImage>>*      fPromiseImages;
     };
 
-    static void PromiseImageFulfillProc(void* textureContext, GrBackendTexture* outTexture) {
+    static sk_sp<SkPromiseImageTexture> PromiseImageFulfillProc(void* textureContext) {
         auto callbackContext = static_cast<PromiseImageCallbackContext*>(textureContext);
-        SkASSERT(callbackContext->backendTexture().isValid());
-        *outTexture = callbackContext->backendTexture();
+        return callbackContext->fulfill();
     }
 
     static void PromiseImageReleaseProc(void* textureContext) {
-#ifdef SK_DEBUG
         auto callbackContext = static_cast<PromiseImageCallbackContext*>(textureContext);
-        SkASSERT(callbackContext->backendTexture().isValid());
-#endif
+        callbackContext->release();
     }
 
     static void PromiseImageDoneProc(void* textureContext) {
         auto callbackContext = static_cast<PromiseImageCallbackContext*>(textureContext);
+        callbackContext->done();
         callbackContext->unref();
     }
 
@@ -206,6 +240,7 @@ private:
 
     bool isValidID(int id) const { return id >= 0 && id < fImageInfo.count(); }
     const PromiseImageInfo& getInfo(int id) const { return fImageInfo[id]; }
+    void uploadImage(GrContext*, PromiseImageInfo*);
 
     // returns -1 if not found
     int findImage(SkImage* image) const;

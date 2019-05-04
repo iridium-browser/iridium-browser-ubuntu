@@ -12,18 +12,18 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "media/base/decrypt_config.h"
-#include "media/base/media_log.h"
 #include "media/base/media_tracks.h"
+#include "media/base/media_util.h"
 #include "media/base/mock_demuxer_host.h"
 #include "media/base/mock_media_log.h"
 #include "media/base/test_helpers.h"
@@ -269,7 +269,7 @@ class FFmpegDemuxerTest : public testing::Test {
   // using StrictMock<MockMediaLog> for all FFmpegDemuxerTests. See
   // https://crbug.com/749178.
   StrictMock<MockMediaLog> media_log_;
-  MediaLog dummy_media_log_;
+  NullMediaLog dummy_media_log_;
 
   std::unique_ptr<FileDataSource> data_source_;
   std::unique_ptr<FFmpegDemuxer> demuxer_;
@@ -445,12 +445,12 @@ TEST_F(FFmpegDemuxerTest, Initialize_Multitrack) {
 #endif
 
 TEST_F(FFmpegDemuxerTest, Initialize_Encrypted) {
-  EXPECT_CALL(*this,
-              OnEncryptedMediaInitData(
-                  EmeInitDataType::WEBM,
-                  std::vector<uint8_t>(kEncryptedMediaInitData,
-                                       kEncryptedMediaInitData +
-                                           arraysize(kEncryptedMediaInitData))))
+  EXPECT_CALL(
+      *this, OnEncryptedMediaInitData(
+                 EmeInitDataType::WEBM,
+                 std::vector<uint8_t>(kEncryptedMediaInitData,
+                                      kEncryptedMediaInitData +
+                                          base::size(kEncryptedMediaInitData))))
       .Times(Exactly(2));
 
   CreateDemuxer("bear-320x240-av_enc-av.webm");
@@ -748,7 +748,7 @@ TEST_F(FFmpegDemuxerTest, Read_AudioNegativeStartTimeAndOggDiscard_Sync) {
     event.RunAndWaitForStatus(PIPELINE_OK);
   }
 }
-#endif
+#endif  // !defined(OS_ANDROID)
 
 // Similar to the test above, but using an opus clip with a large amount of
 // pre-skip, which ffmpeg encodes as negative timestamps.
@@ -770,7 +770,7 @@ TEST_F(FFmpegDemuxerTest, Read_AudioNegativeStartTimeAndOpusDiscard_Sync) {
 
   // Run the test twice with a seek in between.
   for (int i = 0; i < 2; ++i) {
-    for (size_t j = 0; j < arraysize(kTestExpectations); ++j) {
+    for (size_t j = 0; j < base::size(kTestExpectations); ++j) {
       audio->Read(NewReadCB(FROM_HERE, kTestExpectations[j][0],
                             kTestExpectations[j][1], true));
       base::RunLoop().Run();
@@ -797,6 +797,30 @@ TEST_F(FFmpegDemuxerTest, Read_AudioNegativeStartTimeAndOpusDiscard_Sync) {
 }
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
+
+#if defined(OS_CHROMEOS)
+TEST_F(FFmpegDemuxerTest, TestAudioNegativeTimestamps) {
+  // Note: This test will _crash_ the browser if negative timestamp
+  // values are skipped, since this file is heavily truncated to avoid
+  // copyright issue. If the negative timestamp packets are dropped, the
+  // demuxer will continue to read off the end of the stream.
+  CreateDemuxer("negative-audio-timestamps.avi");
+  InitializeDemuxer();
+
+  DemuxerStream* audio = GetStream(DemuxerStream::AUDIO);
+  audio->Read(NewReadCB(FROM_HERE, 104, 0, true));
+  base::RunLoop().Run();
+  audio->Read(NewReadCB(FROM_HERE, 104, 25873, true));
+  base::RunLoop().Run();
+  audio->Read(NewReadCB(FROM_HERE, 104, 51746, true));
+  base::RunLoop().Run();
+  audio->Read(NewReadCB(FROM_HERE, 104, 77619, true));
+  base::RunLoop().Run();
+  audio->Read(NewReadCB(FROM_HERE, 104, 103492, true));
+  base::RunLoop().Run();
+}
+#endif  // defined(OS_CHROMEOS)
+
 // Similar to the test above, but using an opus clip plus h264 b-frames to
 // ensure we don't apply chained ogg workarounds to other content.
 TEST_F(FFmpegDemuxerTest,
@@ -820,7 +844,7 @@ TEST_F(FFmpegDemuxerTest,
         FROM_HERE, 408, 0, base::TimeDelta::FromMicroseconds(6500), true));
     base::RunLoop().Run();
 
-    for (size_t j = 0; j < arraysize(kTestExpectations); ++j) {
+    for (size_t j = 0; j < base::size(kTestExpectations); ++j) {
       audio->Read(NewReadCB(FROM_HERE, kTestExpectations[j][0],
                             kTestExpectations[j][1], true));
       base::RunLoop().Run();
@@ -847,7 +871,7 @@ TEST_F(FFmpegDemuxerTest,
     event.RunAndWaitForStatus(PIPELINE_OK);
   }
 }
-#endif
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
 // Similar to the test above, but using sfx-opus.ogg, which has a much smaller
 // amount of discard padding and no |start_time| set on the AVStream.
@@ -1231,7 +1255,7 @@ TEST_F(FFmpegDemuxerTest, IsValidAnnexB) {
     "bear-1280x720-av_with-aud-nalus_frag.mp4"
   };
 
-  for (size_t i = 0; i < arraysize(files); ++i) {
+  for (size_t i = 0; i < base::size(files); ++i) {
     DVLOG(1) << "Testing " << files[i];
     CreateDemuxer(files[i]);
     InitializeDemuxer();
@@ -1525,7 +1549,7 @@ TEST_F(FFmpegDemuxerTest, UTCDateToTime_Invalid) {
       "2012-11-1012:34:56",
   };
 
-  for (size_t i = 0; i < arraysize(invalid_date_strings); ++i) {
+  for (size_t i = 0; i < base::size(invalid_date_strings); ++i) {
     const char* date_string = invalid_date_strings[i];
     base::Time result;
     EXPECT_FALSE(base::Time::FromUTCString(date_string, &result))

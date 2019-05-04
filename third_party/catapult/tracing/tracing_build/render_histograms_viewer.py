@@ -2,24 +2,33 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import cgi
 import json
 import logging
 import re
 
-# If you change this, please update "Fall-back to old formats."
-_JSON_TAG = '<histogram-json>%s</histogram-json>'
+_DATA_START = '<div id="histogram-json-data" style="display:none;"><!--'
+_DATA_END = '--!></div>'
 
 
-def ExtractJSON(results_html, json_tag):
+def ExtractJSON(results_html):
   results = []
-  pattern = '(.*?)'.join(re.escape(part) for part in json_tag.split('%s'))
   flags = re.MULTILINE | re.DOTALL
-  for match in re.finditer(pattern, results_html, flags):
+  start = re.search("^%s" % re.escape(_DATA_START), results_html, flags)
+  if start is None:
+    logging.warn('Could not find histogram data start: %s', _DATA_START)
+    return []
+  pattern = '^((%s)|(.*?))$' % re.escape(_DATA_END)
+  # Find newlines and parse each line as separate JSON data.
+  for match in re.compile(pattern, flags).finditer(results_html, start.end()+1):
     try:
-      results.append(json.loads(match.group(1)))
+      # Check if the end tag in group(2) got a match.
+      if match.group(2):
+        return results
+      results.append(json.loads(match.group(3)))
     except ValueError:
-      logging.warn('Found existing results json, but failed to parse it.')
+      logging.warn(
+          'Found existing results json, but failed to parse it: %s',
+          match.group(1))
       return []
   return results
 
@@ -28,17 +37,7 @@ def ReadExistingResults(results_html):
   if not results_html:
     return []
 
-  histogram_dicts = ExtractJSON(results_html, _JSON_TAG)
-
-  # Fall-back to old formats.
-  if not histogram_dicts:
-    histogram_dicts = ExtractJSON(
-        results_html, json_tag='<div class="histogram-json">%s</div>')
-  if not histogram_dicts:
-    match = re.search('<div id="value-set-json">(.*?)</div>', results_html,
-                      re.MULTILINE | re.DOTALL)
-    if match:
-      histogram_dicts = json.loads(match.group(1))
+  histogram_dicts = ExtractJSON(results_html)
 
   if not histogram_dicts:
     logging.warn('Failed to extract previous results from HTML output')
@@ -66,13 +65,16 @@ def RenderHistogramsViewer(histogram_dicts, output_stream, reset_results=False,
     histogram_dicts += ReadExistingResults(results_html)
 
   output_stream.write(vulcanized_html)
-
-  output_stream.write('<div style="display:none;">')
-  json_tag_newline = '\n%s' % _JSON_TAG
+  # Put all the serialized histograms nodes inside an html comment to avoid
+  # unecessary stress on html parsing and avoid creating throw-away dom nodes.
+  output_stream.write(_DATA_START)
   for histogram in histogram_dicts:
     hist_json = json.dumps(histogram, separators=(',', ':'))
-    output_stream.write(json_tag_newline % cgi.escape(hist_json))
-  output_stream.write('\n</div>\n')
+    output_stream.write('\n')
+    # No escaping is necessary since the data is stored inside an html comment.
+    # This assumes that {hist_json} doesn't contain an html comment itself.
+    output_stream.write(hist_json)
+  output_stream.write('\n%s\n' % _DATA_END)
 
   # If the output file already existed and was longer than the new contents,
   # discard the old contents after this point.

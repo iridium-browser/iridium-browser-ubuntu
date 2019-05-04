@@ -32,8 +32,9 @@ var media = (function() {
   };
 
   media.onReceiveAudioFocusState = function(audioFocusState) {
-    if (!audioFocusState)
+    if (!audioFocusState) {
       return;
+    }
 
     manager.updateAudioFocusSessions(audioFocusState.sessions);
   };
@@ -75,8 +76,7 @@ var media = (function() {
     });
 
     if (propertyCount === 0) {
-      manager.updatePlayerInfo(
-          source, event.ticksMillis, 'event', event.type);
+      manager.updatePlayerInfo(source, event.ticksMillis, 'event', event.type);
     }
   };
 

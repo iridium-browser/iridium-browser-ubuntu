@@ -10,6 +10,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/callback.h"
@@ -29,6 +30,7 @@
 namespace offline_pages {
 
 class CleanupTaskFactory;
+class ClientPolicyController;
 class RequestQueueStore;
 
 // Class responsible for managing save page requests.
@@ -72,6 +74,13 @@ class RequestQueue : public TaskQueue::Delegate {
   void RemoveRequests(const std::vector<int64_t>& request_ids,
                       UpdateCallback callback);
 
+  // Invokes |remove_predicate| for all requests in the queue, and removes each
+  // request where |remove_predicate| returns true. Note: |remove_predicate| is
+  // called from a background thread.
+  void RemoveRequestsIf(const base::RepeatingCallback<
+                            bool(const SavePageRequest&)>& remove_predicate,
+                        UpdateCallback done_callback);
+
   // Changes the state to |new_state| for requests matching the
   // |request_ids|. Results are returned through |callback|.
   void ChangeRequestsState(const std::vector<int64_t>& request_ids,
@@ -86,6 +95,10 @@ class RequestQueue : public TaskQueue::Delegate {
   // |callback|.
   void MarkAttemptAborted(int64_t request_id, UpdateCallback callback);
 
+  // Marks attempt with |request_id| as deferred. Results are returned through
+  // |callback|.
+  void MarkAttemptDeferred(int64_t request_id, UpdateCallback callback);
+
   // Marks attempt with |request_id| as completed. The attempt may have
   // completed with either success or failure (stored in FailState). Results are
   // returned through |callback|.
@@ -93,10 +106,17 @@ class RequestQueue : public TaskQueue::Delegate {
                             FailState fail_state,
                             UpdateCallback callback);
 
+  // Sets the auto fetch notification state on the request with |request_id|.
+  void SetAutoFetchNotificationState(
+      int64_t request_id,
+      SavePageRequest::AutoFetchNotificationState state,
+      base::OnceCallback<void(bool updated)> callback);
+
   // Make a task to pick the next request, and report our choice to the
   // callbacks.
   void PickNextRequest(
       OfflinerPolicy* policy,
+      ClientPolicyController* policy_controller,
       PickRequestTask::RequestPickedCallback picked_callback,
       PickRequestTask::RequestNotPickedCallback not_picked_callback,
       PickRequestTask::RequestCountCallback request_count_callback,
@@ -118,6 +138,8 @@ class RequestQueue : public TaskQueue::Delegate {
   void SetCleanupFactory(std::unique_ptr<CleanupTaskFactory> factory) {
     cleanup_factory_ = std::move(factory);
   }
+
+  RequestQueueStore* GetStoreForTesting() { return store_.get(); }
 
  private:
   // Store initialization functions.

@@ -120,14 +120,15 @@ bool CSSLayoutDefinition::Instance::Layout(
     fixed_block_size = computed_values.extent_;
   }
 
-  CustomLayoutConstraints* constraints = new CustomLayoutConstraints(
-      layout_custom.LogicalWidth(), fixed_block_size,
-      layout_custom.GetConstraintData(), isolate);
+  CustomLayoutConstraints* constraints =
+      MakeGarbageCollected<CustomLayoutConstraints>(
+          layout_custom.LogicalWidth(), fixed_block_size,
+          layout_custom.GetConstraintData(), isolate);
 
   // TODO(ikilpatrick): Instead of creating a new style_map each time here,
   // store on LayoutCustom, and update when the style changes.
   StylePropertyMapReadOnly* style_map =
-      new PrepopulatedComputedStylePropertyMap(
+      MakeGarbageCollected<PrepopulatedComputedStylePropertyMap>(
           layout_custom.GetDocument(), layout_custom.StyleRef(),
           layout_custom.GetNode(), definition_->native_invalidation_properties_,
           definition_->custom_invalidation_properties_);
@@ -167,7 +168,7 @@ bool CSSLayoutDefinition::Instance::Layout(
     v8::Local<v8::Value> value = iterator.GetValue().ToLocalChecked();
 
     // Process a single fragment request.
-    if (V8LayoutFragmentRequest::hasInstance(value, isolate)) {
+    if (V8LayoutFragmentRequest::HasInstance(value, isolate)) {
       CustomLayoutFragmentRequest* fragment_request =
           V8LayoutFragmentRequest::ToImpl(v8::Local<v8::Object>::Cast(value));
 
@@ -241,7 +242,7 @@ bool CSSLayoutDefinition::Instance::Layout(
 
   // Attempt to convert the result.
   V8FragmentResultOptions::ToImpl(isolate, result_value,
-                                  *fragment_result_options, exception_state);
+                                  fragment_result_options, exception_state);
 
   if (exception_state.HadException()) {
     V8ScriptRunner::ReportException(isolate, exception_state.GetException());
@@ -314,7 +315,7 @@ CSSLayoutDefinition::Instance* CSSLayoutDefinition::CreateInstance() {
   if (V8ScriptRunner::CallAsConstructor(
           isolate, constructor, ExecutionContext::From(script_state_), 0, {})
           .ToLocal(&layout_instance)) {
-    instance = new Instance(this, layout_instance);
+    instance = MakeGarbageCollected<Instance>(this, layout_instance);
   } else {
     constructor_has_failed_ = true;
   }
@@ -327,9 +328,9 @@ void CSSLayoutDefinition::Instance::Trace(blink::Visitor* visitor) {
 }
 
 void CSSLayoutDefinition::Trace(Visitor* visitor) {
-  visitor->Trace(constructor_.Cast<v8::Value>());
-  visitor->Trace(intrinsic_sizes_.Cast<v8::Value>());
-  visitor->Trace(layout_.Cast<v8::Value>());
+  visitor->Trace(constructor_);
+  visitor->Trace(intrinsic_sizes_);
+  visitor->Trace(layout_);
   visitor->Trace(script_state_);
 }
 

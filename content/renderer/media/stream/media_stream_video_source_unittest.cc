@@ -42,7 +42,7 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
         child_process_(new ChildProcess()),
         number_of_successful_constraints_applied_(0),
         number_of_failed_constraints_applied_(0),
-        result_(MEDIA_DEVICE_OK),
+        result_(blink::MEDIA_DEVICE_OK),
         result_name_(""),
         mock_source_(new MockMediaStreamVideoSource(
             media::VideoCaptureFormat(gfx::Size(1280, 720),
@@ -63,7 +63,7 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
                            blink::WebMediaStreamSource::kTypeVideo,
                            blink::WebString::FromASCII("dummy_source_name"),
                            false /* remote */);
-    web_source_.SetExtraData(mock_source_);
+    web_source_.SetPlatformSource(base::WrapUnique(mock_source_));
   }
 
   void TearDown() override {
@@ -107,14 +107,14 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
       double frame_rate,
       bool detect_rotation = false) {
     blink::WebMediaStreamTrack track = CreateTrack(
-        "123",
-        VideoTrackAdapterSettings(width, height, 0.0, HUGE_VAL, frame_rate),
+        "123", VideoTrackAdapterSettings(gfx::Size(width, height), frame_rate),
         base::Optional<bool>(), false, 0.0);
 
     EXPECT_EQ(0, NumberOfSuccessConstraintsCallbacks());
     mock_source_->StartMockedSource();
     // Once the source has started successfully we expect that the
-    // ConstraintsCallback in MediaStreamSource::AddTrack completes.
+    // ConstraintsCallback in blink::WebPlatformMediaStreamSource::AddTrack
+    // completes.
     EXPECT_EQ(1, NumberOfSuccessConstraintsCallbacks());
     return track;
   }
@@ -127,7 +127,7 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
     return number_of_failed_constraints_applied_;
   }
 
-  content::MediaStreamRequestResult error_type() const { return result_; }
+  blink::MediaStreamRequestResult error_type() const { return result_; }
   blink::WebString error_name() const { return result_name_; }
 
   MockMediaStreamVideoSource* mock_source() { return mock_source_; }
@@ -200,12 +200,11 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
         CreateTrackAndStartSource(expected_width1, expected_height1,
                                   MediaStreamVideoSource::kDefaultFrameRate);
 
-    blink::WebMediaStreamTrack track2 =
-        CreateTrack("dummy",
-                    VideoTrackAdapterSettings(
-                        expected_width2, expected_height2, 0.0, HUGE_VAL,
-                        MediaStreamVideoSource::kDefaultFrameRate),
-                    base::Optional<bool>(), false, 0.0);
+    blink::WebMediaStreamTrack track2 = CreateTrack(
+        "dummy",
+        VideoTrackAdapterSettings(gfx::Size(expected_width2, expected_height2),
+                                  MediaStreamVideoSource::kDefaultFrameRate),
+        base::Optional<bool>(), false, 0.0);
 
     MockMediaStreamVideoSink sink1;
     sink1.ConnectToTrack(track1);
@@ -236,12 +235,12 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
   }
 
  private:
-  void OnConstraintsApplied(MediaStreamSource* source,
-                            MediaStreamRequestResult result,
+  void OnConstraintsApplied(blink::WebPlatformMediaStreamSource* source,
+                            blink::MediaStreamRequestResult result,
                             const blink::WebString& result_name) {
-    ASSERT_EQ(source, web_source().GetExtraData());
+    ASSERT_EQ(source, web_source().GetPlatformSource());
 
-    if (result == MEDIA_DEVICE_OK) {
+    if (result == blink::MEDIA_DEVICE_OK) {
       ++number_of_successful_constraints_applied_;
     } else {
       result_ = result;
@@ -260,7 +259,7 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
   blink::WebMediaStreamTrack track_to_release_;
   int number_of_successful_constraints_applied_;
   int number_of_failed_constraints_applied_;
-  content::MediaStreamRequestResult result_;
+  blink::MediaStreamRequestResult result_;
   blink::WebString result_name_;
   blink::WebMediaStreamSource web_source_;
   // |mock_source_| is owned by |web_source_|.
@@ -463,7 +462,7 @@ TEST_F(MediaStreamVideoSourceTest, ReconfigureTrack) {
   EXPECT_EQ(settings.aspect_ratio, 640.0 / 480.0);
 
   source()->ReconfigureTrack(
-      native_track, VideoTrackAdapterSettings(630, 470, 0, HUGE_VAL, 30.0));
+      native_track, VideoTrackAdapterSettings(gfx::Size(630, 470), 30.0));
   native_track->GetSettings(settings);
   EXPECT_EQ(settings.width, 630);
   EXPECT_EQ(settings.height, 470);
@@ -500,7 +499,7 @@ TEST_F(MediaStreamVideoSourceTest, ReconfigureStoppedTrack) {
             blink::WebMediaStreamSource::kReadyStateEnded);
 
   source()->ReconfigureTrack(
-      native_track, VideoTrackAdapterSettings(630, 470, 0, HUGE_VAL, 30.0));
+      native_track, VideoTrackAdapterSettings(gfx::Size(630, 470), 30.0));
   blink::WebMediaStreamTrack::Settings stopped_settings;
   native_track->GetSettings(stopped_settings);
   EXPECT_EQ(stopped_settings.width, -1);
@@ -653,7 +652,8 @@ TEST_F(MediaStreamVideoSourceTest, StartStopAndNotifyRestartSupported) {
             blink::WebMediaStreamSource::kReadyStateLive);
 
   EXPECT_CALL(*this, MockNotification());
-  MediaStreamTrack* track = MediaStreamTrack::GetTrack(web_track);
+  blink::WebPlatformMediaStreamTrack* track =
+      blink::WebPlatformMediaStreamTrack::GetTrack(web_track);
   track->StopAndNotify(base::BindOnce(
       &MediaStreamVideoSourceTest::MockNotification, base::Unretained(this)));
   EXPECT_EQ(web_track.Source().GetReadyState(),
@@ -670,7 +670,8 @@ TEST_F(MediaStreamVideoSourceTest, StartStopAndNotifyRestartNotSupported) {
             blink::WebMediaStreamSource::kReadyStateLive);
 
   EXPECT_CALL(*this, MockNotification());
-  MediaStreamTrack* track = MediaStreamTrack::GetTrack(web_track);
+  blink::WebPlatformMediaStreamTrack* track =
+      blink::WebPlatformMediaStreamTrack::GetTrack(web_track);
   track->StopAndNotify(base::BindOnce(
       &MediaStreamVideoSourceTest::MockNotification, base::Unretained(this)));
   EXPECT_EQ(web_track.Source().GetReadyState(),

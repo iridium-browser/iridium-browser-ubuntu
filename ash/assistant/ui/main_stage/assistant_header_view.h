@@ -18,7 +18,7 @@ class BoxLayout;
 
 namespace ash {
 
-class AssistantController;
+class AssistantViewDelegate;
 class BaseLogoView;
 
 // AssistantHeaderView is the child of UiElementContainerView which provides
@@ -27,7 +27,7 @@ class AssistantHeaderView : public views::View,
                             public AssistantInteractionModelObserver,
                             public AssistantUiModelObserver {
  public:
-  explicit AssistantHeaderView(AssistantController* assistant_controller);
+  explicit AssistantHeaderView(AssistantViewDelegate* delegate);
   ~AssistantHeaderView() override;
 
   // views::View:
@@ -39,14 +39,16 @@ class AssistantHeaderView : public views::View,
       const std::shared_ptr<AssistantResponse>& response) override;
 
   // AssistantUiModelObserver:
-  void OnUiVisibilityChanged(AssistantVisibility new_visibility,
-                             AssistantVisibility old_visibility,
-                             AssistantSource source) override;
+  void OnUiVisibilityChanged(
+      AssistantVisibility new_visibility,
+      AssistantVisibility old_visibility,
+      base::Optional<AssistantEntryPoint> entry_point,
+      base::Optional<AssistantExitPoint> exit_point) override;
 
  private:
   void InitLayout();
 
-  AssistantController* const assistant_controller_;  // Owned by Shell.
+  AssistantViewDelegate* const delegate_;  // Owned by Shell.
 
   views::BoxLayout* layout_manager_;  // Owned by view hierarchy.
   BaseLogoView* molecule_icon_;       // Owned by view hierarchy.

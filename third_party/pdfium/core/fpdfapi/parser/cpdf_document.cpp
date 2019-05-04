@@ -46,7 +46,7 @@ void InsertWidthArrayImpl(std::vector<int> widths, CPDF_Array* pWidthArray) {
       break;
   }
   if (i == widths.size()) {
-    int first = pWidthArray->GetIntegerAt(pWidthArray->GetCount() - 1);
+    int first = pWidthArray->GetIntegerAt(pWidthArray->size() - 1);
     pWidthArray->AddNew<CPDF_Number>(first + static_cast<int>(widths.size()) -
                                      1);
     pWidthArray->AddNew<CPDF_Number>(widths[0]);
@@ -99,7 +99,7 @@ int CountPages(CPDF_Dictionary* pPages,
   if (!pKidList)
     return 0;
   count = 0;
-  for (size_t i = 0; i < pKidList->GetCount(); i++) {
+  for (size_t i = 0; i < pKidList->size(); i++) {
     CPDF_Dictionary* pKid = pKidList->GetDictAt(i);
     if (!pKid || pdfium::ContainsKey(*visited_pages, pKid))
       continue;
@@ -168,8 +168,7 @@ std::unique_ptr<CPDF_Dictionary> CalculateFontDesc(
     int descend,
     std::unique_ptr<CPDF_Array> bbox,
     int32_t stemV) {
-  auto pFontDesc =
-      pdfium::MakeUnique<CPDF_Dictionary>(pDoc->GetByteStringPool());
+  auto pFontDesc = pDoc->New<CPDF_Dictionary>();
   pFontDesc->SetNewFor<CPDF_Name>("Type", "FontDescriptor");
   pFontDesc->SetNewFor<CPDF_Name>("FontName", basefont);
   pFontDesc->SetNewFor<CPDF_Number>("Flags", flags);
@@ -212,7 +211,7 @@ CPDF_Parser::Error CPDF_Document::LoadDoc(
   if (!m_pParser)
     SetParser(pdfium::MakeUnique<CPDF_Parser>(this));
 
-  return m_pParser->StartParse(pFileAccess, password);
+  return HandleLoadResult(m_pParser->StartParse(pFileAccess, password));
 }
 
 CPDF_Parser::Error CPDF_Document::LoadLinearizedDoc(
@@ -221,7 +220,7 @@ CPDF_Parser::Error CPDF_Document::LoadLinearizedDoc(
   if (!m_pParser)
     SetParser(pdfium::MakeUnique<CPDF_Parser>(this));
 
-  return m_pParser->StartLinearizedParse(validator, password);
+  return HandleLoadResult(m_pParser->StartLinearizedParse(validator, password));
 }
 
 void CPDF_Document::LoadPages() {
@@ -259,8 +258,7 @@ CPDF_Dictionary* CPDF_Document::TraversePDFPages(int iPage,
     return nullptr;
   }
   CPDF_Dictionary* page = nullptr;
-  for (size_t i = m_pTreeTraversal[level].second; i < pKidList->GetCount();
-       i++) {
+  for (size_t i = m_pTreeTraversal[level].second; i < pKidList->size(); i++) {
     if (*nPagesToGo == 0)
       break;
     pKidList->ConvertToIndirectObjectAt(i, this);
@@ -299,7 +297,7 @@ CPDF_Dictionary* CPDF_Document::TraversePDFPages(int iPage,
       }
     }
   }
-  if (m_pTreeTraversal[level].second == pKidList->GetCount())
+  if (m_pTreeTraversal[level].second == pKidList->size())
     m_pTreeTraversal.pop_back();
   return page;
 }
@@ -313,6 +311,12 @@ void CPDF_Document::ResetTraversal() {
 void CPDF_Document::SetParser(std::unique_ptr<CPDF_Parser> pParser) {
   ASSERT(!m_pParser);
   m_pParser = std::move(pParser);
+}
+
+CPDF_Parser::Error CPDF_Document::HandleLoadResult(CPDF_Parser::Error error) {
+  if (error == CPDF_Parser::SUCCESS)
+    m_bHasValidCrossReferenceTable = !m_pParser->xref_table_rebuilt();
+  return error;
 }
 
 const CPDF_Dictionary* CPDF_Document::GetPagesDict() const {
@@ -388,7 +392,7 @@ int CPDF_Document::FindPageIndex(const CPDF_Dictionary* pNode,
     return -1;
   }
 
-  if (count && count == pKidList->GetCount()) {
+  if (count && count == pKidList->size()) {
     for (size_t i = 0; i < count; i++) {
       const CPDF_Reference* pKid = ToReference(pKidList->GetObjectAt(i));
       if (pKid && pKid->GetRefObjNum() == objnum)
@@ -396,7 +400,7 @@ int CPDF_Document::FindPageIndex(const CPDF_Dictionary* pNode,
     }
   }
 
-  for (size_t i = 0; i < pKidList->GetCount(); i++) {
+  for (size_t i = 0; i < pKidList->size(); i++) {
     const CPDF_Dictionary* pKid = pKidList->GetDictAt(i);
     if (!pKid || pKid == pNode)
       continue;
@@ -527,7 +531,7 @@ bool CPDF_Document::InsertDeletePDFPage(CPDF_Dictionary* pPages,
   if (!pKidList)
     return false;
 
-  for (size_t i = 0; i < pKidList->GetCount(); i++) {
+  for (size_t i = 0; i < pKidList->size(); i++) {
     CPDF_Dictionary* pKid = pKidList->GetDictAt(i);
     if (pKid->GetStringFor("Type") == "Page") {
       if (nPagesToGo != 0) {

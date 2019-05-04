@@ -10,7 +10,8 @@
 #include "SkLoadICU.h"
 #include "SkMalloc.h"
 #include "SkOnce.h"
-#include "SkPaint.h"
+#include "SkFont.h"
+#include "SkFontMetrics.h"
 #include "SkPoint.h"
 #include "SkRefCnt.h"
 #include "SkScalar.h"
@@ -22,7 +23,6 @@
 #include "SkTFitsIn.h"
 #include "SkTLazy.h"
 #include "SkTemplates.h"
-#include "SkTextBlobPriv.h"
 #include "SkTo.h"
 #include "SkTypeface.h"
 #include "SkTypes.h"
@@ -71,8 +71,18 @@ HBBlob stream_to_blob(std::unique_ptr<SkStreamAsset> asset) {
 }
 
 HBFont create_hb_font(SkTypeface* tf) {
+    if (!tf) {
+        return nullptr;
+    }
     int index;
-    HBBlob blob(stream_to_blob(std::unique_ptr<SkStreamAsset>(tf->openStream(&index))));
+    std::unique_ptr<SkStreamAsset> typefaceAsset(tf->openStream(&index));
+    if (!typefaceAsset) {
+        SkString name;
+        tf->getFamilyName(&name);
+        SkDebugf("Typeface '%s' has no data :(\n", name.c_str());
+        return nullptr;
+    }
+    HBBlob blob(stream_to_blob(std::move(typefaceAsset)));
     HBFace face(hb_face_create(blob.get(), (unsigned)index));
     SkASSERT(face);
     if (!face) {
@@ -143,7 +153,9 @@ public:
 
         // The required lifetime of utf16 isn't well documented.
         // It appears it isn't used after ubidi_setPara except through ubidi_getText.
-        ubidi_setPara(bidi.get(), utf16.getBuffer(), utf16.length(), level, nullptr, &status);
+        ubidi_setPara(bidi.get(),
+                      reinterpret_cast<const UChar*>(utf16.getBuffer()),
+                      utf16.length(), level, nullptr, &status);
         if (U_FAILURE(status)) {
             SkDebugf("Bidi error: %s", u_errorName(status));
             return ret;
@@ -386,37 +398,46 @@ struct ShapedGlyph {
     bool fHasVisual;
 };
 struct ShapedRun {
-    ShapedRun(const char* utf8Start, const char* utf8End, int numGlyphs, const SkPaint& paint,
+    ShapedRun(const char* utf8Start, const char* utf8End, int numGlyphs, const SkFont& font,
               UBiDiLevel level, std::unique_ptr<ShapedGlyph[]> glyphs)
-        : fUtf8Start(utf8Start), fUtf8End(utf8End), fNumGlyphs(numGlyphs), fPaint(paint)
+        : fUtf8Start(utf8Start), fUtf8End(utf8End), fNumGlyphs(numGlyphs), fFont(font)
         , fLevel(level), fGlyphs(std::move(glyphs))
     {}
 
     const char* fUtf8Start;
     const char* fUtf8End;
     int fNumGlyphs;
-    SkPaint fPaint;
+    SkFont fFont;
     UBiDiLevel fLevel;
     std::unique_ptr<ShapedGlyph[]> fGlyphs;
+    SkVector fAdvance = { 0, 0 };
 };
 
 static constexpr bool is_LTR(UBiDiLevel level) {
     return (level & 1) == 0;
 }
 
-static void append(SkTextBlobBuilder* b, const ShapedRun& run, int start, int end, SkPoint* p) {
+static void append(SkShaper::RunHandler* handler, const SkShaper::RunHandler::RunInfo& runInfo,
+                   const ShapedRun& run, int start, int end,
+                   SkPoint* p) {
     unsigned len = end - start;
-    auto runBuffer = SkTextBlobBuilderPriv::AllocRunTextPos(b, run.fPaint, len,
-            run.fUtf8End - run.fUtf8Start, SkString());
-    memcpy(runBuffer.utf8text, run.fUtf8Start, run.fUtf8End - run.fUtf8Start);
+
+    const auto buffer = handler->newRunBuffer(runInfo, run.fFont, len, run.fUtf8End - run.fUtf8Start);
+    SkASSERT(buffer.glyphs);
+    SkASSERT(buffer.positions);
+
+    if (buffer.utf8text) {
+        memcpy(buffer.utf8text, run.fUtf8Start, run.fUtf8End - run.fUtf8Start);
+    }
 
     for (unsigned i = 0; i < len; i++) {
         // Glyphs are in logical order, but output ltr since PDF readers seem to expect that.
         const ShapedGlyph& glyph = run.fGlyphs[is_LTR(run.fLevel) ? start + i : end - 1 - i];
-        runBuffer.glyphs[i] = glyph.fID;
-        runBuffer.clusters[i] = glyph.fCluster;
-        reinterpret_cast<SkPoint*>(runBuffer.pos)[i] =
-                SkPoint::Make(p->fX + glyph.fOffset.fX, p->fY - glyph.fOffset.fY);
+        buffer.glyphs[i] = glyph.fID;
+        buffer.positions[i] = SkPoint::Make(p->fX + glyph.fOffset.fX, p->fY - glyph.fOffset.fY);
+        if (buffer.clusters) {
+            buffer.clusters[i] = glyph.fCluster;
+        }
         p->fX += glyph.fAdvance.fX;
         p->fY += glyph.fAdvance.fY;
     }
@@ -484,7 +505,9 @@ SkShaper::SkShaper(sk_sp<SkTypeface> tf) : fImpl(new Impl) {
 
     fImpl->fTypeface = tf ? std::move(tf) : SkTypeface::MakeDefault();
     fImpl->fHarfBuzzFont = create_hb_font(fImpl->fTypeface.get());
-    SkASSERT(fImpl->fHarfBuzzFont);
+    if (!fImpl->fHarfBuzzFont) {
+        SkDebugf("create_hb_font failed!\n");
+    }
     fImpl->fBuffer.reset(hb_buffer_create());
     SkASSERT(fImpl->fBuffer);
 
@@ -506,15 +529,15 @@ bool SkShaper::good() const {
            fImpl->fBreakIterator;
 }
 
-SkPoint SkShaper::shape(SkTextBlobBuilder* builder,
-                        const SkPaint& srcPaint,
+SkPoint SkShaper::shape(RunHandler* handler,
+                        const SkFont& srcPaint,
                         const char* utf8,
                         size_t utf8Bytes,
                         bool leftToRight,
                         SkPoint point,
                         SkScalar width) const {
     sk_sp<SkFontMgr> fontMgr = SkFontMgr::RefDefault();
-    SkASSERT(builder);
+    SkASSERT(handler);
     UBiDiLevel defaultLevel = leftToRight ? UBIDI_DEFAULT_LTR : UBIDI_DEFAULT_RTL;
     //hb_script_t script = ...
 
@@ -601,6 +624,9 @@ SkPoint SkShaper::shape(SkTextBlobBuilder* builder,
         // TODO: language
         hb_buffer_guess_segment_properties(buffer);
         // TODO: features
+        if (!font->currentHBFont()) {
+            continue;
+        }
         hb_shape(font->currentHBFont(), buffer, nullptr, 0);
         unsigned len = hb_buffer_get_length(buffer);
         if (len == 0) {
@@ -620,15 +646,15 @@ SkPoint SkShaper::shape(SkTextBlobBuilder* builder,
             return point;
         }
 
-        SkPaint paint(srcPaint);
-        paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+        SkFont paint(srcPaint);
         paint.setTypeface(sk_ref_sp(font->currentTypeface()));
         ShapedRun& run = runs.emplace_back(utf8Start, utf8End, len, paint, bidi->currentLevel(),
                                            std::unique_ptr<ShapedGlyph[]>(new ShapedGlyph[len]));
         int scaleX, scaleY;
         hb_font_get_scale(font->currentHBFont(), &scaleX, &scaleY);
-        double textSizeY = run.fPaint.getTextSize() / scaleY;
-        double textSizeX = run.fPaint.getTextSize() / scaleX * run.fPaint.getTextScaleX();
+        double textSizeY = run.fFont.getSize() / scaleY;
+        double textSizeX = run.fFont.getSize() / scaleX * run.fFont.getScaleX();
+        SkVector runAdvance = { 0, 0 };
         for (unsigned i = 0; i < len; i++) {
             ShapedGlyph& glyph = run.fGlyphs[i];
             glyph.fID = info[i].codepoint;
@@ -640,7 +666,10 @@ SkPoint SkShaper::shape(SkTextBlobBuilder* builder,
             glyph.fHasVisual = true; //!font->currentTypeface()->glyphBoundsAreZero(glyph.fID);
             //info->mask safe_to_break;
             glyph.fMustLineBreakBefore = false;
+
+            runAdvance += glyph.fAdvance;
         }
+        run.fAdvance = runAdvance;
 
         int32_t clusterOffset = utf8Start - utf8;
         uint32_t previousCluster = 0xFFFFFFFF;
@@ -711,14 +740,15 @@ SkPoint SkShaper::shape(SkTextBlobBuilder* builder,
     SkScalar maxDescent = 0;
     SkScalar maxLeading = 0;
     int previousRunIndex = -1;
+    size_t lineIndex = 0;
     while (glyphIterator.current()) {
         int runIndex = glyphIterator.fRunIndex;
         int glyphIndex = glyphIterator.fGlyphIndex;
         ShapedGlyph* nextGlyph = glyphIterator.next();
 
         if (previousRunIndex != runIndex) {
-            SkPaint::FontMetrics metrics;
-            runs[runIndex].fPaint.getFontMetrics(&metrics);
+            SkFontMetrics metrics;
+            runs[runIndex].fFont.getMetrics(&metrics);
             maxAscent = SkTMin(maxAscent, metrics.fAscent);
             maxDescent = SkTMax(maxDescent, metrics.fDescent);
             maxLeading = SkTMax(maxLeading, metrics.fLeading);
@@ -749,7 +779,16 @@ SkPoint SkShaper::shape(SkTextBlobBuilder* builder,
             int endGlyphIndex = (logicalIndex == runIndex)
                               ? glyphIndex + 1
                               : runs[logicalIndex].fNumGlyphs;
-            append(builder, runs[logicalIndex], startGlyphIndex, endGlyphIndex, &currentPoint);
+
+            const auto& run = runs[logicalIndex];
+            const RunHandler::RunInfo info = {
+                lineIndex,
+                run.fAdvance,
+                maxAscent,
+                maxDescent,
+                maxLeading,
+            };
+            append(handler, info, run, startGlyphIndex, endGlyphIndex, &currentPoint);
         }
 
         currentPoint.fY += maxDescent + maxLeading;
@@ -758,6 +797,7 @@ SkPoint SkShaper::shape(SkTextBlobBuilder* builder,
         maxDescent = 0;
         maxLeading = 0;
         previousRunIndex = -1;
+        ++lineIndex;
         previousBreak = glyphIterator;
     }
 }

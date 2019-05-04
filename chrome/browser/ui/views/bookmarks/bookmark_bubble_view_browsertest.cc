@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -70,11 +71,3 @@ IN_PROC_BROWSER_TEST_F(BookmarkBubbleViewBrowserTest,
                        InvokeUi_bookmark_details_signed_in) {
   ShowAndVerifyUi();
 }
-
-#if defined(OS_WIN)
-IN_PROC_BROWSER_TEST_F(BookmarkBubbleViewBrowserTest, InvokeUi_ios_promotion) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kForceDesktopIOSPromotion);
-  ShowAndVerifyUi();
-}
-#endif

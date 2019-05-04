@@ -8,6 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "absl/memory/memory.h"
 #include "api/test/simulated_network.h"
 #include "call/fake_network_pipe.h"
 #include "call/simulated_network.h"
@@ -158,8 +159,6 @@ TEST_F(NetworkStateEndToEndTest, RespectsNetworkState) {
         : EndToEndTest(kDefaultTimeoutMs),
           FakeEncoder(Clock::GetRealTimeClock()),
           task_queue_(task_queue),
-          encoded_frames_(false, false),
-          packet_event_(false, false),
           sender_call_(nullptr),
           receiver_call_(nullptr),
           encoder_factory_(this),

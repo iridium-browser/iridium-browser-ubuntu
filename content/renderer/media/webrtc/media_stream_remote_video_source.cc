@@ -20,7 +20,7 @@
 #include "media/base/video_util.h"
 #include "third_party/webrtc/api/video/i420_buffer.h"
 #include "third_party/webrtc/api/video/video_sink_interface.h"
-#include "third_party/webrtc/rtc_base/timeutils.h"  // for TimeMicros
+#include "third_party/webrtc/rtc_base/time_utils.h"  // for TimeMicros
 
 namespace content {
 
@@ -178,9 +178,9 @@ void MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate::OnFrame(
         WebRtcToMediaVideoRotation(incoming_frame.rotation()));
   }
 
-  if (incoming_frame.color_space().has_value()) {
+  if (incoming_frame.color_space()) {
     video_frame->set_color_space(
-        WebRtcToMediaVideoColorSpace(incoming_frame.color_space().value())
+        WebRtcToMediaVideoColorSpace(*incoming_frame.color_space())
             .ToGfxColorSpace());
   }
 
@@ -233,7 +233,7 @@ void MediaStreamRemoteVideoSource::StartSourceImpl(
   scoped_refptr<webrtc::VideoTrackInterface> video_track(
       static_cast<webrtc::VideoTrackInterface*>(observer_->track().get()));
   video_track->AddOrUpdateSink(delegate_.get(), rtc::VideoSinkWants());
-  OnStartDone(MEDIA_DEVICE_OK);
+  OnStartDone(blink::MEDIA_DEVICE_OK);
 }
 
 void MediaStreamRemoteVideoSource::StopSourceImpl() {

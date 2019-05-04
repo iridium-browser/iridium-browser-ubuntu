@@ -25,21 +25,31 @@ class CORE_EXPORT JSEventHandler : public JSBasedEventListener {
     kOnBeforeUnloadEventHandler,
   };
 
-  static JSEventHandler* Create(ScriptState* script_state,
-                                v8::Local<v8::Object> listener,
-                                const V8PrivateProperty::Symbol& property,
-                                HandlerType type) {
-    return new JSEventHandler(script_state, listener, property, type);
+  // TODO(bindings): Consider to remove these two helper functions.  These are
+  // only used by generated bindings code (OnxxxAttribute{Getter,Setter}), and
+  // it should be implemented based on V8EventHandlerNonNull.
+  static JSEventHandler* CreateOrNull(v8::Local<v8::Value>, HandlerType);
+  static v8::Local<v8::Value> AsV8Value(v8::Isolate* isolate,
+                                        EventTarget* event_target,
+                                        EventListener* listener) {
+    if (JSEventHandler* event_handler = DynamicTo<JSEventHandler>(listener)) {
+      return event_handler->GetListenerObject(*event_target);
+    }
+    return v8::Null(isolate);
   }
+
+  explicit JSEventHandler(V8EventHandlerNonNull* event_handler,
+                          HandlerType type)
+      : event_handler_(event_handler), type_(type) {}
 
   // blink::CustomWrappable overrides:
   void Trace(blink::Visitor* visitor) override;
 
   // blink::EventListener overrides:
-  bool operator==(const EventListener& other) const override {
+  bool IsEventHandler() const final { return true; }
+  bool Matches(const EventListener& other) const override {
     return this == &other;
   }
-  bool IsEventHandler() const final { return true; }
 
   // blink::JSBasedEventListener overrides:
   // TODO(crbug.com/881688): remove empty check for this method. This method
@@ -49,19 +59,11 @@ class CORE_EXPORT JSEventHandler : public JSBasedEventListener {
   }
   v8::Local<v8::Value> GetEffectiveFunction(EventTarget&) override;
 
- protected:
-  JSEventHandler(ScriptState* script_state,
-                 v8::Local<v8::Object> listener,
-                 const V8PrivateProperty::Symbol& property,
-                 HandlerType type)
-      : JSBasedEventListener(kJSEventHandlerType),
-        event_handler_(V8EventHandlerNonNull::Create(listener)),
-        type_(type) {
-    Attach(script_state, listener, property, this);
-  }
+  // Helper functions for DowncastTraits.
+  bool IsJSEventHandler() const override { return true; }
 
-  explicit JSEventHandler(HandlerType type)
-      : JSBasedEventListener(kJSEventHandlerType), type_(type) {}
+ protected:
+  explicit JSEventHandler(HandlerType type) : type_(type) {}
 
   // blink::JSBasedEventListener override:
   v8::Isolate* GetIsolate() const override {
@@ -70,15 +72,19 @@ class CORE_EXPORT JSEventHandler : public JSBasedEventListener {
   ScriptState* GetScriptState() const override {
     return event_handler_->CallbackRelevantScriptState();
   }
+  ScriptState* GetScriptStateOrReportError(
+      const char* operation) const override {
+    return event_handler_->CallbackRelevantScriptStateOrReportError(
+        "EventHandler", operation);
+  }
   DOMWrapperWorld& GetWorld() const override {
-    return event_handler_->CallbackRelevantScriptState()->World();
+    return event_handler_->GetWorld();
   }
 
   // Initializes |event_handler_| with |listener|. This method must be used only
   // when content attribute gets lazily compiled.
-  void SetCompiledHandler(ScriptState* script_state,
-                          v8::Local<v8::Function> listener,
-                          const V8PrivateProperty::Symbol& property);
+  void SetCompiledHandler(ScriptState* incumbent_script_state,
+                          v8::Local<v8::Function> listener);
 
   bool HasCompiledHandler() const { return event_handler_; }
 
@@ -94,12 +100,26 @@ class CORE_EXPORT JSEventHandler : public JSBasedEventListener {
   // blink::JSBasedEventListener override:
   // Performs "The event handler processing algorithm"
   // https://html.spec.whatwg.org/C/webappapis.html#the-event-handler-processing-algorithm
-  void CallListenerFunction(EventTarget&,
-                            Event&,
-                            v8::Local<v8::Value> js_event) override;
+  void InvokeInternal(EventTarget&,
+                      Event&,
+                      v8::Local<v8::Value> js_event) override;
 
   TraceWrapperMember<V8EventHandlerNonNull> event_handler_;
   const HandlerType type_;
+};
+
+template <>
+struct DowncastTraits<JSEventHandler> {
+  static bool AllowFrom(const EventListener& event_listener) {
+    if (const JSBasedEventListener* js_based_event_listener =
+            DynamicTo<JSBasedEventListener>(event_listener)) {
+      return js_based_event_listener->IsJSEventHandler();
+    }
+    return false;
+  }
+  static bool AllowFrom(const JSBasedEventListener& event_listener) {
+    return event_listener.IsJSEventHandler();
+  }
 };
 
 }  // namespace blink

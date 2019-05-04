@@ -5,13 +5,13 @@
 #include "third_party/blink/renderer/modules/storage/storage_controller.h"
 
 #include "base/feature_list.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/interface_provider.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/web_content_settings_client.h"
 #include "third_party/blink/public/platform/web_storage_area.h"
 #include "third_party/blink/public/platform/web_storage_namespace.h"
-#include "third_party/blink/renderer/core/frame/content_settings_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/storage/cached_storage_area.h"
 #include "third_party/blink/renderer/modules/storage/storage_namespace.h"
@@ -22,14 +22,6 @@
 
 namespace blink {
 namespace {
-
-#define STATIC_ASSERT_MATCHING_ENUM(enum_name1, enum_name2)                   \
-  static_assert(static_cast<int>(enum_name1) == static_cast<int>(enum_name2), \
-                "mismatching enums: " #enum_name1)
-STATIC_ASSERT_MATCHING_ENUM(StorageArea::StorageType::kLocalStorage,
-                            ContentSettingsClient::StorageType::kLocal);
-STATIC_ASSERT_MATCHING_ENUM(StorageArea::StorageType::kSessionStorage,
-                            ContentSettingsClient::StorageType::kSession);
 
 const size_t kStorageControllerTotalCacheLimitInBytesLowEnd = 1 * 1024 * 1024;
 const size_t kStorageControllerTotalCacheLimitInBytes = 5 * 1024 * 1024;
@@ -44,22 +36,23 @@ mojom::blink::StoragePartitionServicePtr GetAndCreateStorageInterface() {
 
 // static
 StorageController* StorageController::GetInstance() {
-  DEFINE_STATIC_LOCAL(
-      StorageController, gCachedStorageAreaController,
-      (Platform::Current()->MainThread()->Scheduler()->IPCTaskRunner(),
-       GetAndCreateStorageInterface(),
-       base::SysInfo::IsLowEndDevice()
-           ? kStorageControllerTotalCacheLimitInBytesLowEnd
-           : kStorageControllerTotalCacheLimitInBytes));
+  DEFINE_STATIC_LOCAL(StorageController, gCachedStorageAreaController,
+                      (Thread::MainThread()->Scheduler()->IPCTaskRunner(),
+                       GetAndCreateStorageInterface(),
+                       base::SysInfo::IsLowEndDevice()
+                           ? kStorageControllerTotalCacheLimitInBytesLowEnd
+                           : kStorageControllerTotalCacheLimitInBytes));
   return &gCachedStorageAreaController;
 }
 
 // static
 bool StorageController::CanAccessStorageArea(LocalFrame* frame,
                                              StorageArea::StorageType type) {
-  DCHECK(frame->GetContentSettingsClient());
-  return frame->GetContentSettingsClient()->AllowStorage(
-      static_cast<ContentSettingsClient::StorageType>(type));
+  if (auto* settings_client = frame->GetContentSettingsClient()) {
+    return settings_client->AllowStorage(
+        type == StorageArea::StorageType::kLocalStorage);
+  }
+  return true;
 }
 
 StorageController::StorageController(
@@ -67,7 +60,8 @@ StorageController::StorageController(
     mojom::blink::StoragePartitionServicePtr storage_partition_service,
     size_t total_cache_limit)
     : ipc_runner_(std::move(ipc_runner)),
-      namespaces_(new HeapHashMap<String, WeakMember<StorageNamespace>>()),
+      namespaces_(MakeGarbageCollected<
+                  HeapHashMap<String, WeakMember<StorageNamespace>>>()),
       total_cache_limit_(total_cache_limit),
       storage_partition_service_(std::move(storage_partition_service)) {}
 
@@ -82,14 +76,14 @@ StorageNamespace* StorageController::CreateSessionStorageNamespace(
     return it->value;
   StorageNamespace* ns = nullptr;
   if (base::FeatureList::IsEnabled(features::kOnionSoupDOMStorage)) {
-    ns = new StorageNamespace(this, namespace_id);
+    ns = MakeGarbageCollected<StorageNamespace>(this, namespace_id);
   } else {
     auto namespace_str = StringUTF8Adaptor(namespace_id);
     auto web_namespace = Platform::Current()->CreateSessionStorageNamespace(
         namespace_str.AsStringPiece());
     if (!web_namespace)
       return nullptr;
-    ns = new StorageNamespace(std::move(web_namespace));
+    ns = MakeGarbageCollected<StorageNamespace>(std::move(web_namespace));
   }
   namespaces_->insert(namespace_id, ns);
   return ns;
@@ -160,9 +154,9 @@ void StorageController::EnsureLocalStorageNamespaceCreated() {
   if (local_storage_namespace_)
     return;
   if (base::FeatureList::IsEnabled(features::kOnionSoupDOMStorage)) {
-    local_storage_namespace_ = new StorageNamespace(this);
+    local_storage_namespace_ = MakeGarbageCollected<StorageNamespace>(this);
   } else {
-    local_storage_namespace_ = new StorageNamespace(
+    local_storage_namespace_ = MakeGarbageCollected<StorageNamespace>(
         Platform::Current()->CreateLocalStorageNamespace());
   }
 }

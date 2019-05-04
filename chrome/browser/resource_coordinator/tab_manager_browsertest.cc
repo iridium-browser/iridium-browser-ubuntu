@@ -196,10 +196,10 @@ class TabManagerTest : public InProcessBrowserTest {
     // The page has 2 iframes, we will use the first one.
     content::RenderFrameHost* child_frame = content->GetAllFrames()[1];
     // Verify that the main frame and subframe are cross-site.
-    EXPECT_FALSE(content::SiteInstance::IsSameWebSite(
-        browser()->profile(), main_frame->GetLastCommittedURL(),
-        child_frame->GetLastCommittedURL()));
+    EXPECT_NE(main_frame->GetLastCommittedURL().GetOrigin(),
+              child_frame->GetLastCommittedURL().GetOrigin());
     if (content::AreAllSitesIsolatedForTesting()) {
+      EXPECT_NE(main_frame->GetSiteInstance(), child_frame->GetSiteInstance());
       EXPECT_NE(main_frame->GetProcess()->GetID(),
                 child_frame->GetProcess()->GetID());
     }
@@ -276,7 +276,7 @@ class TabManagerTest : public InProcessBrowserTest {
   // indicates that the page is frozen. In production, this is sent by the
   // renderer process. This is done to finish a proactive tab discard.
   void SimulateFreezeSignal(content::WebContents* contents) {
-    TabLifecycleUnitSource::GetInstance()
+    GetTabLifecycleUnitSource()
         ->GetTabLifecycleUnit(contents)
         ->UpdateLifecycleState(mojom::LifecycleState::kFrozen);
   }
@@ -289,7 +289,7 @@ class TabManagerTest : public InProcessBrowserTest {
   }
 
   LifecycleUnit* GetLifecycleUnitAt(int index) {
-    return TabLifecycleUnitSource::GetInstance()->GetTabLifecycleUnit(
+    return GetTabLifecycleUnitSource()->GetTabLifecycleUnit(
         GetWebContentsAt(index));
   }
 
@@ -307,8 +307,7 @@ class TabManagerTestWithTwoTabs : public TabManagerTest {
     TabManagerTest::SetUpOnMainThread();
 
     // Open 2 tabs with default URLs in a focused tab strip.
-    TabLifecycleUnitSource::GetInstance()->SetFocusedTabStripModelForTesting(
-        tsm());
+    GetTabLifecycleUnitSource()->SetFocusedTabStripModelForTesting(tsm());
     OpenTwoTabs(GURL(chrome::kChromeUIAboutURL),
                 GURL(chrome::kChromeUICreditsURL));
   }
@@ -652,17 +651,17 @@ IN_PROC_BROWSER_TEST_F(TabManagerTest, ProtectVideoTabs) {
   auto* tab = GetWebContentsAt(1);
 
   // Simulate that a video stream is now being captured.
-  content::MediaStreamDevices video_devices(1);
+  blink::MediaStreamDevices video_devices(1);
   video_devices[0] =
-      content::MediaStreamDevice(content::MEDIA_DEVICE_VIDEO_CAPTURE,
-                                 "fake_media_device", "fake_media_device");
+      blink::MediaStreamDevice(blink::MEDIA_DEVICE_VIDEO_CAPTURE,
+                               "fake_media_device", "fake_media_device");
   MediaCaptureDevicesDispatcher* dispatcher =
       MediaCaptureDevicesDispatcher::GetInstance();
   dispatcher->SetTestVideoCaptureDevices(video_devices);
   std::unique_ptr<content::MediaStreamUI> video_stream_ui =
       dispatcher->GetMediaStreamCaptureIndicator()->RegisterMediaStream(
           tab, video_devices);
-  video_stream_ui->OnStarted(base::Closure());
+  video_stream_ui->OnStarted(base::OnceClosure(), base::RepeatingClosure());
 
   // Should not be able to discard a tab.
   ASSERT_FALSE(
@@ -725,17 +724,17 @@ IN_PROC_BROWSER_TEST_F(TabManagerTest, CanPurgeBackgroundedRenderer) {
 
   auto* tab = GetWebContentsAt(1);
   // Simulate that a video stream is now being captured.
-  content::MediaStreamDevices video_devices(1);
+  blink::MediaStreamDevices video_devices(1);
   video_devices[0] =
-      content::MediaStreamDevice(content::MEDIA_DEVICE_VIDEO_CAPTURE,
-                                 "fake_media_device", "fake_media_device");
+      blink::MediaStreamDevice(blink::MEDIA_DEVICE_VIDEO_CAPTURE,
+                               "fake_media_device", "fake_media_device");
   MediaCaptureDevicesDispatcher* dispatcher =
       MediaCaptureDevicesDispatcher::GetInstance();
   dispatcher->SetTestVideoCaptureDevices(video_devices);
   std::unique_ptr<content::MediaStreamUI> video_stream_ui =
       dispatcher->GetMediaStreamCaptureIndicator()->RegisterMediaStream(
           tab, video_devices);
-  video_stream_ui->OnStarted(base::Closure());
+  video_stream_ui->OnStarted(base::OnceClosure(), base::RepeatingClosure());
 
   // Should not be able to suspend a tab which plays a video.
   int render_process_id = tab->GetMainFrame()->GetProcess()->GetID();
@@ -1380,10 +1379,10 @@ IN_PROC_BROWSER_TEST_F(TabManagerTest,
 
   // Sanity check that in this test page the main frame and the
   // subframe are cross-site.
-  EXPECT_FALSE(content::SiteInstance::IsSameWebSite(
-      browser()->profile(), main_frame->GetLastCommittedURL(),
-      child_frame->GetLastCommittedURL()));
+  EXPECT_NE(main_frame->GetLastCommittedURL().GetOrigin(),
+            child_frame->GetLastCommittedURL().GetOrigin());
   if (content::AreAllSitesIsolatedForTesting()) {
+    EXPECT_NE(main_frame->GetSiteInstance(), child_frame->GetSiteInstance());
     EXPECT_NE(main_frame->GetProcess()->GetID(),
               child_frame->GetProcess()->GetID());
   }

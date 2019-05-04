@@ -123,13 +123,13 @@ void WriteMetaDataToDiskCache(
   ServiceWorkerResponseMetadataWriter* writer_rawptr = writer.get();
   writer_rawptr->WriteMetadata(
       meta_data_buffer.get(), meta_data.size(),
-      base::Bind(
+      base::BindOnce(
           [](std::unique_ptr<ServiceWorkerResponseMetadataWriter> /* unused */,
              base::OnceClosure callback, int expected, int result) {
             EXPECT_EQ(expected, result);
             std::move(callback).Run();
           },
-          base::Passed(&writer), base::Passed(&callback), meta_data.size()));
+          std::move(writer), std::move(callback), meta_data.size()));
 }
 
 }  // namespace
@@ -143,8 +143,8 @@ ServiceWorkerRemoteProviderEndpoint::ServiceWorkerRemoteProviderEndpoint(
 ServiceWorkerRemoteProviderEndpoint::~ServiceWorkerRemoteProviderEndpoint() {}
 
 void ServiceWorkerRemoteProviderEndpoint::BindWithProviderHostInfo(
-    mojom::ServiceWorkerProviderHostInfoPtr* info) {
-  mojom::ServiceWorkerContainerAssociatedPtr client_ptr;
+    blink::mojom::ServiceWorkerProviderHostInfoPtr* info) {
+  blink::mojom::ServiceWorkerContainerAssociatedPtr client_ptr;
   client_request_ = mojo::MakeRequestAssociatedWithDedicatedPipe(&client_ptr);
   (*info)->client_ptr_info = client_ptr.PassInterface();
   (*info)->host_request =
@@ -152,15 +152,15 @@ void ServiceWorkerRemoteProviderEndpoint::BindWithProviderHostInfo(
 }
 
 void ServiceWorkerRemoteProviderEndpoint::BindWithProviderInfo(
-    mojom::ServiceWorkerProviderInfoForStartWorkerPtr info) {
+    blink::mojom::ServiceWorkerProviderInfoForStartWorkerPtr info) {
   client_request_ = std::move(info->client_request);
   host_ptr_.Bind(std::move(info->host_ptr_info));
 }
 
-mojom::ServiceWorkerProviderHostInfoPtr CreateProviderHostInfoForWindow(
+blink::mojom::ServiceWorkerProviderHostInfoPtr CreateProviderHostInfoForWindow(
     int provider_id,
     int route_id) {
-  return mojom::ServiceWorkerProviderHostInfo::New(
+  return blink::mojom::ServiceWorkerProviderHostInfo::New(
       provider_id, route_id,
       blink::mojom::ServiceWorkerProviderType::kForWindow,
       true /* is_parent_frame_secure */, nullptr /* host_request */,
@@ -173,7 +173,7 @@ std::unique_ptr<ServiceWorkerProviderHost> CreateProviderHostForWindow(
     bool is_parent_frame_secure,
     base::WeakPtr<ServiceWorkerContextCore> context,
     ServiceWorkerRemoteProviderEndpoint* output_endpoint) {
-  mojom::ServiceWorkerProviderHostInfoPtr info =
+  blink::mojom::ServiceWorkerProviderHostInfoPtr info =
       CreateProviderHostInfoForWindow(provider_id, 1 /* route_id */);
   info->is_parent_frame_secure = is_parent_frame_secure;
   output_endpoint->BindWithProviderHostInfo(&info);
@@ -188,13 +188,12 @@ CreateProviderHostForServiceWorkerContext(
     ServiceWorkerVersion* hosted_version,
     base::WeakPtr<ServiceWorkerContextCore> context,
     ServiceWorkerRemoteProviderEndpoint* output_endpoint) {
-  auto provider_info = mojom::ServiceWorkerProviderInfoForStartWorker::New();
+  auto provider_info =
+      blink::mojom::ServiceWorkerProviderInfoForStartWorker::New();
   base::WeakPtr<ServiceWorkerProviderHost> host =
       ServiceWorkerProviderHost::PreCreateForController(
           std::move(context), base::WrapRefCounted(hosted_version),
           &provider_info);
-
-  host->SetDocumentUrl(hosted_version->script_url());
 
   scoped_refptr<network::SharedURLLoaderFactory> loader_factory;
   if (blink::ServiceWorkerUtils::IsServicificationEnabled()) {

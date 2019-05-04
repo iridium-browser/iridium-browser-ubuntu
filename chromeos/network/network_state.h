@@ -33,7 +33,7 @@ namespace chromeos {
 // Manager.ServiceCompleteList. The visible() method indicates whether the
 // network is visible, and the IsInProfile() method indicates whether the
 // network is saved in a profile.
-class CHROMEOS_EXPORT NetworkState : public ManagedState {
+class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkState : public ManagedState {
  public:
   explicit NetworkState(const std::string& path);
   ~NetworkState() override;
@@ -116,8 +116,8 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   const std::string& network_technology() const { return network_technology_; }
   const std::string& activation_type() const { return activation_type_; }
   const std::string& activation_state() const { return activation_state_; }
-  const std::string& roaming() const { return roaming_; }
   const std::string& payment_url() const { return payment_url_; }
+  const std::string& payment_post_data() const { return payment_post_data_; }
   bool cellular_out_of_credits() const { return cellular_out_of_credits_; }
   const std::string& tethering_state() const { return tethering_state_; }
 
@@ -145,7 +145,11 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   // |onc_source_|).
   bool IsManagedByPolicy() const;
 
-  // Returns true if current connection is using mobile data.
+  // Returns true if the network is romaing and the provider does not require
+  // roaming.
+  bool IndicateRoaming() const;
+
+  // Returns true if the current connection is using mobile data.
   bool IsUsingMobileData() const;
 
   // Returns true if the network securty is WEP_8021x (Dynamic WEP)
@@ -194,6 +198,11 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   // Returns |error_| if valid, otherwise returns |last_error_|.
   std::string GetErrorState() const;
 
+  // Setters for testing.
+  void set_network_technology_for_testing(const std::string& technology) {
+    network_technology_ = technology;
+  }
+
   // Helpers (used e.g. when a state, error, or shill dictionary is cached)
   static bool StateIsConnected(const std::string& connection_state);
   static bool StateIsConnecting(const std::string& connection_state);
@@ -205,7 +214,6 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
  private:
   friend class MobileActivatorTest;
   friend class NetworkStateHandler;
-  friend class NetworkChangeNotifierChromeosUpdateTest;
   FRIEND_TEST_ALL_PREFIXES(NetworkStateTest, TetherProperties);
 
   // Updates |name_| from the 'WiFi.HexSSID' entry in |properties|, which must
@@ -260,7 +268,9 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   std::string activation_type_;
   std::string activation_state_;
   std::string roaming_;
+  bool provider_requires_roaming_ = false;
   std::string payment_url_;
+  std::string payment_post_data_;
   bool cellular_out_of_credits_ = false;
   std::string tethering_state_;
 

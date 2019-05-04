@@ -42,7 +42,6 @@ struct StructTraits<ui::mojom::EventDataView, EventUniquePtr> {
   static base::TimeTicks time_stamp(const EventUniquePtr& event);
   static const ui::LatencyInfo& latency(const EventUniquePtr& event);
   static ui::mojom::KeyDataPtr key_data(const EventUniquePtr& event);
-  static ui::mojom::PointerDataPtr pointer_data(const EventUniquePtr& event);
   static ui::mojom::GestureDataPtr gesture_data(const EventUniquePtr& event);
   static ui::mojom::ScrollDataPtr scroll_data(const EventUniquePtr& event);
   static ui::mojom::TouchDataPtr touch_data(const EventUniquePtr& event);
@@ -191,6 +190,39 @@ struct EnumTraits<ui::mojom::ScrollEventPhase, ui::ScrollEventPhase> {
         return true;
       case ui::mojom::ScrollEventPhase::kEnd:
         *out = ui::ScrollEventPhase::kEnd;
+        return true;
+    }
+    NOTREACHED();
+    return false;
+  }
+};
+
+template <>
+struct EnumTraits<ui::mojom::GestureDeviceType, ui::GestureDeviceType> {
+  static ui::mojom::GestureDeviceType ToMojom(ui::GestureDeviceType input) {
+    switch (input) {
+      case ui::GestureDeviceType::DEVICE_UNKNOWN:
+        return ui::mojom::GestureDeviceType::DEVICE_UNKNOWN;
+      case ui::GestureDeviceType::DEVICE_TOUCHPAD:
+        return ui::mojom::GestureDeviceType::DEVICE_TOUCHPAD;
+      case ui::GestureDeviceType::DEVICE_TOUCHSCREEN:
+        return ui::mojom::GestureDeviceType::DEVICE_TOUCHSCREEN;
+    }
+    NOTREACHED();
+    return ui::mojom::GestureDeviceType::DEVICE_UNKNOWN;
+  }
+
+  static bool FromMojom(ui::mojom::GestureDeviceType input,
+                        ui::GestureDeviceType* out) {
+    switch (input) {
+      case ui::mojom::GestureDeviceType::DEVICE_UNKNOWN:
+        *out = ui::GestureDeviceType::DEVICE_UNKNOWN;
+        return true;
+      case ui::mojom::GestureDeviceType::DEVICE_TOUCHPAD:
+        *out = ui::GestureDeviceType::DEVICE_TOUCHPAD;
+        return true;
+      case ui::mojom::GestureDeviceType::DEVICE_TOUCHSCREEN:
+        *out = ui::GestureDeviceType::DEVICE_TOUCHSCREEN;
         return true;
     }
     NOTREACHED();

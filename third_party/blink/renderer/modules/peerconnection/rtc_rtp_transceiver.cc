@@ -66,20 +66,20 @@ bool TransceiverDirectionFromString(
 }  // namespace
 
 webrtc::RtpTransceiverInit ToRtpTransceiverInit(
-    const RTCRtpTransceiverInit& init) {
+    const RTCRtpTransceiverInit* init) {
   webrtc::RtpTransceiverInit webrtc_init;
   base::Optional<webrtc::RtpTransceiverDirection> direction;
-  if (init.hasDirection() &&
-      TransceiverDirectionFromString(init.direction(), &direction) &&
+  if (init->hasDirection() &&
+      TransceiverDirectionFromString(init->direction(), &direction) &&
       direction) {
     webrtc_init.direction = *direction;
   }
-  DCHECK(init.hasStreams());
-  for (const auto& stream : init.streams()) {
+  DCHECK(init->hasStreams());
+  for (const auto& stream : init->streams()) {
     webrtc_init.stream_ids.push_back(stream->id().Utf8().data());
   }
-  DCHECK(init.hasSendEncodings());
-  for (const auto& encoding : init.sendEncodings()) {
+  DCHECK(init->hasSendEncodings());
+  for (const auto& encoding : init->sendEncodings()) {
     webrtc_init.send_encodings.push_back(ToRtpEncodingParameters(encoding));
   }
   return webrtc_init;
@@ -100,6 +100,8 @@ RTCRtpTransceiver::RTCRtpTransceiver(
   DCHECK(sender_);
   DCHECK(receiver_);
   UpdateMembers();
+  sender_->set_transceiver(this);
+  receiver_->set_transceiver(this);
 }
 
 String RTCRtpTransceiver::mid() const {

@@ -21,8 +21,9 @@ namespace chrome_api_permissions {
 namespace {
 
 template <typename T>
-APIPermission* CreateAPIPermission(const APIPermissionInfo* permission) {
-  return new T(permission);
+std::unique_ptr<APIPermission> CreateAPIPermission(
+    const APIPermissionInfo* permission) {
+  return std::make_unique<T>(permission);
 }
 
 // WARNING: If you are modifying a permission message in this list, be sure to
@@ -94,8 +95,6 @@ constexpr APIPermissionInfo::InitInfo permissions_to_register[] = {
     {APIPermission::kWebNavigation, "webNavigation"},
 
     // Register private permissions.
-    {APIPermission::kScreenlockPrivate, "screenlockPrivate",
-     APIPermissionInfo::kFlagCannotBeOptional},
     {APIPermission::kActivityLogPrivate, "activityLogPrivate",
      APIPermissionInfo::kFlagCannotBeOptional},
     {APIPermission::kAutoTestPrivate, "autotestPrivate",
@@ -162,12 +161,9 @@ constexpr APIPermissionInfo::InitInfo permissions_to_register[] = {
      APIPermissionInfo::kFlagCannotBeOptional},
     {APIPermission::kFirstRunPrivate, "firstRunPrivate",
      APIPermissionInfo::kFlagCannotBeOptional},
-    {APIPermission::kInlineInstallPrivate, "inlineInstallPrivate"},
     {APIPermission::kSettingsPrivate, "settingsPrivate",
      APIPermissionInfo::kFlagCannotBeOptional},
     {APIPermission::kAutofillPrivate, "autofillPrivate",
-     APIPermissionInfo::kFlagCannotBeOptional},
-    {APIPermission::kWebstoreWidgetPrivate, "webstoreWidgetPrivate",
      APIPermissionInfo::kFlagCannotBeOptional},
     {APIPermission::kPasswordsPrivate, "passwordsPrivate",
      APIPermissionInfo::kFlagCannotBeOptional},
@@ -178,7 +174,6 @@ constexpr APIPermissionInfo::InitInfo permissions_to_register[] = {
     {APIPermission::kResourcesPrivate, "resourcesPrivate",
      APIPermissionInfo::kFlagCannotBeOptional},
     {APIPermission::kSafeBrowsingPrivate, "safeBrowsingPrivate"},
-    {APIPermission::kArcAppsPrivate, "arcAppsPrivate"},
 
     // Full url access permissions.
     {APIPermission::kDebugger, "debugger",
@@ -201,7 +196,6 @@ constexpr APIPermissionInfo::InitInfo permissions_to_register[] = {
     // Platform-app permissions.
 
     {APIPermission::kFileSystemProvider, "fileSystemProvider"},
-    {APIPermission::kPointerLock, "pointerLock"},
     {APIPermission::kCastStreaming, "cast.streaming"},
     {APIPermission::kLauncherSearchProvider, "launcherSearchProvider"},
 

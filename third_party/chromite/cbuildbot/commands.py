@@ -29,6 +29,7 @@ from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import gob_util
 from chromite.lib import gs
+from chromite.lib import image_lib
 from chromite.lib import metrics
 from chromite.lib import osutils
 from chromite.lib import parallel
@@ -49,7 +50,7 @@ _FACTORY_SHIM = 'factory_shim'
 _AUTOTEST_RPC_CLIENT = ('/b/build_internal/scripts/slave-internal/autotest_rpc/'
                         'autotest_rpc_client.py')
 _AUTOTEST_RPC_HOSTNAME = 'master2'
-_LOCAL_BUILD_FLAGS = ['--nousepkg', '--reuse_pkgs_from_local_boards']
+LOCAL_BUILD_FLAGS = ['--nousepkg', '--reuse_pkgs_from_local_boards']
 UPLOADED_LIST_FILENAME = 'UPLOADED'
 STATEFUL_FILE = 'stateful.tgz'
 # For swarming proxy
@@ -240,22 +241,6 @@ def DeleteChrootSnapshot(buildroot, snapshot_name):
   return result.returncode == 0
 
 
-def RunChrootUpgradeHooks(buildroot, chrome_root=None, extra_env=None):
-  """Run the chroot upgrade hooks in the chroot.
-
-  Args:
-    buildroot: Root directory where build occurs.
-    chrome_root: The directory where chrome is stored.
-    extra_env: A dictionary of environment variables to set.
-  """
-  chroot_args = []
-  if chrome_root:
-    chroot_args.append('--chrome_root=%s' % chrome_root)
-
-  RunBuildScript(buildroot, ['./run_chroot_version_hooks'], enter_chroot=True,
-                 chroot_args=chroot_args, extra_env=extra_env)
-
-
 def UpdateChroot(buildroot, usepkg, toolchain_boards=None, extra_env=None):
   """Wrapper around update_chroot.
 
@@ -313,13 +298,70 @@ def SetupBoard(buildroot, board, usepkg,
     cmd.append('--profile=%s' % profile)
 
   if not usepkg:
-    cmd.extend(_LOCAL_BUILD_FLAGS)
+    cmd.extend(LOCAL_BUILD_FLAGS)
 
   if force:
     cmd.append('--force')
 
   RunBuildScript(buildroot, cmd, extra_env=extra_env, enter_chroot=True,
                  chroot_args=chroot_args)
+
+
+def BuildSDKBoard(buildroot, board, force=False, extra_env=None,
+                  chroot_args=None):
+  """Wrapper around setup_host_board.
+
+  Args:
+    board (str): The name of the board.
+    buildroot (str): The buildroot of the current build.
+    force (bool): Whether to remove existing sysroot if it exists.
+    extra_env (dict): A dictionary of environment variables to set.
+    chroot_args (dict): The args to the chroot.
+  """
+  cmd = ['./build_sdk_board', '--board', board]
+  if force:
+    cmd.append('--force')
+
+  RunBuildScript(buildroot, cmd, extra_env=extra_env, enter_chroot=True,
+                 chroot_args=chroot_args)
+
+
+def SetupToolchains(buildroot, usepkg=True, create_packages=False, targets=None,
+                    sysroot=None, boards=None, output_dir=None, **kwargs):
+  """Install or update toolchains.
+
+  See cros_setup_toolchains for more documentation about the arguments other
+  than buildroot.
+
+  Args:
+    buildroot: str - The buildroot of the current build.
+    usepkg: bool - Whether to use prebuilt packages.
+    create_packages: bool - Whether to build redistributable packages.
+    targets: str - Type of target for the toolchain install, e.g. 'boards'.
+    sysroot: str - The sysroot in which to install the toolchains.
+    boards: str|list - The board(s) whose toolchain should be installed.
+    output_dir: str - The output directory.
+  """
+  kwargs.setdefault('chromite_cmd', True)
+  kwargs.setdefault('enter_chroot', True)
+  kwargs.setdefault('sudo', True)
+
+  cmd = ['cros_setup_toolchains']
+  if not usepkg:
+    cmd.append('--nousepkg')
+  if create_packages:
+    cmd.append('--create-packages')
+  if targets:
+    cmd += ['--targets', targets]
+  if sysroot:
+    cmd += ['--sysroot', sysroot]
+  if boards:
+    boards_str = boards if isinstance(boards, basestring) else ','.join(boards)
+    cmd += ['--include-boards', boards_str]
+  if output_dir:
+    cmd += ['--output-dir', output_dir]
+
+  RunBuildScript(buildroot, cmd, **kwargs)
 
 
 class MissingBinpkg(failures_lib.StepFailure):
@@ -461,7 +503,7 @@ def Build(buildroot, board, build_autotest, usepkg,
     cmd.append('--skip_chroot_upgrade')
 
   if not usepkg:
-    cmd.extend(_LOCAL_BUILD_FLAGS)
+    cmd.extend(LOCAL_BUILD_FLAGS)
 
   if noretry:
     cmd.append('--nobuildretry')
@@ -622,17 +664,6 @@ def RunCrosConfigHost(buildroot, board, args, log_output=True):
       'chromeos-config',
       'yaml',
       'config.yaml')
-  ls_result = cros_build_lib.RunCommand(
-      ['ls', config_fname],
-      enter_chroot=True, capture_output=True, log_output=log_output,
-      cwd=buildroot, error_code_ok=True)
-  if ls_result.returncode != 0:
-    config_fname = os.path.join(
-        cros_build_lib.GetSysroot(board),
-        'usr',
-        'share',
-        'chromeos-config',
-        'config.dtb')
   result = cros_build_lib.RunCommand(
       [tool, '-c', config_fname] + args,
       enter_chroot=True, capture_output=True, log_output=log_output,
@@ -737,16 +768,19 @@ def RunTestImage(buildroot, board, image_dir, results_dir):
                  sudo=True)
 
 
-def RunSignerTests(buildroot, board):
-  cmd = ['./security_test_image', '--board=%s' % board]
-  RunBuildScript(buildroot, cmd, enter_chroot=True)
+def RunSignerTests(_buildroot, board):
+  image_lib.SecurityTest(board=board)
 
 
-def RunUnitTests(buildroot, board, blacklist=None, extra_env=None):
+def RunUnitTests(buildroot, board, blacklist=None, extra_env=None,
+                 build_stage=True):
   cmd = ['cros_run_unit_tests', '--board=%s' % board]
 
   if blacklist:
     cmd += ['--blacklist_packages=%s' % ' '.join(blacklist)]
+
+  if not build_stage:
+    cmd += ['--assume-empty-sysroot']
 
   RunBuildScript(buildroot, cmd, chromite_cmd=True, enter_chroot=True,
                  extra_env=extra_env or {})
@@ -967,14 +1001,14 @@ def _GetRunSkylabSuiteArgs(
     timeout_mins=None,
     retry=None,
     max_retries=None,
-    suite_args=None):
+    suite_args=None,
+    job_keyvals=None):
   """Get a list of args for run_suite.
 
   TODO (xixuan): Add other features as required, e.g.
     subsystems
     test_args
     skip_duts_check
-    job_keyvals
     suite_min_duts
     minimum_duts
 
@@ -986,6 +1020,7 @@ def _GetRunSkylabSuiteArgs(
   """
   # HACK(pwang): Delete this once better solution is out.
   board = board.replace('-arcnext', '')
+  board = board.replace('-arcvm', '')
   args = ['--build', build, '--board', board]
 
   if model:
@@ -1011,6 +1046,9 @@ def _GetRunSkylabSuiteArgs(
 
   if suite_args is not None:
     args += ['--suite_args', repr(suite_args)]
+
+  if job_keyvals is not None:
+    args += ['--job_keyvals', repr(job_keyvals)]
 
   # Use fallback request for every skylab suite.
   args += ['--use_fallback']
@@ -1132,7 +1170,8 @@ def RunSkylabHWTestSuite(
     timeout_mins=None,
     retry=None,
     max_retries=None,
-    suite_args=None):
+    suite_args=None,
+    job_keyvals=None):
   """Run the test suite in the Autotest lab using Skylab.
 
   Args:
@@ -1154,7 +1193,8 @@ def RunSkylabHWTestSuite(
       timeout_mins=timeout_mins,
       retry=retry,
       max_retries=max_retries,
-      suite_args=suite_args)
+      suite_args=suite_args,
+      job_keyvals=job_keyvals)
   swarming_args = _CreateSwarmingArgs(build, suite, board, priority_str,
                                       timeout_mins, run_skylab=True)
   try:
@@ -1201,6 +1241,7 @@ def _GetRunSuiteArgs(
 
   # HACK(pwang): Delete this once better solution is out.
   board = board.replace('-arcnext', '')
+  board = board.replace('-arcvm', '')
   args = ['--build', build, '--board', board]
 
   if model:
@@ -2271,6 +2312,9 @@ def PushImages(board, archive_url, dryrun, profile, sign_types=(),
   if sign_types:
     log_cmd.append('--sign-types=%s' % ' '.join(sign_types))
 
+  if buildroot:
+    log_cmd.append('--buildroot=%s' % buildroot)
+
   log_cmd.append(archive_url)
   logging.info('Running: %s', cros_build_lib.CmdToStr(log_cmd))
 
@@ -2874,9 +2918,9 @@ def ArchiveHWQual(buildroot, hwqual_name, archive_dir, image_dir):
     archive_dir: Local directory for hwqual tarball.
     image_dir: Directory containing test image.
   """
-  scripts_dir = os.path.join(buildroot, 'src', 'scripts')
+  script_dir = os.path.join(buildroot, 'src', 'platform', 'crostestutils')
   ssh_private_key = os.path.join(image_dir, constants.TEST_KEY_PRIVATE)
-  cmd = [os.path.join(scripts_dir, 'archive_hwqual'),
+  cmd = [os.path.join(script_dir, 'archive_hwqual'),
          '--from', archive_dir,
          '--image_dir', image_dir,
          '--ssh_private_key', ssh_private_key,
@@ -3008,9 +3052,6 @@ def SyncChrome(build_root, chrome_root, useflags, tag=None, revision=None):
 class ChromeSDK(object):
   """Wrapper for the 'cros chrome-sdk' command."""
 
-  DEFAULT_JOBS = 24
-  DEFAULT_JOBS_GOMA = 500
-
   def __init__(self, cwd, board, extra_args=None, chrome_src=None, goma=False,
                debug_log=True, cache_dir=None, target_tc=None,
                toolchain_url=None):
@@ -3040,17 +3081,6 @@ class ChromeSDK(object):
     self.target_tc = target_tc
     self.toolchain_url = toolchain_url
 
-  def _GetDefaultTargets(self):
-    """Get the default chrome targets to build."""
-    targets = ['chrome', 'chrome_sandbox']
-
-    use_flags = portage_util.GetInstalledPackageUseFlags(constants.CHROME_CP,
-                                                         self.board)
-    if 'nacl' in use_flags.get(constants.CHROME_CP, []):
-      targets += ['nacl_helper']
-
-    return targets
-
   def Run(self, cmd, extra_args=None, run_args=None):
     """Run a command inside the chrome-sdk context.
 
@@ -3077,39 +3107,47 @@ class ChromeSDK(object):
     cros_cmd += (extra_args or []) + ['--'] + cmd
     return cros_build_lib.RunCommand(cros_cmd, cwd=self.cwd, **run_args)
 
-  def Ninja(self, jobs=None, debug=False, targets=None, run_args=None):
+  def Ninja(self, debug=False, run_args=None):
     """Run 'ninja' inside a chrome-sdk context.
 
     Args:
-      jobs: The number of -j jobs to run.
       debug: Whether to do a Debug build (defaults to Release).
-      targets: The targets to compile.
       run_args: If set (dict), pass to RunCommand as kwargs.
 
     Returns:
       A CommandResult object.
     """
-    cmd = self.GetNinjaCommand(jobs=jobs, debug=debug, targets=targets)
-    return self.Run(cmd, run_args=run_args)
+    return self.Run(self.GetNinjaCommand(debug=debug), run_args=run_args)
 
-  def GetNinjaCommand(self, jobs=None, debug=False, targets=None):
+  def GetNinjaCommand(self, debug=False):
     """Returns a command line to run "ninja".
 
     Args:
-      jobs: The number of -j jobs to run.
       debug: Whether to do a Debug build (defaults to Release).
-      targets: The  targets to compile.
 
     Returns:
       Command line to run "ninja".
     """
-    if jobs is None:
-      jobs = self.DEFAULT_JOBS_GOMA if self.goma else self.DEFAULT_JOBS
-    if targets is None:
-      targets = self._GetDefaultTargets()
-    return ['ninja',
-            '-C', self._GetOutDirectory(debug=debug),
-            '-j', str(jobs)] + list(targets)
+    return ['autoninja', '-C', self._GetOutDirectory(debug=debug),
+            'chromiumos_preflight']
+
+  def VMTest(self, image_path, debug=False):
+    """Run cros_run_vm_test in a VM.
+
+    Only run tests for boards where we build a VM.
+
+    Args:
+      image_path: VM image path.
+      debug: True if this is a debug build.
+
+    Returns:
+      A CommandResult object.
+    """
+    return self.Run([
+        'cros_run_vm_test', '--copy-on-write', '--deploy',
+        '--board=%s' % self.board, '--image-path=%s' % image_path,
+        '--build-dir=%s' % self._GetOutDirectory(debug=debug),
+    ])
 
   def _GetOutDirectory(self, debug=False):
     """Returns the path to the output directory.

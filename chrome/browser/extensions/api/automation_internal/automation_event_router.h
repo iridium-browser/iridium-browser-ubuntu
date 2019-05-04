@@ -16,6 +16,8 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/common/extension_id.h"
+#include "extensions/common/extension_messages.h"
+#include "ui/accessibility/ax_event_bundle_sink.h"
 #include "ui/accessibility/ax_tree_id.h"
 
 class Profile;
@@ -34,7 +36,8 @@ struct ExtensionMsg_AccessibilityLocationChangeParams;
 namespace extensions {
 struct AutomationListener;
 
-class AutomationEventRouter : public content::NotificationObserver {
+class AutomationEventRouter : public ui::AXEventBundleSink,
+                              public content::NotificationObserver {
  public:
   static AutomationEventRouter* GetInstance();
 
@@ -69,6 +72,10 @@ class AutomationEventRouter : public content::NotificationObserver {
   void SetTreeDestroyedCallbackForTest(
       base::RepeatingCallback<void(ui::AXTreeID)> cb);
 
+  // Notify the source extension of the result to getTextLocation.
+  void DispatchGetTextLocationDataResult(const ui::AXActionData& data,
+                                         const base::Optional<gfx::Rect>& rect);
+
  private:
   struct AutomationListener {
     AutomationListener();
@@ -89,6 +96,12 @@ class AutomationEventRouter : public content::NotificationObserver {
                 int listener_process_id,
                 ui::AXTreeID source_ax_tree_id,
                 bool desktop);
+
+  // ui::AXEventBundleSink:
+  void DispatchAccessibilityEvents(const ui::AXTreeID& tree_id,
+                                   std::vector<ui::AXTreeUpdate> updates,
+                                   const gfx::Point& mouse_location,
+                                   std::vector<ui::AXEvent> events) override;
 
   // content::NotificationObserver interface.
   void Observe(int type,

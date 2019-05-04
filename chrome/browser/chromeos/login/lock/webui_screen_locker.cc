@@ -6,6 +6,7 @@
 
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/ash_switches.h"
+#include "ash/public/cpp/lock_screen_widget_factory.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
@@ -47,6 +48,7 @@
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/views/controls/webview/webview.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -117,6 +119,9 @@ WebUIScreenLocker::WebUIScreenLocker(ScreenLocker* screen_locker)
       screen_locker_(screen_locker),
       network_state_helper_(new login::NetworkStateHelper),
       weak_factory_(this) {
+  // This class is a View, and contained in a view hierarchy, but also owned.
+  // Use set_owned_by_client() so it isn't deleted by Views.
+  set_owned_by_client();
   set_should_emit_login_prompt_visible(false);
   display::Screen::GetScreen()->AddObserver(this);
   DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
@@ -125,11 +130,6 @@ WebUIScreenLocker::WebUIScreenLocker(ScreenLocker* screen_locker)
 WebUIScreenLocker::~WebUIScreenLocker() {
   DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
   display::Screen::GetScreen()->RemoveObserver(this);
-  // In case of shutdown, lock_window_ may be deleted before WebUIScreenLocker.
-  if (lock_window_) {
-    lock_window_->RemoveObserver(this);
-    lock_window_->Close();
-  }
   // If LockScreen() was called, we need to clear the signin screen handler
   // delegate set in ShowSigninScreen so that it no longer points to us.
   if (login_display_.get() && GetOobeUI())
@@ -138,21 +138,23 @@ WebUIScreenLocker::~WebUIScreenLocker() {
   ClearLockScreenAppFocusCyclerDelegate();
 
   RequestPreload();
+
+  // This has to be after calls to GetOobeUI().
+  lock_widget_.reset();
 }
 
 void WebUIScreenLocker::LockScreen() {
   gfx::Rect bounds = display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
 
   lock_time_ = base::TimeTicks::Now();
-  lock_window_ = new ash::LockWindow();
-  lock_window_->AddObserver(this);
+  lock_widget_ = ash::CreateLockScreenWidget();
 
   Init();
   content::WebContentsObserver::Observe(web_view()->GetWebContents());
 
-  lock_window_->SetContentsView(this);
-  lock_window_->SetBounds(bounds);
-  lock_window_->Show();
+  lock_widget_->SetContentsView(this);
+  lock_widget_->SetBounds(bounds);
+  lock_widget_->Show();
   LoadURL(GURL(kLoginURL));
   OnLockWindowReady();
 
@@ -180,11 +182,6 @@ void WebUIScreenLocker::ShowErrorMessage(
                             help_topic_id);
 }
 
-void WebUIScreenLocker::AnimateAuthenticationSuccess() {
-  GetWebUI()->CallJavascriptFunctionUnsafe(
-      "cr.ui.Oobe.animateAuthenticationSuccess");
-}
-
 void WebUIScreenLocker::ClearErrors() {
   GetWebUI()->CallJavascriptFunctionUnsafe("cr.ui.Oobe.clearErrors");
 }
@@ -204,7 +201,7 @@ void WebUIScreenLocker::OnLockWindowReady() {
 }
 
 gfx::NativeWindow WebUIScreenLocker::GetNativeWindow() const {
-  return lock_window_->GetNativeWindow();
+  return lock_widget_->GetNativeWindow();
 }
 
 void WebUIScreenLocker::FocusUserPod() {
@@ -258,26 +255,13 @@ void WebUIScreenLocker::OnAshLockAnimationFinished() {
 
 void WebUIScreenLocker::SetFingerprintState(
     const AccountId& account_id,
-    ScreenLocker::FingerprintState state) {
-  // TODO(xiaoyinh@): Modify JS side to consolidate removeUserPodFingerprintIcon
-  // and setUserPodFingerprintIcon into single JS function.
-  if (state == ScreenLocker::FingerprintState::kRemoved) {
-    GetWebUI()->CallJavascriptFunctionUnsafe(
-        "login.AccountPickerScreen.removeUserPodFingerprintIcon",
-        ::login::MakeValue(account_id));
-    return;
-  }
+    ash::mojom::FingerprintState state) {
+  NOTREACHED();
+}
 
-  chromeos::quick_unlock::QuickUnlockStorage* quick_unlock_storage =
-      chromeos::quick_unlock::QuickUnlockFactory::GetForAccountId(account_id);
-  if (!quick_unlock_storage ||
-      !quick_unlock_storage->IsFingerprintAuthenticationAvailable()) {
-    state = ScreenLocker::FingerprintState::kHidden;
-  }
-  GetWebUI()->CallJavascriptFunctionUnsafe(
-      "login.AccountPickerScreen.setUserPodFingerprintIcon",
-      ::login::MakeValue(account_id),
-      ::login::MakeValue(static_cast<int>(state)));
+void WebUIScreenLocker::NotifyFingerprintAuthResult(const AccountId& account_id,
+                                                    bool success) {
+  NOTREACHED();
 }
 
 content::WebContents* WebUIScreenLocker::GetWebContents() {
@@ -337,14 +321,6 @@ void WebUIScreenLocker::Signout() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// WidgetObserver:
-
-void WebUIScreenLocker::OnWidgetDestroying(views::Widget* widget) {
-  lock_window_->RemoveObserver(this);
-  lock_window_ = nullptr;
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // PowerManagerClient::Observer:
 
 void WebUIScreenLocker::LidEventReceived(PowerManagerClient::LidState state,
@@ -368,6 +344,7 @@ void WebUIScreenLocker::SuspendDone(const base::TimeDelta& sleep_duration) {
   base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
                            base::BindOnce(&WebUIScreenLocker::FocusUserPod,
                                           weak_factory_.GetWeakPtr()));
+  screen_locker_->RefreshPinAndFingerprintTimeout();
 }
 
 void WebUIScreenLocker::RenderProcessGone(base::TerminationStatus status) {

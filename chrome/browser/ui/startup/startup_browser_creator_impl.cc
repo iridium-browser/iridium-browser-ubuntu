@@ -62,7 +62,7 @@
 #include "content/public/common/content_switches.h"
 #include "google_apis/google_api_keys.h"
 #include "rlz/buildflags/buildflags.h"
-#include "ui/base/ui_features.h"
+#include "ui/base/buildflags.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -77,6 +77,8 @@
 #endif  // defined(GOOGLE_CHROME_BUILD)
 #include "chrome/browser/notifications/notification_platform_bridge_win.h"
 #include "chrome/browser/shell_integration_win.h"
+#include "chrome/browser/ui/startup/credential_provider_signin_dialog_win.h"
+#include "chrome/credential_provider/common/gcp_strings.h"
 #endif  // defined(OS_WIN)
 
 #if BUILDFLAG(ENABLE_RLZ)
@@ -99,7 +101,8 @@ namespace {
 //   (b) new constants should only be appended at the end of the enumeration.
 enum LaunchMode {
   LM_TO_BE_DECIDED = 0,         // Possibly direct launch or via a shortcut.
-  LM_AS_WEBAPP = 1,             // Launched as a installed web application.
+  LM_AS_WEBAPP_IN_WINDOW = 1,   // Launched as an installed web application in a
+                                // standalone window.
   LM_WITH_URLS = 2,             // Launched with urls in the cmd line.
   LM_OTHER = 3,                 // Not launched from a shortcut.
   LM_SHORTCUT_NONAME = 4,       // Launched from shortcut but no name available.
@@ -109,16 +112,20 @@ enum LaunchMode {
   LM_SHORTCUT_TASKBAR = 8,      // Launched from the taskbar.
   LM_USER_EXPERIMENT = 9,  // Launched after acceptance of a user experiment.
   LM_OTHER_OS = 10,        // Result bucket for OSes with no coverage here.
-  LM_MAC_UNDOCKED_DISK_LAUNCH = 11,   // Undocked launch from disk.
-  LM_MAC_DOCKED_DISK_LAUNCH = 12,     // Docked launch from disk.
-  LM_MAC_UNDOCKED_DMG_LAUNCH = 13,    // Undocked launch from a dmg.
-  LM_MAC_DOCKED_DMG_LAUNCH = 14,      // Docked launch from a dmg.
-  LM_MAC_DOCK_STATUS_ERROR = 15,      // Error determining dock status.
-  LM_MAC_DMG_STATUS_ERROR = 16,       // Error determining dmg status.
-  LM_MAC_DOCK_DMG_STATUS_ERROR = 17,  // Error determining dock and dmg status.
-  LM_WIN_PLATFORM_NOTIFICATION = 18,  // Launched from toast notification
-                                      // activation on Windows.
-  LM_SHORTCUT_START_MENU = 19,        // A Windows Start Menu shortcut.
+  LM_MAC_UNDOCKED_DISK_LAUNCH = 11,    // Undocked launch from disk.
+  LM_MAC_DOCKED_DISK_LAUNCH = 12,      // Docked launch from disk.
+  LM_MAC_UNDOCKED_DMG_LAUNCH = 13,     // Undocked launch from a dmg.
+  LM_MAC_DOCKED_DMG_LAUNCH = 14,       // Docked launch from a dmg.
+  LM_MAC_DOCK_STATUS_ERROR = 15,       // Error determining dock status.
+  LM_MAC_DMG_STATUS_ERROR = 16,        // Error determining dmg status.
+  LM_MAC_DOCK_DMG_STATUS_ERROR = 17,   // Error determining dock and dmg status.
+  LM_WIN_PLATFORM_NOTIFICATION = 18,   // Launched from toast notification
+                                       // activation on Windows.
+  LM_SHORTCUT_START_MENU = 19,         // A Windows Start Menu shortcut.
+  LM_CREDENTIAL_PROVIDER_SIGNIN = 20,  // Started as a logon stub for the Google
+                                       // Credential Provider for Windows.
+  LM_AS_WEBAPP_IN_TAB = 21,            // Launched as an installed web
+                                       // application in a browser tab.
 };
 
 // Returns a LaunchMode value if one can be determined with low overhead, or
@@ -319,6 +326,17 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
     }
     return false;
   }
+  // If being started for credential provider logon purpose, only show the
+  // signin page.
+  if (command_line_.HasSwitch(credential_provider::kGcpwSigninSwitch)) {
+    DCHECK_EQ(Profile::ProfileType::INCOGNITO_PROFILE,
+              profile_->GetProfileType());
+    // NOTE: All launch urls are ignored when running with --gcpw-logon since
+    // this mode only loads Google's sign in page.
+    StartGCPWSignin(command_line_, profile_);
+    RecordLaunchModeHistogram(LM_CREDENTIAL_PROVIDER_SIGNIN);
+    return true;
+  }
 #endif  // defined(OS_WIN)
 
   if (command_line_.HasSwitch(switches::kAppId)) {
@@ -326,19 +344,22 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
     // If |app_id| is a disabled or terminated platform app we handle it
     // specially here, otherwise it will be handled below.
     if (apps::OpenApplicationWithReenablePrompt(profile, app_id, command_line_,
-                                                cur_dir_))
+                                                cur_dir_)) {
       return true;
+    }
   }
 
-  // Open the required browser windows and tabs. First, see if
-  // we're being run as an application window. If so, the user
-  // opened an app shortcut.  Don't restore tabs or open initial
-  // URLs in that case. The user should see the window as an app,
-  // not as chrome.
-  // Special case is when app switches are passed but we do want to restore
-  // session. In that case open app window + focus it after session is restored.
+  // Open the required browser windows and tabs. If we're being run as an
+  // application window or application tab, don't restore tabs or open initial
+  // URLs as the user has directly launched an app shortcut. In the first case,
+  // the user should see a standlone app window. In the second case, the tab
+  // should either open in an existing Chrome window for this profile, or spawn
+  // a new Chrome window without any NTP if no window exists (see
+  // crbug.com/528385).
   if (OpenApplicationWindow(profile)) {
-    RecordLaunchModeHistogram(LM_AS_WEBAPP);
+    RecordLaunchModeHistogram(LM_AS_WEBAPP_IN_WINDOW);
+  } else if (OpenApplicationTab(profile)) {
+    RecordLaunchModeHistogram(LM_AS_WEBAPP_IN_TAB);
   } else {
     // Check the true process command line for --try-chrome-again=N rather than
     // the one parsed for startup URLs and such.
@@ -357,10 +378,6 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
       install_chrome_app::InstallChromeApp(
           command_line_.GetSwitchValueASCII(switches::kInstallChromeApp));
     }
-
-    // If this is an app launch, but we didn't open an app window, it may
-    // be an app tab.
-    OpenApplicationTab(profile);
 
 #if defined(OS_MACOSX)
     if (process_startup) {

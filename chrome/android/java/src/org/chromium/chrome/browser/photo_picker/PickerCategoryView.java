@@ -27,6 +27,7 @@ import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.util.ConversionUtils;
 import org.chromium.chrome.browser.widget.selection.SelectableListLayout;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
+import org.chromium.net.MimeTypeFilter;
 import org.chromium.ui.PhotoPickerListener;
 import org.chromium.ui.UiUtils;
 
@@ -153,8 +154,8 @@ public class PickerCategoryView extends RelativeLayout
         int titleId = multiSelectionAllowed ? R.string.photo_picker_select_images
                                             : R.string.photo_picker_select_image;
         PhotoPickerToolbar toolbar = (PhotoPickerToolbar) mSelectableListLayout.initializeToolbar(
-                R.layout.photo_picker_toolbar, mSelectionDelegate, titleId, null, 0, 0,
-                R.color.default_primary_color, null, false, false);
+                R.layout.photo_picker_toolbar, mSelectionDelegate, titleId, null, 0, 0, null, false,
+                false);
         toolbar.setNavigationOnClickListener(this);
         Button doneButton = (Button) toolbar.findViewById(R.id.done);
         doneButton.setOnClickListener(this);
@@ -365,7 +366,7 @@ public class PickerCategoryView extends RelativeLayout
 
         mEnumStartTime = SystemClock.elapsedRealtime();
         mWorkerTask = new FileEnumWorkerTask(
-                mActivity.getWindowAndroid(), this, new MimeTypeFileFilter(mMimeTypes));
+                mActivity.getWindowAndroid(), this, new MimeTypeFilter(mMimeTypes, true));
         mWorkerTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 

@@ -37,7 +37,6 @@
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/win/hwnd_util.h"
 #include "ui/views/window/client_view.h"
-#include "ui/views/window/hit_test_utils.h"
 
 HICON GlassBrowserFrameView::throbber_icons_[
     GlassBrowserFrameView::kThrobberIconCount];
@@ -67,11 +66,9 @@ constexpr char GlassBrowserFrameView::kClassName[];
 
 SkColor GlassBrowserFrameView::GetReadableFeatureColor(
     SkColor background_color) {
-  // BlendTowardOppositeLuma or IsDark isn't used here because those functions
-  // may use a different value for the dark/light threshold or the upper/lower
-  // bounds to which the color is blended. This will ensure the results of this
-  // function remain unchanged should those other functions behave differently.
-  // This algorithm matches the behaviour for native Windows caption buttons.
+  // color_utils::GetColorWithMaxContrast()/IsDark() aren't used here because
+  // they switch based on the Chrome light/dark endpoints, while we want to use
+  // the system native behavior below.
   return color_utils::GetLuma(background_color) < 128 ? SK_ColorWHITE
                                                       : SK_ColorBLACK;
 }
@@ -114,16 +111,16 @@ GlassBrowserFrameView::GlassBrowserFrameView(BrowserFrame* frame,
     AddChildView(window_title_);
   }
 
-  if (extensions::HostedAppBrowserController::IsForExperimentalHostedAppBrowser(
-          browser_view->browser())) {
-    // TODO(alancutter): Avoid snapshotting GetTitlebarFeatureColor() values
-    // here and call it on demand in
-    // HostedAppButtonContainer::UpdateIconsColor() via a delegate interface.
-    SkColor active_color = GetTitlebarFeatureColor(kActive);
-    SkColor inactive_color = GetTitlebarFeatureColor(kInactive);
-    hosted_app_button_container_ = new HostedAppButtonContainer(
-        frame, browser_view, active_color, inactive_color);
-    AddChildView(hosted_app_button_container_);
+  extensions::HostedAppBrowserController* controller =
+      browser_view->browser()->hosted_app_controller();
+  if (controller && controller->ShouldShowHostedAppButtonContainer()) {
+    // TODO(alancutter): Avoid snapshotting GetCaptionColor() values here and
+    // call it on demand in HostedAppButtonContainer::UpdateIconsColor() via a
+    // delegate interface.
+    set_hosted_app_button_container(new HostedAppButtonContainer(
+        frame, browser_view, GetCaptionColor(kActive),
+        GetCaptionColor(kInactive)));
+    AddChildView(hosted_app_button_container());
   }
 
   minimize_button_ =
@@ -150,7 +147,7 @@ bool GlassBrowserFrameView::CaptionButtonsOnLeadingEdge() const {
 }
 
 gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
-    views::View* tabstrip) const {
+    const views::View* tabstrip) const {
   const int x = CaptionButtonsOnLeadingEdge()
                     ? (width() - frame()->GetMinimizeButtonOffset())
                     : 0;
@@ -189,6 +186,15 @@ bool GlassBrowserFrameView::HasVisibleBackgroundTabShapes(
   return BrowserNonClientFrameView::HasVisibleBackgroundTabShapes(active_state);
 }
 
+bool GlassBrowserFrameView::CanDrawStrokes() const {
+  // On Win 7, the tabs are drawn as flat shapes against the glass frame, so
+  // the active tab always has a visible shape and strokes are unnecessary.
+  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+    return false;
+
+  return BrowserNonClientFrameView::CanDrawStrokes();
+}
+
 void GlassBrowserFrameView::UpdateThrobber(bool running) {
   if (ShowCustomIcon())
     window_icon_->Update();
@@ -213,7 +219,7 @@ gfx::Size GlassBrowserFrameView::GetMinimumSize() const {
 
   // Ensure that the minimum width is enough to hold a min-width tab strip.
   if (browser_view()->IsTabStripVisible()) {
-    TabStrip* tabstrip = browser_view()->tabstrip();
+    const TabStrip* tabstrip = browser_view()->tabstrip();
     int min_tabstrip_width = tabstrip->GetMinimumSize().width();
     int min_tabstrip_area_width =
         width() - GetBoundsForTabStrip(tabstrip).width() + min_tabstrip_width;
@@ -230,13 +236,12 @@ bool GlassBrowserFrameView::IsSingleTabModeAvailable() const {
          BrowserNonClientFrameView::IsSingleTabModeAvailable();
 }
 
-bool GlassBrowserFrameView::ShouldDrawStrokes() const {
-  // On Win 7, the tabs are drawn as flat shapes against the glass frame, so
-  // the active tab always has a visible shape and strokes are unnecessary.
-  if (base::win::GetVersion() < base::win::VERSION_WIN8)
-    return false;
-
-  return BrowserNonClientFrameView::ShouldDrawStrokes();
+SkColor GlassBrowserFrameView::GetCaptionColor(ActiveState active_state) const {
+  const SkAlpha title_alpha = ShouldPaintAsActive(active_state)
+                                  ? SK_AlphaOPAQUE
+                                  : kInactiveTitlebarFeatureAlpha;
+  return SkColorSetA(GetReadableFeatureColor(GetFrameColor(active_state)),
+                     title_alpha);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -277,6 +282,10 @@ bool HitTestCaptionButton(Windows10CaptionButton* button,
 }  // namespace
 
 int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
+  int super_component = BrowserNonClientFrameView::NonClientHitTest(point);
+  if (super_component != HTNOWHERE)
+    return super_component;
+
   // For app windows and popups without a custom titlebar we haven't customized
   // the frame at all so Windows can figure it out.
   if (!ShouldCustomDrawSystemTitlebar() &&
@@ -287,15 +296,6 @@ int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   // the frame so again Windows can figure it out.
   if (!bounds().Contains(point))
     return HTNOWHERE;
-
-  if (hosted_app_button_container_) {
-    // TODO(alancutter): Assign hit test components to all children and refactor
-    // this entire function call to just be GetHitTestComponent(this, point).
-    int hosted_app_component =
-        views::GetHitTestComponent(hosted_app_button_container_, point);
-    if (hosted_app_component != HTNOWHERE)
-      return hosted_app_component;
-  }
 
   int frame_component = frame()->client_view()->NonClientHitTest(point);
 
@@ -377,12 +377,11 @@ void GlassBrowserFrameView::UpdateWindowTitle() {
 }
 
 void GlassBrowserFrameView::ResetWindowControls() {
+  BrowserNonClientFrameView::ResetWindowControls();
   minimize_button_->SetState(views::Button::STATE_NORMAL);
   maximize_button_->SetState(views::Button::STATE_NORMAL);
   restore_button_->SetState(views::Button::STATE_NORMAL);
   close_button_->SetState(views::Button::STATE_NORMAL);
-  if (hosted_app_button_container_)
-    hosted_app_button_container_->UpdateContentSettingViewsVisibility();
 }
 
 void GlassBrowserFrameView::ButtonPressed(views::Button* sender,
@@ -394,13 +393,12 @@ void GlassBrowserFrameView::ButtonPressed(views::Button* sender,
   else if (sender == restore_button_)
     frame()->Restore();
   else if (sender == close_button_)
-    frame()->Close();
+    frame()->CloseWithReason(views::Widget::ClosedReason::kCloseButtonClicked);
 }
 
 bool GlassBrowserFrameView::ShouldTabIconViewAnimate() const {
   DCHECK(ShowCustomIcon());
-  const content::WebContents* current_tab =
-      browser_view()->GetActiveWebContents();
+  content::WebContents* current_tab = browser_view()->GetActiveWebContents();
   return current_tab && current_tab->IsLoading();
 }
 
@@ -418,11 +416,6 @@ bool GlassBrowserFrameView::IsMaximized() const {
 
 const char* GlassBrowserFrameView::GetClassName() const {
   return kClassName;
-}
-
-void GlassBrowserFrameView::ChildPreferredSizeChanged(views::View* child) {
-  if (browser_view()->initialized() && child == hosted_app_button_container_)
-    Layout();
 }
 
 void GlassBrowserFrameView::OnPaint(gfx::Canvas* canvas) {
@@ -444,13 +437,6 @@ void GlassBrowserFrameView::Layout() {
 
 ///////////////////////////////////////////////////////////////////////////////
 // GlassBrowserFrameView, private:
-
-void GlassBrowserFrameView::ActivationChanged(bool active) {
-  BrowserNonClientFrameView::ActivationChanged(active);
-
-  if (hosted_app_button_container_)
-    hosted_app_button_container_->SetPaintAsActive(active);
-}
 
 int GlassBrowserFrameView::FrameBorderThickness() const {
   return (IsMaximized() || frame()->IsFullscreen())
@@ -516,13 +502,13 @@ int GlassBrowserFrameView::TopAreaHeight(bool restored) const {
 int GlassBrowserFrameView::TitlebarMaximizedVisualHeight() const {
   int maximized_height =
       display::win::ScreenWin::GetSystemMetricsInDIP(SM_CYCAPTION);
-  if (hosted_app_button_container_) {
+  if (hosted_app_button_container()) {
     // Adding 2px of vertical padding puts at least 1 px of space on the top and
     // bottom of the element.
     constexpr int kVerticalPadding = 2;
     maximized_height =
         std::max(maximized_height,
-                 hosted_app_button_container_->GetPreferredSize().height() +
+                 hosted_app_button_container()->GetPreferredSize().height() +
                      kVerticalPadding);
   }
   return maximized_height;
@@ -535,15 +521,6 @@ int GlassBrowserFrameView::TitlebarHeight(bool restored) const {
   // some of it is above the screen in maximized mode. See the comment in
   // FrameTopBorderThicknessPx().
   return TitlebarMaximizedVisualHeight() + FrameTopBorderThickness(false);
-}
-
-SkColor GlassBrowserFrameView::GetTitlebarFeatureColor(
-    ActiveState active_state) const {
-  const SkAlpha title_alpha = ShouldPaintAsActive(active_state)
-                                  ? SK_AlphaOPAQUE
-                                  : kInactiveTitlebarFeatureAlpha;
-  return SkColorSetA(GetReadableFeatureColor(GetFrameColor(active_state)),
-                     title_alpha);
 }
 
 int GlassBrowserFrameView::WindowTopY() const {
@@ -574,7 +551,7 @@ bool GlassBrowserFrameView::IsToolbarVisible() const {
 
 bool GlassBrowserFrameView::ShowCustomIcon() const {
   // Hosted app windows don't include the window icon as per UI mocks.
-  return !hosted_app_button_container_ && ShouldCustomDrawSystemTitlebar() &&
+  return !hosted_app_button_container() && ShouldCustomDrawSystemTitlebar() &&
          browser_view()->ShouldShowWindowIcon();
 }
 
@@ -630,21 +607,15 @@ void GlassBrowserFrameView::PaintTitlebar(gfx::Canvas* canvas) const {
   // ourselves, we can make the client surface fully opaque and avoid the
   // power consumption needed for DWM to blend the window contents.
   //
-  // So the accent border also has to be opaque, but native inactive borders
-  // are #494949 with 47% alpha. Against white (the most visible case) this is
-  // #AAAAAA, so we color with that normally. However, when the titlebar is dark
-  // that color sometimes stands out badly. In that case we lighten the titlebar
-  // color slightly, which creates a subtle highlight effect. This isn't exactly
-  // native but it looks good given our constraints.
+  // So the accent border also has to be opaque. Native inactive borders are
+  // #555555 with 50% alpha. We can blend the titlebar color with this to
+  // approximate the native effect.
   const SkColor titlebar_color = GetTitlebarColor();
-  const SkColor inactive_border_color =
-      color_utils::IsDark(titlebar_color)
-          ? color_utils::BlendTowardOppositeLuma(titlebar_color, 0x0F)
-          : SkColorSetRGB(0xAA, 0xAA, 0xAA);
   flags.setColor(
       ShouldPaintAsActive()
           ? GetThemeProvider()->GetColor(ThemeProperties::COLOR_ACCENT_BORDER)
-          : inactive_border_color);
+          : color_utils::AlphaBlend(SkColorSetRGB(0x55, 0x55, 0x55),
+                                    titlebar_color, 0.5f));
   canvas->DrawRect(gfx::RectF(0, 0, width() * scale, y), flags);
 
   const int titlebar_height =
@@ -676,7 +647,7 @@ void GlassBrowserFrameView::PaintTitlebar(gfx::Canvas* canvas) const {
   }
 
   if (ShowCustomTitle())
-    window_title_->SetEnabledColor(GetTitlebarFeatureColor(kUseCurrent));
+    window_title_->SetEnabledColor(GetCaptionColor(kUseCurrent));
 }
 
 void GlassBrowserFrameView::LayoutTitleBar() {
@@ -708,8 +679,8 @@ void GlassBrowserFrameView::LayoutTitleBar() {
     next_leading_x = window_icon_bounds.right() + kIconTitleSpacing;
   }
 
-  if (hosted_app_button_container_) {
-    next_trailing_x = hosted_app_button_container_->LayoutInContainer(
+  if (hosted_app_button_container()) {
+    next_trailing_x = hosted_app_button_container()->LayoutInContainer(
         next_leading_x, next_trailing_x, window_top, titlebar_visual_height);
   }
 

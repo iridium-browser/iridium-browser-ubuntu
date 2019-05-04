@@ -16,32 +16,29 @@
 #include "ash/app_list/model/search/search_model.h"
 #include "ash/app_list/presenter/app_list_presenter_impl.h"
 #include "ash/ash_export.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/public/cpp/app_list/app_list_constants.h"
+#include "ash/public/cpp/assistant/default_voice_interaction_observer.h"
+#include "ash/public/cpp/shelf_types.h"
 #include "ash/public/interfaces/app_list.mojom.h"
 #include "ash/public/interfaces/voice_interaction_controller.mojom.h"
 #include "ash/session/session_observer.h"
 #include "ash/shell_observer.h"
 #include "ash/wallpaper/wallpaper_controller_observer.h"
 #include "ash/wm/tablet_mode/tablet_mode_observer.h"
+#include "base/observer_list.h"
 #include "components/sync/model/string_ordinal.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "mojo/public/cpp/bindings/interface_ptr_set.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 
-namespace app_list {
-class AnswerCardContentsRegistry;
-}  // namespace app_list
-
 namespace ui {
 class MouseWheelEvent;
 }  // namespace ui
 
-namespace ws {
-class WindowService;
-}  // namespace ws
-
 namespace ash {
 
+class AppListControllerObserver;
 class HomeLauncherGestureHandler;
 
 // Ash's AppListController owns the AppListModel and implements interface
@@ -56,11 +53,12 @@ class ASH_EXPORT AppListControllerImpl
       public TabletModeObserver,
       public keyboard::KeyboardControllerObserver,
       public WallpaperControllerObserver,
-      public mojom::VoiceInteractionObserver {
+      public DefaultVoiceInteractionObserver,
+      public WindowTreeHostManager::Observer {
  public:
   using AppListItemMetadataPtr = mojom::AppListItemMetadataPtr;
   using SearchResultMetadataPtr = mojom::SearchResultMetadataPtr;
-  explicit AppListControllerImpl(ws::WindowService* window_service);
+  AppListControllerImpl();
   ~AppListControllerImpl() override;
 
   // Binds the mojom::AppListController interface request to this object.
@@ -137,9 +135,9 @@ class ASH_EXPORT AppListControllerImpl
                                  float background_opacity);
   void EndDragFromShelf(app_list::AppListViewState app_list_state);
   void ProcessMouseWheelEvent(const ui::MouseWheelEvent& event);
-  void ToggleAppList(int64_t display_id,
-                     app_list::AppListShowSource show_source,
-                     base::TimeTicks event_time_stamp);
+  ash::ShelfAction ToggleAppList(int64_t display_id,
+                                 app_list::AppListShowSource show_source,
+                                 base::TimeTicks event_time_stamp);
   app_list::AppListViewState GetAppListViewState();
   HomeLauncherGestureHandler* home_launcher_gesture_handler() {
     return home_launcher_gesture_handler_.get();
@@ -184,18 +182,26 @@ class ASH_EXPORT AppListControllerImpl
   bool ProcessHomeLauncherGesture(ui::GestureEvent* event,
                                   const gfx::Point& screen_location) override;
   bool CanProcessEventsOnApplistViews() override;
-  ws::WindowService* GetWindowService() override;
+  void GetNavigableContentsFactory(
+      content::mojom::NavigableContentsFactoryRequest request) override;
 
-  void OnVisibilityChanged(bool visible);
-  void OnTargetVisibilityChanged(bool visible);
-  void StartVoiceInteractionSession();
-  void ToggleVoiceInteractionSession();
+  void AddObserver(AppListControllerObserver* observer);
+  void RemoveObserver(AppListControllerObserver* obsever);
+
+  // AppList visibility announcements are for clamshell mode AppList.
+  void NotifyAppListVisibilityChanged(bool visible, int64_t display_id);
+  void NotifyAppListTargetVisibilityChanged(bool visible);
+
+  // HomeLauncher visibility announcements are for tablet mode AppList.
+  void NotifyHomeLauncherTargetPositionChanged(bool showing,
+                                               int64_t display_id);
+  void NotifyHomeLauncherAnimationComplete(bool shown, int64_t display_id);
 
   void FlushForTesting();
 
   // ShellObserver:
   void OnOverviewModeStarting() override;
-  void OnOverviewModeEnding() override;
+  void OnOverviewModeEnding(OverviewSession* overview_session) override;
   void OnOverviewModeEndingAnimationComplete(bool canceled) override;
 
   // TabletModeObserver:
@@ -211,23 +217,27 @@ class ASH_EXPORT AppListControllerImpl
   void OnWallpaperPreviewEnded() override;
 
   // mojom::VoiceInteractionObserver:
-  void OnVoiceInteractionStatusChanged(
-      mojom::VoiceInteractionState state) override {}
   void OnVoiceInteractionSettingsEnabled(bool enabled) override;
-  void OnVoiceInteractionContextEnabled(bool enabled) override {}
-  void OnVoiceInteractionHotwordEnabled(bool enabled) override {}
-  void OnVoiceInteractionSetupCompleted(bool completed) override {}
   void OnAssistantFeatureAllowedChanged(
       mojom::AssistantAllowedState state) override;
-  void OnLocaleChanged(const std::string& locale) override {}
+
+  // WindowTreeHostManager::Observer:
+  void OnDisplayConfigurationChanged() override;
 
   bool onscreen_keyboard_shown() const { return onscreen_keyboard_shown_; }
 
-  // Returns true if the home launcher is enabled in tablet mode.
-  bool IsHomeLauncherEnabledInTabletMode() const;
-
   // Performs the 'back' action for the active page.
   void Back();
+
+  // Handles app list button press event. (Search key should trigger the same
+  // behavior.) All three parameters are only used in clamshell mode.
+  // |display_id| is the id of display where app list should toggle.
+  // |show_source| is the source of the event. |event_time_stamp| records the
+  // event timestamp.
+  ash::ShelfAction OnAppListButtonPressed(
+      int64_t display_id,
+      app_list::AppListShowSource show_source,
+      base::TimeTicks event_time_stamp);
 
  private:
   syncer::StringOrdinal GetOemFolderPos();
@@ -244,7 +254,8 @@ class ASH_EXPORT AppListControllerImpl
 
   int64_t GetDisplayIdToShowAppListOn();
 
-  ws::WindowService* window_service_;
+  // Shows the home launcher in tablet mode.
+  void ShowHomeLauncher();
 
   base::string16 last_raw_query_;
 
@@ -260,10 +271,6 @@ class ASH_EXPORT AppListControllerImpl
   // Bindings for the AppListController interface.
   mojo::BindingSet<mojom::AppListController> bindings_;
 
-  // Token to view map for classic/mus ash (i.e. non-mash).
-  std::unique_ptr<app_list::AnswerCardContentsRegistry>
-      answer_card_contents_registry_;
-
   // Owned pointer to the object which handles gestures related to the home
   // launcher.
   std::unique_ptr<HomeLauncherGestureHandler> home_launcher_gesture_handler_;
@@ -271,13 +278,10 @@ class ASH_EXPORT AppListControllerImpl
   // Whether the on-screen keyboard is shown.
   bool onscreen_keyboard_shown_ = false;
 
-  // Whether the home launcher feature is enabled.
-  const bool is_home_launcher_enabled_;
-
   // Each time overview mode is exited, set this variable based on whether
   // overview mode is sliding out, so the home launcher knows what to do when
   // overview mode exit animations are finished.
-  bool use_slide_to_exit_overview_mode_ = false;
+  bool use_slide_to_exit_overview_ = false;
 
   // Whether the wallpaper is being previewed. The home launcher (if enabled)
   // should be hidden during wallpaper preview.
@@ -286,7 +290,7 @@ class ASH_EXPORT AppListControllerImpl
   // Whether we're currently in a window dragging process.
   bool in_window_dragging_ = false;
 
-  mojo::Binding<mojom::VoiceInteractionObserver> voice_interaction_binding_;
+  base::ObserverList<AppListControllerObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListControllerImpl);
 };

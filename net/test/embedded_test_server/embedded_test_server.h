@@ -110,6 +110,9 @@ class EmbeddedTestServer {
 
     // A certificate that is a leaf certificate signed with SHA-1.
     CERT_SHA1_LEAF,
+
+    // A certificate that is signed by an intermediate certificate.
+    CERT_OK_BY_INTERMEDIATE,
   };
 
   typedef base::RepeatingCallback<std::unique_ptr<HttpResponse>(
@@ -186,6 +189,9 @@ class EmbeddedTestServer {
 
   // Returns the address list needed to connect to the server.
   bool GetAddressList(AddressList* address_list) const WARN_UNUSED_RESULT;
+
+  // Returns the IP Address to connect to the server as a string.
+  std::string GetIPLiteralString() const;
 
   // Returns the port number used by the server.
   uint16_t port() const { return port_; }

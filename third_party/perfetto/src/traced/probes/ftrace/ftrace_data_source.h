@@ -17,9 +17,12 @@
 #ifndef SRC_TRACED_PROBES_FTRACE_FTRACE_DATA_SOURCE_H_
 #define SRC_TRACED_PROBES_FTRACE_FTRACE_DATA_SOURCE_H_
 
+#include <functional>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "perfetto/base/scoped_file.h"
 #include "perfetto/base/weak_ptr.h"
@@ -60,18 +63,19 @@ class FtraceDataSource : public ProbesDataSource {
 
   // Called by FtraceController soon after ProbesProducer creates the data
   // source, to inject ftrace dependencies.
-  void Initialize(FtraceConfigId, std::unique_ptr<EventFilter>);
+  void Initialize(FtraceConfigId, const EventFilter* event_filter);
 
   // ProbesDataSource implementation.
   void Start() override;
 
   // Flushes the ftrace buffers into the userspace trace buffers and writes
   // also ftrace stats.
-  void Flush() override;
+  void Flush(FlushRequestID, std::function<void()> callback) override;
+  void OnFtraceFlushComplete(FlushRequestID);
 
   FtraceConfigId config_id() const { return config_id_; }
   const FtraceConfig& config() const { return config_; }
-  EventFilter* event_filter() { return event_filter_.get(); }
+  const EventFilter* event_filter() { return event_filter_; }
   FtraceMetadata* mutable_metadata() { return &metadata_; }
   TraceWriter* trace_writer() { return writer_.get(); }
 
@@ -85,12 +89,13 @@ class FtraceDataSource : public ProbesDataSource {
   const FtraceConfig config_;
   FtraceMetadata metadata_;
   FtraceStats stats_before_ = {};
+  std::map<FlushRequestID, std::function<void()>> pending_flushes_;
 
   // Initialized by the Initialize() call.
   FtraceConfigId config_id_ = 0;
   std::unique_ptr<TraceWriter> writer_;
   base::WeakPtr<FtraceController> controller_weak_;
-  std::unique_ptr<EventFilter> event_filter_;
+  const EventFilter* event_filter_;
 };
 
 }  // namespace perfetto

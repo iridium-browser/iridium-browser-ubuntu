@@ -29,7 +29,7 @@
             android:lineSpacingExtra="6dp"
             android:paddingTop="16dp"
             android:textAlignment="viewStart"
-            android:textAppearance="@style/BlackTitle1" />
+            android:textAppearance="@style/TextAppearance.BlackTitle1" />
 
         <TextView
             android:id="@+id/page_info_connection_summary"
@@ -37,7 +37,7 @@
             android:layout_height="wrap_content"
             android:lineSpacingExtra="3dp"
             android:paddingTop="16dp"
-            android:textAppearance="@style/BlackTitle1"
+            android:textAppearance="@style/TextAppearance.BlackTitle1"
             android:visibility="gone" />
 
         <TextView
@@ -46,7 +46,7 @@
             android:layout_height="wrap_content"
             android:lineSpacingExtra="3dp"
             android:paddingTop="8dp"
-            android:textAppearance="@style/BlackBodyDefault"
+            android:textAppearance="@style/TextAppearance.BlackBodyDefault"
             android:visibility="gone" />
 
         <View
@@ -60,7 +60,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingTop="14dp"
-            android:textAppearance="@style/BlackTitle1"
+            android:textAppearance="@style/TextAppearance.BlackTitle1"
             android:text="@string/page_info_preview_message"
             android:visibility="gone" />
 
@@ -68,7 +68,7 @@
             android:id="@+id/page_info_stale_preview_timestamp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textAppearance="@style/BlackCaption"
+            android:textAppearance="@style/TextAppearance.BlackCaption"
             android:visibility="gone" />
 
         <TextView
@@ -76,7 +76,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingTop="12dp"
-            android:textAppearance="@style/BlackTitle1"
+            android:textAppearance="@style/TextAppearance.BlackTitle1"
             android:visibility="gone" />
     </LinearLayout>
 
@@ -92,9 +92,8 @@
         android:paddingEnd="@dimen/page_info_popup_button_padding_sides"
         android:paddingStart="@dimen/page_info_popup_button_padding_sides"
         android:text="@string/page_info_instant_app_button"
-        android:textAppearance="@style/WhiteButtonText"
-        app:buttonRaised="false"
-        app:buttonColor="@color/app_banner_install_button_bg" />
+        app:buttonColor="@color/app_banner_install_button_bg"
+        style="@style/FilledButton" />
 
     <LinearLayout
         android:id="@+id/page_info_permissions_list"
@@ -105,7 +104,7 @@
         android:paddingEnd="@dimen/page_info_popup_padding_sides" >
     </LinearLayout>
 
-    <Button
+    <org.chromium.ui.widget.ButtonCompat
         android:id="@+id/page_info_site_settings_button"
         android:layout_width="wrap_content"
         android:layout_height="@dimen/page_info_popup_button_height"
@@ -115,9 +114,10 @@
         android:layout_marginTop="8dp"
         android:paddingEnd="@dimen/page_info_popup_button_padding_sides"
         android:paddingStart="@dimen/page_info_popup_button_padding_sides"
-        android:text="@string/page_info_site_settings_button" />
+        android:text="@string/page_info_site_settings_button"
+        style="@style/TextButton" />
 
-    <Button
+    <org.chromium.ui.widget.ButtonCompat
         android:id="@+id/page_info_open_online_button"
         android:layout_width="wrap_content"
         android:layout_height="@dimen/page_info_popup_button_height"
@@ -127,5 +127,6 @@
         android:layout_marginTop="8dp"
         android:paddingEnd="@dimen/page_info_popup_button_padding_sides"
         android:paddingStart="@dimen/page_info_popup_button_padding_sides"
-        android:text="@string/page_info_open_online_button" />
+        android:text="@string/page_info_open_online_button"
+        style="@style/TextButton" />
 </LinearLayout>

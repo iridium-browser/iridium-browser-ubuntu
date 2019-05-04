@@ -371,13 +371,30 @@ Optional<StringRef> LinkerDriver::findFile(StringRef Filename) {
   return Path;
 }
 
+// MinGW specific. If an embedded directive specified to link to
+// foo.lib, but it isn't found, try libfoo.a instead.
+StringRef LinkerDriver::doFindLibMinGW(StringRef Filename) {
+  if (Filename.contains('/') || Filename.contains('\\'))
+    return Filename;
+
+  SmallString<128> S = Filename;
+  sys::path::replace_extension(S, ".a");
+  StringRef LibName = Saver.save("lib" + S.str());
+  return doFindFile(LibName);
+}
+
 // Find library file from search path.
 StringRef LinkerDriver::doFindLib(StringRef Filename) {
   // Add ".lib" to Filename if that has no file extension.
   bool HasExt = Filename.contains('.');
   if (!HasExt)
     Filename = Saver.save(Filename + ".lib");
-  return doFindFile(Filename);
+  StringRef Ret = doFindFile(Filename);
+  // For MinGW, if the find above didn't turn up anything, try
+  // looking for a MinGW formatted library name.
+  if (Config->MinGW && Ret == Filename)
+    return doFindLibMinGW(Filename);
+  return Ret;
 }
 
 // Resolves a library path. /nodefaultlib options are taken into
@@ -969,11 +986,17 @@ void LinkerDriver::link(ArrayRef<const char *> ArgsArr) {
 
   // Handle /ignore
   for (auto *Arg : Args.filtered(OPT_ignore)) {
-    if (StringRef(Arg->getValue()) == "4037")
-      Config->WarnMissingOrderSymbol = false;
-    else if (StringRef(Arg->getValue()) == "4217")
-      Config->WarnLocallyDefinedImported = false;
-    // Other warning numbers are ignored.
+    SmallVector<StringRef, 8> Vec;
+    StringRef(Arg->getValue()).split(Vec, ',');
+    for (StringRef S : Vec) {
+      if (S == "4037")
+        Config->WarnMissingOrderSymbol = false;
+      else if (S == "4099")
+        Config->WarnDebugInfoUnusable = false;
+      else if (S == "4217")
+        Config->WarnLocallyDefinedImported = false;
+      // Other warning numbers are ignored.
+    }
   }
 
   // Handle /out
@@ -1350,6 +1373,7 @@ void LinkerDriver::link(ArrayRef<const char *> ArgsArr) {
     warn("/machine is not specified. x64 is assumed");
     Config->Machine = AMD64;
   }
+  Config->Wordsize = Config->is64() ? 8 : 4;
 
   // Input files can be Windows resource files (.res files). We use
   // WindowsResource to convert resource files to a regular COFF file,

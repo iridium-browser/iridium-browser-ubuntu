@@ -12,7 +12,7 @@
 #include "third_party/blink/renderer/modules/peerconnection/adapters/ice_transport_adapter.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/ice_transport_adapter_cross_thread_factory.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
-#include "third_party/webrtc/p2p/base/p2ptransportchannel.h"
+#include "third_party/webrtc/p2p/base/p2p_transport_channel.h"
 
 namespace rtc {
 class Thread;
@@ -21,6 +21,7 @@ class Thread;
 namespace blink {
 
 class IceTransportHost;
+class LocalFrame;
 class QuicTransportProxy;
 
 // This class allows the ICE implementation (P2PTransportChannel) to run on a
@@ -60,7 +61,7 @@ class IceTransportProxy final {
   // The P2PTransportChannel will be created with the given PortAllocator.
   // The delegate must outlive the IceTransportProxy.
   IceTransportProxy(
-      FrameScheduler* frame_scheduler,
+      LocalFrame& frame,
       scoped_refptr<base::SingleThreadTaskRunner> proxy_thread,
       scoped_refptr<base::SingleThreadTaskRunner> host_thread,
       Delegate* delegate,

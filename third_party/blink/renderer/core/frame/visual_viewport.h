@@ -92,7 +92,11 @@ class CORE_EXPORT VisualViewport final
   USING_GARBAGE_COLLECTED_MIXIN(VisualViewport);
 
  public:
-  static VisualViewport* Create(Page& host) { return new VisualViewport(host); }
+  static VisualViewport* Create(Page& host) {
+    return MakeGarbageCollected<VisualViewport>(host);
+  }
+
+  explicit VisualViewport(Page&);
   ~VisualViewport() override;
 
   void Trace(blink::Visitor*) override;
@@ -186,7 +190,6 @@ class CORE_EXPORT VisualViewport final
 
   // ScrollableArea implementation
   ChromeClient* GetChromeClient() const override;
-  bool ShouldUseIntegerScrollOffset() const override;
   void SetScrollOffset(const ScrollOffset&,
                        ScrollType,
                        ScrollBehavior = kScrollBehaviorInstant) override;
@@ -255,6 +258,7 @@ class CORE_EXPORT VisualViewport final
   ScrollbarTheme& GetPageScrollbarTheme() const override;
   bool VisualViewportSuppliesScrollbars() const override;
 
+  TransformPaintPropertyNode* GetDeviceEmulationTransformNode() const;
   TransformPaintPropertyNode* GetOverscrollElasticityTransformNode() const;
   TransformPaintPropertyNode* GetPageScaleNode() const;
   TransformPaintPropertyNode* GetScrollTranslationNode() const;
@@ -273,8 +277,6 @@ class CORE_EXPORT VisualViewport final
   bool NeedsPaintPropertyUpdate() const { return needs_paint_property_update_; }
 
  private:
-  explicit VisualViewport(Page&);
-
   bool DidSetScaleOrLocation(float scale, const FloatPoint& location);
 
 
@@ -295,10 +297,15 @@ class CORE_EXPORT VisualViewport final
                      GraphicsLayerPaintingPhase,
                      const IntRect&) const override;
   void SetOverlayScrollbarsHidden(bool) override;
+  void SetPaintArtifactCompositorNeedsUpdate() const override;
   String DebugName(const GraphicsLayer*) const override;
 
   const ScrollableArea* GetScrollableAreaForTesting(
       const GraphicsLayer*) const override;
+
+  int ScrollbarThickness() const;
+  IntSize ScrollbarSize(ScrollbarOrientation) const;
+  IntPoint ScrollbarOffset(ScrollbarOrientation) const;
 
   void SetupScrollbar(ScrollbarOrientation);
 
@@ -336,6 +343,7 @@ class CORE_EXPORT VisualViewport final
   std::unique_ptr<GraphicsLayer> overlay_scrollbar_horizontal_;
   std::unique_ptr<GraphicsLayer> overlay_scrollbar_vertical_;
 
+  scoped_refptr<TransformPaintPropertyNode> device_emulation_transform_node_;
   scoped_refptr<TransformPaintPropertyNode>
       overscroll_elasticity_transform_node_;
   scoped_refptr<TransformPaintPropertyNode> scale_transform_node_;

@@ -63,6 +63,26 @@ class PasswordStoreResultsObserver
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreResultsObserver);
 };
 
+// Custom class is required to enable password generation.
+class CustomPasswordManagerClient : public ChromePasswordManagerClient {
+ public:
+  using ChromePasswordManagerClient::ChromePasswordManagerClient;
+
+  static void CreateForWebContentsWithAutofillClient(
+      content::WebContents* contents,
+      autofill::AutofillClient* autofill_client) {
+    ASSERT_FALSE(FromWebContents(contents));
+    contents->SetUserData(UserDataKey(),
+                          base::WrapUnique(new CustomPasswordManagerClient(
+                              contents, autofill_client)));
+  }
+
+  // PasswordManagerClient:
+  password_manager::SyncState GetPasswordSyncState() const override {
+    return password_manager::SYNCING_NORMAL_ENCRYPTION;
+  }
+};
+
 // ManagePasswordsUIController subclass to capture the UI events.
 class CustomManagePasswordsUIController : public ManagePasswordsUIController {
  public:
@@ -72,6 +92,8 @@ class CustomManagePasswordsUIController : public ManagePasswordsUIController {
   void WaitForState(password_manager::ui::State target_state);
 
   void WaitForFallbackForSaving();
+
+  bool WaitForFallbackForSaving(const base::TimeDelta timeout);
 
   bool was_prompt_automatically_shown() {
     return was_prompt_automatically_shown_;
@@ -163,6 +185,25 @@ void CustomManagePasswordsUIController::WaitForFallbackForSaving() {
   wait_for_fallback_ = true;
   run_loop_ = &run_loop;
   run_loop_->Run();
+}
+
+bool CustomManagePasswordsUIController::WaitForFallbackForSaving(
+    const base::TimeDelta timeout = base::TimeDelta::Max()) {
+  // If the browser is currently showing the save fallback, return true
+  // without waiting.
+  if (BubbleIsManualFallbackForSaving())
+    return true;
+
+  base::RunLoop run_loop;
+  wait_for_fallback_ = true;
+  run_loop_ = &run_loop;
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, run_loop_->QuitClosure(), timeout);
+  run_loop_->Run();
+  bool shownFallbackForSaving = !wait_for_fallback_;
+  run_loop_ = nullptr;
+  wait_for_fallback_ = false;
+  return shownFallbackForSaving;
 }
 
 void CustomManagePasswordsUIController::OnPasswordSubmitted(
@@ -370,10 +411,11 @@ void BubbleObserver::WaitForAutomaticSavePrompt() const {
   controller->WaitForState(password_manager::ui::PENDING_PASSWORD_STATE);
 }
 
-void BubbleObserver::WaitForFallbackForSaving() const {
+bool BubbleObserver::WaitForFallbackForSaving(
+    const base::TimeDelta timeout) const {
   CustomManagePasswordsUIController* controller =
       static_cast<CustomManagePasswordsUIController*>(passwords_ui_controller_);
-  controller->WaitForFallbackForSaving();
+  return controller->WaitForFallbackForSaving(timeout);
 }
 
 PasswordManagerBrowserTestBase::PasswordManagerBrowserTestBase()
@@ -439,7 +481,7 @@ void PasswordManagerBrowserTestBase::SetUpOnMainThreadAndGetNewTab(
 
   // ManagePasswordsUIController needs ChromePasswordManagerClient for logging.
   autofill::ChromeAutofillClient::CreateForWebContents(*web_contents);
-  ChromePasswordManagerClient::CreateForWebContentsWithAutofillClient(
+  CustomPasswordManagerClient::CreateForWebContentsWithAutofillClient(
       *web_contents,
       autofill::ChromeAutofillClient::FromWebContents(*web_contents));
   ASSERT_TRUE(ChromePasswordManagerClient::FromWebContents(*web_contents));
@@ -634,8 +676,8 @@ void PasswordManagerBrowserTestBase::AddHSTSHost(const std::string& host) {
   base::Time expiry = base::Time::Now() + base::TimeDelta::FromDays(1000);
   bool include_subdomains = false;
   base::RunLoop run_loop;
-  network_context->AddHSTSForTesting(host, expiry, include_subdomains,
-                                     run_loop.QuitClosure());
+  network_context->AddHSTS(host, expiry, include_subdomains,
+                           run_loop.QuitClosure());
   run_loop.Run();
 }
 

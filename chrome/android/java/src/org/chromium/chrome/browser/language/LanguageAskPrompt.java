@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.language;
 
 import android.content.Context;
+import android.content.res.Resources;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.RecyclerView.ViewHolder;
@@ -21,13 +22,14 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.modaldialog.DialogDismissalCause;
-import org.chromium.chrome.browser.modaldialog.ModalDialogManager;
-import org.chromium.chrome.browser.modaldialog.ModalDialogView;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.languages.LanguageItem;
 import org.chromium.components.language.AndroidLanguageMetricsBridge;
 import org.chromium.components.language.GeoLanguageProviderBridge;
+import org.chromium.ui.modaldialog.DialogDismissalCause;
+import org.chromium.ui.modaldialog.ModalDialogManager;
+import org.chromium.ui.modaldialog.ModalDialogProperties;
+import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -40,7 +42,7 @@ import java.util.List;
  * Implements a modal dialog that prompts the user about the languages they can read. Displayed
  * once at browser startup when no other promo or modals are shown.
  */
-public class LanguageAskPrompt implements ModalDialogView.Controller {
+public class LanguageAskPrompt implements ModalDialogProperties.Controller {
     // Enum values for the Translate.ExplicitLanguageAsk.Event histogram.
     private static final int PROMPT_EVENT_SHOWN = 0;
     private static final int PROMPT_EVENT_SAVED = 1;
@@ -252,7 +254,6 @@ public class LanguageAskPrompt implements ModalDialogView.Controller {
 
     private ListScrollListener mListScrollListener;
     private ModalDialogManager mModalDialogManager;
-    private ModalDialogView mDialog;
     private HashSet<String> mLanguagesUpdate;
     private HashSet<String> mInitialLanguages;
 
@@ -295,15 +296,9 @@ public class LanguageAskPrompt implements ModalDialogView.Controller {
         mInitialLanguages.addAll(userAcceptLanguagesList);
         mLanguagesUpdate = new HashSet<String>(mInitialLanguages);
 
-        ModalDialogView.Params params = new ModalDialogView.Params();
-        params.title = activity.getString(R.string.languages_explicit_ask_title);
-        params.positiveButtonTextId = R.string.save;
-        params.negativeButtonTextId = R.string.cancel;
-        params.cancelOnTouchOutside = true;
-
-        params.customView = LayoutInflater.from(activity).inflate(
+        View customView = LayoutInflater.from(activity).inflate(
                 R.layout.language_ask_prompt_content, null, false);
-        RecyclerView list = (RecyclerView) params.customView.findViewById(R.id.recycler_view);
+        RecyclerView list = customView.findViewById(R.id.recycler_view);
         LanguageItemAdapter adapter = new LanguageItemAdapter(activity, mLanguagesUpdate);
         list.setAdapter(adapter);
         LinearLayoutManager linearLayoutManager = new LinearLayoutManager(activity);
@@ -311,8 +306,8 @@ public class LanguageAskPrompt implements ModalDialogView.Controller {
         list.setLayoutManager(linearLayoutManager);
         list.setHasFixedSize(true);
 
-        ImageView topShadow = (ImageView) params.customView.findViewById(R.id.top_shadow);
-        ImageView bottomShadow = (ImageView) params.customView.findViewById(R.id.bottom_shadow);
+        ImageView topShadow = customView.findViewById(R.id.top_shadow);
+        ImageView bottomShadow = customView.findViewById(R.id.bottom_shadow);
         mListScrollListener = new ListScrollListener(list, topShadow, bottomShadow);
 
         List<LanguageItem> languages = PrefServiceBridge.getInstance().getChromeLanguageList();
@@ -346,25 +341,35 @@ public class LanguageAskPrompt implements ModalDialogView.Controller {
 
         adapter.setLanguages(topLanguages, bottomLanguages);
 
+        Resources resources = activity.getResources();
+        PropertyModel model =
+                new PropertyModel.Builder(ModalDialogProperties.ALL_KEYS)
+                        .with(ModalDialogProperties.CONTROLLER, this)
+                        .with(ModalDialogProperties.TITLE, resources,
+                                R.string.languages_explicit_ask_title)
+                        .with(ModalDialogProperties.CUSTOM_VIEW, customView)
+                        .with(ModalDialogProperties.POSITIVE_BUTTON_TEXT, resources, R.string.save)
+                        .with(ModalDialogProperties.NEGATIVE_BUTTON_TEXT, resources,
+                                R.string.cancel)
+                        .with(ModalDialogProperties.CANCEL_ON_TOUCH_OUTSIDE, true)
+                        .build();
+
         mModalDialogManager = activity.getModalDialogManager();
-        mDialog = new ModalDialogView(this, params);
-        mModalDialogManager.showDialog(mDialog, ModalDialogManager.ModalDialogType.APP);
+        mModalDialogManager.showDialog(model, ModalDialogManager.ModalDialogType.APP);
     }
 
     @Override
-    public void onClick(int buttonType) {
-        if (buttonType == ModalDialogView.ButtonType.NEGATIVE) {
-            mModalDialogManager.dismissDialog(
-                    mDialog, DialogDismissalCause.NEGATIVE_BUTTON_CLICKED);
+    public void onClick(PropertyModel model, int buttonType) {
+        if (buttonType == ModalDialogProperties.ButtonType.NEGATIVE) {
+            mModalDialogManager.dismissDialog(model, DialogDismissalCause.NEGATIVE_BUTTON_CLICKED);
         } else {
             saveLanguages();
-            mModalDialogManager.dismissDialog(
-                    mDialog, DialogDismissalCause.POSITIVE_BUTTON_CLICKED);
+            mModalDialogManager.dismissDialog(model, DialogDismissalCause.POSITIVE_BUTTON_CLICKED);
         }
     }
 
     @Override
-    public void onDismiss(@DialogDismissalCause int dismissalCause) {
+    public void onDismiss(PropertyModel model, int dismissalCause) {
         if (dismissalCause == DialogDismissalCause.POSITIVE_BUTTON_CLICKED) {
             recordPromptEvent(PROMPT_EVENT_SAVED);
         } else {

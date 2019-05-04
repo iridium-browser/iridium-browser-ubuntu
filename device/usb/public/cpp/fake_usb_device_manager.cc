@@ -19,6 +19,13 @@ FakeUsbDeviceManager::FakeUsbDeviceManager() : weak_factory_(this) {}
 
 FakeUsbDeviceManager::~FakeUsbDeviceManager() {}
 
+void FakeUsbDeviceManager::EnumerateDevicesAndSetClient(
+    mojom::UsbDeviceManagerClientAssociatedPtrInfo client,
+    EnumerateDevicesAndSetClientCallback callback) {
+  GetDevices(nullptr, std::move(callback));
+  SetClient(std::move(client));
+}
+
 // mojom::UsbDeviceManager implementation:
 void FakeUsbDeviceManager::GetDevices(mojom::UsbEnumerationOptionsPtr options,
                                       GetDevicesCallback callback) {
@@ -28,7 +35,7 @@ void FakeUsbDeviceManager::GetDevices(mojom::UsbEnumerationOptionsPtr options,
 
   std::vector<mojom::UsbDeviceInfoPtr> device_infos;
   for (const auto& it : devices_) {
-    mojom::UsbDeviceInfoPtr device_info = it.second->GetDeviceInfo();
+    mojom::UsbDeviceInfoPtr device_info = it.second->GetDeviceInfo().Clone();
     if (UsbDeviceFilterMatchesAny(filters, *device_info)) {
       device_infos.push_back(std::move(device_info));
     }
@@ -48,6 +55,21 @@ void FakeUsbDeviceManager::GetDevice(const std::string& guid,
                         std::move(device_client));
 }
 
+#if defined(OS_CHROMEOS)
+void FakeUsbDeviceManager::CheckAccess(const std::string& guid,
+                                       CheckAccessCallback callback) {
+  std::move(callback).Run(true);
+}
+
+void FakeUsbDeviceManager::OpenFileDescriptor(
+    const std::string& guid,
+    OpenFileDescriptorCallback callback) {
+  std::move(callback).Run(base::File(
+      base::FilePath(FILE_PATH_LITERAL("/dev/null")),
+      base::File::FLAG_OPEN | base::File::FLAG_READ | base::File::FLAG_WRITE));
+}
+#endif  // defined(OS_CHROMEOS)
+
 void FakeUsbDeviceManager::SetClient(
     mojom::UsbDeviceManagerClientAssociatedPtrInfo client) {
   DCHECK(client);
@@ -65,7 +87,7 @@ mojom::UsbDeviceInfoPtr FakeUsbDeviceManager::AddDevice(
   DCHECK(device);
   DCHECK(!base::ContainsKey(devices_, device->guid()));
   devices_[device->guid()] = device;
-  auto device_info = device->GetDeviceInfo();
+  auto device_info = device->GetDeviceInfo().Clone();
 
   // Notify all the clients.
   clients_.ForAllPtrs(
@@ -79,7 +101,7 @@ void FakeUsbDeviceManager::RemoveDevice(
     scoped_refptr<FakeUsbDeviceInfo> device) {
   DCHECK(device);
   DCHECK(base::ContainsKey(devices_, device->guid()));
-  auto device_info = device->GetDeviceInfo();
+  auto device_info = device->GetDeviceInfo().Clone();
   devices_.erase(device->guid());
 
   // Notify all the clients

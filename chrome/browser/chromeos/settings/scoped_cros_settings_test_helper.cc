@@ -11,11 +11,13 @@
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_cache.h"
+#include "chrome/browser/chromeos/settings/device_settings_provider.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/ownership/mock_owner_key_util.h"
 #include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -35,12 +37,14 @@ ScopedCrosSettingsTestHelper::~ScopedCrosSettingsTestHelper() {
 std::unique_ptr<FakeOwnerSettingsService>
 ScopedCrosSettingsTestHelper::CreateOwnerSettingsService(Profile* profile) {
   return std::make_unique<FakeOwnerSettingsService>(
-      profile, new ownership::MockOwnerKeyUtil(), stub_settings_provider_ptr_);
+      stub_settings_provider_ptr_, profile, new ownership::MockOwnerKeyUtil());
 }
 
 void ScopedCrosSettingsTestHelper::ReplaceDeviceSettingsProviderWithStub() {
+  CHECK(CrosSettings::IsInitialized());
+  // This function shouldn't be called twice.
   CHECK(!real_settings_provider_);
-  // Swap out the DeviceSettingsProvider with our settings provider.
+
   CrosSettings* const cros_settings = CrosSettings::Get();
 
   // TODO(olsen): This could be simplified if DeviceSettings and CrosSettings
@@ -66,23 +70,22 @@ void ScopedCrosSettingsTestHelper::RestoreRealDeviceSettingsProvider() {
   real_settings_provider_.reset();
 }
 
-bool ScopedCrosSettingsTestHelper::IsDeviceSettingsProviderStubbed() {
-  return !!real_settings_provider_;
+StubCrosSettingsProvider* ScopedCrosSettingsTestHelper::GetStubbedProvider() {
+  return stub_settings_provider_ptr_;
 }
 
 void ScopedCrosSettingsTestHelper::SetTrustedStatus(
     CrosSettingsProvider::TrustedStatus status) {
-  stub_settings_provider_ptr_->SetTrustedStatus(status);
+  GetStubbedProvider()->SetTrustedStatus(status);
 }
 
 void ScopedCrosSettingsTestHelper::SetCurrentUserIsOwner(bool owner) {
-  stub_settings_provider_ptr_->SetCurrentUserIsOwner(owner);
+  GetStubbedProvider()->SetCurrentUserIsOwner(owner);
 }
 
 void ScopedCrosSettingsTestHelper::Set(const std::string& path,
                                        const base::Value& in_value) {
-  CHECK(IsDeviceSettingsProviderStubbed());
-  stub_settings_provider_ptr_->Set(path, in_value);
+  GetStubbedProvider()->Set(path, in_value);
 }
 
 void ScopedCrosSettingsTestHelper::SetBoolean(const std::string& path,
@@ -129,6 +132,13 @@ void ScopedCrosSettingsTestHelper::CopyStoredValue(const std::string& path) {
   if (value) {
     stub_settings_provider_ptr_->Set(path, *value);
   }
+}
+
+void ScopedCrosSettingsTestHelper::SetFakeSessionManager() {
+  DeviceSettingsService::Get()->SetSessionManager(
+      &fake_session_manager_client_, new ownership::MockOwnerKeyUtil());
+  DeviceSettingsService::Get()->Load();
+  content::RunAllTasksUntilIdle();
 }
 
 StubInstallAttributes* ScopedCrosSettingsTestHelper::InstallAttributes() {

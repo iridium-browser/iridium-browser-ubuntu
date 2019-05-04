@@ -28,7 +28,6 @@ TraceStorage::TraceStorage() {
 
   // Reserve string ID 0 for the empty string.
   InternString("");
-
 }
 
 TraceStorage::~TraceStorage() {}
@@ -41,13 +40,34 @@ StringId TraceStorage::InternString(base::StringView str) {
     return id_it->second;
   }
   string_pool_.emplace_back(str.ToStdString());
-  StringId string_id = string_pool_.size() - 1;
+  StringId string_id = static_cast<uint32_t>(string_pool_.size() - 1);
   string_index_.emplace(hash, string_id);
   return string_id;
 }
 
 void TraceStorage::ResetStorage() {
   *this = TraceStorage();
+}
+
+void TraceStorage::SqlStats::RecordQueryBegin(const std::string& query,
+                                              int64_t time_queued,
+                                              int64_t time_started) {
+  if (queries_.size() >= kMaxLogEntries) {
+    queries_.pop_front();
+    times_queued_.pop_front();
+    times_started_.pop_front();
+    times_ended_.pop_front();
+  }
+  queries_.push_back(query);
+  times_queued_.push_back(time_queued);
+  times_started_.push_back(time_started);
+  times_ended_.push_back(0);
+}
+
+void TraceStorage::SqlStats::RecordQueryEnd(int64_t time_ended) {
+  PERFETTO_DCHECK(!times_ended_.empty());
+  PERFETTO_DCHECK(times_ended_.back() == 0);
+  times_ended_.back() = time_ended;
 }
 
 }  // namespace trace_processor

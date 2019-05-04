@@ -82,9 +82,41 @@ const char* LocationToString(extensions::Manifest::Location loc) {
   return "";
 }
 
+base::Value CreationFlagsToList(int creation_flags) {
+  base::Value flags_value(base::Value::Type::LIST);
+  if (creation_flags & extensions::Extension::NO_FLAGS)
+    flags_value.GetList().emplace_back("NO_FLAGS");
+  if (creation_flags & extensions::Extension::REQUIRE_KEY)
+    flags_value.GetList().emplace_back("REQUIRE_KEY");
+  if (creation_flags & extensions::Extension::REQUIRE_MODERN_MANIFEST_VERSION)
+    flags_value.GetList().emplace_back("REQUIRE_MODERN_MANIFEST_VERSION");
+  if (creation_flags & extensions::Extension::ALLOW_FILE_ACCESS)
+    flags_value.GetList().emplace_back("ALLOW_FILE_ACCESS");
+  if (creation_flags & extensions::Extension::FROM_WEBSTORE)
+    flags_value.GetList().emplace_back("FROM_WEBSTORE");
+  if (creation_flags & extensions::Extension::FROM_BOOKMARK)
+    flags_value.GetList().emplace_back("FROM_BOOKMARK");
+  if (creation_flags & extensions::Extension::FOLLOW_SYMLINKS_ANYWHERE)
+    flags_value.GetList().emplace_back("FOLLOW_SYMLINKS_ANYWHERE");
+  if (creation_flags & extensions::Extension::ERROR_ON_PRIVATE_KEY)
+    flags_value.GetList().emplace_back("ERROR_ON_PRIVATE_KEY");
+  if (creation_flags & extensions::Extension::WAS_INSTALLED_BY_DEFAULT)
+    flags_value.GetList().emplace_back("WAS_INSTALLED_BY_DEFAULT");
+  if (creation_flags & extensions::Extension::REQUIRE_PERMISSIONS_CONSENT)
+    flags_value.GetList().emplace_back("REQUIRE_PERMISSIONS_CONSENT");
+  if (creation_flags & extensions::Extension::IS_EPHEMERAL)
+    flags_value.GetList().emplace_back("IS_EPHEMERAL");
+  if (creation_flags & extensions::Extension::WAS_INSTALLED_BY_OEM)
+    flags_value.GetList().emplace_back("WAS_INSTALLED_BY_OEM");
+  if (creation_flags & extensions::Extension::MAY_BE_UNTRUSTED)
+    flags_value.GetList().emplace_back("MAY_BE_UNTRUSTED");
+  return flags_value;
+}
+
 // The JSON we generate looks like this:
 //
 // [ {
+//    "creation_flags": [ "ALLOW_FILE_ACCESS", "FROM_WEBSTORE" ],
 //    "event_listeners": {
 //       "count": 2,
 //       "events": [ {
@@ -113,12 +145,17 @@ const char* LocationToString(extensions::Manifest::Location loc) {
 //
 // LIST
 //  DICT
+//    "creation_flags": LIST
+//      STRING
 //    "event_listeners": DICT
 //      "count": INT
-//      "events": LIST
+//      "listeners": LIST
 //        DICT
-//          "name": STRING
+//          "event_name": STRING
 //          "filter": DICT
+//          "is_for_service_worker": STRING
+//          "is_lazy": STRING
+//          "url": STRING
 //    "id": STRING
 //    "keepalive": DICT
 //      "activities": LIST
@@ -135,14 +172,19 @@ const char* LocationToString(extensions::Manifest::Location loc) {
 
 constexpr base::StringPiece kActivitesKey = "activites";
 constexpr base::StringPiece kCountKey = "count";
-constexpr base::StringPiece kEventsKey = "events";
+constexpr base::StringPiece kEventNameKey = "event_name";
 constexpr base::StringPiece kEventsListenersKey = "event_listeners";
 constexpr base::StringPiece kExtraDataKey = "extra_data";
 constexpr base::StringPiece kFilterKey = "filter";
+constexpr base::StringPiece kInternalsCreationFlagsKey = "creation_flags";
 constexpr base::StringPiece kInternalsIdKey = "id";
 constexpr base::StringPiece kInternalsNameKey = "name";
 constexpr base::StringPiece kInternalsVersionKey = "version";
+constexpr base::StringPiece kIsForServiceWorkerKey = "is_for_service_worker";
+constexpr base::StringPiece kIsLazyKey = "is_lazy";
+constexpr base::StringPiece kListenersKey = "listeners";
 constexpr base::StringPiece kKeepaliveKey = "keepalive";
+constexpr base::StringPiece kListenerUrlKey = "url";
 constexpr base::StringPiece kLocationKey = "location";
 constexpr base::StringPiece kManifestVersionKey = "manifest_version";
 constexpr base::StringPiece kPathKey = "path";
@@ -172,30 +214,35 @@ base::Value FormatKeepaliveData(extensions::ProcessManager* process_manager,
 void AddEventListenerData(extensions::EventRouter* event_router,
                           base::Value* data) {
   CHECK(data->is_list());
-  // A map of extension ID to the event data for that extension,
+  // A map of extension ID to the listener data for that extension,
   // which is of type LIST of DICTIONARY.
   std::unordered_map<base::StringPiece, base::Value, base::StringPieceHash>
-      events_map;
+      listeners_map;
 
   // Build the map of extension IDs to the list of events.
   for (const auto& entry : event_router->listeners().listeners()) {
     for (const auto& listener_entry : entry.second) {
-      auto& events_list = events_map[listener_entry->extension_id()];
-      if (events_list.is_none()) {
+      auto& listeners_list = listeners_map[listener_entry->extension_id()];
+      if (listeners_list.is_none()) {
         // Not there, so make it a LIST.
-        events_list = base::Value(base::Value::Type::LIST);
+        listeners_list = base::Value(base::Value::Type::LIST);
       }
-      // The data for each event is a dictionary, with a name and a
-      // filter.
-      base::Value event_data(base::Value::Type::DICTIONARY);
-      event_data.SetKey(kInternalsNameKey,
-                        base::Value(listener_entry->event_name()));
+      // The data for each listener is a dictionary.
+      base::Value listener_data(base::Value::Type::DICTIONARY);
+      listener_data.SetKey(kEventNameKey,
+                           base::Value(listener_entry->event_name()));
+      listener_data.SetKey(
+          kIsForServiceWorkerKey,
+          base::Value(listener_entry->is_for_service_worker()));
+      listener_data.SetKey(kIsLazyKey, base::Value(listener_entry->IsLazy()));
+      listener_data.SetKey(kListenerUrlKey,
+                           base::Value(listener_entry->listener_url().spec()));
       // Add the filter if one exists.
       base::Value* const filter = listener_entry->filter();
       if (filter != nullptr) {
-        event_data.SetKey(kFilterKey, filter->Clone());
+        listener_data.SetKey(kFilterKey, filter->Clone());
       }
-      events_list.GetList().push_back(std::move(event_data));
+      listeners_list.GetList().push_back(std::move(listener_data));
     }
   }
 
@@ -203,20 +250,21 @@ void AddEventListenerData(extensions::EventRouter* event_router,
   for (auto& output_entry : data->GetList()) {
     const base::Value* const value = output_entry.FindKey(kInternalsIdKey);
     CHECK(value && value->is_string());
-    const auto it = events_map.find(value->GetString());
-    base::Value listeners(base::Value::Type::DICTIONARY);
-    if (it == events_map.end()) {
+    const auto it = listeners_map.find(value->GetString());
+    base::Value event_listeners(base::Value::Type::DICTIONARY);
+    if (it == listeners_map.end()) {
       // We didn't find any events, so initialize an empty dictionary.
-      listeners.SetKey(kCountKey, base::Value(0));
-      listeners.SetKey(kEventsKey, base::Value(base::Value::Type::LIST));
+      event_listeners.SetKey(kCountKey, base::Value(0));
+      event_listeners.SetKey(kListenersKey,
+                             base::Value(base::Value::Type::LIST));
     } else {
       // Set the count and the events values.
-      listeners.SetKey(
+      event_listeners.SetKey(
           kCountKey,
           base::Value(base::checked_cast<int>(it->second.GetList().size())));
-      listeners.SetKey(kEventsKey, std::move(it->second));
+      event_listeners.SetKey(kListenersKey, std::move(it->second));
     }
-    output_entry.SetKey(kEventsListenersKey, std::move(listeners));
+    output_entry.SetKey(kEventsListenersKey, std::move(event_listeners));
   }
 }
 
@@ -255,6 +303,8 @@ std::string ExtensionsInternalsSource::WriteToString() const {
   for (const auto& extension : *extensions) {
     base::Value extension_data(base::Value::Type::DICTIONARY);
     extension_data.SetKey(kInternalsIdKey, base::Value(extension->id()));
+    extension_data.SetKey(kInternalsCreationFlagsKey,
+                          CreationFlagsToList(extension->creation_flags()));
     extension_data.SetKey(
         kKeepaliveKey, FormatKeepaliveData(process_manager, extension.get()));
     extension_data.SetKey(kLocationKey,

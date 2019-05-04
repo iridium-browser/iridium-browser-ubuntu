@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/task/post_task.h"
@@ -26,8 +27,8 @@
 #include "services/network/p2p/socket.h"
 #include "services/network/proxy_resolving_client_socket_factory.h"
 #include "services/network/public/cpp/p2p_param_traits.h"
-#include "third_party/webrtc/media/base/rtputils.h"
-#include "third_party/webrtc/media/base/turnutils.h"
+#include "third_party/webrtc/media/base/rtp_utils.h"
+#include "third_party/webrtc/media/base/turn_utils.h"
 
 namespace network {
 
@@ -61,14 +62,22 @@ bool IsRtcpPacket(base::span<const uint8_t> data) {
   return type >= 64 && type < 96;
 }
 
+// Names ending in ".local." are link-local and used with Multicast DNS as
+// described in RFC6762 (https://tools.ietf.org/html/rfc6762#section-3).
+constexpr char kLocalTld[] = ".local.";
+
+bool HasLocalTld(const std::string& host_name) {
+  return EndsWith(host_name, kLocalTld, base::CompareCase::INSENSITIVE_ASCII);
+}
+
 }  // namespace
 
 class P2PSocketManager::DnsRequest {
  public:
   typedef base::Callback<void(const net::IPAddressList&)> DoneCallback;
 
-  explicit DnsRequest(net::HostResolver* host_resolver)
-      : resolver_(host_resolver) {}
+  DnsRequest(net::HostResolver* host_resolver, bool enable_mdns)
+      : resolver_(host_resolver), enable_mdns_(enable_mdns) {}
 
   void Resolve(const std::string& host_name,
                const DoneCallback& done_callback) {
@@ -90,11 +99,18 @@ class P2PSocketManager::DnsRequest {
       host_name_ += '.';
 
     net::HostPortPair host(host_name_, 0);
-    // TODO(crbug.com/879746): Pass in a
-    // net::HostResolver::ResolveHostParameters with source set to MDNS if we
-    // have a ".local." TLD (once MDNS is supported).
+
+    net::HostResolver::ResolveHostParameters parameters;
+    if (enable_mdns_ && HasLocalTld(host_name_)) {
+#if BUILDFLAG(ENABLE_MDNS)
+      // HostResolver/MDnsClient expects a key without a trailing dot.
+      host.set_host(host_name_.substr(0, host_name_.size() - 1));
+      parameters.source = net::HostResolverSource::MULTICAST_DNS;
+#endif  // ENABLE_MDNS
+    }
     request_ =
-        resolver_->CreateRequest(host, net::NetLogWithSource(), base::nullopt);
+        resolver_->CreateRequest(host, net::NetLogWithSource(), parameters);
+
     int result = request_->Start(base::BindOnce(
         &P2PSocketManager::DnsRequest::OnDone, base::Unretained(this)));
     if (result != net::ERR_IO_PENDING)
@@ -124,6 +140,8 @@ class P2PSocketManager::DnsRequest {
   std::unique_ptr<net::HostResolver::ResolveHostRequest> request_;
 
   DoneCallback done_callback_;
+
+  const bool enable_mdns_;
 };
 
 P2PSocketManager::P2PSocketManager(
@@ -258,9 +276,10 @@ void P2PSocketManager::StartNetworkNotifications(
 
 void P2PSocketManager::GetHostAddress(
     const std::string& host_name,
+    bool enable_mdns,
     mojom::P2PSocketManager::GetHostAddressCallback callback) {
-  std::unique_ptr<DnsRequest> request =
-      std::make_unique<DnsRequest>(url_request_context_->host_resolver());
+  auto request = std::make_unique<DnsRequest>(
+      url_request_context_->host_resolver(), enable_mdns);
   DnsRequest* request_ptr = request.get();
   dns_requests_.insert(std::move(request));
   request_ptr->Resolve(
@@ -290,10 +309,10 @@ void P2PSocketManager::CreateSocket(P2PSocketType type,
     LOG(ERROR) << "Too many sockets created";
     return;
   }
-  std::unique_ptr<P2PSocket> socket(
+  std::unique_ptr<P2PSocket> socket =
       P2PSocket::Create(this, std::move(client), std::move(request), type,
                         url_request_context_->net_log(),
-                        proxy_resolving_socket_factory_.get(), &throttler_));
+                        proxy_resolving_socket_factory_.get(), &throttler_);
 
   if (!socket)
     return;

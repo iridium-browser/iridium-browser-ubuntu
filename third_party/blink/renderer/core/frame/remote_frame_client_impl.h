@@ -18,6 +18,8 @@ class RemoteFrameClientImpl final : public RemoteFrameClient {
  public:
   static RemoteFrameClientImpl* Create(WebRemoteFrameImpl*);
 
+  explicit RemoteFrameClientImpl(WebRemoteFrameImpl*);
+
   void Trace(blink::Visitor*) override;
 
   // FrameClient overrides:
@@ -35,6 +37,8 @@ class RemoteFrameClientImpl final : public RemoteFrameClient {
   // RemoteFrameClient overrides:
   void Navigate(const ResourceRequest&,
                 bool should_replace_current_entry,
+                bool is_opener_navigation,
+                bool prevent_sandboxed_download,
                 mojom::blink::BlobURLTokenPtr) override;
   unsigned BackForwardLength() override;
   void CheckCompleted() override;
@@ -56,8 +60,6 @@ class RemoteFrameClientImpl final : public RemoteFrameClient {
   WebRemoteFrameImpl* GetWebFrame() const { return web_frame_; }
 
  private:
-  explicit RemoteFrameClientImpl(WebRemoteFrameImpl*);
-
   Member<WebRemoteFrameImpl> web_frame_;
 };
 

@@ -82,12 +82,28 @@ password_manager::metrics_util::LinuxBackendMigrationStatus StepForMetrics(
   switch (step) {
     case PasswordStoreX::NOT_ATTEMPTED:
       return LinuxBackendMigrationStatus::kNotAttempted;
-    case PasswordStoreX::FAILED:
-      return LinuxBackendMigrationStatus::kFailed;
+    case PasswordStoreX::DEPRECATED_FAILED:
+      return LinuxBackendMigrationStatus::kDeprecatedFailed;
     case PasswordStoreX::COPIED_ALL:
       return LinuxBackendMigrationStatus::kCopiedAll;
     case PasswordStoreX::LOGIN_DB_REPLACED:
       return LinuxBackendMigrationStatus::kLoginDBReplaced;
+    case PasswordStoreX::STARTED:
+      return LinuxBackendMigrationStatus::kStarted;
+    case PasswordStoreX::POSTPONED:
+      return LinuxBackendMigrationStatus::kPostponed;
+    case PasswordStoreX::DEPRECATED_FAILED_CREATE_ENCRYPTED:
+      return LinuxBackendMigrationStatus::kDeprecatedFailedCreatedEncrypted;
+    case PasswordStoreX::FAILED_ACCESS_NATIVE:
+      return LinuxBackendMigrationStatus::kFailedAccessNative;
+    case PasswordStoreX::FAILED_REPLACE:
+      return LinuxBackendMigrationStatus::kFailedReplace;
+    case PasswordStoreX::FAILED_INIT_ENCRYPTED:
+      return LinuxBackendMigrationStatus::kFailedInitEncrypted;
+    case PasswordStoreX::FAILED_RECREATE_ENCRYPTED:
+      return LinuxBackendMigrationStatus::kFailedRecreateEncrypted;
+    case PasswordStoreX::FAILED_WRITE_TO_ENCRYPTED:
+      return LinuxBackendMigrationStatus::kFailedWriteToEncrypted;
   }
   NOTREACHED();
   return LinuxBackendMigrationStatus::kNotAttempted;
@@ -359,11 +375,19 @@ void PasswordStoreX::CheckMigration() {
       base::Time::Now() - migration_to_native_started);
 
   if (base::FeatureList::IsEnabled(
-          password_manager::features::kMigrateLinuxToLoginDB) &&
-      backend_) {
+          password_manager::features::kMigrateLinuxToLoginDB)) {
     // Copy passwords from the backend into the login database, using
     // encryption.
-    MigrateToEncryptedLoginDB();
+    if (backend_) {
+      UpdateMigrationToLoginDBStep(STARTED);
+      MigrateToEncryptedLoginDB();
+    } else {
+      UpdateMigrationToLoginDBStep(POSTPONED);
+    }
+
+    base::UmaHistogramEnumeration(
+        "PasswordManager.LinuxBackendMigration.AttemptResult",
+        StepForMetrics(migration_to_login_db_step_));
   }
 }
 
@@ -430,7 +454,7 @@ void PasswordStoreX::MigrateToEncryptedLoginDB() {
   if (!encrypted_login_db->Init()) {
     VLOG(1) << "Failed to init the encrypted database file. Migration "
                "aborted.";
-    UpdateMigrationToLoginDBStep(FAILED);
+    UpdateMigrationToLoginDBStep(FAILED_INIT_ENCRYPTED);
     return;  // Serve from the native backend.
   }
 
@@ -438,7 +462,7 @@ void PasswordStoreX::MigrateToEncryptedLoginDB() {
   VLOG(1) << "Migrating all passwords to the encrypted database. Last status: "
           << migration_to_login_db_step_;
   UpdateMigrationToLoginDBStep(CopyBackendToLoginDB(encrypted_login_db.get()));
-  if (migration_to_login_db_step_ == FAILED) {
+  if (migration_to_login_db_step_ != COPIED_ALL) {
     VLOG(1) << "Migration to encryption failed.";
     base::DeleteFile(encrypted_login_db_file_, false);
     return;
@@ -454,7 +478,7 @@ void PasswordStoreX::MigrateToEncryptedLoginDB() {
   // Move the new database onto the old.
   if (!base::Move(encrypted_login_db_file_, login_db_file_)) {
     LOG(ERROR) << "Could not replace login database.";
-    UpdateMigrationToLoginDBStep(FAILED);
+    UpdateMigrationToLoginDBStep(FAILED_REPLACE);
     base::DeleteFile(encrypted_login_db_file_, false);
     return;  // Serve from the native backend.
   }
@@ -488,17 +512,17 @@ PasswordStoreX::MigrationToLoginDBStep PasswordStoreX::CopyBackendToLoginDB(
 
   if (!login_db->DeleteAndRecreateDatabaseFile()) {
     LOG(ERROR) << "Failed to create the encrypted login database file";
-    return FAILED;
+    return FAILED_RECREATE_ENCRYPTED;
   }
 
   std::vector<std::unique_ptr<PasswordForm>> forms;
   if (!backend_->GetAllLogins(&forms))
-    return FAILED;
+    return FAILED_ACCESS_NATIVE;
 
   for (auto& form : forms) {
     PasswordStoreChangeList changes = login_db->AddLogin(*form);
     if (changes.empty() || changes.back().type() != PasswordStoreChange::ADD) {
-      return FAILED;
+      return FAILED_WRITE_TO_ENCRYPTED;
     }
   }
 

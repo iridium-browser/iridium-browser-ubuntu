@@ -8,10 +8,21 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <memory>
+#include <string.h>
+#include <map>
 #include <set>
 
+#include "absl/container/inlined_vector.h"
+#include "absl/types/optional.h"
+#include "absl/types/variant.h"
+#include "api/video/video_content_type.h"
+#include "api/video/video_rotation.h"
 #include "call/rtp_payload_params.h"
+#include "common_types.h"  // NOLINT(build/include)
+#include "modules/video_coding/codecs/h264/include/h264_globals.h"
+#include "modules/video_coding/codecs/interface/common_constants.h"
+#include "modules/video_coding/codecs/vp8/include/vp8_globals.h"
+#include "modules/video_coding/codecs/vp9/include/vp9_globals.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "test/field_trial.h"
 #include "test/gtest.h"
@@ -95,6 +106,7 @@ TEST(RtpPayloadParamsTest, InfoMappedToRtpVideoHeader_Vp9) {
   EXPECT_EQ(kVideoRotation_90, header.rotation);
   EXPECT_EQ(VideoContentType::SCREENSHARE, header.content_type);
   EXPECT_EQ(kVideoCodecVP9, header.codec);
+  EXPECT_FALSE(header.color_space);
   const auto& vp9_header =
       absl::get<RTPVideoHeaderVP9>(header.video_type_header);
   EXPECT_EQ(kPictureId + 1, vp9_header.picture_id);
@@ -111,11 +123,16 @@ TEST(RtpPayloadParamsTest, InfoMappedToRtpVideoHeader_Vp9) {
   codec_info.codecSpecific.VP9.end_of_picture = true;
 
   encoded_image.SetSpatialIndex(1);
+  ColorSpace color_space(
+      ColorSpace::PrimaryID::kSMPTE170M, ColorSpace::TransferID::kSMPTE170M,
+      ColorSpace::MatrixID::kSMPTE170M, ColorSpace::RangeID::kFull);
+  encoded_image.SetColorSpace(&color_space);
   header = params.GetRtpVideoHeader(encoded_image, &codec_info, kDontCare);
 
   EXPECT_EQ(kVideoRotation_90, header.rotation);
   EXPECT_EQ(VideoContentType::SCREENSHARE, header.content_type);
   EXPECT_EQ(kVideoCodecVP9, header.codec);
+  EXPECT_EQ(absl::make_optional(color_space), header.color_space);
   EXPECT_EQ(kPictureId + 1, vp9_header.picture_id);
   EXPECT_EQ(kTl0PicIdx, vp9_header.tl0_pic_idx);
   EXPECT_EQ(vp9_header.temporal_idx, codec_info.codecSpecific.VP9.temporal_idx);
@@ -309,9 +326,13 @@ class RtpPayloadParamsVp8ToGenericTest : public ::testing::Test {
                        int64_t shared_frame_id,
                        FrameType frame_type,
                        LayerSync layer_sync,
-                       const std::set<int64_t>& expected_deps) {
+                       const std::set<int64_t>& expected_deps,
+                       uint16_t width = 0,
+                       uint16_t height = 0) {
     EncodedImage encoded_image;
     encoded_image._frameType = frame_type;
+    encoded_image._encodedWidth = width;
+    encoded_image._encodedHeight = height;
 
     CodecSpecificInfo codec_info{};
     codec_info.codecType = kVideoCodecVP8;
@@ -330,6 +351,9 @@ class RtpPayloadParamsVp8ToGenericTest : public ::testing::Test {
     std::set<int64_t> actual_deps(header.generic->dependencies.begin(),
                                   header.generic->dependencies.end());
     EXPECT_EQ(expected_deps, actual_deps);
+
+    EXPECT_EQ(header.width, width);
+    EXPECT_EQ(header.height, height);
   }
 
  protected:
@@ -339,13 +363,13 @@ class RtpPayloadParamsVp8ToGenericTest : public ::testing::Test {
 };
 
 TEST_F(RtpPayloadParamsVp8ToGenericTest, Keyframe) {
-  ConvertAndCheck(0, 0, kVideoFrameKey, kNoSync, {});
+  ConvertAndCheck(0, 0, kVideoFrameKey, kNoSync, {}, 480, 360);
   ConvertAndCheck(0, 1, kVideoFrameDelta, kNoSync, {0});
-  ConvertAndCheck(0, 2, kVideoFrameKey, kNoSync, {});
+  ConvertAndCheck(0, 2, kVideoFrameKey, kNoSync, {}, 480, 360);
 }
 
 TEST_F(RtpPayloadParamsVp8ToGenericTest, TooHighTemporalIndex) {
-  ConvertAndCheck(0, 0, kVideoFrameKey, kNoSync, {});
+  ConvertAndCheck(0, 0, kVideoFrameKey, kNoSync, {}, 480, 360);
 
   EncodedImage encoded_image;
   encoded_image._frameType = kVideoFrameDelta;
@@ -362,7 +386,7 @@ TEST_F(RtpPayloadParamsVp8ToGenericTest, TooHighTemporalIndex) {
 
 TEST_F(RtpPayloadParamsVp8ToGenericTest, LayerSync) {
   // 02120212 pattern
-  ConvertAndCheck(0, 0, kVideoFrameKey, kNoSync, {});
+  ConvertAndCheck(0, 0, kVideoFrameKey, kNoSync, {}, 480, 360);
   ConvertAndCheck(2, 1, kVideoFrameDelta, kNoSync, {0});
   ConvertAndCheck(1, 2, kVideoFrameDelta, kNoSync, {0});
   ConvertAndCheck(2, 3, kVideoFrameDelta, kNoSync, {0, 1, 2});
@@ -375,7 +399,7 @@ TEST_F(RtpPayloadParamsVp8ToGenericTest, LayerSync) {
 
 TEST_F(RtpPayloadParamsVp8ToGenericTest, FrameIdGaps) {
   // 0101 pattern
-  ConvertAndCheck(0, 0, kVideoFrameKey, kNoSync, {});
+  ConvertAndCheck(0, 0, kVideoFrameKey, kNoSync, {}, 480, 360);
   ConvertAndCheck(1, 1, kVideoFrameDelta, kNoSync, {0});
 
   ConvertAndCheck(0, 5, kVideoFrameDelta, kNoSync, {0});

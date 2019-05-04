@@ -56,7 +56,6 @@ void ShadowRoot::Distribute() {
 }
 
 struct SameSizeAsShadowRoot : public DocumentFragment, public TreeScope {
-  char empty_class_fields_due_to_gc_mixin_marker[1];
   Member<void*> member[3];
   unsigned counters_and_flags[1];
 };
@@ -76,7 +75,7 @@ ShadowRoot::ShadowRoot(Document& document, ShadowRootType type)
       needs_distribution_recalc_(false),
       unused_(0) {
   if (IsV0())
-    shadow_root_v0_ = new ShadowRootV0(*this);
+    shadow_root_v0_ = MakeGarbageCollected<ShadowRootV0>(*this);
 }
 
 ShadowRoot::~ShadowRoot() = default;
@@ -164,27 +163,14 @@ void ShadowRoot::RebuildLayoutTree(WhitespaceAttacher& whitespace_attacher) {
   ClearChildNeedsReattachLayoutTree();
 }
 
-void ShadowRoot::AttachLayoutTree(AttachContext& context) {
-  Node::AttachContext children_context(context);
-  DocumentFragment::AttachLayoutTree(children_context);
-}
-
-void ShadowRoot::DetachLayoutTree(const AttachContext& context) {
-  Node::AttachContext children_context(context);
-  children_context.clear_invalidation = true;
-  GetDocument()
-      .GetStyleEngine()
-      .GetPendingNodeInvalidations()
-      .ClearInvalidation(*this);
-  DocumentFragment::DetachLayoutTree(children_context);
-}
-
 Node::InsertionNotificationRequest ShadowRoot::InsertedInto(
     ContainerNode& insertion_point) {
   DocumentFragment::InsertedInto(insertion_point);
 
   if (!insertion_point.isConnected())
     return kInsertionDone;
+
+  GetDocument().GetStyleEngine().ShadowRootInsertedToDocument(*this);
 
   GetDocument().GetSlotAssignmentEngine().Connected(*this);
 
@@ -216,12 +202,6 @@ void ShadowRoot::RemovedFrom(ContainerNode& insertion_point) {
       if (root)
         root->RemoveChildShadowRoot();
       registered_with_parent_shadow_root_ = false;
-    }
-    if (NeedsStyleInvalidation()) {
-      GetDocument()
-          .GetStyleEngine()
-          .GetPendingNodeInvalidations()
-          .ClearInvalidation(*this);
     }
   }
 
@@ -274,7 +254,7 @@ void ShadowRoot::SetNeedsDistributionRecalc() {
     V0().ClearDistribution();
 }
 
-void ShadowRoot::Trace(blink::Visitor* visitor) {
+void ShadowRoot::Trace(Visitor* visitor) {
   visitor->Trace(style_sheet_list_);
   visitor->Trace(slot_assignment_);
   visitor->Trace(shadow_root_v0_);

@@ -5,9 +5,11 @@
 #include "extensions/browser/guest_view/extensions_guest_view_message_filter.h"
 
 #include "base/guid.h"
-#include "base/macros.h"
+#include "base/no_destructor.h"
+#include "base/stl_util.h"
 #include "base/task/post_task.h"
-#include "components/guest_view/browser/guest_view_base.h"
+#include "base/time/time.h"
+#include "components/guest_view/browser/bad_message.h"
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "components/guest_view/browser/guest_view_manager_delegate.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -21,6 +23,7 @@
 #include "extensions/browser/bad_message.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_stream_manager.h"
+#include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_attach_helper.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_constants.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
 #include "extensions/browser/guest_view/web_view/web_view_content_script_manager.h"
@@ -30,6 +33,7 @@
 #include "extensions/common/manifest_handlers/mime_types_handler.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
+#include "url/gurl.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -47,7 +51,7 @@ namespace {
 // using cross-process-frames.
 // Returns true if |child_routing_id| corresponds to a frame which is a direct
 // child of |parent_rfh|.
-bool AreRoutingIDsConsistent(content::RenderFrameHost* parent_rfh,
+bool AreRoutingIDsConsistent(RenderFrameHost* parent_rfh,
                              int32_t child_routing_id) {
   const bool uses_cross_process_frame =
       content::MimeHandlerViewMode::UsesCrossProcessFrame();
@@ -61,9 +65,8 @@ bool AreRoutingIDsConsistent(content::RenderFrameHost* parent_rfh,
     // The |child_routing_id| is the routing ID of either a RenderFrame or a
     // proxy in the |parent_rfh|. Therefore, to get the associated RFH we need
     // to go through the FTN first.
-    int32_t child_ftn_id =
-        content::RenderFrameHost::GetFrameTreeNodeIdForRoutingId(
-            parent_rfh->GetProcess()->GetID(), child_routing_id);
+    int32_t child_ftn_id = RenderFrameHost::GetFrameTreeNodeIdForRoutingId(
+        parent_rfh->GetProcess()->GetID(), child_routing_id);
     // The |child_rfh| is not really used; it is retrieved to verify whether or
     // not what the renderer process says makes any sense.
     auto* child_rfh = content::WebContents::FromRenderFrameHost(parent_rfh)
@@ -75,17 +78,20 @@ bool AreRoutingIDsConsistent(content::RenderFrameHost* parent_rfh,
 }
 
 }  // namespace
+
 const uint32_t ExtensionsGuestViewMessageFilter::kFilteredMessageClasses[] = {
     GuestViewMsgStart, ExtensionsGuestViewMsgStart};
+
 
 ExtensionsGuestViewMessageFilter::ExtensionsGuestViewMessageFilter(
     int render_process_id,
     BrowserContext* context)
     : GuestViewMessageFilter(kFilteredMessageClasses,
-                             arraysize(kFilteredMessageClasses),
+                             base::size(kFilteredMessageClasses),
                              render_process_id,
                              context),
-      content::BrowserAssociatedInterface<mojom::GuestView>(this, this) {}
+      content::BrowserAssociatedInterface<mojom::GuestView>(this, this) {
+}
 
 ExtensionsGuestViewMessageFilter::~ExtensionsGuestViewMessageFilter() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -237,8 +243,7 @@ void ExtensionsGuestViewMessageFilter::CreateEmbeddedMimeHandlerViewGuest(
 
   content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(
-          content::RenderFrameHost::FromID(render_process_id_,
-                                           render_frame_id));
+          RenderFrameHost::FromID(render_process_id_, render_frame_id));
   if (!web_contents)
     return;
 
@@ -299,27 +304,27 @@ void ExtensionsGuestViewMessageFilter::MimeHandlerViewGuestCreatedCallback(
   base::DictionaryValue attach_params;
   attach_params.SetInteger(guest_view::kElementWidth, element_size.width());
   attach_params.SetInteger(guest_view::kElementHeight, element_size.height());
-  auto uses_cross_process_frame =
-      content::MimeHandlerViewMode::UsesCrossProcessFrame();
-  if (uses_cross_process_frame) {
-    auto* plugin_rfh = content::RenderFrameHost::FromID(
-        embedder_render_process_id, plugin_frame_routing_id);
-    if (!plugin_rfh) {
-      // TODO(ekaramad): This happens when the plugin element contains a remote
-      // frame. Introduce this edge case to content/ layer.
-      return;
-    }
-    AttachToEmbedderFrame(plugin_frame_routing_id, element_instance_id,
-                          guest_instance_id, attach_params,
-                          is_full_page_plugin);
+  auto* manager = GuestViewManager::FromBrowserContext(browser_context_);
+  if (!manager) {
+    guest_view::bad_message::ReceivedBadMessage(
+        this,
+        guest_view::bad_message::GVMF_UNEXPECTED_MESSAGE_BEFORE_GVM_CREATION);
+    guest_view->Destroy(true);
     return;
   }
-  auto* manager = GuestViewManager::FromBrowserContext(browser_context_);
-  CHECK(manager);
   manager->AttachGuest(embedder_render_process_id, element_instance_id,
                        guest_instance_id, attach_params);
-  rfh->Send(new ExtensionsGuestViewMsg_CreateMimeHandlerViewGuestACK(
-      element_instance_id));
+
+  if (!content::MimeHandlerViewMode::UsesCrossProcessFrame()) {
+    rfh->Send(new ExtensionsGuestViewMsg_CreateMimeHandlerViewGuestACK(
+        element_instance_id));
+    return;
+  }
+
+  MimeHandlerViewAttachHelper::Get(render_process_id_)
+      ->AttachToOuterWebContents(guest_view, embedder_render_process_id,
+                                 plugin_frame_routing_id, element_instance_id,
+                                 is_full_page_plugin);
 }
 
 }  // namespace extensions

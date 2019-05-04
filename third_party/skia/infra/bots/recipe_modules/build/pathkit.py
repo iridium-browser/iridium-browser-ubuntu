@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-DOCKER_IMAGE = 'gcr.io/skia-public/emsdk-release:1.38.6_jre'
+DOCKER_IMAGE = 'gcr.io/skia-public/emsdk-release:1.38.16_v1'
 INNER_BUILD_SCRIPT = '/SRC/skia/infra/pathkit/build_pathkit.sh'
 
 BUILD_PRODUCTS_ISOLATE_WHITELIST_WASM = [
@@ -39,10 +39,13 @@ def compile_fn(api, checkout_root, _ignore):
     cmd.append('debug') # It defaults to Release
   if target_arch == 'asmjs':
     cmd.append('asm.js') # It defaults to WASM
-  api.run(
-    api.step,
-    'Build PathKit with Docker',
-    cmd=cmd)
+  # Override DOCKER_CONFIG set by Kitchen.
+  env = {'DOCKER_CONFIG': '/home/chrome-bot/.docker'}
+  with api.env(env):
+    api.run(
+        api.step,
+        'Build PathKit with Docker',
+        cmd=cmd)
 
 
 def copy_extra_build_products(api, _ignore, dst):
@@ -86,4 +89,3 @@ for pattern in build_products_whitelist:
 ''' % str(BUILD_PRODUCTS_ISOLATE_WHITELIST_WASM),
       args=[out_dir, dst],
       infra_step=True)
-

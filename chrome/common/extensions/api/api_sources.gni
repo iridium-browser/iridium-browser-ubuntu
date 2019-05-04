@@ -44,7 +44,6 @@ schema_sources_ = [
   "identity.idl",
   "identity_private.idl",
   "image_writer_private.idl",
-  "inline_install_private.idl",
   "instance_id.json",
   "language_settings_private.idl",
   "manifest_types.json",
@@ -73,7 +72,6 @@ schema_sources_ = [
   "webrtc_logging_private.idl",
 
   "webstore_private.json",
-  "webstore_widget_private.idl",
   "windows.json",
 ]
 
@@ -87,7 +85,6 @@ if (is_chromeos || is_mac || is_win) {
 
 if (is_chromeos) {
   schema_sources_ += [
-    "arc_apps_private.idl",
     "certificate_provider.idl",
     "certificate_provider_internal.idl",
     "echo_private.json",
@@ -107,7 +104,6 @@ if (is_chromeos) {
     "platform_keys.idl",
     "platform_keys_internal.idl",
     "quick_unlock_private.idl",
-    "screenlock_private.idl",
     "terminal_private.json",
     "users_private.idl",
     "wallpaper.json",

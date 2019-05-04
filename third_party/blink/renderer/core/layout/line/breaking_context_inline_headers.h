@@ -39,6 +39,7 @@
 #include "third_party/blink/renderer/core/layout/line/line_width.h"
 #include "third_party/blink/renderer/core/layout/line/trailing_objects.h"
 #include "third_party/blink/renderer/core/layout/line/word_measurement.h"
+#include "third_party/blink/renderer/core/layout/logical_values.h"
 #include "third_party/blink/renderer/core/layout/text_run_constructor.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/platform/fonts/character_range.h"
@@ -86,9 +87,6 @@ class BreakingContext {
         floats_fit_on_line_(true),
         collapse_white_space_(false),
         starting_new_paragraph_(line_info_.PreviousLineBrokeCleanly()),
-        allow_images_to_break_(
-            !block.GetDocument().InQuirksMode() || !block.IsTableCell() ||
-            !block_style_->LogicalWidth().IsIntrinsicOrAuto()),
         at_end_(false),
         line_midpoint_state_(resolver.GetMidpointState()) {
     line_info_.SetPreviousLineBrokeCleanly(false);
@@ -127,6 +125,7 @@ class BreakingContext {
                             const Font&,
                             bool apply_word_spacing,
                             float word_spacing);
+  void TrailingSpacesHang(bool can_break_mid_word);
   bool TrailingSpaceExceedsAvailableWidth(bool can_break_mid_word,
                                           const LineLayoutText&,
                                           WordMeasurement&,
@@ -207,7 +206,9 @@ class BreakingContext {
   bool at_start_;
   bool ignoring_spaces_;
   bool current_character_is_space_;
+  bool previous_character_is_space_;
   bool single_leading_space_;
+  unsigned current_start_offset_;  // initial offset for the current text
   bool applied_start_width_;
   bool include_end_width_;
   bool auto_wrap_;
@@ -215,7 +216,6 @@ class BreakingContext {
   bool floats_fit_on_line_;
   bool collapse_white_space_;
   bool starting_new_paragraph_;
-  bool allow_images_to_break_;
   bool at_end_;
 
   LineMidpointState& line_midpoint_state_;
@@ -379,6 +379,10 @@ inline void BreakingContext::InitializeForCurrentObject() {
   if (collapse_white_space_ && !ComputedStyle::CollapseWhiteSpace(last_ws_))
     current_character_is_space_ = false;
 
+  // Since current_ iterates all along the text's length, we need to store the
+  // initial offset of the current handle text so that we can then identify
+  // a single leading white-space as potential breaking opportunities.
+  current_start_offset_ = current_.Offset();
   single_leading_space_ = false;
 }
 
@@ -416,7 +420,7 @@ inline void BreakingContext::HandleBR(EClear& clear) {
       EnsureLineBoxInsideIgnoredSpaces(&line_midpoint_state_, br);
 
     if (!line_info_.IsEmpty())
-      clear = current_style_->Clear();
+      clear = ResolvedClear(*current_style_, block_.StyleRef());
   }
   at_end_ = true;
 }
@@ -637,7 +641,6 @@ inline void BreakingContext::HandleReplaced() {
   // Break on replaced elements if either has normal white-space,
   // or if the replaced element is ruby that can break before.
   if ((auto_wrap_ || ComputedStyle::AutoWrap(last_ws_)) &&
-      (!current_.GetLineLayoutItem().IsImage() || allow_images_to_break_) &&
       (!current_.GetLineLayoutItem().IsRubyRun() ||
        LineLayoutRubyRun(current_.GetLineLayoutItem())
            .CanBreakBefore(layout_text_info_.line_break_iterator_))) {
@@ -698,17 +701,17 @@ ALWAYS_INLINE void BreakingContext::SetCurrentCharacterIsSpace(UChar c) {
 }
 
 inline float FirstPositiveWidth(const WordMeasurements& word_measurements) {
-  for (size_t i = 0; i < word_measurements.size(); ++i) {
-    if (word_measurements[i].width > 0)
-      return word_measurements[i].width;
+  for (const WordMeasurement& word_measurement : word_measurements) {
+    if (word_measurement.width > 0)
+      return word_measurement.width;
   }
   return 0;
 }
 
 ALWAYS_INLINE TextDirection
-TextDirectionFromUnicode(WTF::Unicode::CharDirection direction) {
-  return direction == WTF::Unicode::kRightToLeft ||
-                 direction == WTF::Unicode::kRightToLeftArabic
+TextDirectionFromUnicode(WTF::unicode::CharDirection direction) {
+  return direction == WTF::unicode::kRightToLeft ||
+                 direction == WTF::unicode::kRightToLeftArabic
              ? TextDirection::kRtl
              : TextDirection::kLtr;
 }
@@ -1043,7 +1046,7 @@ inline bool BreakingContext::HandleText(WordMeasurements& word_measurements,
       layout_text_info_.line_break_iterator_.SecondToLastCharacter();
   for (; current_.Offset() < layout_text.TextLength();
        current_.FastIncrementInTextNode()) {
-    bool previous_character_is_space = current_character_is_space_;
+    previous_character_is_space_ = current_character_is_space_;
     UChar c = current_.Current();
     SetCurrentCharacterIsSpace(c);
 
@@ -1105,7 +1108,7 @@ inline bool BreakingContext::HandleText(WordMeasurements& word_measurements,
       }
 
       PrepareForNextCharacter(layout_text, prohibit_break_inside,
-                              previous_character_is_space);
+                              previous_character_is_space_);
       at_start_ = false;
       NextCharacter(c, last_character, second_to_last_character);
       continue;
@@ -1145,7 +1148,7 @@ inline bool BreakingContext::HandleText(WordMeasurements& word_measurements,
     // We keep track of the total width contributed by trailing space as we
     // often want to exclude it when determining
     // if a run fits on a line.
-    if (collapse_white_space_ && previous_character_is_space &&
+    if (collapse_white_space_ && previous_character_is_space_ &&
         current_character_is_space_ && last_width_measurement)
       width_.SetTrailingWhitespaceWidth(last_width_measurement);
 
@@ -1209,7 +1212,7 @@ inline bool BreakingContext::HandleText(WordMeasurements& word_measurements,
     if (CanBreakAtWhitespace(
             break_words, word_measurement, stopped_ignoring_spaces, char_width,
             hyphenated, disable_soft_hyphen, hyphen_width, between_words,
-            mid_word_break, can_break_mid_word, previous_character_is_space,
+            mid_word_break, can_break_mid_word, previous_character_is_space_,
             last_width_measurement, layout_text, font, apply_word_spacing,
             word_spacing))
       return false;
@@ -1249,7 +1252,7 @@ inline bool BreakingContext::HandleText(WordMeasurements& word_measurements,
     // go ahead and break up this run and enter a mode where we start collapsing
     // spaces.
     if (!ignoring_spaces_ && current_style_->CollapseWhiteSpace()) {
-      if (current_character_is_space_ && previous_character_is_space) {
+      if (current_character_is_space_ && previous_character_is_space_) {
         ignoring_spaces_ = true;
 
         // We just entered a mode where we are ignoring spaces. Create a
@@ -1262,7 +1265,7 @@ inline bool BreakingContext::HandleText(WordMeasurements& word_measurements,
     }
 
     PrepareForNextCharacter(layout_text, prohibit_break_inside,
-                            previous_character_is_space);
+                            previous_character_is_space_);
     at_start_ = false;
     is_line_empty = line_info_.IsEmpty();
     NextCharacter(c, last_character, second_to_last_character);
@@ -1362,7 +1365,7 @@ inline void BreakingContext::PrepareForNextCharacter(
     if (auto_wrap_ && current_style_->BreakOnlyAfterWhiteSpace()) {
       line_break_.MoveTo(current_.GetLineLayoutItem(), current_.Offset(),
                          current_.NextBreakablePosition());
-      if (current_.Offset() == 1)
+      if (current_.Offset() == current_start_offset_ + 1)
         single_leading_space_ = true;
     }
   }
@@ -1416,6 +1419,22 @@ inline WordMeasurement& BreakingContext::CalculateWordWidth(
   return word_measurement;
 }
 
+inline void BreakingContext::TrailingSpacesHang(bool can_break_mid_word) {
+  DCHECK(curr_ws_ == EWhiteSpace::kBreakSpaces);
+  // Avoid breaking before the first white-space after a word if there is a
+  // breaking opportunity before.
+  if (single_leading_space_ && !previous_character_is_space_)
+    return;
+
+  line_break_.MoveTo(current_.GetLineLayoutItem(), current_.Offset(),
+                     current_.NextBreakablePosition());
+
+  // Avoid breaking before the first white-space after a word, unless
+  // overflow-wrap or word-break allow to.
+  if (!previous_character_is_space_ && !can_break_mid_word)
+    line_break_.Increment();
+}
+
 inline bool BreakingContext::TrailingSpaceExceedsAvailableWidth(
     bool can_break_mid_word,
     const LineLayoutText& layout_text,
@@ -1426,7 +1445,7 @@ inline bool BreakingContext::TrailingSpaceExceedsAvailableWidth(
   // If we break only after white-space, consider the current character
   // as candidate width for this line.
   if (width_.FitsOnLine() && current_character_is_space_ &&
-      current_style_->BreakOnlyAfterWhiteSpace() && !can_break_mid_word) {
+      current_style_->BreakOnlyAfterWhiteSpace()) {
     float char_width = TextWidth(layout_text, current_.Offset(), 1, font,
                                  width_.CurrentWidth(), collapse_white_space_,
                                  &word_measurement.fallback_fonts,
@@ -1438,8 +1457,13 @@ inline bool BreakingContext::TrailingSpaceExceedsAvailableWidth(
     // then move the line break to the space and skip all
     // additional whitespace.
     if (!width_.FitsOnLine(char_width)) {
+      if (curr_ws_ == EWhiteSpace::kBreakSpaces) {
+        TrailingSpacesHang(can_break_mid_word);
+        return true;
+      }
       line_break_.MoveTo(current_.GetLineLayoutItem(), current_.Offset(),
                          current_.NextBreakablePosition());
+
       SkipTrailingWhitespace(line_break_, line_info_);
       return true;
     }
@@ -1596,7 +1620,6 @@ inline void BreakingContext::CommitAndUpdateLineBreakIfNeeded() {
   if (!current_.GetLineLayoutItem().IsFloatingOrOutOfFlowPositioned()) {
     last_object_ = current_.GetLineLayoutItem();
     if (last_object_.IsAtomicInlineLevel() && auto_wrap_ &&
-        (!last_object_.IsImage() || allow_images_to_break_) &&
         (!last_object_.IsListMarker() ||
          LineLayoutListMarker(last_object_).IsInside()) &&
         !last_object_.IsRubyRun()) {

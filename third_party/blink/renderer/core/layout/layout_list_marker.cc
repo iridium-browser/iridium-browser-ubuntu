@@ -36,7 +36,7 @@ namespace blink {
 
 const int kCMarkerPaddingPx = 7;
 
-// TODO(glebl): Move to WebKit/Source/core/css/html.css after
+// TODO(glebl): Move to core/html/resources/html.css after
 // Blink starts to support ::marker crbug.com/457718
 // Recommended UA margin for list markers.
 const int kCUAMarkerMarginEm = 1;
@@ -84,9 +84,10 @@ void LayoutListMarker::StyleWillChange(StyleDifference diff,
                                        const ComputedStyle& new_style) {
   if (Style() &&
       (new_style.ListStylePosition() != StyleRef().ListStylePosition() ||
-       new_style.ListStyleType() != StyleRef().ListStyleType()))
+       new_style.ListStyleType() != StyleRef().ListStyleType())) {
     SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
-        LayoutInvalidationReason::kStyleChange);
+        layout_invalidation_reason::kStyleChange);
+  }
 
   LayoutBox::StyleWillChange(diff, new_style);
 }
@@ -149,8 +150,8 @@ void LayoutListMarker::UpdateLayout() {
   SetMarginStart(LayoutUnit());
   SetMarginEnd(LayoutUnit());
 
-  Length start_margin = StyleRef().MarginStart();
-  Length end_margin = StyleRef().MarginEnd();
+  const Length& start_margin = StyleRef().MarginStart();
+  const Length& end_margin = StyleRef().MarginEnd();
   if (start_margin.IsFixed())
     SetMarginStart(LayoutUnit(start_margin.Value()));
   if (end_margin.IsFixed())
@@ -166,11 +167,12 @@ void LayoutListMarker::ImageChanged(WrappedImagePtr o, CanDeferInvalidation) {
     return;
 
   LayoutSize image_size = IsImage() ? ImageBulletSize() : LayoutSize();
-  if (Size() != image_size || image_->ErrorOccurred())
+  if (Size() != image_size || image_->ErrorOccurred()) {
     SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
-        LayoutInvalidationReason::kImageChanged);
-  else
+        layout_invalidation_reason::kImageChanged);
+  } else {
     SetShouldDoFullPaintInvalidation();
+  }
 }
 
 void LayoutListMarker::UpdateMarginsAndContent() {

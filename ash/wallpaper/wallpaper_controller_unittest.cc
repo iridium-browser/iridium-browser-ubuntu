@@ -29,7 +29,8 @@
 #include "base/task/post_task.h"
 #include "base/task/task_scheduler/task_scheduler.h"
 #include "base/test/bind_test_util.h"
-#include "chromeos/chromeos_switches.h"
+#include "base/time/time_override.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "components/prefs/testing_pref_service.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -206,6 +207,7 @@ class TaskObserver : public base::MessageLoop::TaskObserver {
 
 // See content::RunAllTasksUntilIdle().
 void RunAllTasksUntilIdle() {
+  LOG(ERROR) << "RunAllTasksUntilIdle - before";
   while (true) {
     TaskObserver task_observer;
     base::MessageLoopCurrent::Get()->AddTaskObserver(&task_observer);
@@ -218,6 +220,7 @@ void RunAllTasksUntilIdle() {
     if (!task_observer.processed())
       break;
   }
+  LOG(ERROR) << "RunAllTasksUntilIdle - after";
 }
 
 // A test implementation of the WallpaperObserver mojo interface.
@@ -2334,9 +2337,26 @@ TEST_F(WallpaperControllerTest, AddFirstWallpaperAnimationEndCallback) {
       base::BindLambdaForTesting(
           [&is_second_callback_run]() { is_second_callback_run = true; }),
       test_window.get());
+  {
+    // The animation is quite short (0.01 seconds) which is problematic in
+    // debug builds if RunAllTasksUntilIdle is a bit slow to execute. That leads
+    // to test flakes. We work around that by temporarily freezing time, which
+    // prevents the animation from unexpectedly completing too soon.
+    // Ideally this test should use MockTime instead, which will become easier
+    // after https://crrev.com/c/1352260 lands.
+    base::subtle::ScopedTimeClockOverrides time_override(
+        nullptr,
+        []() {
+          static base::TimeTicks time_ticks =
+              base::subtle::TimeTicksNowIgnoringOverride();
+          return time_ticks;
+        },
+        nullptr);
+
+    RunAllTasksUntilIdle();
+  }
   // Neither callback is run because the animation of the first wallpaper
   // hasn't finished yet.
-  RunAllTasksUntilIdle();
   EXPECT_FALSE(is_first_callback_run);
   EXPECT_FALSE(is_second_callback_run);
 
@@ -2423,6 +2443,50 @@ TEST_F(WallpaperControllerTest, OnFirstWallpaperShown) {
   EXPECT_EQ(2, GetWallpaperCount());
   EXPECT_EQ(1, observer.first_wallpaper_shown_count_);
   controller_->RemoveObserver(&observer);
+}
+
+// Although ephemeral users' custom wallpapers are not saved to disk, they
+// should be kept within the user session. Test for https://crbug.com/825237.
+TEST_F(WallpaperControllerTest, ShowWallpaperForEphemeralUser) {
+  auto initialize_ephemeral_user = [&](const AccountId& account_id) {
+    mojom::WallpaperUserInfoPtr wallpaper_user_info =
+        InitializeUser(account_id);
+    wallpaper_user_info->is_ephemeral = true;
+    return wallpaper_user_info;
+  };
+
+  SimulateUserLogin(kUser1);
+  // The user doesn't have wallpaper cache in the beginning.
+  gfx::ImageSkia cached_wallpaper;
+  EXPECT_FALSE(
+      controller_->GetWallpaperFromCache(account_id_1, &cached_wallpaper));
+  base::FilePath path;
+  EXPECT_FALSE(controller_->GetPathFromCache(account_id_1, &path));
+
+  controller_->SetCustomWallpaper(
+      initialize_ephemeral_user(account_id_1), wallpaper_files_id_1,
+      file_name_1, WALLPAPER_LAYOUT_CENTER,
+      CreateImage(640, 480, kWallpaperColor), /*preview_mode=*/false);
+  RunAllTasksUntilIdle();
+  EXPECT_EQ(1, GetWallpaperCount());
+  EXPECT_EQ(CUSTOMIZED, controller_->GetWallpaperType());
+  EXPECT_EQ(kWallpaperColor, GetWallpaperColor());
+
+  // The custom wallpaper is cached.
+  EXPECT_TRUE(
+      controller_->GetWallpaperFromCache(account_id_1, &cached_wallpaper));
+  EXPECT_EQ(
+      kWallpaperColor,
+      cached_wallpaper.GetRepresentation(1.0f).GetBitmap().getColor(0, 0));
+  EXPECT_TRUE(controller_->GetPathFromCache(account_id_1, &path));
+
+  // Calling |ShowUserWallpaper| will continue showing the custom wallpaper
+  // instead of reverting to the default.
+  controller_->ShowUserWallpaper(initialize_ephemeral_user(account_id_1));
+  RunAllTasksUntilIdle();
+  EXPECT_EQ(0, GetWallpaperCount());
+  EXPECT_EQ(CUSTOMIZED, controller_->GetWallpaperType());
+  EXPECT_EQ(kWallpaperColor, GetWallpaperColor());
 }
 
 // A test wallpaper controller client class.

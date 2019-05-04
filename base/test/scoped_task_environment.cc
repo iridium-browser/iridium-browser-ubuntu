@@ -5,6 +5,7 @@
 #include "base/test/scoped_task_environment.h"
 
 #include "base/bind_helpers.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
@@ -12,15 +13,23 @@
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/task/post_task.h"
+#include "base/task/sequence_manager/sequence_manager_impl.h"
+#include "base/task/sequence_manager/time_domain.h"
 #include "base/task/task_scheduler/task_scheduler.h"
 #include "base/task/task_scheduler/task_scheduler_impl.h"
 #include "base/test/test_mock_time_task_runner.h"
+#include "base/test/test_timeouts.h"
 #include "base/threading/sequence_local_storage_map.h"
+#include "base/threading/thread_local.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/clock.h"
+#include "base/time/tick_clock.h"
 #include "base/time/time.h"
+#include "base/time/time_override.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) || defined(OS_FUCHSIA)
 #include "base/files/file_descriptor_watcher_posix.h"
 #endif
 
@@ -29,23 +38,216 @@ namespace test {
 
 namespace {
 
-std::unique_ptr<MessageLoop> CreateMessageLoopForMainThreadType(
+LazyInstance<ThreadLocalPointer<ScopedTaskEnvironment::LifetimeObserver>>::Leaky
+    environment_lifetime_observer;
+
+base::Optional<MessageLoop::Type> GetMessageLoopTypeForMainThreadType(
     ScopedTaskEnvironment::MainThreadType main_thread_type) {
   switch (main_thread_type) {
     case ScopedTaskEnvironment::MainThreadType::DEFAULT:
-      return std::make_unique<MessageLoop>(MessageLoop::TYPE_DEFAULT);
     case ScopedTaskEnvironment::MainThreadType::MOCK_TIME:
-      return nullptr;
+      return MessageLoop::TYPE_DEFAULT;
     case ScopedTaskEnvironment::MainThreadType::UI:
-      return std::make_unique<MessageLoop>(MessageLoop::TYPE_UI);
+    case ScopedTaskEnvironment::MainThreadType::UI_MOCK_TIME:
+      return MessageLoop::TYPE_UI;
     case ScopedTaskEnvironment::MainThreadType::IO:
-      return std::make_unique<MessageLoop>(MessageLoop::TYPE_IO);
+    case ScopedTaskEnvironment::MainThreadType::IO_MOCK_TIME:
+      return MessageLoop::TYPE_IO;
   }
   NOTREACHED();
-  return nullptr;
+  return base::nullopt;
 }
 
+std::unique_ptr<sequence_manager::SequenceManager>
+CreateSequenceManagerForMainThreadType(
+    ScopedTaskEnvironment::MainThreadType main_thread_type) {
+  auto type = GetMessageLoopTypeForMainThreadType(main_thread_type);
+  if (!type) {
+    return nullptr;
+  } else {
+    auto settings = base::sequence_manager::SequenceManager::Settings{
+        .message_loop_type = *type};
+    return sequence_manager::CreateSequenceManagerOnCurrentThreadWithPump(
+        MessageLoop::CreateMessagePumpForType(*type), std::move(settings));
+  }
+}
+
+class TickClockBasedClock : public Clock {
+ public:
+  explicit TickClockBasedClock(const TickClock* tick_clock)
+      : tick_clock_(*tick_clock),
+        start_ticks_(tick_clock_.NowTicks()),
+        start_time_(Time::UnixEpoch()) {}
+
+  Time Now() const override {
+    return start_time_ + (tick_clock_.NowTicks() - start_ticks_);
+  }
+
+ private:
+  const TickClock& tick_clock_;
+  const TimeTicks start_ticks_;
+  const Time start_time_;
+};
+
 }  // namespace
+
+class ScopedTaskEnvironment::MockTimeDomain
+    : public sequence_manager::TimeDomain,
+      public TickClock {
+ public:
+  explicit MockTimeDomain(ScopedTaskEnvironment::NowSource now_source) {
+    DCHECK_EQ(nullptr, current_mock_time_domain_);
+    current_mock_time_domain_ = this;
+    if (now_source == ScopedTaskEnvironment::NowSource::MAIN_THREAD_MOCK_TIME) {
+      time_overrides_ = std::make_unique<subtle::ScopedTimeClockOverrides>(
+          &MockTimeDomain::GetTime, &MockTimeDomain::GetTimeTicks, nullptr);
+    }
+  }
+
+  ~MockTimeDomain() override {
+    DCHECK_EQ(this, current_mock_time_domain_);
+    current_mock_time_domain_ = nullptr;
+  }
+
+  static MockTimeDomain* current_mock_time_domain_;
+
+  static Time GetTime() {
+    return Time::UnixEpoch() + (current_mock_time_domain_->Now() - TimeTicks());
+  }
+
+  static TimeTicks GetTimeTicks() { return current_mock_time_domain_->Now(); }
+
+  using TimeDomain::NextScheduledRunTime;
+
+  static std::unique_ptr<ScopedTaskEnvironment::MockTimeDomain> Create(
+      ScopedTaskEnvironment::MainThreadType main_thread_type,
+      ScopedTaskEnvironment::NowSource now_source) {
+    if (main_thread_type == MainThreadType::MOCK_TIME ||
+        main_thread_type == MainThreadType::UI_MOCK_TIME ||
+        main_thread_type == MainThreadType::IO_MOCK_TIME) {
+      return std::make_unique<ScopedTaskEnvironment::MockTimeDomain>(
+          now_source);
+    }
+    return nullptr;
+  }
+
+  // sequence_manager::TimeDomain:
+
+  sequence_manager::LazyNow CreateLazyNow() const override {
+    base::AutoLock lock(now_ticks_lock_);
+    return sequence_manager::LazyNow(now_ticks_);
+  }
+
+  TimeTicks Now() const override {
+    // This can be called from any thread.
+    base::AutoLock lock(now_ticks_lock_);
+    return now_ticks_;
+  }
+
+  Optional<TimeDelta> DelayTillNextTask(
+      sequence_manager::LazyNow* lazy_now) override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+    // Make sure TimeDomain::NextScheduledRunTime has taken canceled tasks into
+    // account, ReclaimMemory sweeps canceled delayed tasks.
+    sequence_manager()->ReclaimMemory();
+    Optional<TimeTicks> run_time = NextScheduledRunTime();
+    // Check if we've run out of tasks.
+    if (!run_time)
+      return base::nullopt;
+
+    // Check if we have a task that should be running now.
+    if (run_time <= now_ticks_)
+      return base::TimeDelta();
+
+    // The next task is a future delayed task. Since we're using mock time, we
+    // don't want an actual OS level delayed wake up scheduled, so pretend we
+    // have no more work. This will result in MaybeFastForwardToNextTask getting
+    // called which lets us advance |now_ticks_|.
+    return base::nullopt;
+  }
+
+  // This method is called when the underlying message pump has run out of
+  // non-delayed work.
+  bool MaybeFastForwardToNextTask(bool quit_when_idle_requested) override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    // If we're being externally controlled by a RunLoop in client code, check
+    // if the RunLoop is due to quit when idle, if so we don't want to advance
+    // mock time.
+    if (stop_when_message_pump_is_idle_ && quit_when_idle_requested)
+      return false;
+
+    // We don't need to call ReclaimMemory here because
+    // DelayTillNextTask will have dealt with cancelled delayed tasks for us.
+    Optional<TimeTicks> run_time = NextScheduledRunTime();
+    if (!run_time) {
+      // We've run out of tasks, but ScopedTaskEnvironment::FastForwardBy
+      // requires the virtual time to be consumed.
+      if (now_ticks_ < allow_advance_until_ && !allow_advance_until_.is_max())
+        SetTime(allow_advance_until_);
+      return false;
+    }
+
+    // Don't advance past |allow_advance_until_|.
+    DCHECK_GT(*run_time, now_ticks_);
+    TimeTicks time_to_advance_to = std::min(allow_advance_until_, *run_time);
+    if (time_to_advance_to <= now_ticks_)
+      return false;
+
+    SetTime(time_to_advance_to);
+
+    // Make sure a DoWork is scheduled.
+    return true;
+  }
+
+  const char* GetName() const override { return "MockTimeDomain"; }
+
+  // TickClock implementation:
+  TimeTicks NowTicks() const override { return Now(); }
+
+  // Allows time to advance when reaching idle, until
+  // |now_ticks_ == advance_until|. No-op if |advance_until <= now_ticks_|.
+  // Doesn't schedule work by itself.
+  void SetAllowTimeToAutoAdvanceUntil(TimeTicks advance_until) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    allow_advance_until_ = advance_until;
+  }
+
+  void SetStopWhenMessagePumpIsIdle(bool stop_when_message_pump_is_idle) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    stop_when_message_pump_is_idle_ = stop_when_message_pump_is_idle;
+  }
+
+ private:
+  void SetTime(TimeTicks time) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    DCHECK_LE(time, allow_advance_until_);
+
+    base::AutoLock lock(now_ticks_lock_);
+    now_ticks_ = time;
+  }
+
+  SEQUENCE_CHECKER(sequence_checker_);
+
+  std::unique_ptr<subtle::ScopedTimeClockOverrides> time_overrides_;
+
+  // By default we want RunLoop.Run() to advance virtual time due to the API
+  // contract.
+  TimeTicks allow_advance_until_ = TimeTicks::Max();
+  bool stop_when_message_pump_is_idle_ = true;
+
+  // Protects |now_ticks_|
+  mutable Lock now_ticks_lock_;
+
+  // Only ever written to from the main sequence.
+  // TODO(alexclarke): We can't override now by default with now_ticks_ staring
+  // from zero because many tests have checks that TimeTicks::Now() returns a
+  // non-zero result.
+  TimeTicks now_ticks_;
+};
+
+ScopedTaskEnvironment::MockTimeDomain*
+    ScopedTaskEnvironment::MockTimeDomain::current_mock_time_domain_ = nullptr;
 
 class ScopedTaskEnvironment::TestTaskTracker
     : public internal::TaskSchedulerImpl::TaskTrackerImpl {
@@ -71,6 +273,7 @@ class ScopedTaskEnvironment::TestTaskTracker
   // internal::TaskSchedulerImpl::TaskTrackerImpl:
   void RunOrSkipTask(internal::Task task,
                      internal::Sequence* sequence,
+                     const TaskTraits& traits,
                      bool can_run_task) override;
 
   // Synchronizes accesses to members below.
@@ -93,38 +296,46 @@ class ScopedTaskEnvironment::TestTaskTracker
 
 ScopedTaskEnvironment::ScopedTaskEnvironment(
     MainThreadType main_thread_type,
-    ExecutionMode execution_control_mode)
-    : execution_control_mode_(execution_control_mode),
-      message_loop_(CreateMessageLoopForMainThreadType(main_thread_type)),
-      mock_time_task_runner_(
-          main_thread_type == MainThreadType::MOCK_TIME
-              ? MakeRefCounted<TestMockTimeTaskRunner>(
-                    TestMockTimeTaskRunner::Type::kBoundToThread)
-              : nullptr),
-      slsm_for_mock_time_(
-          main_thread_type == MainThreadType::MOCK_TIME
-              ? std::make_unique<internal::SequenceLocalStorageMap>()
-              : nullptr),
-      slsm_registration_for_mock_time_(
-          main_thread_type == MainThreadType::MOCK_TIME
-              ? std::make_unique<
-                    internal::ScopedSetSequenceLocalStorageMapForCurrentThread>(
-                    slsm_for_mock_time_.get())
-              : nullptr),
-#if defined(OS_POSIX)
-      file_descriptor_watcher_(
-          main_thread_type == MainThreadType::IO
-              ? std::make_unique<FileDescriptorWatcher>(
-                    static_cast<MessageLoopForIO*>(message_loop_.get()))
-              : nullptr),
-#endif  // defined(OS_POSIX)
-      task_tracker_(new TestTaskTracker()) {
+    ExecutionMode execution_control_mode,
+    NowSource now_source,
+    trait_helpers::NotATraitTag)
+    : main_thread_type_(main_thread_type),
+      execution_control_mode_(execution_control_mode),
+      mock_time_domain_(MockTimeDomain::Create(main_thread_type, now_source)),
+      sequence_manager_(
+          CreateSequenceManagerForMainThreadType(main_thread_type)),
+      task_queue_(CreateDefaultTaskQueue()),
+      mock_clock_(mock_time_domain_ ? std::make_unique<TickClockBasedClock>(
+                                          mock_time_domain_.get())
+                                    : nullptr),
+#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+      file_descriptor_watcher_(main_thread_type == MainThreadType::IO
+                                   ? std::make_unique<FileDescriptorWatcher>(
+                                         GetMainThreadTaskRunner())
+                                   : nullptr),
+#endif  // defined(OS_POSIX) || defined(OS_FUCHSIA)
+      task_tracker_(new TestTaskTracker()),
+      scoped_lazy_task_runner_list_for_testing_(
+          std::make_unique<internal::ScopedLazyTaskRunnerListForTesting>()),
+      // TODO(https://crbug.com/918724): Enable Run() timeouts even for
+      // instances created with *MOCK_TIME, and determine whether the timeout
+      // can be reduced from action_max_timeout() to action_timeout().
+      run_loop_timeout_(std::make_unique<RunLoop::ScopedRunTimeoutForTest>(
+          mock_time_domain_ ? TimeDelta() : TestTimeouts::action_max_timeout(),
+          BindRepeating([]() { LOG(FATAL) << "Run() timed out."; }))) {
+  CHECK(now_source == NowSource::REAL_TIME || mock_time_domain_)
+      << "NowSource must be REAL_TIME unless we're using mock time";
   CHECK(!TaskScheduler::GetInstance())
       << "Someone has already initialized TaskScheduler. If nothing in your "
          "test does so, then a test that ran earlier may have initialized one, "
          "and leaked it. base::TestSuite will trap leaked globals, unless "
          "someone has explicitly disabled it with "
          "DisableCheckForLeakedGlobals().";
+
+  CHECK(!base::ThreadTaskRunnerHandle::IsSet());
+  sequence_manager_->SetDefaultTaskRunner(GetMainThreadTaskRunner());
+  CHECK(base::ThreadTaskRunnerHandle::IsSet())
+      << "ThreadTaskRunnerHandle should've been set now.";
 
   // Instantiate a TaskScheduler with 2 threads in each of its 4 pools. Threads
   // stay alive even when they don't have work.
@@ -141,14 +352,44 @@ ScopedTaskEnvironment::ScopedTaskEnvironment(
   TaskScheduler::SetInstance(std::make_unique<internal::TaskSchedulerImpl>(
       "ScopedTaskEnvironment", WrapUnique(task_tracker_)));
   task_scheduler_ = TaskScheduler::GetInstance();
-  TaskScheduler::GetInstance()->Start({worker_pool_params, worker_pool_params,
-                                       worker_pool_params, worker_pool_params});
+  TaskScheduler::GetInstance()->Start({
+    worker_pool_params, worker_pool_params, worker_pool_params,
+        worker_pool_params
+#if defined(OS_WIN)
+        ,
+        // Enable the MTA in unit tests to match the browser process'
+        // TaskScheduler configuration.
+        //
+        // This has the adverse side-effect of enabling the MTA in non-browser
+        // unit tests as well but the downside there is not as bad as not having
+        // it in browser unit tests. It just means some COM asserts may pass in
+        // unit tests where they wouldn't in integration tests or prod. That's
+        // okay because unit tests are already generally very loose on allowing
+        // I/O, waits, etc. Such misuse will still be caught in later phases
+        // (and COM usage should already be pretty much inexistent in sandboxed
+        // processes).
+        TaskScheduler::InitParams::SharedWorkerPoolEnvironment::COM_MTA
+#endif
+  });
 
   if (execution_control_mode_ == ExecutionMode::QUEUED)
     CHECK(task_tracker_->DisallowRunTasks());
+
+  LifetimeObserver* observer = environment_lifetime_observer.Get().Get();
+  if (observer) {
+    observer->OnScopedTaskEnvironmentCreated(main_thread_type,
+                                             GetMainThreadTaskRunner());
+  }
 }
 
+ScopedTaskEnvironment::ScopedTaskEnvironment(ScopedTaskEnvironment&& other) =
+    default;
+
 ScopedTaskEnvironment::~ScopedTaskEnvironment() {
+  // If we've been moved then bail out.
+  if (!owns_instance_)
+    return;
+
   // Ideally this would RunLoop().RunUntilIdle() here to catch any errors or
   // infinite post loop in the remaining work but this isn't possible right now
   // because base::~MessageLoop() didn't use to do this and adding it here would
@@ -165,24 +406,67 @@ ScopedTaskEnvironment::~ScopedTaskEnvironment() {
   // on their main thread.
   ScopedAllowBaseSyncPrimitivesForTesting allow_waits_to_destroy_task_tracker;
   TaskScheduler::SetInstance(nullptr);
+  task_queue_ = nullptr;
+  NotifyDestructionObserversAndReleaseSequenceManager();
+}
+
+void ScopedTaskEnvironment::
+    NotifyDestructionObserversAndReleaseSequenceManager() {
+  // A derived classes may call this method early.
+  if (!sequence_manager_)
+    return;
+
+  LifetimeObserver* observer = environment_lifetime_observer.Get().Get();
+  if (observer)
+    observer->OnScopedTaskEnvironmentDestroyed();
+
+  if (mock_time_domain_)
+    sequence_manager_->UnregisterTimeDomain(mock_time_domain_.get());
+
+  sequence_manager_.reset();
+}
+
+scoped_refptr<sequence_manager::TaskQueue>
+ScopedTaskEnvironment::CreateDefaultTaskQueue() {
+  if (mock_time_domain_)
+    sequence_manager_->RegisterTimeDomain(mock_time_domain_.get());
+
+  return sequence_manager_->CreateTaskQueue(
+      sequence_manager::TaskQueue::Spec("scoped_task_environment_default")
+          .SetTimeDomain(mock_time_domain_.get()));
+}
+
+void ScopedTaskEnvironment::SetLifetimeObserver(
+    ScopedTaskEnvironment::LifetimeObserver* lifetime_observer) {
+  DCHECK_NE(!!environment_lifetime_observer.Get().Get(), !!lifetime_observer);
+  environment_lifetime_observer.Get().Set(lifetime_observer);
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
 ScopedTaskEnvironment::GetMainThreadTaskRunner() {
-  if (message_loop_)
-    return message_loop_->task_runner();
-  DCHECK(mock_time_task_runner_);
-  return mock_time_task_runner_;
+  return task_queue_->task_runner();
 }
 
 bool ScopedTaskEnvironment::MainThreadHasPendingTask() const {
-  if (message_loop_)
-    return !message_loop_->IsIdleForTesting();
-  DCHECK(mock_time_task_runner_);
-  return mock_time_task_runner_->HasPendingTask();
+  sequence_manager::internal::SequenceManagerImpl* sequence_manager_impl =
+      static_cast<sequence_manager::internal::SequenceManagerImpl*>(
+          sequence_manager_.get());
+  // ReclaimMemory sweeps canceled delayed tasks.
+  sequence_manager_impl->ReclaimMemory();
+  // Unfortunately this API means different things depending on whether mock
+  // time is used or not. If MockTime is used then tests want to know if there
+  // are any delayed or non-delayed tasks, otherwise only non-delayed tasks are
+  // considered.
+  if (mock_time_domain_)
+    return sequence_manager_impl->HasTasks();
+  return !sequence_manager_impl->IsIdleForTesting();
 }
 
 void ScopedTaskEnvironment::RunUntilIdle() {
+  // Prevent virtual time from advancing while within this call.
+  if (mock_time_domain_)
+    mock_time_domain_->SetAllowTimeToAutoAdvanceUntil(TimeTicks());
+
   // TODO(gab): This can be heavily simplified to essentially:
   //     bool HasMainThreadTasks() {
   //      if (message_loop_)
@@ -260,41 +544,57 @@ void ScopedTaskEnvironment::RunUntilIdle() {
   // parallel execution before returning unless in ExecutionMode::QUEUED.
   if (execution_control_mode_ != ExecutionMode::QUEUED)
     task_tracker_->AllowRunTasks();
+
+  if (mock_time_domain_)
+    mock_time_domain_->SetAllowTimeToAutoAdvanceUntil(TimeTicks::Max());
 }
 
 void ScopedTaskEnvironment::FastForwardBy(TimeDelta delta) {
-  DCHECK(mock_time_task_runner_);
-  mock_time_task_runner_->FastForwardBy(delta);
+  MessageLoopCurrent::ScopedNestableTaskAllower allow;
+  DCHECK(mock_time_domain_);
+  mock_time_domain_->SetStopWhenMessagePumpIsIdle(false);
+  mock_time_domain_->SetAllowTimeToAutoAdvanceUntil(mock_time_domain_->Now() +
+                                                    delta);
+  RunLoop().RunUntilIdle();
+  mock_time_domain_->SetStopWhenMessagePumpIsIdle(true);
+  mock_time_domain_->SetAllowTimeToAutoAdvanceUntil(TimeTicks::Max());
 }
 
 void ScopedTaskEnvironment::FastForwardUntilNoTasksRemain() {
-  DCHECK(mock_time_task_runner_);
-  mock_time_task_runner_->FastForwardUntilNoTasksRemain();
+  // TimeTicks::operator+(TimeDelta) uses saturated arithmetic so it's safe to
+  // pass in TimeDelta::Max().
+  FastForwardBy(TimeDelta::Max());
 }
 
-const TickClock* ScopedTaskEnvironment::GetMockTickClock() {
-  DCHECK(mock_time_task_runner_);
-  return mock_time_task_runner_->GetMockTickClock();
-}
-
-std::unique_ptr<TickClock> ScopedTaskEnvironment::DeprecatedGetMockTickClock() {
-  DCHECK(mock_time_task_runner_);
-  return mock_time_task_runner_->DeprecatedGetMockTickClock();
+const TickClock* ScopedTaskEnvironment::GetMockTickClock() const {
+  DCHECK(mock_time_domain_);
+  return mock_time_domain_.get();
 }
 
 base::TimeTicks ScopedTaskEnvironment::NowTicks() const {
-  DCHECK(mock_time_task_runner_);
-  return mock_time_task_runner_->NowTicks();
+  DCHECK(mock_time_domain_);
+  return mock_time_domain_->Now();
+}
+
+const Clock* ScopedTaskEnvironment::GetMockClock() const {
+  DCHECK(mock_clock_);
+  return mock_clock_.get();
 }
 
 size_t ScopedTaskEnvironment::GetPendingMainThreadTaskCount() const {
-  DCHECK(mock_time_task_runner_);
-  return mock_time_task_runner_->GetPendingTaskCount();
+  // ReclaimMemory sweeps canceled delayed tasks.
+  sequence_manager_->ReclaimMemory();
+  return sequence_manager_->GetPendingTaskCountForTesting();
 }
 
 TimeDelta ScopedTaskEnvironment::NextMainThreadPendingTaskDelay() const {
-  DCHECK(mock_time_task_runner_);
-  return mock_time_task_runner_->NextPendingTaskDelay();
+  // ReclaimMemory sweeps canceled delayed tasks.
+  sequence_manager_->ReclaimMemory();
+  DCHECK(mock_time_domain_);
+  Optional<TimeTicks> run_time = mock_time_domain_->NextScheduledRunTime();
+  if (run_time)
+    return *run_time - mock_time_domain_->Now();
+  return TimeDelta::Max();
 }
 
 ScopedTaskEnvironment::TestTaskTracker::TestTaskTracker()
@@ -327,6 +627,7 @@ bool ScopedTaskEnvironment::TestTaskTracker::DisallowRunTasks() {
 void ScopedTaskEnvironment::TestTaskTracker::RunOrSkipTask(
     internal::Task task,
     internal::Sequence* sequence,
+    const TaskTraits& traits,
     bool can_run_task) {
   {
     AutoLock auto_lock(lock_);
@@ -338,7 +639,7 @@ void ScopedTaskEnvironment::TestTaskTracker::RunOrSkipTask(
   }
 
   internal::TaskSchedulerImpl::TaskTrackerImpl::RunOrSkipTask(
-      std::move(task), sequence, can_run_task);
+      std::move(task), sequence, traits, can_run_task);
 
   {
     AutoLock auto_lock(lock_);

@@ -82,8 +82,8 @@ std::unique_ptr<protocol::Array<std::string>> WidgetElement::GetAttributes()
   return attributes;
 }
 
-std::pair<gfx::NativeWindow, gfx::Rect> WidgetElement::GetNodeWindowAndBounds()
-    const {
+std::pair<gfx::NativeWindow, gfx::Rect>
+WidgetElement::GetNodeWindowAndScreenBounds() const {
   return std::make_pair(widget_->GetNativeWindow(),
                         widget_->GetWindowBoundsInScreen());
 }
@@ -94,4 +94,19 @@ views::Widget* WidgetElement::From(const UIElement* element) {
   return static_cast<const WidgetElement*>(element)->widget_;
 }
 
+template <>
+int UIElement::FindUIElementIdForBackendElement<views::Widget>(
+    views::Widget* element) const {
+  if (type_ == UIElementType::WIDGET &&
+      UIElement::GetBackingElement<views::Widget, WidgetElement>(this) ==
+          element) {
+    return node_id_;
+  }
+  for (auto* child : children_) {
+    int ui_element_id = child->FindUIElementIdForBackendElement(element);
+    if (ui_element_id)
+      return ui_element_id;
+  }
+  return 0;
+}
 }  // namespace ui_devtools

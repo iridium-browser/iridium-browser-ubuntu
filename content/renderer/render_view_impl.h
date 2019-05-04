@@ -37,9 +37,10 @@
 #include "content/public/renderer/render_view.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_widget.h"
-#include "content/renderer/render_widget_owner_delegate.h"
+#include "content/renderer/render_widget_delegate.h"
 #include "ipc/ipc_platform_file.h"
 #include "mojo/public/cpp/bindings/interface_ptr_set.h"
+#include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 #include "third_party/blink/public/platform/web_input_event.h"
 #include "third_party/blink/public/platform/web_scoped_virtual_time_pauser.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
@@ -99,27 +100,33 @@ class CreateViewParams;
 // a local frame for this view, then it also manages a RenderWidget for the
 // main frame.
 //
-// TODO(419087): That RenderWidget should be managed by the main frame itself.
-class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
-                                      public blink::WebViewClient,
-                                      public RenderWidgetOwnerDelegate,
+// TODO(419087): Currently even though the RenderViewImpl "manages" the
+// RenderWidget, the RenderWidget owns the RenderViewImpl. This is due to
+// RenderViewImpl historically being a subclass of RenderWidget. Breaking
+// the ownership relation will require moving the RenderWidget to the main
+// frame and updating all the blink objects to understand the lifetime changes.
+class CONTENT_EXPORT RenderViewImpl : public blink::WebViewClient,
+                                      public IPC::Listener,
+                                      public RenderWidgetDelegate,
                                       public RenderView {
  public:
+  ~RenderViewImpl() override;
+
   // Creates a new RenderView. Note that if the original opener has been closed,
   // |params.window_was_created_with_opener| will be true and
-  // |params.opener_frame_route_id| will be MSG_ROUTING_NONE. When
-  // |params.swapped_out| is true, |params.proxy_routing_id| is specified, so a
-  // RenderFrameProxy can be created for this RenderView's main RenderFrame. The
-  // opener should provide a non-null value for |show_callback| if it needs to
-  // send an additional IPC to finish making this view visible.
+  // |params.opener_frame_route_id| will be MSG_ROUTING_NONE.
+  // When |params.proxy_routing_id| instead of |params.main_frame_routing_id| is
+  // specified, a RenderFrameProxy will be created for this RenderView's main
+  // RenderFrame.
+  // The opener should provide a non-null value for |show_callback| if it needs
+  // to send an additional IPC to finish making this view visible.
   static RenderViewImpl* Create(
       CompositorDependencies* compositor_deps,
       mojom::CreateViewParamsPtr params,
       RenderWidget::ShowCallback show_callback,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
-  // Used by content_layouttest_support to hook into the creation of
-  // RenderViewImpls.
+  // Used by web_test_support to hook into the creation of RenderViewImpls.
   static void InstallCreateHook(RenderViewImpl* (*create_render_view_impl)(
       CompositorDependencies* compositor_deps,
       const mojom::CreateViewParams&));
@@ -136,6 +143,7 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
 
   // Returns the RenderWidget for this RenderView.
   RenderWidget* GetWidget();
+  const RenderWidget* GetWidget() const;
 
   const WebPreferences& webkit_preferences() const {
     return webkit_preferences_;
@@ -168,7 +176,14 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   // FocusController.
   void SetFocus(bool enable);
 
+  // Attaches a WebFrameWidget that will provide a WebFrameWidget interface to
+  // the WebView. Called as part of initialization or when the main frame
+  // RenderWidget is unfrozen, to connect it to the new local main frame.
   void AttachWebFrameWidget(blink::WebFrameWidget* frame_widget);
+  // Detaches the current WebFrameWidget, disconnecting it from the main frame.
+  // Called when the RenderWidget is being frozen, because the local main
+  // frame is going away.
+  void DetachWebFrameWidget();
 
   // Starts a timer to send an UpdateState message on behalf of |frame|, if the
   // timer isn't already running. This allows multiple state changing events to
@@ -190,7 +205,7 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   unsigned GetLocalSessionHistoryLengthForTesting() const;
 
   // Invokes OnSetFocus and marks the widget as active depending on the value
-  // of |enable|. This is used for layout tests that need to control the focus
+  // of |enable|. This is used for web tests that need to control the focus
   // synchronously from the renderer.
   void SetFocusAndActivateForTesting(bool enable);
 
@@ -211,13 +226,12 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
                              const blink::WebString& frame_name,
                              blink::WebNavigationPolicy policy,
                              bool suppress_opener,
-                             blink::WebSandboxFlags sandbox_flags) override;
-  blink::WebWidget* CreatePopup(blink::WebLocalFrame* creator) override;
+                             blink::WebSandboxFlags sandbox_flags,
+                             const blink::SessionStorageNamespaceId&
+                                 session_storage_namespace_id) override;
+  blink::WebPagePopup* CreatePopup(blink::WebLocalFrame* creator) override;
   base::StringPiece GetSessionStorageNamespaceId() override;
   void PrintPage(blink::WebLocalFrame* frame) override;
-  bool EnumerateChosenDirectory(
-      const blink::WebString& path,
-      blink::WebFileChooserCompletion* chooser_completion) override;
   void SetValidationMessageDirection(base::string16* main_text,
                                      blink::WebTextDirection main_text_hint,
                                      base::string16* sub_text,
@@ -243,8 +257,8 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   void DidAutoResize(const blink::WebSize& newSize) override;
   blink::WebRect RootWindowRect() override;
   void DidFocus(blink::WebLocalFrame* calling_frame) override;
+  blink::WebScreenInfo GetScreenInfo() override;
   bool CanHandleGestureEvent() override;
-  blink::WebWidgetClient* WidgetClient() override;
 
 #if defined(OS_ANDROID)
   // Only used on Android since all other platforms implement
@@ -257,28 +271,31 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
 
   bool Send(IPC::Message* message) override;
   RenderFrameImpl* GetMainRenderFrame() override;
-  int GetRoutingID() const override;
-  gfx::Size GetSize() const override;
-  float GetDeviceScaleFactor() const override;
-  float GetZoomLevel() const override;
+  int GetRoutingID() override;
+  gfx::Size GetSize() override;
+  float GetDeviceScaleFactor() override;
+  float GetZoomLevel() override;
   const WebPreferences& GetWebkitPreferences() override;
   void SetWebkitPreferences(const WebPreferences& preferences) override;
   blink::WebView* GetWebView() override;
   blink::WebFrameWidget* GetWebFrameWidget() override;
-  bool ShouldDisplayScrollbars(int width, int height) const override;
-  bool GetContentStateImmediately() const override;
+  bool GetContentStateImmediately() override;
   void SetEditCommandForNextKeyEvent(const std::string& name,
                                      const std::string& value) override;
   void ClearEditCommands() override;
-  const std::string& GetAcceptLanguages() const override;
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+  const std::string& GetAcceptLanguages() override;
   void UpdateBrowserControlsState(BrowserControlsState constraints,
                                   BrowserControlsState current,
                                   bool animate) override;
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
   virtual void didScrollWithKeyboard(const blink::WebSize& delta);
 #endif
   void ConvertViewportToWindowViaWidget(blink::WebRect* rect) override;
   gfx::RectF ElementBoundsInWindow(const blink::WebElement& element) override;
+
+  // Can be overridden by web tests to inject their own WebWidgetClient instead
+  // of RenderWidget.
+  virtual blink::WebWidgetClient* WidgetClient();
 
   // Please do not add your stuff randomly to the end here. If there is an
   // appropriate section, add it there. If not, there are some random functions
@@ -301,8 +318,10 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
                   RenderWidget::ShowCallback show_callback,
                   scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
-  // Do not delete directly.  This class is reference counted.
-  ~RenderViewImpl() override;
+  // Called when Page visibility is changed, to update the View/Page in blink.
+  // This is separate from the IPC handlers as tests may call this and need to
+  // be able to specify |initial_setting| where IPC handlers do not.
+  void ApplyPageHidden(bool hidden, bool initial_setting);
 
  private:
   // For unit tests.
@@ -318,7 +337,7 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   friend class RenderFrameImpl;
 
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, RenderFrameMessageAfterDetach);
-  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, DecideNavigationPolicyForWebUI);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, BeginNavigationForWebUI);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
                            DidFailProvisionalLoadWithErrorForError);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
@@ -342,7 +361,7 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnNavigationHttpPost);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, UpdateDSFAfterSwapIn);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
-                           DecideNavigationPolicyHandlesAllTopLevel);
+                           BeginNavigationHandlesAllTopLevel);
 #if defined(OS_MACOSX)
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, MacTestCmdUp);
 #endif
@@ -368,22 +387,18 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
     CONNECTION_ERROR,
   };
 
-  // RenderWidget public API that should no longer go through RenderView.
-  using RenderWidget::routing_id;
-
-  // RenderWidgetOwnerDelegate implementation ----------------------------------
+  // RenderWidgetDelegate implementation ----------------------------------
 
   blink::WebWidget* GetWebWidgetForWidget() const override;
+  blink::WebWidgetClient* GetWebWidgetClientForWidget() override;
   bool RenderWidgetWillHandleMouseEventForWidget(
       const blink::WebMouseEvent& event) override;
   void SetActiveForWidget(bool active) override;
   bool SupportsMultipleWindowsForWidget() override;
   void DidHandleGestureEventForWidget(
       const blink::WebGestureEvent& event) override;
-  void OverrideCloseForWidget() override;
   void DidCloseWidget() override;
-  void ApplyNewSizeForWidget(const gfx::Size& old_size,
-                             const gfx::Size& new_size) override;
+  void CancelPagePopupForWidget() override;
   void ApplyNewDisplayModeForWidget(
       const blink::WebDisplayMode& new_display_mode) override;
   void ApplyAutoResizeLimitsForWidget(const gfx::Size& min_size,
@@ -399,7 +414,6 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
       float top_controls_height,
       float bottom_controls_height,
       bool browser_controls_shrink_blink_size) override;
-  void RequestScheduleAnimationForWidget() override;
   void SetScreenMetricsEmulationParametersForWidget(
       bool enabled,
       const blink::WebDeviceEmulationParams& params) override;
@@ -420,9 +434,6 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   static WindowOpenDisposition NavigationPolicyToDisposition(
       blink::WebNavigationPolicy policy);
 
-  void ApplyWebPreferencesInternal(const WebPreferences& prefs,
-                                   blink::WebView* web_view);
-
   // IPC message handlers ------------------------------------------------------
   //
   // The documentation for these functions should be in
@@ -436,10 +447,11 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   void OnDisableScrollbarsForSmallWindows(
       const gfx::Size& disable_scrollbars_size_limit);
   void OnEnablePreferredSizeChangedMode();
-  void OnEnumerateDirectoryResponse(int id,
-                                    const std::vector<base::FilePath>& paths);
   void OnPluginActionAt(const gfx::Point& location,
                         const blink::WebPluginAction& action);
+  void OnAnimateDoubleTapZoomInMainFrame(const blink::WebPoint& point,
+                                         const blink::WebRect& rect_to_zoom);
+  void OnZoomToFindInPageRect(const blink::WebRect& rect_to_zoom);
   void OnMoveOrResizeStarted();
   void OnExitFullscreen();
   void OnSetHistoryOffsetAndLength(int history_offset, int history_length);
@@ -452,6 +464,7 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   void OnSetPageScale(float page_scale_factor);
   void OnAudioStateChanged(bool is_audio_playing);
   void OnPausePageScheduledTasks(bool paused);
+  void OnSetBackgroundOpaque(bool opaque);
 
   // Page message handlers -----------------------------------------------------
   void OnUpdateWindowScreenRect(gfx::Rect window_screen_rect);
@@ -510,6 +523,8 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   // it in the same order in the .cc file as it was in the header.
   // ---------------------------------------------------------------------------
 
+  RenderWidget* render_widget_;
+
   // Routing ID that allows us to communicate with the corresponding
   // RenderViewHost in the parent browser process.
   const int32_t routing_id_;
@@ -517,7 +532,7 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   // Whether lookup of frames in the created RenderView (e.g. lookup via
   // window.open or via <a target=...>) should be renderer-wide (i.e. going
   // beyond the usual opener-relationship-based BrowsingInstance boundaries).
-  const bool renderer_wide_named_frame_lookup_ = false;
+  const bool renderer_wide_named_frame_lookup_;
 
   // Settings ------------------------------------------------------------------
 
@@ -539,17 +554,6 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   // Whether the preferred size may have changed and |UpdatePreferredSize| needs
   // to be called.
   bool needs_preferred_size_update_ = true;
-
-  // If non-empty, and |send_preferred_size_changes_| is true, disable drawing
-  // scroll bars on windows smaller than this size.  Used for windows that the
-  // browser resizes to the size of the content, such as browser action popups.
-  // If a render view is set to the minimum size of its content, webkit may add
-  // scroll bars.  This makes sense for fixed sized windows, but it does not
-  // make sense when the size of the view was chosen to fit the content.
-  // This setting ensures that no scroll bars are drawn.  The size limit exists
-  // because if the view grows beyond a size known to the browser, scroll bars
-  // should be drawn.
-  gfx::Size disable_scrollbars_size_limit_;
 
   // Loading state -------------------------------------------------------------
 
@@ -604,11 +608,9 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
   // The next target URL we want to send to the browser.
   GURL pending_target_url_;
 
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
   // Cache the old browser controls state constraints. Used when updating
   // current value only without altering the constraints.
   BrowserControlsState top_controls_constraints_ = BROWSER_CONTROLS_STATE_BOTH;
-#endif
 
   // View ----------------------------------------------------------------------
 
@@ -642,14 +644,10 @@ class CONTENT_EXPORT RenderViewImpl : private RenderWidget,
 
   // Misc ----------------------------------------------------------------------
 
-  // The current directory enumeration callback
-  std::map<int, blink::WebFileChooserCompletion*> enumeration_completions_;
-  int enumeration_completion_id_ = 0;
-
   // The SessionStorage namespace that we're assigned to has an ID, and that ID
   // is passed to us upon creation.  WebKit asks for this ID upon first use and
   // uses it whenever asking the browser process to allocate new storage areas.
-  std::string session_storage_namespace_id_;
+  blink::SessionStorageNamespaceId session_storage_namespace_id_;
 
   // All the registered observers.  We expect this list to be small, so vector
   // is fine.

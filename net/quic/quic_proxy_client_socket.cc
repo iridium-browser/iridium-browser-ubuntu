@@ -16,6 +16,7 @@
 #include "net/http/proxy_connect_redirect_http_stream.h"
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_source_type.h"
+#include "net/quic/quic_http_utils.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 
@@ -84,6 +85,10 @@ bool QuicProxyClientSocket::IsUsingSpdy() const {
 
 NextProto QuicProxyClientSocket::GetProxyNegotiatedProtocol() const {
   return kProtoQUIC;
+}
+
+void QuicProxyClientSocket::SetStreamPriority(RequestPriority priority) {
+  stream_->SetPriority(ConvertRequestPriorityToQuicPriority(priority));
 }
 
 // Sends a HEADERS frame to the proxy with a CONNECT request
@@ -410,7 +415,7 @@ int QuicProxyClientSocket::DoReadReplyComplete(int result) {
       redirect_has_load_timing_info_ =
           GetLoadTimingInfo(&redirect_load_timing_info_);
       next_state_ = STATE_DISCONNECTED;
-      return ERR_HTTPS_PROXY_TUNNEL_RESPONSE;
+      return ERR_HTTPS_PROXY_TUNNEL_RESPONSE_REDIRECT;
 
     case 407:  // Proxy Authentication Required
       next_state_ = STATE_CONNECT_COMPLETE;

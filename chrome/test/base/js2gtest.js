@@ -50,13 +50,15 @@ var outputFile = arguments[4];
 
 /**
  * Type of this test.
- * @type {string} ('extension' | 'unit' | 'webui')
+ * @type {string} ('extension' | 'unit' | 'webui' | 'mojo_webui' |
+ *                 'mojo_lite_webui')
  */
 var testType = arguments[5];
 if (testType != 'extension' &&
     testType != 'unit' &&
     testType != 'webui' &&
-    testType != 'mojo_webui') {
+    testType != 'mojo_webui' &&
+    testType != 'mojo_lite_webui') {
   print('Invalid test type: ' + testType);
   quit(-1);
 }
@@ -148,6 +150,9 @@ ${argHint}
   //               ExtensionJSBrowserTest superclass.
   // 'unit' - unit_tests harness, js2unit rule, V8UnitTest superclass.
   // 'mojo_webui' - browser_tests harness, js2webui rule, MojoWebUIBrowserTest
+  //                with mojo bindings.
+  // 'mojo_lite_webui' - browser_tests harness, js2webui rule,
+  //                     MojoWebUIBrowserTest with mojo_lite bindings.
   // superclass. Uses Mojo to communicate test results.
   // 'webui' - browser_tests harness, js2webui rule, WebUIBrowserTest
   // superclass. Uses chrome.send to communicate test results.
@@ -161,7 +166,7 @@ ${argHint}
     testing.Test.prototype.typedefCppFixture = 'V8UnitTest';
     testF = 'TEST_F';
     addSetPreloadInfo = false;
-  } else if (testType === 'mojo_webui') {
+  } else if (testType === 'mojo_webui' || testType === 'mojo_lite_webui') {
     output('#include "chrome/test/base/mojo_web_ui_browser_test.h"');
     testing.Test.prototype.typedefCppFixture = 'MojoWebUIBrowserTest';
     testF = 'IN_PROC_BROWSER_TEST_F';
@@ -325,22 +330,6 @@ function GEN(code) {
 }
 
 /**
- * Outputs |commentEncodedCode|, converting comment to enclosed C++ code.
- * @param {function} commentEncodedCode A function in the following format (note
- * the space in '/ *' and '* /' should be removed to form a comment delimiter):
- *    function() {/ *! my_cpp_code.DoSomething(); * /
- *    Code between / *! and * / will be extracted and written to stdout.
- */
-function GEN_BLOCK(commentEncodedCode) {
-  var code = commentEncodedCode.toString().
-      replace(/^[^\/]+\/\*!?/, '').
-      replace(/\*\/[^\/]+$/, '').
-      replace(/^\n|\n$/, '').
-      replace(/\s+$/, '');
-  GEN(code);
-}
-
-/**
  * Generate includes for the current |jsFile| by including them
  * immediately and at runtime.
  * The paths must be relative to the directory of the current file.
@@ -380,8 +369,10 @@ function getTestDeclarationLineNumber() {
  * @param {string} testFixture The name of this test's fixture.
  * @param {string} testFunction The name of this test's function.
  * @param {Function} testBody The function body to execute for this test.
+ * @param {string=} opt_preamble C++ to be generated before the TEST_F block.
+ * Useful for including #ifdef blocks. See TEST_F_WITH_PREAMBLE.
  */
-function TEST_F(testFixture, testFunction, testBody) {
+function TEST_F(testFixture, testFunction, testBody, opt_preamble) {
   maybeGenHeader(testFixture);
   var browsePreload = this[testFixture].prototype.browsePreload;
   var browsePrintPreload = this[testFixture].prototype.browsePrintPreload;
@@ -451,7 +442,8 @@ class ${testFixture} : public ${typedefCppFixture} {
       if (hasSwitches) {
       // Override SetUpCommandLine and add each switch.
       output(`
-  void SetUpCommandLine(base::CommandLine* command_line) override {`);
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ${typedefCppFixture}::SetUpCommandLine(command_line);`);
       for (var i = 0; i < switches.length; i++) {
         output(`
     command_line->AppendSwitchASCII(
@@ -470,6 +462,10 @@ class ${testFixture} : public ${typedefCppFixture} {
 `);
     }
     typedeffedCppFixtures[testFixture] = typedefCppFixture;
+  }
+
+  if (opt_preamble) {
+    GEN(opt_preamble);
   }
 
   var outputLine = countOutputLines() + 3;
@@ -492,6 +488,10 @@ ${testF}(${testFixture}, ${testFunction}) {
   set_preload_test_fixture("${testFixture}");
   set_preload_test_name("${testFunction}");`);
   }
+  if(testType == 'mojo_lite_webui') {
+    output(`
+  set_use_mojo_lite_bindings();`);
+  }
   if (testGenPreamble)
     testGenPreamble(testFixture, testFunction);
   if (browsePreload)
@@ -509,6 +509,18 @@ ${testF}(${testFixture}, ${testFunction}) {
   if (testGenPostamble)
     testGenPostamble(testFixture, testFunction);
   output('}\n');
+}
+
+/**
+ * Same as TEST_F above, with a mandatory preamble.
+ * @param {string} preamble C++ to be generated before the TEST_F block.
+ *                 Useful for including #ifdef blocks.
+ * @param {string} testFixture The name of this test's fixture.
+ * @param {string} testFunction The name of this test's function.
+ * @param {Function} testBody The function body to execute for this test.
+ */
+function TEST_F_WITH_PREAMBLE(preamble, testFixture, testFunction, testBody) {
+  TEST_F(testFixture, testFunction, testBody, preamble);
 }
 
 // Now that generation functions are defined, load in |jsFile|.

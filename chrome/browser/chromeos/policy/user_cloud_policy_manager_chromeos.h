@@ -120,9 +120,19 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
   // using the ProfileOAuth2TokenService directly to get the access token, a 3rd
   // service (UserCloudPolicyTokenForwarder) will fetch it later and pass it to
   // this method once available.
-  // The |access_token| can then be used to authenticate the registration
-  // request to the DMServer.
-  void OnAccessTokenAvailable(const std::string& access_token);
+  // UserCloudPolicyTokenForwarder will continue delivering fresh OAuth tokens
+  // upon expected previous token expiration if this class requires OAuth token
+  // to be always available (needed for child user). The |access_token| is used
+  // to authenticate the registration request to DMServer for all users. It is
+  // also used to authorize policy fetch request and status upload for child
+  // user.
+  // Note: This method will be called once for regular user and multiple times
+  // (periodically) for child user.
+  virtual void OnAccessTokenAvailable(const std::string& access_token);
+
+  // Whether OAuth2 token is required for DMServer requests (policy fetch,
+  // uploading status report) for child user.
+  bool RequiresOAuthTokenForChildUser() const;
 
   // Returns true if the underlying CloudPolicyClient is already registered.
   bool IsClientRegistered() const;
@@ -140,7 +150,7 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
   bool IsInitializationComplete(PolicyDomain domain) const override;
 
   // CloudPolicyService::Observer:
-  void OnInitializationCompleted(CloudPolicyService* service) override;
+  void OnCloudPolicyServiceInitializationCompleted() override;
 
   // CloudPolicyClient::Observer:
   void OnPolicyFetched(CloudPolicyClient* client) override;
@@ -209,6 +219,9 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
   // user is not managed).
   void CancelWaitForPolicyFetch(bool success);
 
+  // Starts refresh scheduler if all the required conditions are fullfilled.
+  // Exits immediately if refresh scheduler is already started, so it is safe to
+  // call it multiple times.
   void StartRefreshSchedulerIfReady();
 
   // content::NotificationObserver:
@@ -239,7 +252,7 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
 
   // Whether we're waiting for a policy fetch to complete before reporting
   // IsInitializationComplete().
-  bool waiting_for_policy_fetch_;
+  bool waiting_for_policy_fetch_ = false;
 
   // What kind of enforcement we need to implement.
   PolicyEnforcement enforcement_type_;
@@ -259,7 +272,8 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
   std::unique_ptr<WildcardLoginChecker> wildcard_login_checker_;
 
   // The access token passed to OnAccessTokenAvailable. It is stored here so
-  // that it can be used if OnInitializationCompleted is called later.
+  // that it can be used if OnCloudPolicyServiceInitializationCompleted is
+  // called later.
   std::string access_token_;
 
   // Timestamps for collecting timing UMA stats.
@@ -274,7 +288,7 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
   base::debug::StackTrace connect_callstack_;
 
   // The AccountId associated with the user whose policy is being loaded.
-  AccountId account_id_;
+  const AccountId account_id_;
 
   // The callback to invoke if the user session should be shutdown. This is
   // injected in the constructor to make it easier to write tests.

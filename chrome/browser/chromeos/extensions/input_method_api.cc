@@ -10,6 +10,8 @@
 #include <string>
 #include <utility>
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/values.h"
@@ -22,14 +24,16 @@
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/ui/ash/keyboard/chrome_keyboard_controller_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/api/input_method_private.h"
 #include "chrome/common/pref_names.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
@@ -38,8 +42,6 @@
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/ime/chromeos/input_method_util.h"
 #include "ui/base/ime/ime_bridge.h"
-#include "ui/keyboard/keyboard_controller.h"
-#include "ui/keyboard/keyboard_util.h"
 
 namespace AddWordToDictionary =
     extensions::api::input_method_private::AddWordToDictionary;
@@ -61,6 +63,10 @@ namespace OnImeMenuItemsChanged =
     extensions::api::input_method_private::OnImeMenuItemsChanged;
 namespace GetSurroundingText =
     extensions::api::input_method_private::GetSurroundingText;
+namespace GetSetting = extensions::api::input_method_private::GetSetting;
+namespace SetSetting = extensions::api::input_method_private::SetSetting;
+namespace OnSettingsChanged =
+    extensions::api::input_method_private::OnSettingsChanged;
 
 namespace {
 
@@ -218,8 +224,8 @@ InputMethodPrivateGetEncryptSyncEnabledFunction::Run() {
           Profile::FromBrowserContext(browser_context()));
   if (!profile_sync_service)
     return RespondNow(Error("Sync service is not ready for current profile."));
-  std::unique_ptr<base::Value> ret(
-      new base::Value(profile_sync_service->IsEncryptEverythingEnabled()));
+  std::unique_ptr<base::Value> ret(new base::Value(
+      profile_sync_service->GetUserSettings()->IsEncryptEverythingEnabled()));
   return RespondNow(OneArgument(std::move(ret)));
 #endif
 }
@@ -245,26 +251,28 @@ InputMethodPrivateShowInputViewFunction::Run() {
 #if !defined(OS_CHROMEOS)
   EXTENSION_FUNCTION_VALIDATE(false);
 #else
-  auto* keyboard_controller = keyboard::KeyboardController::Get();
-  if (keyboard_controller->IsEnabled()) {
-    keyboard_controller->ShowKeyboard(false);
+  auto* keyboard_client = ChromeKeyboardControllerClient::Get();
+  if (!keyboard_client->is_keyboard_enabled()) {
+    keyboard_client->ShowKeyboard();
     return RespondNow(NoArguments());
   }
 
-  if (keyboard::IsKeyboardEnabled())
-    return RespondNow(Error(kErrorFailToShowInputView));
+  // Temporarily enable the onscreen keyboard if there is no keyboard enabled.
+  // This will be cleared when the keybaord is hidden.
+  keyboard_client->SetEnableFlag(
+      keyboard::mojom::KeyboardEnableFlag::kTemporarilyEnabled);
+  keyboard_client->GetKeyboardEnabled(base::BindOnce(
+      &InputMethodPrivateShowInputViewFunction::OnGetIsEnabled, this));
+  return RespondLater();
+}
 
-  // Forcibly enables the a11y onscreen keyboard if there is on keyboard enabled
-  // for now. And re-disables it after showing once.
-  keyboard::SetAccessibilityKeyboardEnabled(true);
-  keyboard_controller = keyboard::KeyboardController::Get();
-  if (!keyboard_controller->IsEnabled()) {
-    keyboard::SetAccessibilityKeyboardEnabled(false);
-    return RespondNow(Error(kErrorFailToShowInputView));
+void InputMethodPrivateShowInputViewFunction::OnGetIsEnabled(bool enabled) {
+  if (!enabled) {
+    Respond(Error(kErrorFailToShowInputView));
+    return;
   }
-  keyboard_controller->ShowKeyboard(false);
-  keyboard::SetAccessibilityKeyboardEnabled(false);
-  return RespondNow(NoArguments());
+  ChromeKeyboardControllerClient::Get()->ShowKeyboard();
+  Respond(NoArguments());
 #endif
 }
 
@@ -316,13 +324,22 @@ InputMethodPrivateGetSurroundingTextFunction::Run() {
   uint32_t param_before_length = (uint32_t)params->before_length;
   uint32_t param_after_length = (uint32_t)params->after_length;
 
-  auto ret = std::make_unique<base::DictionaryValue>();
   ui::SurroundingTextInfo info = input_context->GetSurroundingTextInfo();
-  uint32_t text_before_end = info.selection_range.start();
+  if (!info.selection_range.IsValid())
+    return RespondNow(OneArgument(std::make_unique<base::Value>()));
+
+  auto ret = std::make_unique<base::DictionaryValue>();
+  uint32_t selection_start = info.selection_range.start();
+  uint32_t selection_end = info.selection_range.end();
+  // Makes sure |selection_start| is less or equals to |selection_end|.
+  if (selection_start > selection_end)
+    std::swap(selection_start, selection_end);
+
+  uint32_t text_before_end = selection_start;
   uint32_t text_before_start = text_before_end > param_before_length
                                    ? text_before_end - param_before_length
                                    : 0;
-  uint32_t text_after_start = info.selection_range.end();
+  uint32_t text_after_start = selection_end;
   uint32_t text_after_end =
       text_after_start + param_after_length < info.surrounding_text.length()
           ? text_after_start + param_after_length
@@ -339,6 +356,54 @@ InputMethodPrivateGetSurroundingTextFunction::Run() {
                                             text_after_end - text_after_start));
 
   return RespondNow(OneArgument(std::move(ret)));
+#endif
+}
+
+ExtensionFunction::ResponseAction InputMethodPrivateGetSettingFunction::Run() {
+#if !defined(OS_CHROMEOS)
+  EXTENSION_FUNCTION_VALIDATE(false);
+#else
+  const auto params = GetSetting::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  const base::DictionaryValue* inputMethods =
+      Profile::FromBrowserContext(browser_context())
+          ->GetPrefs()
+          ->GetDictionary(prefs::kLanguageInputMethodSpecificSettings);
+  const base::Value* result =
+      inputMethods->FindPath({params->engine_id, params->key});
+  return RespondNow(
+      OneArgument(result ? std::make_unique<base::Value>(result->Clone())
+                         : std::make_unique<base::Value>()));
+#endif
+}
+
+ExtensionFunction::ResponseAction InputMethodPrivateSetSettingFunction::Run() {
+#if !defined(OS_CHROMEOS)
+  EXTENSION_FUNCTION_VALIDATE(false);
+#else
+  const auto params = SetSetting::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  DictionaryPrefUpdate update(
+      Profile::FromBrowserContext(browser_context())->GetPrefs(),
+      prefs::kLanguageInputMethodSpecificSettings);
+  update->SetPath({params->engine_id, params->key}, params->value->Clone());
+
+  // The router will only send the event to extensions that are listening.
+  extensions::EventRouter* router =
+      extensions::EventRouter::Get(browser_context());
+  if (router->HasEventListener(OnSettingsChanged::kEventName)) {
+    auto event = std::make_unique<extensions::Event>(
+        extensions::events::INPUT_METHOD_PRIVATE_ON_SETTINGS_CHANGED,
+        OnSettingsChanged::kEventName,
+        OnSettingsChanged::Create(params->engine_id, params->key,
+                                  params->value->Clone()),
+        context_);
+    router->BroadcastEvent(std::move(event));
+  }
+
+  return RespondNow(NoArguments());
 #endif
 }
 

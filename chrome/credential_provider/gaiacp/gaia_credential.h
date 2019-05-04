@@ -7,14 +7,12 @@
 
 #include "chrome/credential_provider/gaiacp/gaia_credential_base.h"
 #include "chrome/credential_provider/gaiacp/gaia_credential_provider_i.h"
-#include "chrome/credential_provider/gaiacp/grit/gaia_resources.h"
 
 namespace credential_provider {
 
 // Implementation of an ICredentialProviderCredential backed by a Gaia account.
 class ATL_NO_VTABLE CGaiaCredential
     : public CComObjectRootEx<CComMultiThreadModel>,
-      public CComCoClass<CGaiaCredential, &CLSID_GaiaCredential>,
       public CGaiaCredentialBase {
  public:
   DECLARE_NO_REGISTRY()
@@ -37,15 +35,9 @@ class ATL_NO_VTABLE CGaiaCredential
 
   DECLARE_PROTECT_FINAL_CONSTRUCT()
 
-  // IGaiaCredential
-  IFACEMETHODIMP FinishAuthentication(BSTR username,
-                                      BSTR password,
-                                      BSTR fullname,
-                                      BSTR* sid,
-                                      BSTR* error_text) override;
+  // CGaiaCredentialBase
+  void ResetInternalState() override;
 };
-
-OBJECT_ENTRY_AUTO(__uuidof(GaiaCredential), CGaiaCredential)
 
 }  // namespace credential_provider
 

@@ -24,21 +24,26 @@ export -n SHELLOPTS
 ME="$(basename "${0}")"
 readonly ME
 
-if [[ ${#} -ne 5 && ${#} -ne 6 ]]; then
-  echo "usage: ${ME} app_path codesign_keychain codesign_id \
-provisioning_profile entitlements_plist [--development]" >& 2
-  exit 1
-fi
-
-app_path="${1}"
-codesign_keychain="${2}"
-codesign_id="${3}"
-provisioning_profile="${4}"
-entitlements_plist="${5}"
+# Note that |is_development| is tested for string length, not value.
 is_development=
 
-if [[ ${#} == 6 && "${6}" == "--development" ]]; then
-  is_development=1
+if [[ ${#} -eq 4 || ${#} -eq 6 ]]; then
+  app_path="${1}"
+  codesign_keychain="${2}"
+  codesign_id="${3}"
+  if [[ "${4}" == "--development" || "${6}" == "--development" ]]; then
+    is_development=1
+  fi
+elif [[ ${#} -ne 5 ]]; then
+  echo "usage: ${ME} app_path codesign_keychain codesign_id \
+provisioning_profile entitlements_plist" >& 2
+  exit 1
+else
+  app_path="${1}"
+  codesign_keychain="${2}"
+  codesign_id="${3}"
+  provisioning_profile="${4}"
+  entitlements_plist="${5}"
 fi
 
 script_dir="$(dirname "${0}")"
@@ -58,8 +63,19 @@ helper_app="${versioned_dir}/@MAC_PRODUCT_NAME@ Helper.app"
 app_mode_loader_app="${framework}/Resources/app_mode_loader.app"
 app_mode_loader="${app_mode_loader_app}/Contents/MacOS/app_mode_loader"
 
+libraries_dir="${framework}/Libraries"
+libraries=(
+  "${libraries_dir}/libEGL.dylib"
+  "${libraries_dir}/libGLESv2.dylib"
+  "${libraries_dir}/libswiftshader_libEGL.dylib"
+  "${libraries_dir}/libswiftshader_libGLESv2.dylib"
+  "${libraries_dir}/WidevineCdm/_platform_specific/mac_x64/libwidevinecdm.dylib"
+)
+
 # Embed the supplied provisioning profile.
-cp "${provisioning_profile}" "${contents_dir}/embedded.provisionprofile"
+if [[ -z "${is_development}" ]]; then
+  cp "${provisioning_profile}" "${contents_dir}/embedded.provisionprofile"
+fi
 
 requirement="\
 designated => \
@@ -75,9 +91,9 @@ codesign_cmd=(
   "${browser_app}"
   --options "${enforcement_flags_app}"
   --resource-rules "${browser_app_rules}"
-  --entitlements "${entitlements_plist}"
 )
 if [[ -z "${is_development}" ]]; then
+  codesign_cmd+=(--entitlements="${entitlements_plist}")
   codesign_cmd+=( -r="${requirement}" )
 fi
 "${codesign_cmd[@]}"
@@ -101,6 +117,12 @@ codesign --verify --verbose=6 --deep "${notification_service}"
 codesign --verify --verbose=6 --deep --no-strict "${framework}"
 codesign --verify --verbose=6 --strict "${framework}"
 codesign --verify --verbose=6 --deep "${helper_app}"
+
+for library in "${libraries[@]}"; do
+  if [ -f "${library}" ]; then
+    codesign --verify --verbose=6 --deep "${library}"
+  fi
+done
 
 # Verify with spctl, which uses the same rules that Gatekeeper does for
 # validation. This is unreliable on 10.11 where syspolicyd caches assessments

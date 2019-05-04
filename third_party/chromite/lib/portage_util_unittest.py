@@ -77,6 +77,12 @@ platform_pkg_test() {
 
   _SINGLE_LINE_TEST = 'src_test() { echo "foo" }'
 
+  _INHERIT_CROS_GO = 'inherit cros-workon cros-go'
+
+  _INHERIT_TAST_BUNDLE = 'inherit tast-bundle'
+
+  _INHERIT_CROS_DEBUG = 'inherit cros-debug'
+
   _EBUILD_BASE = """
 CROS_WORKON_COMMIT=commit1
 CROS_WORKON_TREE=("tree1" "tree2")
@@ -201,6 +207,9 @@ inherit cros-workon superpower
     run_case(self._MULTILINE_COMMENTED, False)
     run_case(self._MULTILINE_PLATFORM, True)
     run_case(self._SINGLE_LINE_TEST, True)
+    run_case(self._INHERIT_CROS_GO, True)
+    run_case(self._INHERIT_TAST_BUNDLE, True)
+    run_case(self._INHERIT_CROS_DEBUG, False)
 
   def testCheckHasTestWithoutEbuild(self):
     """Test CheckHasTest on a package without ebuild config file"""
@@ -707,7 +716,9 @@ class EBuildRevWorkonTest(cros_test_lib.MockTempDirTestCase):
     self.PatchObject(portage_util.EBuild, 'GetSourceInfo',
                      return_value=portage_util.SourceInfo(
                          projects=None, srcdirs=[], subdirs=[], subtrees=[]))
-    self.PatchObject(portage_util.EBuild, '_RunCommand', return_value='1122')
+    self.PatchObject(cros_build_lib, 'RunCommand',
+                     return_value=cros_build_lib.CommandResult(
+                         returncode=0, output='1122', error='STDERR'))
     self.assertEqual('1122', self.m_ebuild.GetVersion(None, None, '1234'))
     # Sanity check.
     self.assertEqual(exists.call_count, 1)
@@ -718,20 +729,36 @@ class EBuildRevWorkonTest(cros_test_lib.MockTempDirTestCase):
     self.PatchObject(portage_util.EBuild, 'GetSourceInfo',
                      return_value=portage_util.SourceInfo(
                          projects=None, srcdirs=[], subdirs=[], subtrees=[]))
-    run = self.PatchObject(portage_util.EBuild, '_RunCommand')
+    run = self.PatchObject(cros_build_lib, 'RunCommand')
+    readfile = self.PatchObject(osutils, 'ReadFile')
 
     # Reject no output.
-    run.return_value = ''
+    run.return_value = cros_build_lib.CommandResult(
+        returncode=0, output='', error='STDERR')
     self.assertRaises(SystemExit, self.m_ebuild.GetVersion, None, None, '1234')
     # Sanity check.
-    self.assertEqual(exists.call_count, 1)
+    self.assertEqual(exists.call_count, 2)
     exists.reset_mock()
+    self.assertEqual(readfile.call_count, 1)
+    readfile.reset_mock()
 
     # Reject simple output.
-    run.return_value = '\n'
+    run.return_value = cros_build_lib.CommandResult(
+        returncode=0, output='\n', error='STDERR')
     self.assertRaises(SystemExit, self.m_ebuild.GetVersion, None, None, '1234')
     # Sanity check.
-    self.assertEqual(exists.call_count, 1)
+    self.assertEqual(exists.call_count, 2)
+    exists.reset_mock()
+    self.assertEqual(readfile.call_count, 1)
+    readfile.reset_mock()
+
+    # Reject error.
+    run.return_value = cros_build_lib.CommandResult(
+        returncode=1, output='FAIL\n', error='STDERR')
+    self.assertRaises(SystemExit, self.m_ebuild.GetVersion, None, None, '1234')
+    # Sanity check.
+    self.assertEqual(exists.call_count, 2)
+    self.assertEqual(readfile.call_count, 1)
 
   def testVersionScriptTooHighVersion(self):
     """Reject scripts that output high version numbers."""
@@ -739,7 +766,9 @@ class EBuildRevWorkonTest(cros_test_lib.MockTempDirTestCase):
     self.PatchObject(portage_util.EBuild, 'GetSourceInfo',
                      return_value=portage_util.SourceInfo(
                          projects=None, srcdirs=[], subdirs=[], subtrees=[]))
-    self.PatchObject(portage_util.EBuild, '_RunCommand', return_value='999999')
+    self.PatchObject(cros_build_lib, 'RunCommand',
+                     return_value=cros_build_lib.CommandResult(
+                         returncode=0, output='999999', error='STDERR'))
     self.assertRaises(ValueError, self.m_ebuild.GetVersion, None, None, '1234')
     # Sanity check.
     self.assertEqual(exists.call_count, 1)
@@ -750,7 +779,9 @@ class EBuildRevWorkonTest(cros_test_lib.MockTempDirTestCase):
     self.PatchObject(portage_util.EBuild, 'GetSourceInfo',
                      return_value=portage_util.SourceInfo(
                          projects=None, srcdirs=[], subdirs=[], subtrees=[]))
-    self.PatchObject(portage_util.EBuild, '_RunCommand', return_value='abcd')
+    self.PatchObject(cros_build_lib, 'RunCommand',
+                     return_value=cros_build_lib.CommandResult(
+                         returncode=0, output='abcd', error='STDERR'))
     self.assertRaises(ValueError, self.m_ebuild.GetVersion, None, None, '1234')
     # Sanity check.
     self.assertEqual(exists.call_count, 1)

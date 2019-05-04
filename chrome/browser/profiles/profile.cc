@@ -34,7 +34,7 @@
 #if defined(OS_CHROMEOS)
 #include "base/command_line.h"
 #include "chrome/common/chrome_switches.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #endif
 
 #if !defined(OS_ANDROID)
@@ -181,8 +181,6 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterStringPref(prefs::kApplicationLocaleBackup, std::string());
   registry->RegisterStringPref(prefs::kApplicationLocaleAccepted,
                                std::string());
-  registry->RegisterListPref(prefs::kAllowedUILocales,
-                             std::make_unique<base::ListValue>());
 #endif
 
   registry->RegisterBooleanPref(prefs::kDataSaverEnabled, false);
@@ -271,8 +269,8 @@ bool Profile::IsNewProfile() {
 
 bool Profile::IsSyncAllowed() {
   if (ProfileSyncServiceFactory::HasProfileSyncService(this)) {
-    browser_sync::ProfileSyncService* sync_service =
-        ProfileSyncServiceFactory::GetForProfile(this);
+    syncer::SyncService* sync_service =
+        ProfileSyncServiceFactory::GetSyncServiceForProfile(this);
     return !sync_service->HasDisableReason(
                syncer::SyncService::DISABLE_REASON_PLATFORM_OVERRIDE) &&
            !sync_service->HasDisableReason(

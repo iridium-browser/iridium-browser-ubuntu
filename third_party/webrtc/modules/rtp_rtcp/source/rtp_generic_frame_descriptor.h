@@ -18,6 +18,8 @@
 
 namespace webrtc {
 
+class RtpGenericFrameDescriptorExtension;
+
 // Data to put on the wire for FrameDescriptor rtp header extension.
 class RtpGenericFrameDescriptor {
  public:
@@ -35,9 +37,7 @@ class RtpGenericFrameDescriptor {
   void SetLastPacketInSubFrame(bool last) { end_of_subframe_ = last; }
 
   bool FirstSubFrameInFrame() const { return beginning_of_frame_; }
-  void SetFirstSubFrameInFrame(bool first) { beginning_of_frame_ = first; }
   bool LastSubFrameInFrame() const { return end_of_frame_; }
-  void SetLastSubFrameInFrame(bool last) { end_of_frame_ = last; }
 
   // Properties below undefined if !FirstPacketInSubFrame()
   // Valid range for temporal layer: [0, 7]
@@ -49,6 +49,10 @@ class RtpGenericFrameDescriptor {
   int SpatialLayer() const;
   uint8_t SpatialLayersBitmask() const;
   void SetSpatialLayersBitmask(uint8_t spatial_layers);
+
+  int Width() const { return width_; }
+  int Height() const { return height_; }
+  void SetResolution(int width, int height);
 
   uint16_t FrameId() const;
   void SetFrameId(uint16_t frame_id);
@@ -62,16 +66,23 @@ class RtpGenericFrameDescriptor {
   rtc::ArrayView<const uint8_t> GetByteRepresentation();
 
  private:
+  friend class RtpGenericFrameDescriptorExtension;
+  void SetFirstSubFrameInFrame(bool first) { beginning_of_frame_ = first; }
+  void SetLastSubFrameInFrame(bool last) { end_of_frame_ = last; }
+
   bool beginning_of_subframe_ = false;
   bool end_of_subframe_ = false;
-  bool beginning_of_frame_ = false;
-  bool end_of_frame_ = false;
+  bool beginning_of_frame_ = true;
+  bool end_of_frame_ = true;
 
   uint16_t frame_id_ = 0;
   uint8_t spatial_layers_ = 1;
   uint8_t temporal_layer_ = 0;
   size_t num_frame_deps_ = 0;
   uint16_t frame_deps_id_diffs_[kMaxNumFrameDependencies];
+  int width_ = 0;
+  int height_ = 0;
+
   std::vector<uint8_t> byte_representation_;
 };
 

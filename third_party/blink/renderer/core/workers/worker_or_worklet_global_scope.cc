@@ -5,16 +5,23 @@
 #include "third_party/blink/renderer/core/workers/worker_or_worklet_global_scope.h"
 
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/public/platform/web_worker_fetch_context.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/dom/events/event_queue.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
+#include "third_party/blink/renderer/core/loader/subresource_filter.h"
 #include "third_party/blink/renderer/core/loader/worker_fetch_context.h"
+#include "third_party/blink/renderer/core/loader/worker_resource_fetcher_properties.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/core/script/fetch_client_settings_object_impl.h"
+#include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
+#include "third_party/blink/renderer/platform/loader/fetch/null_resource_fetcher_properties.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -23,8 +30,11 @@ namespace blink {
 WorkerOrWorkletGlobalScope::WorkerOrWorkletGlobalScope(
     v8::Isolate* isolate,
     WorkerClients* worker_clients,
+    scoped_refptr<WebWorkerFetchContext> web_worker_fetch_context,
     WorkerReportingProxy& reporting_proxy)
-    : worker_clients_(worker_clients),
+    : ExecutionContext(isolate),
+      worker_clients_(worker_clients),
+      web_worker_fetch_context_(std::move(web_worker_fetch_context)),
       script_controller_(
           WorkerOrWorkletScriptController::Create(this, isolate)),
       reporting_proxy_(reporting_proxy),
@@ -93,22 +103,69 @@ void WorkerOrWorkletGlobalScope::CountDeprecation(WebFeature feature) {
   ReportingProxy().CountDeprecation(feature);
 }
 
+void WorkerOrWorkletGlobalScope::InitializeWebFetchContextIfNeeded() {
+  if (web_fetch_context_initialized_)
+    return;
+  web_fetch_context_initialized_ = true;
+
+  if (!web_worker_fetch_context_)
+    return;
+
+  DCHECK(!subresource_filter_);
+  web_worker_fetch_context_->InitializeOnWorkerThread(navigator());
+  std::unique_ptr<blink::WebDocumentSubresourceFilter> web_filter =
+      web_worker_fetch_context_->TakeSubresourceFilter();
+  if (web_filter) {
+    subresource_filter_ =
+        SubresourceFilter::Create(*this, std::move(web_filter));
+  }
+}
+
 ResourceFetcher* WorkerOrWorkletGlobalScope::EnsureFetcher() {
   DCHECK(IsContextThread());
-  if (resource_fetcher_)
-    return resource_fetcher_;
-  WorkerFetchContext* fetch_context = WorkerFetchContext::Create(*this);
-  resource_fetcher_ = ResourceFetcher::Create(fetch_context);
+  if (inside_settings_resource_fetcher_)
+    return inside_settings_resource_fetcher_;
+  inside_settings_resource_fetcher_ = CreateFetcherInternal(
+      MakeGarbageCollected<FetchClientSettingsObjectImpl>(*this));
+  return inside_settings_resource_fetcher_;
+}
+
+ResourceFetcher* WorkerOrWorkletGlobalScope::CreateFetcherInternal(
+    FetchClientSettingsObject* fetch_client_settings_object) {
+  DCHECK(IsContextThread());
+  DCHECK(fetch_client_settings_object);
+  InitializeWebFetchContextIfNeeded();
+  ResourceFetcherProperties* properties = nullptr;
+  FetchContext* context = nullptr;
+  if (web_worker_fetch_context_) {
+    properties = MakeGarbageCollected<WorkerResourceFetcherProperties>(
+        *this, *fetch_client_settings_object, web_worker_fetch_context_);
+    context = MakeGarbageCollected<WorkerFetchContext>(
+        *this, web_worker_fetch_context_, subresource_filter_);
+  } else {
+    // This code path is for unittests.
+    properties = MakeGarbageCollected<NullResourceFetcherProperties>();
+    context = &FetchContext::NullInstance();
+  }
+  auto* resource_fetcher =
+      MakeGarbageCollected<ResourceFetcher>(ResourceFetcherInit(
+          *properties, context, GetTaskRunner(TaskType::kNetworking), *this));
   if (IsContextPaused())
-    resource_fetcher_->SetDefersLoading(true);
-  DCHECK(resource_fetcher_);
-  return resource_fetcher_;
+    resource_fetcher->SetDefersLoading(true);
+  resource_fetchers_.insert(resource_fetcher);
+  return resource_fetcher;
 }
 
 ResourceFetcher* WorkerOrWorkletGlobalScope::Fetcher() const {
   DCHECK(IsContextThread());
-  DCHECK(resource_fetcher_);
-  return resource_fetcher_;
+  DCHECK(inside_settings_resource_fetcher_);
+  return inside_settings_resource_fetcher_;
+}
+
+ResourceFetcher* WorkerOrWorkletGlobalScope::CreateOutsideSettingsFetcher(
+    FetchClientSettingsObject* fetch_client_settings_object) {
+  DCHECK(IsContextThread());
+  return CreateFetcherInternal(fetch_client_settings_object);
 }
 
 bool WorkerOrWorkletGlobalScope::IsJSExecutionForbidden() const {
@@ -132,9 +189,9 @@ void WorkerOrWorkletGlobalScope::Dispose() {
   script_controller_->Dispose();
   script_controller_.Clear();
 
-  if (resource_fetcher_) {
-    resource_fetcher_->StopFetching();
-    resource_fetcher_->ClearContext();
+  for (ResourceFetcher* resource_fetcher : resource_fetchers_) {
+    resource_fetcher->StopFetching();
+    resource_fetcher->ClearContext();
   }
 }
 
@@ -168,7 +225,8 @@ void WorkerOrWorkletGlobalScope::InitContentSecurityPolicyFromVector(
 
 void WorkerOrWorkletGlobalScope::BindContentSecurityPolicyToExecutionContext() {
   DCHECK(IsContextThread());
-  GetContentSecurityPolicy()->BindToExecutionContext(GetExecutionContext());
+  GetContentSecurityPolicy()->BindToDelegate(
+      GetContentSecurityPolicyDelegate());
 }
 
 // Implementation of the "fetch a module worker script graph" algorithm in the
@@ -192,28 +250,32 @@ void WorkerOrWorkletGlobalScope::FetchModuleScript(
   // string."
   ScriptFetchOptions options(nonce, IntegrityMetadataSet(), integrity_attribute,
                              parser_state, credentials_mode,
-                             kReferrerPolicyDefault);
+                             network::mojom::ReferrerPolicy::kDefault);
 
   Modulator* modulator = Modulator::From(ScriptController()->GetScriptState());
   // Step 3. "Perform the internal module script graph fetching procedure ..."
-  modulator->FetchTree(module_url_record, fetch_client_settings_object,
-                       destination, options, custom_fetch_type, client);
+  modulator->FetchTree(
+      module_url_record,
+      CreateOutsideSettingsFetcher(fetch_client_settings_object), destination,
+      options, custom_fetch_type, client);
 }
 
 void WorkerOrWorkletGlobalScope::TasksWerePaused() {
   ExecutionContext::TasksWerePaused();
-  if (resource_fetcher_)
-    resource_fetcher_->SetDefersLoading(true);
+  for (ResourceFetcher* resource_fetcher : resource_fetchers_)
+    resource_fetcher->SetDefersLoading(true);
 }
 
 void WorkerOrWorkletGlobalScope::TasksWereUnpaused() {
   ExecutionContext::TasksWereUnpaused();
-  if (resource_fetcher_)
-    resource_fetcher_->SetDefersLoading(false);
+  for (ResourceFetcher* resource_fetcher : resource_fetchers_)
+    resource_fetcher->SetDefersLoading(false);
 }
 
 void WorkerOrWorkletGlobalScope::Trace(blink::Visitor* visitor) {
-  visitor->Trace(resource_fetcher_);
+  visitor->Trace(inside_settings_resource_fetcher_);
+  visitor->Trace(resource_fetchers_);
+  visitor->Trace(subresource_filter_);
   visitor->Trace(script_controller_);
   visitor->Trace(modulator_);
   EventTargetWithInlineData::Trace(visitor);

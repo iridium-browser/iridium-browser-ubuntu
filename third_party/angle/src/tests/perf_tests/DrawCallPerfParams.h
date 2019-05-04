@@ -22,7 +22,6 @@ struct DrawCallPerfParams : public RenderTestParams
 
     std::string suffix() const override;
 
-    unsigned int iterations;
     double runTimeSeconds;
     int numTris;
     bool useFBO;
@@ -33,5 +32,6 @@ DrawCallPerfParams DrawCallPerfD3D9Params(bool useNullDevice, bool renderToTextu
 DrawCallPerfParams DrawCallPerfOpenGLOrGLESParams(bool useNullDevice, bool renderToTexture);
 DrawCallPerfParams DrawCallPerfValidationOnly();
 DrawCallPerfParams DrawCallPerfVulkanParams(bool useNullDevice, bool renderToTexture);
+DrawCallPerfParams DrawCallPerfWGLParams(bool renderToTexture);
 
 #endif  // TESTS_PERF_TESTS_DRAW_CALL_PERF_PARAMS_H_

@@ -12,7 +12,7 @@ namespace ash {
 
 AssistantSetupController::AssistantSetupController(
     AssistantController* assistant_controller)
-    : assistant_controller_(assistant_controller) {
+    : assistant_controller_(assistant_controller), binding_(this) {
   assistant_controller_->AddObserver(this);
 }
 
@@ -20,9 +20,14 @@ AssistantSetupController::~AssistantSetupController() {
   assistant_controller_->RemoveObserver(this);
 }
 
+void AssistantSetupController::BindRequest(
+    mojom::AssistantSetupControllerRequest request) {
+  binding_.Bind(std::move(request));
+}
+
 void AssistantSetupController::SetAssistantSetup(
-    mojom::AssistantSetup* assistant_setup) {
-  assistant_setup_ = assistant_setup;
+    mojom::AssistantSetupPtr assistant_setup) {
+  assistant_setup_ = std::move(assistant_setup);
 }
 
 void AssistantSetupController::OnDeepLinkReceived(
@@ -43,26 +48,30 @@ void AssistantSetupController::OnOptInButtonPressed() {
   StartOnboarding(/*relaunch=*/true);
 }
 
-void AssistantSetupController::StartOnboarding(bool relaunch) {
+void AssistantSetupController::StartOnboarding(bool relaunch,
+                                               mojom::FlowType type) {
   if (!assistant_setup_)
     return;
 
   if (relaunch) {
-    assistant_setup_->StartAssistantOptInFlow(base::BindOnce(
-        [](AssistantController* assistant_controller, bool completed) {
-          if (completed) {
-            assistant_controller->ui_controller()->ShowUi(
-                AssistantSource::kSetup);
-          }
-        },
-        // AssistantController owns |assistant_setup_| so a raw pointer is safe.
-        assistant_controller_));
+    assistant_setup_->StartAssistantOptInFlow(
+        type,
+        base::BindOnce(
+            [](AssistantController* assistant_controller, bool completed) {
+              if (completed) {
+                assistant_controller->ui_controller()->ShowUi(
+                    AssistantEntryPoint::kSetup);
+              }
+            },
+            // AssistantController owns |assistant_setup_| so a raw pointer is
+            // safe.
+            assistant_controller_));
   } else {
-    assistant_setup_->StartAssistantOptInFlow(base::DoNothing());
+    assistant_setup_->StartAssistantOptInFlow(type, base::DoNothing());
   }
 
   // Assistant UI should be hidden while the user onboards.
-  assistant_controller_->ui_controller()->HideUi(AssistantSource::kSetup);
+  assistant_controller_->ui_controller()->HideUi(AssistantExitPoint::kSetup);
 }
 
 }  // namespace ash

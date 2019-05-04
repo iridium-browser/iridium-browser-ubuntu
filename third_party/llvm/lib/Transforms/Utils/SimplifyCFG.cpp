@@ -175,13 +175,13 @@ class SimplifyCFGOpt {
   const SimplifyCFGOptions &Options;
   bool Resimplify;
 
-  Value *isValueEqualityComparison(TerminatorInst *TI);
+  Value *isValueEqualityComparison(Instruction *TI);
   BasicBlock *GetValueEqualityComparisonCases(
-      TerminatorInst *TI, std::vector<ValueEqualityComparisonCase> &Cases);
-  bool SimplifyEqualityComparisonWithOnlyPredecessor(TerminatorInst *TI,
+      Instruction *TI, std::vector<ValueEqualityComparisonCase> &Cases);
+  bool SimplifyEqualityComparisonWithOnlyPredecessor(Instruction *TI,
                                                      BasicBlock *Pred,
                                                      IRBuilder<> &Builder);
-  bool FoldValueComparisonIntoPredecessors(TerminatorInst *TI,
+  bool FoldValueComparisonIntoPredecessors(Instruction *TI,
                                            IRBuilder<> &Builder);
 
   bool SimplifyReturn(ReturnInst *RI, IRBuilder<> &Builder);
@@ -219,7 +219,7 @@ public:
 /// Return true if it is safe to merge these two
 /// terminator instructions together.
 static bool
-SafeToMergeTerminators(TerminatorInst *SI1, TerminatorInst *SI2,
+SafeToMergeTerminators(Instruction *SI1, Instruction *SI2,
                        SmallSetVector<BasicBlock *, 4> *FailBlocks = nullptr) {
   if (SI1 == SI2)
     return false; // Can't merge with self!
@@ -670,7 +670,7 @@ private:
 
 } // end anonymous namespace
 
-static void EraseTerminatorInstAndDCECond(TerminatorInst *TI) {
+static void EraseTerminatorAndDCECond(Instruction *TI) {
   Instruction *Cond = nullptr;
   if (SwitchInst *SI = dyn_cast<SwitchInst>(TI)) {
     Cond = dyn_cast<Instruction>(SI->getCondition());
@@ -688,12 +688,12 @@ static void EraseTerminatorInstAndDCECond(TerminatorInst *TI) {
 
 /// Return true if the specified terminator checks
 /// to see if a value is equal to constant integer value.
-Value *SimplifyCFGOpt::isValueEqualityComparison(TerminatorInst *TI) {
+Value *SimplifyCFGOpt::isValueEqualityComparison(Instruction *TI) {
   Value *CV = nullptr;
   if (SwitchInst *SI = dyn_cast<SwitchInst>(TI)) {
     // Do not permit merging of large switch instructions into their
     // predecessors unless there is only one predecessor.
-    if (SI->getNumSuccessors() * pred_size(SI->getParent()) <= 128)
+    if (!SI->getParent()->hasNPredecessorsOrMore(128 / SI->getNumSuccessors()))
       CV = SI->getCondition();
   } else if (BranchInst *BI = dyn_cast<BranchInst>(TI))
     if (BI->isConditional() && BI->getCondition()->hasOneUse())
@@ -716,7 +716,7 @@ Value *SimplifyCFGOpt::isValueEqualityComparison(TerminatorInst *TI) {
 /// Given a value comparison instruction,
 /// decode all of the 'cases' that it represents and return the 'default' block.
 BasicBlock *SimplifyCFGOpt::GetValueEqualityComparisonCases(
-    TerminatorInst *TI, std::vector<ValueEqualityComparisonCase> &Cases) {
+    Instruction *TI, std::vector<ValueEqualityComparisonCase> &Cases) {
   if (SwitchInst *SI = dyn_cast<SwitchInst>(TI)) {
     Cases.reserve(SI->getNumCases());
     for (auto Case : SI->cases())
@@ -806,7 +806,7 @@ static void setBranchWeights(Instruction *I, uint32_t TrueWeight,
 /// determines the outcome of this comparison. If so, simplify TI. This does a
 /// very limited form of jump threading.
 bool SimplifyCFGOpt::SimplifyEqualityComparisonWithOnlyPredecessor(
-    TerminatorInst *TI, BasicBlock *Pred, IRBuilder<> &Builder) {
+    Instruction *TI, BasicBlock *Pred, IRBuilder<> &Builder) {
   Value *PredVal = isValueEqualityComparison(Pred->getTerminator());
   if (!PredVal)
     return false; // Not a value comparison in predecessor.
@@ -854,7 +854,7 @@ bool SimplifyCFGOpt::SimplifyEqualityComparisonWithOnlyPredecessor(
                         << "Through successor TI: " << *TI << "Leaving: " << *NI
                         << "\n");
 
-      EraseTerminatorInstAndDCECond(TI);
+      EraseTerminatorAndDCECond(TI);
       return true;
     }
 
@@ -936,7 +936,7 @@ bool SimplifyCFGOpt::SimplifyEqualityComparisonWithOnlyPredecessor(
                     << "Through successor TI: " << *TI << "Leaving: " << *NI
                     << "\n");
 
-  EraseTerminatorInstAndDCECond(TI);
+  EraseTerminatorAndDCECond(TI);
   return true;
 }
 
@@ -971,10 +971,10 @@ static inline bool HasBranchWeights(const Instruction *I) {
   return false;
 }
 
-/// Get Weights of a given TerminatorInst, the default weight is at the front
+/// Get Weights of a given terminator, the default weight is at the front
 /// of the vector. If TI is a conditional eq, we need to swap the branch-weight
 /// metadata.
-static void GetBranchWeights(TerminatorInst *TI,
+static void GetBranchWeights(Instruction *TI,
                              SmallVectorImpl<uint64_t> &Weights) {
   MDNode *MD = TI->getMetadata(LLVMContext::MD_prof);
   assert(MD);
@@ -1008,7 +1008,7 @@ static void FitWeights(MutableArrayRef<uint64_t> Weights) {
 /// (either a switch or a branch on "X == c").
 /// See if any of the predecessors of the terminator block are value comparisons
 /// on the same value.  If so, and if safe to do so, fold them together.
-bool SimplifyCFGOpt::FoldValueComparisonIntoPredecessors(TerminatorInst *TI,
+bool SimplifyCFGOpt::FoldValueComparisonIntoPredecessors(Instruction *TI,
                                                          IRBuilder<> &Builder) {
   BasicBlock *BB = TI->getParent();
   Value *CV = isValueEqualityComparison(TI); // CondVal
@@ -1020,7 +1020,7 @@ bool SimplifyCFGOpt::FoldValueComparisonIntoPredecessors(TerminatorInst *TI,
     BasicBlock *Pred = Preds.pop_back_val();
 
     // See if the predecessor is a comparison with the same value.
-    TerminatorInst *PTI = Pred->getTerminator();
+    Instruction *PTI = Pred->getTerminator();
     Value *PCV = isValueEqualityComparison(PTI); // PredCondVal
 
     if (PCV == CV && TI != PTI) {
@@ -1197,7 +1197,7 @@ bool SimplifyCFGOpt::FoldValueComparisonIntoPredecessors(TerminatorInst *TI,
         setBranchWeights(NewSI, MDWeights);
       }
 
-      EraseTerminatorInstAndDCECond(PTI);
+      EraseTerminatorAndDCECond(PTI);
 
       // Okay, last check.  If BB is still a successor of PSI, then we must
       // have an infinite loop case.  If so, add an infinitely looping block
@@ -1321,7 +1321,8 @@ static bool HoistThenElseCodeToIf(BranchInst *BI,
                              LLVMContext::MD_align,
                              LLVMContext::MD_dereferenceable,
                              LLVMContext::MD_dereferenceable_or_null,
-                             LLVMContext::MD_mem_parallel_loop_access};
+                             LLVMContext::MD_mem_parallel_loop_access,
+                             LLVMContext::MD_access_group};
       combineMetadata(I1, I2, KnownIDs, true);
 
       // I1 and I2 are being combined into a single instruction.  Its debug
@@ -1381,7 +1382,13 @@ HoistTerminator:
     NT->takeName(I1);
   }
 
+  // Ensure terminator gets a debug location, even an unknown one, in case
+  // it involves inlinable calls.
+  NT->applyMergedLocation(I1->getDebugLoc(), I2->getDebugLoc());
+
+  // PHIs created below will adopt NT's merged DebugLoc.
   IRBuilder<NoFolder> Builder(NT);
+
   // Hoisting one of the terminators from our successor is a great thing.
   // Unfortunately, the successors of the if/else blocks may have PHI nodes in
   // them.  If they do, all PHI entries for BB1/BB2 must agree for all PHI
@@ -1413,7 +1420,7 @@ HoistTerminator:
   for (BasicBlock *Succ : successors(BB1))
     AddPredecessorToBlock(Succ, BIParent, BB1);
 
-  EraseTerminatorInstAndDCECond(BI);
+  EraseTerminatorAndDCECond(BI);
   return true;
 }
 
@@ -2247,7 +2254,7 @@ static bool FoldCondBranchOnPHI(BranchInst *BI, const DataLayout &DL,
 
     // Loop over all of the edges from PredBB to BB, changing them to branch
     // to EdgeBB instead.
-    TerminatorInst *PredBBTI = PredBB->getTerminator();
+    Instruction *PredBBTI = PredBB->getTerminator();
     for (unsigned i = 0, e = PredBBTI->getNumSuccessors(); i != e; ++i)
       if (PredBBTI->getSuccessor(i) == BB) {
         BB->removePredecessor(PredBB);
@@ -2375,24 +2382,10 @@ static bool FoldTwoEntryPHINode(PHINode *PN, const TargetTransformInfo &TTI,
 
   // Move all 'aggressive' instructions, which are defined in the
   // conditional parts of the if's up to the dominating block.
-  if (IfBlock1) {
-    for (auto &I : *IfBlock1) {
-      I.dropUnknownNonDebugMetadata();
-      dropDebugUsers(I);
-    }
-    DomBlock->getInstList().splice(InsertPt->getIterator(),
-                                   IfBlock1->getInstList(), IfBlock1->begin(),
-                                   IfBlock1->getTerminator()->getIterator());
-  }
-  if (IfBlock2) {
-    for (auto &I : *IfBlock2) {
-      I.dropUnknownNonDebugMetadata();
-      dropDebugUsers(I);
-    }
-    DomBlock->getInstList().splice(InsertPt->getIterator(),
-                                   IfBlock2->getInstList(), IfBlock2->begin(),
-                                   IfBlock2->getTerminator()->getIterator());
-  }
+  if (IfBlock1)
+    hoistAllInstructionsInto(DomBlock, InsertPt, IfBlock1);
+  if (IfBlock2)
+    hoistAllInstructionsInto(DomBlock, InsertPt, IfBlock2);
 
   while (PHINode *PN = dyn_cast<PHINode>(BB->begin())) {
     // Change the PHI node into a select instruction.
@@ -2408,7 +2401,7 @@ static bool FoldTwoEntryPHINode(PHINode *PN, const TargetTransformInfo &TTI,
   // At this point, IfBlock1 and IfBlock2 are both empty, so our if statement
   // has been flattened.  Change DomBlock to jump directly to our new block to
   // avoid other simplifycfg's kicking in on the diamond.
-  TerminatorInst *OldTI = DomBlock->getTerminator();
+  Instruction *OldTI = DomBlock->getTerminator();
   Builder.SetInsertPoint(OldTI);
   Builder.CreateBr(BB);
   OldTI->eraseFromParent();
@@ -2442,7 +2435,7 @@ static bool SimplifyCondBranchToTwoReturns(BranchInst *BI,
     TrueSucc->removePredecessor(BI->getParent());
     FalseSucc->removePredecessor(BI->getParent());
     Builder.CreateRetVoid();
-    EraseTerminatorInstAndDCECond(BI);
+    EraseTerminatorAndDCECond(BI);
     return true;
   }
 
@@ -2498,7 +2491,7 @@ static bool SimplifyCondBranchToTwoReturns(BranchInst *BI,
                     << "\n  " << *BI << "NewRet = " << *RI << "TRUEBLOCK: "
                     << *TrueSucc << "FALSEBLOCK: " << *FalseSucc);
 
-  EraseTerminatorInstAndDCECond(BI);
+  EraseTerminatorAndDCECond(BI);
 
   return true;
 }
@@ -2822,7 +2815,7 @@ bool llvm::FoldBranchToCommonDest(BranchInst *BI, unsigned BonusInstThreshold) {
       }
       // Change PBI from Conditional to Unconditional.
       BranchInst *New_PBI = BranchInst::Create(TrueDest, PBI);
-      EraseTerminatorInstAndDCECond(PBI);
+      EraseTerminatorAndDCECond(PBI);
       PBI = New_PBI;
     }
 
@@ -2888,7 +2881,7 @@ static Value *ensureValueAvailableInSuccessor(Value *V, BasicBlock *BB,
       if (!AlternativeV)
         break;
 
-      assert(pred_size(Succ) == 2);
+      assert(Succ->hasNPredecessors(2));
       auto PredI = pred_begin(Succ);
       BasicBlock *OtherPredBB = *PredI == BB ? *++PredI : *PredI;
       if (PHI->getIncomingValueForBlock(OtherPredBB) == AlternativeV)
@@ -3417,7 +3410,7 @@ static bool SimplifyCondBranchToCondBranch(BranchInst *PBI, BranchInst *BI,
 // Takes care of updating the successors and removing the old terminator.
 // Also makes sure not to introduce new successors by assuming that edges to
 // non-successor TrueBBs and FalseBBs aren't reachable.
-static bool SimplifyTerminatorOnSelect(TerminatorInst *OldTerm, Value *Cond,
+static bool SimplifyTerminatorOnSelect(Instruction *OldTerm, Value *Cond,
                                        BasicBlock *TrueBB, BasicBlock *FalseBB,
                                        uint32_t TrueWeight,
                                        uint32_t FalseWeight) {
@@ -3472,7 +3465,7 @@ static bool SimplifyTerminatorOnSelect(TerminatorInst *OldTerm, Value *Cond,
       Builder.CreateBr(FalseBB);
   }
 
-  EraseTerminatorInstAndDCECond(OldTerm);
+  EraseTerminatorAndDCECond(OldTerm);
   return true;
 }
 
@@ -3715,7 +3708,7 @@ static bool SimplifyBranchOnICmpChain(BranchInst *BI, IRBuilder<> &Builder,
     BasicBlock *NewBB =
         BB->splitBasicBlock(BI->getIterator(), "switch.early.test");
     // Remove the uncond branch added to the old block.
-    TerminatorInst *OldTI = BB->getTerminator();
+    Instruction *OldTI = BB->getTerminator();
     Builder.SetInsertPoint(OldTI);
 
     if (TrueWhenEqual)
@@ -3759,7 +3752,7 @@ static bool SimplifyBranchOnICmpChain(BranchInst *BI, IRBuilder<> &Builder,
   }
 
   // Erase the old branch instruction.
-  EraseTerminatorInstAndDCECond(BI);
+  EraseTerminatorAndDCECond(BI);
 
   LLVM_DEBUG(dbgs() << "  ** 'icmp' chain result is:\n" << *BB << '\n');
   return true;
@@ -4007,7 +4000,7 @@ static bool removeEmptyCleanup(CleanupReturnInst *RI) {
     if (UnwindDest == nullptr) {
       removeUnwindEdge(PredBB);
     } else {
-      TerminatorInst *TI = PredBB->getTerminator();
+      Instruction *TI = PredBB->getTerminator();
       TI->replaceUsesOfWith(BB, UnwindDest);
     }
   }
@@ -4076,7 +4069,7 @@ bool SimplifyCFGOpt::SimplifyReturn(ReturnInst *RI, IRBuilder<> &Builder) {
   SmallVector<BranchInst *, 8> CondBranchPreds;
   for (pred_iterator PI = pred_begin(BB), E = pred_end(BB); PI != E; ++PI) {
     BasicBlock *P = *PI;
-    TerminatorInst *PTI = P->getTerminator();
+    Instruction *PTI = P->getTerminator();
     if (BranchInst *BI = dyn_cast<BranchInst>(PTI)) {
       if (BI->isUnconditional())
         UncondBranchPreds.push_back(P);
@@ -4181,7 +4174,7 @@ bool SimplifyCFGOpt::SimplifyUnreachable(UnreachableInst *UI) {
 
   SmallVector<BasicBlock *, 8> Preds(pred_begin(BB), pred_end(BB));
   for (unsigned i = 0, e = Preds.size(); i != e; ++i) {
-    TerminatorInst *TI = Preds[i]->getTerminator();
+    Instruction *TI = Preds[i]->getTerminator();
     IRBuilder<> Builder(TI);
     if (auto *BI = dyn_cast<BranchInst>(TI)) {
       if (BI->isUnconditional()) {
@@ -4193,10 +4186,10 @@ bool SimplifyCFGOpt::SimplifyUnreachable(UnreachableInst *UI) {
       } else {
         if (BI->getSuccessor(0) == BB) {
           Builder.CreateBr(BI->getSuccessor(1));
-          EraseTerminatorInstAndDCECond(BI);
+          EraseTerminatorAndDCECond(BI);
         } else if (BI->getSuccessor(1) == BB) {
           Builder.CreateBr(BI->getSuccessor(0));
-          EraseTerminatorInstAndDCECond(BI);
+          EraseTerminatorAndDCECond(BI);
           Changed = true;
         }
       }
@@ -4438,7 +4431,7 @@ static bool eliminateDeadSwitchCases(SwitchInst *SI, AssumptionCache *AC,
     SplitBlock(&*NewDefault, &NewDefault->front());
     auto *OldTI = NewDefault->getTerminator();
     new UnreachableInst(SI->getContext(), OldTI);
-    EraseTerminatorInstAndDCECond(OldTI);
+    EraseTerminatorAndDCECond(OldTI);
     return true;
   }
 
@@ -4649,12 +4642,12 @@ GetCaseResults(SwitchInst *SI, ConstantInt *CaseVal, BasicBlock *CaseDest,
   SmallDenseMap<Value *, Constant *> ConstantPool;
   ConstantPool.insert(std::make_pair(SI->getCondition(), CaseVal));
   for (Instruction &I :CaseDest->instructionsWithoutDebug()) {
-    if (TerminatorInst *T = dyn_cast<TerminatorInst>(&I)) {
+    if (I.isTerminator()) {
       // If the terminator is a simple branch, continue to the next block.
-      if (T->getNumSuccessors() != 1 || T->isExceptionalTerminator())
+      if (I.getNumSuccessors() != 1 || I.isExceptionalTerminator())
         return false;
       Pred = CaseDest;
-      CaseDest = T->getSuccessor(0);
+      CaseDest = I.getSuccessor(0);
     } else if (Constant *C = ConstantFold(&I, DL, ConstantPool)) {
       // Instruction is side-effect free and constant.
 
@@ -5274,7 +5267,7 @@ static bool SwitchToLookupTable(SwitchInst *SI, IRBuilder<> &Builder,
 
   // Figure out the corresponding result for each case value and phi node in the
   // common destination, as well as the min and max case values.
-  assert(SI->case_begin() != SI->case_end());
+  assert(!empty(SI->cases()));
   SwitchInst::CaseIt CI = SI->case_begin();
   ConstantInt *MinCaseVal = CI->getCaseValue();
   ConstantInt *MaxCaseVal = CI->getCaseValue();
@@ -5663,14 +5656,14 @@ bool SimplifyCFGOpt::SimplifyIndirectBr(IndirectBrInst *IBI) {
   if (IBI->getNumDestinations() == 0) {
     // If the indirectbr has no successors, change it to unreachable.
     new UnreachableInst(IBI->getContext(), IBI);
-    EraseTerminatorInstAndDCECond(IBI);
+    EraseTerminatorAndDCECond(IBI);
     return true;
   }
 
   if (IBI->getNumDestinations() == 1) {
     // If the indirectbr has one successor, change it to a direct branch.
     BranchInst::Create(IBI->getDestination(0), IBI);
-    EraseTerminatorInstAndDCECond(IBI);
+    EraseTerminatorAndDCECond(IBI);
     return true;
   }
 
@@ -5772,7 +5765,7 @@ bool SimplifyCFGOpt::SimplifyUncondBranch(BranchInst *BI,
   // backedge, so we can eliminate BB.
   bool NeedCanonicalLoop =
       Options.NeedCanonicalLoop &&
-      (LoopHeaders && pred_size(BB) > 1 &&
+      (LoopHeaders && BB->hasNPredecessorsOrMore(2) &&
        (LoopHeaders->count(BB) || LoopHeaders->count(Succ)));
   BasicBlock::iterator I = BB->getFirstNonPHIOrDbg()->getIterator();
   if (I->isTerminator() && BB != &BB->getParent()->getEntryBlock() &&
@@ -5851,28 +5844,17 @@ bool SimplifyCFGOpt::SimplifyCondBranch(BranchInst *BI, IRBuilder<> &Builder) {
   if (SimplifyBranchOnICmpChain(BI, Builder, DL))
     return true;
 
-  // If this basic block has a single dominating predecessor block and the
-  // dominating block's condition implies BI's condition, we know the direction
-  // of the BI branch.
-  if (BasicBlock *Dom = BB->getSinglePredecessor()) {
-    auto *PBI = dyn_cast_or_null<BranchInst>(Dom->getTerminator());
-    if (PBI && PBI->isConditional() &&
-        PBI->getSuccessor(0) != PBI->getSuccessor(1)) {
-      assert(PBI->getSuccessor(0) == BB || PBI->getSuccessor(1) == BB);
-      bool CondIsTrue = PBI->getSuccessor(0) == BB;
-      Optional<bool> Implication = isImpliedCondition(
-          PBI->getCondition(), BI->getCondition(), DL, CondIsTrue);
-      if (Implication) {
-        // Turn this into a branch on constant.
-        auto *OldCond = BI->getCondition();
-        ConstantInt *CI = *Implication
-                              ? ConstantInt::getTrue(BB->getContext())
-                              : ConstantInt::getFalse(BB->getContext());
-        BI->setCondition(CI);
-        RecursivelyDeleteTriviallyDeadInstructions(OldCond);
-        return requestResimplify();
-      }
-    }
+  // If this basic block has dominating predecessor blocks and the dominating
+  // blocks' conditions imply BI's condition, we know the direction of BI.
+  Optional<bool> Imp = isImpliedByDomCondition(BI->getCondition(), BI, DL);
+  if (Imp) {
+    // Turn this into a branch on constant.
+    auto *OldCond = BI->getCondition();
+    ConstantInt *TorF = *Imp ? ConstantInt::getTrue(BB->getContext())
+                             : ConstantInt::getFalse(BB->getContext());
+    BI->setCondition(TorF);
+    RecursivelyDeleteTriviallyDeadInstructions(OldCond);
+    return requestResimplify();
   }
 
   // If this basic block is ONLY a compare and a branch, and if a predecessor
@@ -5892,7 +5874,7 @@ bool SimplifyCFGOpt::SimplifyCondBranch(BranchInst *BI, IRBuilder<> &Builder) {
     } else {
       // If Successor #1 has multiple preds, we may be able to conditionally
       // execute Successor #0 if it branches to Successor #1.
-      TerminatorInst *Succ0TI = BI->getSuccessor(0)->getTerminator();
+      Instruction *Succ0TI = BI->getSuccessor(0)->getTerminator();
       if (Succ0TI->getNumSuccessors() == 1 &&
           Succ0TI->getSuccessor(0) == BI->getSuccessor(1))
         if (SpeculativelyExecuteBB(BI, BI->getSuccessor(0), TTI))
@@ -5901,7 +5883,7 @@ bool SimplifyCFGOpt::SimplifyCondBranch(BranchInst *BI, IRBuilder<> &Builder) {
   } else if (BI->getSuccessor(1)->getSinglePredecessor()) {
     // If Successor #0 has multiple preds, we may be able to conditionally
     // execute Successor #1 if it branches to Successor #0.
-    TerminatorInst *Succ1TI = BI->getSuccessor(1)->getTerminator();
+    Instruction *Succ1TI = BI->getSuccessor(1)->getTerminator();
     if (Succ1TI->getNumSuccessors() == 1 &&
         Succ1TI->getSuccessor(0) == BI->getSuccessor(0))
       if (SpeculativelyExecuteBB(BI, BI->getSuccessor(1), TTI))
@@ -5991,7 +5973,7 @@ static bool removeUndefIntroducingPredecessor(BasicBlock *BB) {
   for (PHINode &PHI : BB->phis())
     for (unsigned i = 0, e = PHI.getNumIncomingValues(); i != e; ++i)
       if (passingValueIsAlwaysUndefined(PHI.getIncomingValue(i), &PHI)) {
-        TerminatorInst *T = PHI.getIncomingBlock(i)->getTerminator();
+        Instruction *T = PHI.getIncomingBlock(i)->getTerminator();
         IRBuilder<> Builder(T);
         if (BranchInst *BI = dyn_cast<BranchInst>(T)) {
           BB->removePredecessor(PHI.getIncomingBlock(i));

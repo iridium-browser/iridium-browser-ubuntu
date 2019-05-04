@@ -9,40 +9,57 @@
 #include "base/bind.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/net/chrome_accept_language_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
+#include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_content_client.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/pref_names.h"
 #include "components/certificate_transparency/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "components/metrics/metrics_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_instance.h"
+#include "content/public/browser/shared_cors_origin_access_list.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/common/url_constants.h"
 #include "mojo/public/cpp/bindings/associated_interface_ptr.h"
+#include "net/http/http_util.h"
 #include "net/net_buildflags.h"
+#include "services/network/public/cpp/cors/origin_access_list.h"
 #include "services/network/public/cpp/features.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/policy/policy_cert_service.h"
+#include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "components/user_manager/user.h"
+#endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "extensions/common/constants.h"
 #endif
 
 namespace {
+
+bool* g_discard_domain_reliability_uploads_for_testing = nullptr;
 
 std::vector<std::string> TranslateStringArray(const base::ListValue* list) {
   std::vector<std::string> strings;
@@ -51,6 +68,23 @@ std::vector<std::string> TranslateStringArray(const base::ListValue* list) {
     strings.push_back(value.GetString());
   }
   return strings;
+}
+
+std::string ComputeAcceptLanguageFromPref(const std::string& language_pref) {
+  std::string accept_languages_str =
+      base::FeatureList::IsEnabled(features::kUseNewAcceptLanguageHeader)
+          ? net::HttpUtil::ExpandLanguageList(language_pref)
+          : language_pref;
+  return net::HttpUtil::GenerateAcceptLanguageHeader(accept_languages_str);
+}
+
+void DeleteChannelIDFiles(base::FilePath channel_id_path) {
+  UMA_HISTOGRAM_BOOLEAN("DomainBoundCerts.DBExists",
+                        base::PathExists(channel_id_path));
+  base::DeleteFile(channel_id_path, false);
+  base::DeleteFile(
+      base::FilePath(channel_id_path.value() + FILE_PATH_LITERAL("-journal")),
+      false);
 }
 
 }  // namespace
@@ -109,7 +143,6 @@ ProfileNetworkContextService::CreateNetworkContext(
     bool in_memory,
     const base::FilePath& relative_partition_path) {
   network::mojom::NetworkContextPtr network_context;
-  PartitionInfo partition_info(in_memory, relative_partition_path);
 
   if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
     content::GetNetworkService()->CreateNetworkContext(
@@ -118,6 +151,7 @@ ProfileNetworkContextService::CreateNetworkContext(
   } else {
     // The corresponding |profile_io_data_network_contexts_| may already be
     // initialized if SetUpProfileIODataNetworkContext was called first.
+    PartitionInfo partition_info(in_memory, relative_partition_path);
     auto iter = profile_io_data_network_contexts_.find(partition_info);
     if (iter == profile_io_data_network_contexts_.end()) {
       // If this is not the main network context, then this method is expected
@@ -133,6 +167,19 @@ ProfileNetworkContextService::CreateNetworkContext(
       // and NetworkContexts can't be destroyed without destroying the profile.
       profile_io_data_network_contexts_.erase(iter);
     }
+  }
+
+  if ((!in_memory && !profile_->IsOffTheRecord()) &&
+      (base::FeatureList::IsEnabled(network::features::kNetworkService) ||
+       base::FeatureList::IsEnabled(features::kUseSameCacheForMedia))) {
+    base::FilePath media_cache_path = GetPartitionPath(relative_partition_path)
+                                          .Append(chrome::kMediaCacheDirname);
+    base::PostTaskWithTraits(
+        FROM_HERE,
+        {base::TaskPriority::BEST_EFFORT, base::MayBlock(),
+         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+        base::BindOnce(base::IgnoreResult(&base::DeleteFile), media_cache_path,
+                       true /* recursive */));
   }
 
   std::vector<network::mojom::NetworkContext*> contexts{network_context.get()};
@@ -179,6 +226,28 @@ void ProfileNetworkContextService::SetUpProfileIODataNetworkContext(
   *network_context_params = network::mojom::NetworkContextParams::New();
 }
 
+#if defined(OS_CHROMEOS)
+void ProfileNetworkContextService::UpdateAdditionalCertificates(
+    const net::CertificateList& all_additional_certificates,
+    const net::CertificateList& trust_anchors) {
+  content::BrowserContext::ForEachStoragePartition(
+      profile_, base::BindRepeating(
+                    [](const net::CertificateList& all_additional_certificates,
+                       const net::CertificateList& trust_anchors,
+                       content::StoragePartition* storage_partition) {
+                      auto additional_certificates =
+                          network::mojom::AdditionalCertificates::New();
+                      additional_certificates->all_certificates =
+                          all_additional_certificates;
+                      additional_certificates->trust_anchors = trust_anchors;
+                      storage_partition->GetNetworkContext()
+                          ->UpdateAdditionalCertificates(
+                              std::move(additional_certificates));
+                    },
+                    all_additional_certificates, trust_anchors));
+}
+#endif
+
 void ProfileNetworkContextService::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kQuicAllowed, true);
@@ -218,8 +287,7 @@ void ProfileNetworkContextService::UpdateBlockThirdPartyCookies() {
 }
 
 std::string ProfileNetworkContextService::ComputeAcceptLanguage() const {
-  return chrome_accept_language_settings::ComputeAcceptLanguageFromPref(
-      pref_accept_language_.GetValue());
+  return ComputeAcceptLanguageFromPref(pref_accept_language_.GetValue());
 }
 
 void ProfileNetworkContextService::UpdateReferrersEnabled() {
@@ -283,16 +351,18 @@ void ProfileNetworkContextService::FlushProxyConfigMonitorForTesting() {
   proxy_config_monitor_.FlushForTesting();
 }
 
+void ProfileNetworkContextService::SetDiscardDomainReliabilityUploadsForTesting(
+    bool value) {
+  g_discard_domain_reliability_uploads_for_testing = new bool(value);
+}
+
 network::mojom::NetworkContextParamsPtr
 ProfileNetworkContextService::CreateNetworkContextParams(
     bool in_memory,
     const base::FilePath& relative_partition_path) {
   if (profile_->IsOffTheRecord())
     in_memory = true;
-  base::FilePath path = profile_->GetPath();
-  bool is_main_partition = relative_partition_path.empty();
-  if (!is_main_partition)
-    path = path.Append(relative_partition_path);
+  base::FilePath path(GetPartitionPath(relative_partition_path));
 
   network::mojom::NetworkContextParamsPtr network_context_params =
       g_browser_process->system_network_context_manager()
@@ -319,6 +389,9 @@ ProfileNetworkContextService::CreateNetworkContextParams(
         ->matching_scheme_cookies_allowed_schemes.push_back(
             extensions::kExtensionScheme);
   }
+  network_context_params->cookie_manager_params
+      ->third_party_cookies_allowed_schemes.push_back(
+          extensions::kExtensionScheme);
 #endif
 
   ContentSettingsForOneType settings;
@@ -350,11 +423,16 @@ ProfileNetworkContextService::CreateNetworkContextParams(
     cookie_path = cookie_path.Append(chrome::kCookieFilename);
     network_context_params->cookie_path = cookie_path;
 
-    base::FilePath channel_id_path = path;
-    channel_id_path = channel_id_path.Append(chrome::kChannelIDFilename);
-    network_context_params->channel_id_path = channel_id_path;
+    // TODO(nharper): Remove the following when no longer needed - see
+    // crbug.com/903642.
+    base::PostTaskWithTraits(
+        FROM_HERE,
+        {base::TaskPriority::BEST_EFFORT, base::MayBlock(),
+         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+        base::BindOnce(DeleteChannelIDFiles,
+                       path.Append(chrome::kChannelIDFilename)));
 
-    if (is_main_partition) {
+    if (relative_partition_path.empty()) {  // This is the main partition.
       network_context_params->restore_old_session_cookies =
           profile_->ShouldRestoreOldSessionCookies();
       network_context_params->persist_session_cookies =
@@ -388,6 +466,19 @@ ProfileNetworkContextService::CreateNetworkContextParams(
   network_context_params->enable_certificate_reporting = true;
   network_context_params->enable_expect_ct_reporting = true;
 
+  if (domain_reliability::DomainReliabilityServiceFactory::
+          ShouldCreateService()) {
+    network_context_params->enable_domain_reliability = true;
+    network_context_params->domain_reliability_upload_reporter =
+        domain_reliability::DomainReliabilityServiceFactory::
+            kUploadReporterString;
+    network_context_params->discard_domain_reliablity_uploads =
+        g_discard_domain_reliability_uploads_for_testing
+            ? *g_discard_domain_reliability_uploads_for_testing
+            : !g_browser_process->local_state()->GetBoolean(
+                  metrics::prefs::kMetricsReportingEnabled);
+  }
+
   if (data_reduction_proxy::params::IsEnabledWithNetworkService()) {
     auto* drp_settings =
         DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile_);
@@ -399,7 +490,51 @@ ProfileNetworkContextService::CreateNetworkContextParams(
     }
   }
 
+#if defined(OS_CHROMEOS)
+  user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+  if (base::FeatureList::IsEnabled(network::features::kNetworkService) &&
+      user_manager &&
+      policy::PolicyCertServiceFactory::CreateAndStartObservingForProfile(
+          profile_)) {
+    const user_manager::User* user =
+        chromeos::ProfileHelper::Get()->GetUserByProfile(profile_);
+    // No need to initialize NSS for users with empty username hash:
+    // Getters for a user's NSS slots always return NULL slot if the user's
+    // username hash is empty, even when the NSS is not initialized for the
+    // user.
+    if (user && !user->username_hash().empty()) {
+      network_context_params->username_hash = user->username_hash();
+      network_context_params->nss_path = profile_->GetPath();
+
+      policy::PolicyCertService* service =
+          policy::PolicyCertServiceFactory::GetForProfile(profile_);
+      network_context_params->initial_additional_certificates =
+          network::mojom::AdditionalCertificates::New();
+      network_context_params->initial_additional_certificates
+          ->all_certificates = service->all_server_and_authority_certs();
+      network_context_params->initial_additional_certificates->trust_anchors =
+          service->trust_anchors();
+    }
+  }
+#endif
+
+  if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+    // Should be initialized with existing per-profile CORS access lists.
+    network_context_params->cors_origin_access_list =
+        profile_->GetSharedCorsOriginAccessList()
+            ->GetOriginAccessList()
+            .CreateCorsOriginAccessPatternsList();
+  }
+
   return network_context_params;
+}
+
+base::FilePath ProfileNetworkContextService::GetPartitionPath(
+    const base::FilePath& relative_partition_path) {
+  base::FilePath path = profile_->GetPath();
+  if (!relative_partition_path.empty())
+    path = path.Append(relative_partition_path);
+  return path;
 }
 
 void ProfileNetworkContextService::OnContentSettingChanged(

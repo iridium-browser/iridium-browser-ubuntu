@@ -47,8 +47,9 @@ class QuicUnackedPacketMapTest : public QuicTestWithParam<bool> {
   ~QuicUnackedPacketMapTest() override {}
 
   SerializedPacket CreateRetransmittablePacket(QuicPacketNumber packet_number) {
-    return CreateRetransmittablePacketForStream(packet_number,
-                                                kHeadersStreamId);
+    return CreateRetransmittablePacketForStream(
+        packet_number, QuicUtils::GetHeadersStreamId(
+                           CurrentSupportedVersions()[0].transport_version));
   }
 
   SerializedPacket CreateRetransmittablePacketForStream(
@@ -133,8 +134,8 @@ class QuicUnackedPacketMapTest : public QuicTestWithParam<bool> {
     unacked_packets_.GetMutableTransmissionInfo(packet_number)->state = state;
   }
 
-  void RetransmitAndSendPacket(QuicPacketNumber old_packet_number,
-                               QuicPacketNumber new_packet_number,
+  void RetransmitAndSendPacket(uint64_t old_packet_number,
+                               uint64_t new_packet_number,
                                TransmissionType transmission_type) {
     DCHECK(unacked_packets_.HasRetransmittableFrames(old_packet_number));
     if (!unacked_packets_.session_decides_what_to_write()) {
@@ -146,7 +147,8 @@ class QuicUnackedPacketMapTest : public QuicTestWithParam<bool> {
     }
     QuicTransmissionInfo* info =
         unacked_packets_.GetMutableTransmissionInfo(old_packet_number);
-    QuicStreamId stream_id = kHeadersStreamId;
+    QuicStreamId stream_id = QuicUtils::GetHeadersStreamId(
+        CurrentSupportedVersions()[0].transport_version);
     for (const auto& frame : info->retransmittable_frames) {
       if (frame.type == STREAM_FRAME) {
         stream_id = frame.stream_frame.stream_id;
@@ -368,13 +370,8 @@ TEST_P(QuicUnackedPacketMapTest, RetransmitThreeTimes) {
   std::vector<QuicPacketNumber> unacked3;
   std::vector<QuicPacketNumber> retransmittable3;
   if (unacked_packets_.session_decides_what_to_write()) {
-    if (unacked_packets_.fix_is_useful_for_retransmission()) {
-      unacked3 = {3, 5, 6};
-      retransmittable3 = {3, 5, 6};
-    } else {
-      unacked3 = {1, 3, 5, 6};
-      retransmittable3 = {1, 3, 5, 6};
-    }
+    unacked3 = {3, 5, 6};
+    retransmittable3 = {3, 5, 6};
   } else {
     unacked3 = {3, 5, 6};
     retransmittable3 = {5, 6};
@@ -393,13 +390,8 @@ TEST_P(QuicUnackedPacketMapTest, RetransmitThreeTimes) {
   std::vector<QuicPacketNumber> unacked4;
   std::vector<QuicPacketNumber> retransmittable4;
   if (unacked_packets_.session_decides_what_to_write()) {
-    if (unacked_packets_.fix_is_useful_for_retransmission()) {
-      unacked4 = {3, 5, 7};
-      retransmittable4 = {3, 5, 7};
-    } else {
-      unacked4 = {1, 3, 5, 7};
-      retransmittable4 = {1, 3, 5, 7};
-    }
+    unacked4 = {3, 5, 7};
+    retransmittable4 = {3, 5, 7};
   } else {
     unacked4 = {3, 5, 7};
     retransmittable4 = {7};
@@ -476,11 +468,7 @@ TEST_P(QuicUnackedPacketMapTest, RetransmitFourTimes) {
 
   std::vector<QuicPacketNumber> unacked4;
   if (unacked_packets_.session_decides_what_to_write()) {
-    if (unacked_packets_.fix_is_useful_for_retransmission()) {
-      unacked4 = {4, 6};
-    } else {
-      unacked4 = {1, 3, 4, 6};
-    }
+    unacked4 = {4, 6};
   } else {
     unacked4 = {4, 6};
   }
@@ -489,11 +477,7 @@ TEST_P(QuicUnackedPacketMapTest, RetransmitFourTimes) {
   VerifyInFlightPackets(pending4, QUIC_ARRAYSIZE(pending4));
   std::vector<QuicPacketNumber> retransmittable4;
   if (unacked_packets_.session_decides_what_to_write()) {
-    if (unacked_packets_.fix_is_useful_for_retransmission()) {
-      retransmittable4 = {4, 6};
-    } else {
-      retransmittable4 = {1, 3, 4, 6};
-    }
+    retransmittable4 = {4, 6};
   } else {
     retransmittable4 = {6};
   }

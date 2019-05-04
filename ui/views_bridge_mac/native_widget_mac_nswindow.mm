@@ -32,9 +32,6 @@
 // Private API on NSWindow, determines whether the title is drawn on the title
 // bar. The title is still visible in menus, Expose, etc.
 - (BOOL)_isTitleHidden;
-
-// Retrieve the corresponding views::BridgedNativeWidgetImpl in this process.
-- (views::BridgedNativeWidgetImpl*)bridgeImpl;
 @end
 
 // Use this category to implement mouseDown: on multiple frame view classes
@@ -85,8 +82,10 @@
   base::scoped_nsprotocol<id<UserInterfaceItemCommandHandler>> commandHandler_;
   id<WindowTouchBarDelegate> touchBarDelegate_;  // Weak.
   uint64_t bridgedNativeWidgetId_;
+  views::BridgedNativeWidgetImpl* bridgeImpl_;
 }
 @synthesize bridgedNativeWidgetId = bridgedNativeWidgetId_;
+@synthesize bridgeImpl = bridgeImpl_;
 
 - (instancetype)initWithContentRect:(NSRect)contentRect
                           styleMask:(NSUInteger)windowStyle
@@ -135,18 +134,16 @@
   return base::mac::ObjCCastStrict<ViewsNSWindowDelegate>([self delegate]);
 }
 
-- (views::BridgedNativeWidgetImpl*)bridgeImpl {
-  return views::BridgedNativeWidgetImpl::GetFromId(bridgedNativeWidgetId_);
-}
-
 - (BOOL)hasViewsMenuActive {
   bool hasMenuController = false;
-  [self bridgeImpl]->host()->GetHasMenuController(&hasMenuController);
+  if (bridgeImpl_)
+    bridgeImpl_->host()->GetHasMenuController(&hasMenuController);
   return hasMenuController;
 }
 
 - (id)rootAccessibilityObject {
-  return [self bridgeImpl]->host_helper()->GetNativeViewAccessible();
+  return bridgeImpl_ ? bridgeImpl_->host_helper()->GetNativeViewAccessible()
+                     : nullptr;
 }
 
 // NSWindow overrides.
@@ -164,8 +161,8 @@
 
 - (BOOL)_isTitleHidden {
   bool shouldShowWindowTitle = YES;
-  if ([self bridgeImpl])
-    [self bridgeImpl]->host()->GetShouldShowWindowTitle(&shouldShowWindowTitle);
+  if (bridgeImpl_)
+    bridgeImpl_->host()->GetShouldShowWindowTitle(&shouldShowWindowTitle);
   return !shouldShowWindowTitle;
 }
 
@@ -182,32 +179,36 @@
 // down, so check for a delegate.
 - (BOOL)canBecomeKeyWindow {
   bool canBecomeKey = NO;
-  if ([self bridgeImpl])
-    [self bridgeImpl]->host()->GetCanWindowBecomeKey(&canBecomeKey);
+  if (bridgeImpl_)
+    bridgeImpl_->host()->GetCanWindowBecomeKey(&canBecomeKey);
   return canBecomeKey;
 }
 
 - (BOOL)canBecomeMainWindow {
-  views::BridgedNativeWidgetImpl* bridgeImpl = [self bridgeImpl];
-  if (!bridgeImpl)
+  if (!bridgeImpl_)
     return NO;
 
   // Dialogs and bubbles shouldn't take large shadows away from their parent.
-  if (bridgeImpl->parent())
+  if (bridgeImpl_->parent())
     return NO;
 
   bool canBecomeKey = NO;
-  if (bridgeImpl)
-    bridgeImpl->host()->GetCanWindowBecomeKey(&canBecomeKey);
+  if (bridgeImpl_)
+    bridgeImpl_->host()->GetCanWindowBecomeKey(&canBecomeKey);
   return canBecomeKey;
 }
 
 // Lets the traffic light buttons on the parent window keep their active state.
 - (BOOL)hasKeyAppearance {
-  views::BridgedNativeWidgetImpl* bridgeImpl = [self bridgeImpl];
-  if (bridgeImpl) {
+  // Note that this function is called off of the main thread. In such cases,
+  // it is not safe to access the mojo interface or the ui::Widget, as they are
+  // not reentrant.
+  // https://crbug.com/941506.
+  if (![NSThread isMainThread])
+    return [super hasKeyAppearance];
+  if (bridgeImpl_) {
     bool isAlwaysRenderWindowAsKey = NO;
-    bridgeImpl->host()->GetAlwaysRenderWindowAsKey(&isAlwaysRenderWindowAsKey);
+    bridgeImpl_->host()->GetAlwaysRenderWindowAsKey(&isAlwaysRenderWindowAsKey);
     if (isAlwaysRenderWindowAsKey)
       return YES;
   }
@@ -276,6 +277,13 @@
   return touchBarDelegate_ ? [touchBarDelegate_ makeTouchBar] : nil;
 }
 
+// On newer SDKs, _canMiniaturize respects NSMiniaturizableWindowMask in the
+// window's styleMask. Views assumes that Widgets can always be minimized,
+// regardless of their window style, so override that behavior here.
+- (BOOL)_canMiniaturize {
+  return YES;
+}
+
 // CommandDispatchingWindow implementation.
 
 - (void)setCommandHandler:(id<UserInterfaceItemCommandHandler>)commandHandler {
@@ -328,11 +336,10 @@
   // properties on the NSWindow and repeats them when focusing an item in the
   // RootView's a11y group. See http://crbug.com/748221.
   id superFocus = [super accessibilityFocusedUIElement];
-  views::BridgedNativeWidgetImpl* bridgeImpl = [self bridgeImpl];
-  if (!bridgeImpl || superFocus != self)
+  if (!bridgeImpl_ || superFocus != self)
     return superFocus;
 
-  return bridgeImpl->host_helper()->GetNativeViewAccessible();
+  return bridgeImpl_->host_helper()->GetNativeViewAccessible();
 }
 
 - (id)accessibilityAttributeValue:(NSString*)attribute {

@@ -11,8 +11,9 @@ namespace internal {
 
 PlatformNativeWorkerPoolWin::PlatformNativeWorkerPoolWin(
     TrackedRef<TaskTracker> task_tracker,
-    DelayedTaskManager* delayed_task_manager)
-    : SchedulerWorkerPool(task_tracker, delayed_task_manager) {}
+    TrackedRef<Delegate> delegate)
+    : SchedulerWorkerPool(std::move(task_tracker),
+                          std::move(delegate)) {}
 
 PlatformNativeWorkerPoolWin::~PlatformNativeWorkerPoolWin() {
 #if DCHECK_IS_ON()
@@ -40,10 +41,10 @@ void PlatformNativeWorkerPoolWin::Start() {
 
   size_t local_num_sequences_before_start;
   {
-    auto transaction(priority_queue_.BeginTransaction());
+    auto transaction = priority_queue_.BeginTransaction();
     DCHECK(!started_);
     started_ = true;
-    local_num_sequences_before_start = transaction->Size();
+    local_num_sequences_before_start = transaction.Size();
   }
 
   // Schedule sequences added to |priority_queue_| before Start().
@@ -57,6 +58,12 @@ void PlatformNativeWorkerPoolWin::JoinForTesting() {
   DCHECK(!join_for_testing_returned_.IsSet());
   join_for_testing_returned_.Set();
 #endif
+}
+
+void PlatformNativeWorkerPoolWin::ReEnqueueSequence(
+    SequenceAndTransaction sequence_and_transaction,
+    bool is_changing_pools) {
+  OnCanScheduleSequence(std::move(sequence_and_transaction));
 }
 
 // static
@@ -84,20 +91,25 @@ void CALLBACK PlatformNativeWorkerPoolWin::RunNextSequence(
 }
 
 scoped_refptr<Sequence> PlatformNativeWorkerPoolWin::GetWork() {
-  auto transaction(priority_queue_.BeginTransaction());
+  auto transaction = priority_queue_.BeginTransaction();
 
   // The PQ should never be empty here as there's a 1:1 correspondence between
   // a call to ScheduleSequence()/SubmitThreadpoolWork() and GetWork().
-  DCHECK(!transaction->IsEmpty());
-  return transaction->PopSequence();
+  DCHECK(!transaction.IsEmpty());
+  return transaction.PopSequence();
 }
 
 void PlatformNativeWorkerPoolWin::OnCanScheduleSequence(
     scoped_refptr<Sequence> sequence) {
-  const SequenceSortKey sequence_sort_key = sequence->GetSortKey();
-  auto transaction(priority_queue_.BeginTransaction());
+  OnCanScheduleSequence(
+      SequenceAndTransaction::FromSequence(std::move(sequence)));
+}
 
-  transaction->Push(std::move(sequence), sequence_sort_key);
+void PlatformNativeWorkerPoolWin::OnCanScheduleSequence(
+    SequenceAndTransaction sequence_and_transaction) {
+  priority_queue_.BeginTransaction().Push(
+      std::move(sequence_and_transaction.sequence),
+      sequence_and_transaction.transaction.GetSortKey());
   if (started_) {
     // TODO(fdoray): Handle priorities by having different work objects and
     // using ::SetThreadpoolCallbackPriority() and

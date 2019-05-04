@@ -45,6 +45,8 @@ class SliderThumbElement final : public HTMLDivElement {
  public:
   static SliderThumbElement* Create(Document&);
 
+  SliderThumbElement(Document&);
+
   void SetPositionFromValue();
 
   void DragFrom(const LayoutPoint&);
@@ -58,7 +60,6 @@ class SliderThumbElement final : public HTMLDivElement {
   void StopDragging();
 
  private:
-  SliderThumbElement(Document&);
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
   scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() final;
   Element* CloneWithoutAttributesAndChildren(Document&) const override;
@@ -88,6 +89,8 @@ class SliderContainerElement final : public HTMLDivElement {
     kNoMove,
   };
 
+  explicit SliderContainerElement(Document&);
+
   DECLARE_NODE_FACTORY(SliderContainerElement);
   HTMLInputElement* HostInput() const;
   void DefaultEventHandler(Event&) override;
@@ -97,7 +100,6 @@ class SliderContainerElement final : public HTMLDivElement {
   void RemoveAllEventListeners() override;
 
  private:
-  explicit SliderContainerElement(Document&);
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
   scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() final;
   const AtomicString& ShadowPseudoId() const override;

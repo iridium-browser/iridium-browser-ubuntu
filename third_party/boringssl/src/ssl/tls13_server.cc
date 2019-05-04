@@ -12,13 +12,6 @@
  * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 
-// Per C99, various stdint.h macros are unavailable in C++ unless some macros
-// are defined. C++11 overruled this decision, but older Android NDKs still
-// require it.
-#if !defined(__STDC_LIMIT_MACROS)
-#define __STDC_LIMIT_MACROS
-#endif
-
 #include <openssl/ssl.h>
 
 #include <assert.h>
@@ -103,30 +96,36 @@ static int ssl_ext_supported_versions_add_serverhello(SSL_HANDSHAKE *hs,
 }
 
 static const SSL_CIPHER *choose_tls13_cipher(
-    const SSL *ssl, const SSL_CLIENT_HELLO *client_hello) {
+    const SSL *ssl, const SSL_CLIENT_HELLO *client_hello, uint16_t group_id) {
   if (client_hello->cipher_suites_len % 2 != 0) {
-    return NULL;
+    return nullptr;
   }
 
   CBS cipher_suites;
   CBS_init(&cipher_suites, client_hello->cipher_suites,
            client_hello->cipher_suites_len);
 
-  const int aes_is_fine = EVP_has_aes_hardware();
+  const bool aes_is_fine = EVP_has_aes_hardware();
+  const bool require_256_bit = group_id == SSL_CURVE_CECPQ2;
   const uint16_t version = ssl_protocol_version(ssl);
 
-  const SSL_CIPHER *best = NULL;
+  const SSL_CIPHER *best = nullptr;
   while (CBS_len(&cipher_suites) > 0) {
     uint16_t cipher_suite;
     if (!CBS_get_u16(&cipher_suites, &cipher_suite)) {
-      return NULL;
+      return nullptr;
     }
 
     // Limit to TLS 1.3 ciphers we know about.
     const SSL_CIPHER *candidate = SSL_get_cipher_by_value(cipher_suite);
-    if (candidate == NULL ||
+    if (candidate == nullptr ||
         SSL_CIPHER_get_min_version(candidate) > version ||
         SSL_CIPHER_get_max_version(candidate) < version) {
+      continue;
+    }
+
+    // Post-quantum key exchanges should be paired with 256-bit ciphers.
+    if (require_256_bit && candidate->algorithm_enc == SSL_AES128GCM) {
       continue;
     }
 
@@ -140,7 +139,7 @@ static const SSL_CIPHER *choose_tls13_cipher(
       return candidate;
     }
 
-    if (best == NULL) {
+    if (best == nullptr) {
       best = candidate;
     }
   }
@@ -246,8 +245,15 @@ static enum ssl_hs_wait_t do_select_parameters(SSL_HANDSHAKE *hs) {
                  client_hello.session_id_len);
   hs->session_id_len = client_hello.session_id_len;
 
+  uint16_t group_id;
+  if (!tls1_get_shared_group(hs, &group_id)) {
+    OPENSSL_PUT_ERROR(SSL, SSL_R_NO_SHARED_GROUP);
+    ssl_send_alert(ssl, SSL3_AL_FATAL, SSL_AD_HANDSHAKE_FAILURE);
+    return ssl_hs_error;
+  }
+
   // Negotiate the cipher suite.
-  hs->new_cipher = choose_tls13_cipher(ssl, &client_hello);
+  hs->new_cipher = choose_tls13_cipher(ssl, &client_hello, group_id);
   if (hs->new_cipher == NULL) {
     OPENSSL_PUT_ERROR(SSL, SSL_R_NO_SHARED_CIPHER);
     ssl_send_alert(ssl, SSL3_AL_FATAL, SSL_AD_HANDSHAKE_FAILURE);
@@ -586,8 +592,8 @@ static enum ssl_hs_wait_t do_send_server_hello(SSL_HANDSHAKE *hs) {
 
   // Derive and enable the handshake traffic secrets.
   if (!tls13_derive_handshake_secrets(hs) ||
-      !tls13_set_traffic_key(ssl, evp_aead_seal, hs->server_handshake_secret,
-                             hs->hash_len)) {
+      !tls13_set_traffic_key(ssl, ssl_encryption_handshake, evp_aead_seal,
+                             hs->server_handshake_secret, hs->hash_len)) {
     return ssl_hs_error;
   }
 
@@ -697,8 +703,8 @@ static enum ssl_hs_wait_t do_send_server_finished(SSL_HANDSHAKE *hs) {
       // Update the secret to the master secret and derive traffic keys.
       !tls13_advance_key_schedule(hs, kZeroes, hs->hash_len) ||
       !tls13_derive_application_secrets(hs) ||
-      !tls13_set_traffic_key(ssl, evp_aead_seal, hs->server_traffic_secret_0,
-                             hs->hash_len)) {
+      !tls13_set_traffic_key(ssl, ssl_encryption_application, evp_aead_seal,
+                             hs->server_traffic_secret_0, hs->hash_len)) {
     return ssl_hs_error;
   }
 
@@ -750,8 +756,8 @@ static enum ssl_hs_wait_t do_send_server_finished(SSL_HANDSHAKE *hs) {
 static enum ssl_hs_wait_t do_read_second_client_flight(SSL_HANDSHAKE *hs) {
   SSL *const ssl = hs->ssl;
   if (ssl->s3->early_data_accepted) {
-    if (!tls13_set_traffic_key(ssl, evp_aead_open, hs->early_traffic_secret,
-                               hs->hash_len)) {
+    if (!tls13_set_traffic_key(ssl, ssl_encryption_early_data, evp_aead_open,
+                               hs->early_traffic_secret, hs->hash_len)) {
       return ssl_hs_error;
     }
     hs->can_early_write = true;
@@ -785,8 +791,8 @@ static enum ssl_hs_wait_t do_process_end_of_early_data(SSL_HANDSHAKE *hs) {
       ssl->method->next_message(ssl);
     }
   }
-  if (!tls13_set_traffic_key(ssl, evp_aead_open, hs->client_handshake_secret,
-                             hs->hash_len)) {
+  if (!tls13_set_traffic_key(ssl, ssl_encryption_handshake, evp_aead_open,
+                             hs->client_handshake_secret, hs->hash_len)) {
     return ssl_hs_error;
   }
   hs->tls13_state = ssl->s3->early_data_accepted
@@ -892,8 +898,8 @@ static enum ssl_hs_wait_t do_read_client_finished(SSL_HANDSHAKE *hs) {
       // and derived the resumption secret.
       !tls13_process_finished(hs, msg, ssl->s3->early_data_accepted) ||
       // evp_aead_seal keys have already been switched.
-      !tls13_set_traffic_key(ssl, evp_aead_open, hs->client_traffic_secret_0,
-                             hs->hash_len)) {
+      !tls13_set_traffic_key(ssl, ssl_encryption_application, evp_aead_open,
+                             hs->client_traffic_secret_0, hs->hash_len)) {
     return ssl_hs_error;
   }
 

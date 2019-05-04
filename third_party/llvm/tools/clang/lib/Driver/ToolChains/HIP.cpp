@@ -24,6 +24,12 @@ using namespace clang::driver::tools;
 using namespace clang;
 using namespace llvm::opt;
 
+#if _WIN32 || _WIN64
+#define NULL_FILE "nul"
+#else
+#define NULL_FILE "/dev/null"
+#endif
+
 namespace {
 
 static void addBCLib(Compilation &C, const ArgList &Args,
@@ -81,8 +87,8 @@ const char *AMDGCN::Linker::constructLLVMLinkCommand(
     else
       FlushDenormalControlBC = "oclc_daz_opt_off.amdgcn.bc";
 
-    BCLibs.append({"opencl.amdgcn.bc",
-                   "ocml.amdgcn.bc", "ockl.amdgcn.bc", "irif.amdgcn.bc",
+    BCLibs.append({"hip.amdgcn.bc", "opencl.amdgcn.bc",
+                   "ocml.amdgcn.bc", "ockl.amdgcn.bc",
                    "oclc_finite_only_off.amdgcn.bc",
                    FlushDenormalControlBC,
                    "oclc_correctly_rounded_sqrt_on.amdgcn.bc",
@@ -154,7 +160,7 @@ const char *AMDGCN::Linker::constructLlcCommand(
     llvm::StringRef OutputFilePrefix, const char *InputFileName) const {
   // Construct llc command.
   ArgStringList LlcArgs{InputFileName, "-mtriple=amdgcn-amd-amdhsa",
-                        "-filetype=obj",
+                        "-filetype=obj", "-mattr=-code-object-v3",
                         Args.MakeArgString("-mcpu=" + SubArchName), "-o"};
   std::string LlcOutputFileName =
       C.getDriver().GetTemporaryPath(OutputFilePrefix, "o");
@@ -197,7 +203,7 @@ void AMDGCN::constructHIPFatbinCommand(Compilation &C, const JobAction &JA,
   // ToDo: Remove the dummy host binary entry which is required by
   // clang-offload-bundler.
   std::string BundlerTargetArg = "-targets=host-x86_64-unknown-linux";
-  std::string BundlerInputArg = "-inputs=/dev/null";
+  std::string BundlerInputArg = "-inputs=" NULL_FILE;
 
   for (const auto &II : Inputs) {
     const auto* A = II.getAction();

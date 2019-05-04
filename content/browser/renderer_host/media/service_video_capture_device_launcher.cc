@@ -8,6 +8,7 @@
 #include "content/browser/renderer_host/media/service_launched_video_capture_device.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "media/capture/video/video_capture_device.h"
 #include "media/capture/video/video_frame_receiver_on_task_runner.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/video_capture/public/cpp/receiver_media_to_mojo_adapter.h"
@@ -31,7 +32,10 @@ void ConcludeLaunchDeviceWithSuccess(
   video_capture::mojom::ReceiverPtr receiver_proxy;
   mojo::MakeStrongBinding<video_capture::mojom::Receiver>(
       std::move(receiver_adapter), mojo::MakeRequest(&receiver_proxy));
-  device->Start(params, std::move(receiver_proxy));
+  media::VideoCaptureParams new_params = params;
+  new_params.power_line_frequency =
+      media::VideoCaptureDevice::GetPowerLineFrequency(params);
+  device->Start(new_params, std::move(receiver_proxy));
   callbacks->OnDeviceLaunched(
       std::make_unique<ServiceLaunchedVideoCaptureDevice>(
           std::move(device), std::move(connection_lost_cb)));
@@ -41,7 +45,7 @@ void ConcludeLaunchDeviceWithSuccess(
 void ConcludeLaunchDeviceWithFailure(
     bool abort_requested,
     media::VideoCaptureError error,
-    std::unique_ptr<VideoCaptureFactoryDelegate> device_factory,
+    scoped_refptr<RefCountedVideoCaptureFactory> device_factory,
     VideoCaptureDeviceLauncher::Callbacks* callbacks,
     base::OnceClosure done_cb) {
   device_factory.reset();
@@ -67,7 +71,7 @@ ServiceVideoCaptureDeviceLauncher::~ServiceVideoCaptureDeviceLauncher() {
 
 void ServiceVideoCaptureDeviceLauncher::LaunchDeviceAsync(
     const std::string& device_id,
-    MediaStreamType stream_type,
+    blink::MediaStreamType stream_type,
     const media::VideoCaptureParams& params,
     base::WeakPtr<media::VideoFrameReceiver> receiver,
     base::OnceClosure connection_lost_cb,
@@ -76,14 +80,14 @@ void ServiceVideoCaptureDeviceLauncher::LaunchDeviceAsync(
   DCHECK(sequence_checker_.CalledOnValidSequence());
   DCHECK(state_ == State::READY_TO_LAUNCH);
 
-  if (stream_type != content::MEDIA_DEVICE_VIDEO_CAPTURE) {
+  if (stream_type != blink::MEDIA_DEVICE_VIDEO_CAPTURE) {
     // This launcher only supports MEDIA_DEVICE_VIDEO_CAPTURE.
     NOTREACHED();
     return;
   }
 
   connect_to_device_factory_cb_.Run(&device_factory_);
-  if (!device_factory_->is_bound()) {
+  if (!device_factory_->device_factory().is_bound()) {
     // This can happen when the ServiceVideoCaptureProvider owning
     // |device_factory_| loses connection to the service process and resets
     // |device_factory_|.
@@ -117,7 +121,7 @@ void ServiceVideoCaptureDeviceLauncher::LaunchDeviceAsync(
       base::BindOnce(&ServiceVideoCaptureDeviceLauncher::
                          OnConnectionLostWhileWaitingForCallback,
                      base::Unretained(this)));
-  device_factory_->CreateDevice(
+  device_factory_->device_factory()->CreateDevice(
       device_id, std::move(device_request),
       base::BindOnce(
           // Use of Unretained |this| is safe, because |done_cb_| guarantees

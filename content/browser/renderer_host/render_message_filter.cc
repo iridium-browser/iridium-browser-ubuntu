@@ -14,8 +14,8 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/alias.h"
-#include "base/macros.h"
 #include "base/numerics/safe_math.h"
+#include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
@@ -56,8 +56,6 @@
 #include "net/base/io_buffer.h"
 #include "net/base/mime_util.h"
 #include "net/base/request_priority.h"
-#include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_context_getter.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -88,21 +86,17 @@ const uint32_t kRenderFilteredMessageClasses[] = {ViewMsgStart};
 RenderMessageFilter::RenderMessageFilter(
     int render_process_id,
     BrowserContext* browser_context,
-    net::URLRequestContextGetter* request_context,
     RenderWidgetHelper* render_widget_helper,
     MediaInternals* media_internals)
     : BrowserMessageFilter(kRenderFilteredMessageClasses,
-                           arraysize(kRenderFilteredMessageClasses)),
+                           base::size(kRenderFilteredMessageClasses)),
       BrowserAssociatedInterface<mojom::RenderMessageFilter>(this, this),
       resource_dispatcher_host_(ResourceDispatcherHostImpl::Get()),
-      request_context_(request_context),
       resource_context_(browser_context->GetResourceContext()),
       render_widget_helper_(render_widget_helper),
       render_process_id_(render_process_id),
       media_internals_(media_internals),
       weak_ptr_factory_(this) {
-  DCHECK(request_context_.get());
-
   if (render_widget_helper)
     render_widget_helper_->Init(render_process_id_, resource_dispatcher_host_);
 }

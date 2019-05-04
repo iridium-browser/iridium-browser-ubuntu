@@ -96,9 +96,8 @@ class CONTENT_EXPORT CrossProcessFrameConnector
       const viz::SurfaceId& local_surface_id,
       gfx::PointF* transformed_point,
       viz::EventSource source = viz::EventSource::ANY) override;
-  void ForwardAckedTouchpadPinchGestureEvent(
-      const blink::WebGestureEvent& event,
-      InputEventAckState ack_result) override;
+  void ForwardAckedTouchpadZoomEvent(const blink::WebGestureEvent& event,
+                                     InputEventAckState ack_result) override;
   void BubbleScrollEvent(const blink::WebGestureEvent& event) override;
   bool HasFocus() override;
   void FocusRootView() override;
@@ -177,7 +176,7 @@ class CONTENT_EXPORT CrossProcessFrameConnector
 
   // Handlers for messages received from the parent frame.
   void OnSynchronizeVisualProperties(
-      const viz::SurfaceId& surface_id,
+      const viz::FrameSinkId& frame_sink_id,
       const FrameVisualProperties& visual_properties);
   void OnUpdateViewportIntersection(const gfx::Rect& viewport_intersection,
                                     const gfx::Rect& compositor_visible_rect,
@@ -202,8 +201,6 @@ class CONTENT_EXPORT CrossProcessFrameConnector
   // Visibility state of the corresponding frame owner element in parent process
   // which is set through CSS.
   bool is_hidden_ = false;
-
-  bool is_scroll_bubbling_;
 
   // Used to make sure we only log UMA once per renderer crash.
   bool is_crash_already_logged_ = false;

@@ -14,49 +14,39 @@
 #include "libANGLE/renderer/vulkan/vk_cache_utils.h"
 #include "libANGLE/renderer/vulkan/vk_helpers.h"
 
-namespace gl
-{
-class DrawCallParams;
-}  // namespace gl
-
 namespace rx
 {
 class BufferVk;
 
-namespace vk
-{
-class CommandGraphResource;
-}  // namespace vk
-
 class VertexArrayVk : public VertexArrayImpl
 {
   public:
-    VertexArrayVk(const gl::VertexArrayState &state, RendererVk *renderer);
+    VertexArrayVk(ContextVk *contextVk, const gl::VertexArrayState &state);
     ~VertexArrayVk() override;
 
     void destroy(const gl::Context *context) override;
 
     angle::Result syncState(const gl::Context *context,
                             const gl::VertexArray::DirtyBits &dirtyBits,
-                            const gl::VertexArray::DirtyAttribBitsArray &attribBits,
-                            const gl::VertexArray::DirtyBindingBitsArray &bindingBits) override;
+                            gl::VertexArray::DirtyAttribBitsArray *attribBits,
+                            gl::VertexArray::DirtyBindingBitsArray *bindingBits) override;
 
-    void getPackedInputDescriptions(vk::PipelineDesc *pipelineDesc);
-
-    gl::Error drawElements(const gl::Context *context,
-                           const gl::DrawCallParams &drawCallParams,
-                           vk::CommandBuffer *commandBuffer,
-                           bool shouldApplyVertexArray);
-
-    void updateDefaultAttrib(RendererVk *renderer,
+    void updateDefaultAttrib(ContextVk *contextVk,
                              size_t attribIndex,
                              VkBuffer bufferHandle,
                              uint32_t offset);
 
     angle::Result updateClientAttribs(const gl::Context *context,
-                                      const gl::DrawCallParams &drawCallParams);
+                                      GLint firstVertex,
+                                      GLsizei vertexOrIndexCount,
+                                      gl::DrawElementsType indexTypeOrInvalid,
+                                      const void *indices);
 
-    angle::Result handleLineLoop(ContextVk *contextVk, const gl::DrawCallParams &drawCallParams);
+    angle::Result handleLineLoop(ContextVk *contextVk,
+                                 GLint firstVertex,
+                                 GLsizei vertexOrIndexCount,
+                                 gl::DrawElementsType indexTypeOrInvalid,
+                                 const void *indices);
 
     const gl::AttribArray<VkBuffer> &getCurrentArrayBufferHandles() const
     {
@@ -68,12 +58,10 @@ class VertexArrayVk : public VertexArrayImpl
         return mCurrentArrayBufferOffsets;
     }
 
-    const gl::AttribArray<vk::CommandGraphResource *> &getCurrentArrayBufferResources() const
+    const gl::AttribArray<vk::BufferHelper *> &getCurrentArrayBuffers() const
     {
-        return mCurrentArrayBufferResources;
+        return mCurrentArrayBuffers;
     }
-
-    VkBuffer getCurrentElementArrayBufferHandle() const { return mCurrentElementArrayBufferHandle; }
 
     VkDeviceSize getCurrentElementArrayBufferOffset() const
     {
@@ -85,38 +73,31 @@ class VertexArrayVk : public VertexArrayImpl
         mCurrentElementArrayBufferOffset = reinterpret_cast<VkDeviceSize>(offset);
     }
 
-    vk::CommandGraphResource *getCurrentElementArrayBufferResource() const
-    {
-        return mCurrentElementArrayBufferResource;
-    }
+    vk::BufferHelper *getCurrentElementArrayBuffer() const { return mCurrentElementArrayBuffer; }
 
     angle::Result updateIndexTranslation(ContextVk *contextVk,
-                                         const gl::DrawCallParams &drawCallParams);
+                                         GLsizei indexCount,
+                                         gl::DrawElementsType type,
+                                         const void *indices);
 
   private:
-    // This will update any dirty packed input descriptions, regardless if they're used by the
-    // active program. This could lead to slight inefficiencies when the app would repeatedly
-    // update vertex info for attributes the program doesn't use, (very silly edge case). The
-    // advantage is the cached state then doesn't depend on the Program, so doesn't have to be
-    // updated when the active Program changes.
-    void updatePackedInputDescriptions();
-    void updatePackedInputInfo(uint32_t attribIndex,
-                               const gl::VertexBinding &binding,
-                               const gl::VertexAttribute &attrib);
-
-    void updateArrayBufferReadDependencies(vk::CommandGraphResource *drawFramebuffer,
-                                           const gl::AttributesMask &activeAttribsMask,
-                                           Serial serial);
+    void setDefaultPackedInput(ContextVk *contextVk, size_t attribIndex);
 
     angle::Result streamIndexData(ContextVk *contextVk,
-                                  GLenum indexType,
+                                  gl::DrawElementsType indexType,
                                   size_t indexCount,
                                   const void *sourcePointer,
                                   vk::DynamicBuffer *dynamicBuffer);
-    angle::Result convertVertexBuffer(ContextVk *contextVk,
-                                      BufferVk *srcBuffer,
-                                      const gl::VertexBinding &binding,
-                                      size_t attribIndex);
+    angle::Result convertVertexBufferGpu(ContextVk *contextVk,
+                                         BufferVk *srcBuffer,
+                                         const gl::VertexBinding &binding,
+                                         size_t attribIndex,
+                                         const vk::Format &vertexFormat);
+    angle::Result convertVertexBufferCpu(ContextVk *contextVk,
+                                         BufferVk *srcBuffer,
+                                         const gl::VertexBinding &binding,
+                                         size_t attribIndex,
+                                         const vk::Format &vertexFormat);
     void ensureConversionReleased(RendererVk *renderer, size_t attribIndex);
 
     angle::Result syncDirtyAttrib(ContextVk *contextVk,
@@ -126,20 +107,11 @@ class VertexArrayVk : public VertexArrayImpl
 
     gl::AttribArray<VkBuffer> mCurrentArrayBufferHandles;
     gl::AttribArray<VkDeviceSize> mCurrentArrayBufferOffsets;
-    gl::AttribArray<vk::CommandGraphResource *> mCurrentArrayBufferResources;
-    gl::AttribArray<const vk::Format *> mCurrentArrayBufferFormats;
-    gl::AttribArray<GLuint> mCurrentArrayBufferStrides;
+    gl::AttribArray<vk::BufferHelper *> mCurrentArrayBuffers;
     gl::AttribArray<vk::DynamicBuffer> mCurrentArrayBufferConversion;
     gl::AttribArray<bool> mCurrentArrayBufferConversionCanRelease;
-    VkBuffer mCurrentElementArrayBufferHandle;
     VkDeviceSize mCurrentElementArrayBufferOffset;
-    vk::CommandGraphResource *mCurrentElementArrayBufferResource;
-
-    // Keep a cache of binding and attribute descriptions for easy pipeline updates.
-    // This is copied out of here into the pipeline description on a Context state change.
-    gl::AttributesMask mDirtyPackedInputs;
-    vk::VertexInputBindings mPackedInputBindings;
-    vk::VertexInputAttributes mPackedInputAttributes;
+    vk::BufferHelper *mCurrentElementArrayBuffer;
 
     vk::DynamicBuffer mDynamicVertexData;
     vk::DynamicBuffer mDynamicIndexData;
@@ -149,6 +121,9 @@ class VertexArrayVk : public VertexArrayImpl
     Optional<GLint> mLineLoopBufferFirstIndex;
     Optional<size_t> mLineLoopBufferLastIndex;
     bool mDirtyLineLoopTranslation;
+
+    // Vulkan does not allow binding a null vertex buffer. We use a dummy as a placeholder.
+    vk::BufferHelper mTheNullBuffer;
 };
 }  // namespace rx
 

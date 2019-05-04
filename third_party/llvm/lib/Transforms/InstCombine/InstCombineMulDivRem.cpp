@@ -244,6 +244,11 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
     return NewMul;
   }
 
+  // -X * Y --> -(X * Y)
+  // X * -Y --> -(X * Y)
+  if (match(&I, m_c_Mul(m_OneUse(m_Neg(m_Value(X))), m_Value(Y))))
+    return BinaryOperator::CreateNeg(Builder.CreateMul(X, Y));
+
   // (X / Y) *  Y = X - (X % Y)
   // (X / Y) * -Y = (X % Y) - X
   {
@@ -1157,7 +1162,8 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
       IRBuilder<>::FastMathFlagGuard FMFGuard(B);
       B.setFastMathFlags(I.getFastMathFlags());
       AttributeList Attrs = CallSite(Op0).getCalledFunction()->getAttributes();
-      Value *Res = emitUnaryFloatFnCall(X, TLI.getName(LibFunc_tan), B, Attrs);
+      Value *Res = emitUnaryFloatFnCall(X, &TLI, LibFunc_tan, LibFunc_tanf,
+                                        LibFunc_tanl, B, Attrs);
       if (IsCot)
         Res = B.CreateFDiv(ConstantFP::get(I.getType(), 1.0), Res);
       return replaceInstUsesWith(I, Res);

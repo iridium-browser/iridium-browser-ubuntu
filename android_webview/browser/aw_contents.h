@@ -16,7 +16,6 @@
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/browser_view_renderer_client.h"
 #include "android_webview/browser/find_helper.h"
-#include "android_webview/browser/gl_view_renderer_manager.h"
 #include "android_webview/browser/icon_helper.h"
 #include "android_webview/browser/permission/permission_request_handler_client.h"
 #include "android_webview/browser/renderer_host/aw_render_view_host_ext.h"
@@ -27,7 +26,6 @@
 #include "content/public/browser/web_contents_observer.h"
 
 class SkBitmap;
-class TabContents;
 
 namespace autofill {
 class AutofillProvider;
@@ -39,17 +37,12 @@ class WebContents;
 
 namespace android_webview {
 
-class AwContentsContainer;
 class AwContentsClientBridge;
-class AwGLFunctor;
 class AwPdfExporter;
 class AwWebContentsDelegate;
 class PermissionRequestHandler;
 
 // Native side of java-class of same name.
-// Provides the ownership of and access to browser components required for
-// WebView functionality; analogous to chrome's TabContents, but with a
-// level of indirection provided by the AwContentsContainer abstraction.
 //
 // Object lifetime:
 // For most purposes the java and native objects can be considered to have
@@ -108,9 +101,10 @@ class AwContents : public FindHelper::Listener,
   base::android::ScopedJavaLocalRef<jobject> GetWebContents(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
-  void SetAwGLFunctor(JNIEnv* env,
-                      const base::android::JavaParamRef<jobject>& obj,
-                      jlong gl_functor);
+  void SetCompositorFrameConsumer(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jlong compositor_frame_consumer);
 
   base::android::ScopedJavaLocalRef<jobject> GetRenderProcess(
       JNIEnv* env,
@@ -312,6 +306,11 @@ class AwContents : public FindHelper::Listener,
                 const base::android::JavaParamRef<jobject>& obj,
                 jint x,
                 jint y);
+  void RestoreScrollAfterTransition(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jint x,
+      jint y);
   void SmoothScroll(JNIEnv* env,
                     const base::android::JavaParamRef<jobject>& obj,
                     jint target_x,
@@ -343,6 +342,9 @@ class AwContents : public FindHelper::Listener,
 
   jlong GetAutofillProvider(JNIEnv* env,
                             const base::android::JavaParamRef<jobject>& obj);
+
+  void RendererUnresponsive(content::RenderProcessHost* render_process_host);
+  void RendererResponsive(content::RenderProcessHost* render_process_host);
 
   // content::WebContentsObserver overrides
   void RenderViewHostChanged(content::RenderViewHost* old_host,
@@ -376,10 +378,7 @@ class AwContents : public FindHelper::Listener,
 
   void SetDipScaleInternal(float dip_scale);
 
-  void SetAwGLFunctor(AwGLFunctor* functor);
-
   JavaObjectWeakGlobalRef java_ref_;
-  AwGLFunctor* functor_;
   BrowserViewRenderer browser_view_renderer_;  // Must outlive |web_contents_|.
   std::unique_ptr<content::WebContents> web_contents_;
   std::unique_ptr<AwWebContentsDelegate> web_contents_delegate_;
@@ -398,8 +397,6 @@ class AwContents : public FindHelper::Listener,
   typedef std::pair<const GURL, base::OnceCallback<void(bool)>> OriginCallback;
   // The first element in the list is always the currently pending request.
   std::list<OriginCallback> pending_geolocation_prompts_;
-
-  GLViewRendererManager::Key renderer_manager_key_;
 
   DISALLOW_COPY_AND_ASSIGN(AwContents);
 };

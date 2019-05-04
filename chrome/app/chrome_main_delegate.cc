@@ -11,20 +11,20 @@
 #include "base/command_line.h"
 #include "base/cpu.h"
 #include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/process/memory.h"
+#include "base/process/process.h"
 #include "base/process/process_handle.h"
-#include "base/process/process_info.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event_impl.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/chrome_resource_bundle_helper.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/channel_info.h"
@@ -36,7 +36,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/profiling.h"
 #include "chrome/common/trace_event_args_whitelist.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/gpu/chrome_content_gpu_client.h"
@@ -48,15 +47,17 @@
 #include "components/crash/core/common/crash_key.h"
 #include "components/crash/core/common/crash_keys.h"
 #include "components/nacl/common/buildflags.h"
-#include "components/services/heap_profiling/public/cpp/allocator_shim.h"
+#include "components/services/heap_profiling/public/cpp/sampling_profiler_wrapper.h"
 #include "components/services/heap_profiling/public/cpp/stream.h"
 #include "components/tracing/common/tracing_sampler_profiler.h"
 #include "components/version_info/version_info.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/profiling.h"
 #include "content/public/common/service_names.mojom.h"
 #include "extensions/common/constants.h"
+#include "net/url_request/url_request.h"
 #include "pdf/buildflags.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "printing/buildflags/buildflags.h"
@@ -76,6 +77,7 @@
 #include "chrome/child/v8_crashpad_support_win.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome_elf/chrome_elf_main.h"
+#include "components/gwp_asan/client/gwp_asan.h"  // nogncheck
 #include "sandbox/win/src/sandbox.h"
 #include "ui/base/resource/resource_bundle_win.h"
 #endif
@@ -105,10 +107,10 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "chrome/browser/chromeos/boot_times_recorder.h"
-#include "chromeos/chromeos_paths.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_paths.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/hugepage_text/hugepage_text.h"
 #endif
 
@@ -116,7 +118,6 @@
 #include "base/android/java_exception_reporter.h"
 #include "chrome/browser/android/crash/pure_java_exception_handler.h"
 #include "chrome/common/descriptors_android.h"
-#include "ui/base/resource/resource_bundle_android.h"
 #else
 // Diagnostics is only available on non-android platforms.
 #include "chrome/browser/diagnostics/diagnostics_controller.h"
@@ -129,7 +130,7 @@
 #include "ui/base/x/x11_util.h"  // nogncheck
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 #include "components/crash/content/app/breakpad_linux.h"
 #include "v8/include/v8.h"
 #endif
@@ -138,7 +139,7 @@
 #include "base/environment.h"
 #endif
 
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_ANDROID)
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "components/crash/content/app/crashpad.h"
 #endif
@@ -157,20 +158,17 @@
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #endif
 
-#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER) && BUILDFLAG(ENABLE_PDF)
 #include "chrome/child/pdf_child_init.h"
+#endif
 
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
 base::LazyInstance<ChromeContentGpuClient>::DestructorAtExit
     g_chrome_content_gpu_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<ChromeContentRendererClient>::DestructorAtExit
     g_chrome_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<ChromeContentUtilityClient>::DestructorAtExit
     g_chrome_content_utility_client = LAZY_INSTANCE_INITIALIZER;
-#endif
-
-#if defined(OS_POSIX)
-base::LazyInstance<ChromeCrashReporterClient>::Leaky g_chrome_crash_client =
-    LAZY_INSTANCE_INITIALIZER;
 #endif
 
 extern int NaClMain(const content::MainFunctionParams&);
@@ -182,7 +180,7 @@ extern int CloudPrintServiceProcessMain(const content::MainFunctionParams&);
 const char* const ChromeMainDelegate::kNonWildcardDomainNonPortSchemes[] = {
     extensions::kExtensionScheme, chrome::kChromeSearchScheme};
 const size_t ChromeMainDelegate::kNonWildcardDomainNonPortSchemesSize =
-    arraysize(kNonWildcardDomainNonPortSchemes);
+    base::size(kNonWildcardDomainNonPortSchemes);
 
 namespace {
 
@@ -217,7 +215,7 @@ bool IsSandboxedProcess() {
 }
 
 bool UseHooks() {
-#if defined(ARCH_CPU_X86_64)
+#if defined(ARCH_CPU_64_BITS)
   return false;
 #elif defined(NDEBUG)
   version_info::Channel channel = chrome::GetChannel();
@@ -352,7 +350,7 @@ void HandleHelpSwitches(const base::CommandLine& command_line) {
 
 #if !defined(OS_MACOSX) && !defined(OS_ANDROID)
 void SIGTERMProfilingShutdown(int signal) {
-  Profiling::Stop();
+  content::Profiling::Stop();
   struct sigaction sigact;
   memset(&sigact, 0, sizeof(sigact));
   sigact.sa_handler = SIG_DFL;
@@ -384,9 +382,9 @@ void InitializeUserDataDir(base::CommandLine* command_line) {
   wchar_t user_data_dir_buf[MAX_PATH], invalid_user_data_dir_buf[MAX_PATH];
 
   // In tests this may return false, implying the user data dir should be unset.
-  if (GetUserDataDirectoryThunk(user_data_dir_buf, arraysize(user_data_dir_buf),
-                                invalid_user_data_dir_buf,
-                                arraysize(invalid_user_data_dir_buf))) {
+  if (GetUserDataDirectoryThunk(
+          user_data_dir_buf, base::size(user_data_dir_buf),
+          invalid_user_data_dir_buf, base::size(invalid_user_data_dir_buf))) {
     base::FilePath user_data_dir(user_data_dir_buf);
     if (invalid_user_data_dir_buf[0] != 0) {
       chrome::SetInvalidSpecifiedUserDataDir(
@@ -474,7 +472,7 @@ void RecordMainStartupMetrics(base::TimeTicks exe_entry_point_ticks) {
 #if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
   // Record the startup process creation time on supported platforms.
   startup_metric_utils::RecordStartupProcessCreationTime(
-      base::CurrentProcessInfo::CreationTime());
+      base::Process::Current().CreationTime());
 #endif
 
 // On Android the main entry point time is the time when the Java code starts.
@@ -507,10 +505,20 @@ ChromeMainDelegate::~ChromeMainDelegate() {
 }
 
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
-void ChromeMainDelegate::PostEarlyInitialization() {
+void ChromeMainDelegate::PostEarlyInitialization(bool is_running_tests) {
+  // Chrome disallows cookies by default. All code paths that want to use
+  // cookies need to go through one of Chrome's URLRequestContexts which have
+  // a ChromeNetworkDelegate attached that selectively allows cookies again.
+  net::URLRequest::SetDefaultCookiePolicyToBlock();
+
   DCHECK(chrome_feature_list_creator_);
   chrome_feature_list_creator_->CreateFeatureList();
-  tracing_sampler_profiler_->OnMessageLoopStarted();
+  PostFieldTrialInitialization();
+
+  // Initializes the resource bundle and determines the locale.
+  std::string actual_locale =
+      LoadLocalState(chrome_feature_list_creator_.get(), is_running_tests);
+  chrome_feature_list_creator_->SetApplicationLocale(actual_locale);
 }
 
 bool ChromeMainDelegate::ShouldCreateFeatureList() {
@@ -519,6 +527,12 @@ bool ChromeMainDelegate::ShouldCreateFeatureList() {
 }
 #endif
 
+void ChromeMainDelegate::PostFieldTrialInitialization() {
+#if defined(OS_WIN)
+  gwp_asan::EnableForMalloc();
+#endif
+}
+
 bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 #if defined(OS_CHROMEOS)
   chromeos::BootTimesRecorder::Get()->SaveChromeMainStats();
@@ -526,6 +540,22 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
+
+  // Only allow disabling web security via the command-line flag if the user has
+  // specified a distinct profile directory. This still enables tests to disable
+  // web security by setting the kWebKitWebSecurityEnabled pref directly.
+  //
+  // Note that this is done in ChromeMainDelegate::BasicStartupComplete()
+  // because this is the earliest callback. Many places in Chromium gate
+  // security features around kDisableWebSecurity, and it is unreasonable to
+  // expect them all to properly also check for kUserDataDir.
+  if (command_line.HasSwitch(switches::kDisableWebSecurity) &&
+      !command_line.HasSwitch(switches::kUserDataDir)) {
+    LOG(ERROR) << "Web security may only be disabled if '--user-data-dir' is "
+                  "also specified.";
+    base::CommandLine::ForCurrentProcess()->RemoveSwitch(
+        switches::kDisableWebSecurity);
+  }
 
 #if defined(OS_WIN)
   // Browser should not be sandboxed.
@@ -545,14 +575,14 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
   chrome::common::mac::EnableCFBundleBlocker();
 #endif
 
-  Profiling::ProcessStarted();
+  content::Profiling::ProcessStarted();
 
   base::trace_event::TraceLog::GetInstance()->SetArgumentFilterPredicate(
       base::Bind(&IsTraceEventArgsWhitelisted));
 
   // Setup tracing sampler profiler as early as possible at startup if needed.
-  tracing_sampler_profiler_ = std::make_unique<tracing::TracingSamplerProfiler>(
-      base::PlatformThread::CurrentId());
+  tracing_sampler_profiler_ =
+      tracing::TracingSamplerProfiler::CreateOnMainThread();
 
 #if defined(OS_WIN) && !defined(CHROME_MULTIPLE_DLL_BROWSER)
   v8_crashpad_support::SetUp();
@@ -648,8 +678,8 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
       command_line.HasSwitch(switches::kDiagnosticsRecovery)) {
     base::CommandLine interim_command_line(command_line.GetProgram());
     const char* const kSwitchNames[] = {switches::kUserDataDir, };
-    interim_command_line.CopySwitchesFrom(
-        command_line, kSwitchNames, arraysize(kSwitchNames));
+    interim_command_line.CopySwitchesFrom(command_line, kSwitchNames,
+                                          base::size(kSwitchNames));
     interim_command_line.AppendSwitch(switches::kDiagnostics);
     interim_command_line.AppendSwitch(switches::kDiagnosticsRecovery);
 
@@ -773,7 +803,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
   crash_reporter::InitializeCrashKeys();
 
 #if defined(OS_POSIX)
-  crash_reporter::SetCrashReporterClient(g_chrome_crash_client.Pointer());
+  ChromeCrashReporterClient::Create();
 #endif
 
 #if defined(OS_MACOSX)
@@ -794,12 +824,11 @@ void ChromeMainDelegate::PreSandboxStartup() {
   if (chrome::ProcessNeedsProfileDir(process_type)) {
     InitializeUserDataDir(base::CommandLine::ForCurrentProcess());
 #if defined(OS_WIN) && !defined(CHROME_MULTIPLE_DLL_CHILD)
-    if (downgrade::IsMSIInstall()) {
-      downgrade::MoveUserDataForFirstRunAfterDowngrade();
-      base::FilePath user_data_dir;
-      if (base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
-        downgrade::UpdateLastVersion(user_data_dir);
-    }
+    // TODO(grt): Enable this codepath for all desktop platforms.
+    downgrade::MoveUserDataForFirstRunAfterDowngrade();
+    base::FilePath user_data_dir;
+    if (base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
+      downgrade::UpdateLastVersion(user_data_dir);
 #endif
   }
 
@@ -879,7 +908,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
       kAndroidChrome100PercentPakDescriptor,
       kAndroidUIResourcesPakDescriptor,
     };
-    for (size_t i = 0; i < arraysize(extra_pak_keys); ++i) {
+    for (size_t i = 0; i < base::size(extra_pak_keys); ++i) {
       pak_fd = global_descriptors->Get(extra_pak_keys[i]);
       pak_region = global_descriptors->GetRegion(extra_pak_keys[i]);
       ui::ResourceBundle::GetSharedInstance().AddDataPackFromFileRegion(
@@ -903,7 +932,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
         locale;
   }
 
-#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER) && BUILDFLAG(ENABLE_PDF)
   InitializePDF();
 #endif
 
@@ -911,12 +940,11 @@ void ChromeMainDelegate::PreSandboxStartup() {
   // Zygote needs to call InitCrashReporter() in RunZygote().
   if (process_type != service_manager::switches::kZygoteProcess) {
 #if defined(OS_ANDROID)
+    crash_reporter::InitializeCrashpad(process_type.empty(), process_type);
     if (process_type.empty()) {
-      breakpad::InitCrashReporter(process_type);
       base::android::InitJavaExceptionReporter();
       UninstallPureJavaExceptionHandler();
     } else {
-      breakpad::InitNonBrowserCrashReporterForAndroid(process_type);
       base::android::InitJavaExceptionReporterForChildProcess();
     }
 #else  // !defined(OS_ANDROID)
@@ -985,7 +1013,7 @@ int ChromeMainDelegate::RunProcess(
 #endif
   };
 
-  for (size_t i = 0; i < arraysize(kMainFunctions); ++i) {
+  for (size_t i = 0; i < base::size(kMainFunctions); ++i) {
     if (process_type == kMainFunctions[i].name)
       return kMainFunctions[i].function(main_function_params);
   }
@@ -1035,7 +1063,7 @@ void ChromeMainDelegate::ZygoteStarting(
     std::vector<std::unique_ptr<service_manager::ZygoteForkDelegate>>*
         delegates) {
 #if defined(OS_CHROMEOS)
-    chromeos::ReloadElfTextInHugePages();
+    chromeos::InitHugepagesAndMlockSelf();
 #endif
 
 #if BUILDFLAG(ENABLE_NACL)
@@ -1044,8 +1072,8 @@ void ChromeMainDelegate::ZygoteStarting(
 }
 
 void ChromeMainDelegate::ZygoteForked() {
-  Profiling::ProcessStarted();
-  if (Profiling::BeingProfiled()) {
+  content::Profiling::ProcessStarted();
+  if (content::Profiling::BeingProfiled()) {
     base::debug::RestartProfilingAfterFork();
     SetUpProfilingShutdownHandler();
   }
@@ -1070,13 +1098,11 @@ ChromeMainDelegate::CreateContentBrowserClient() {
   return NULL;
 #else
   if (chrome_content_browser_client_ == nullptr) {
-    DCHECK(service_manifest_data_pack_);
     DCHECK(!chrome_feature_list_creator_);
     chrome_feature_list_creator_ = std::make_unique<ChromeFeatureListCreator>();
 
     chrome_content_browser_client_ =
         std::make_unique<ChromeContentBrowserClient>(
-            std::move(service_manifest_data_pack_),
             chrome_feature_list_creator_.get());
   }
   return chrome_content_browser_client_.get();
@@ -1107,43 +1133,6 @@ ChromeMainDelegate::CreateContentUtilityClient() {
 #else
   return g_chrome_content_utility_client.Pointer();
 #endif
-}
-
-ui::DataPack* ChromeMainDelegate::LoadServiceManifestDataPack() {
-  DCHECK(!service_manifest_data_pack_ && !chrome_content_browser_client_);
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-  std::string process_type =
-      command_line.GetSwitchValueASCII(switches::kProcessType);
-  DCHECK(process_type.empty());
-
-  base::FilePath resources_pack_path;
-  base::PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
-
-#if defined(OS_ANDROID)
-  service_manifest_data_pack_ =
-      ui::GetDataPackFromPackFile("assets/resources.pak", resources_pack_path);
-#else
-  if (base::PathExists(resources_pack_path)) {
-    service_manifest_data_pack_.reset(new ui::DataPack(ui::SCALE_FACTOR_NONE));
-    service_manifest_data_pack_->LoadFromPath(resources_pack_path);
-  }
-#endif  // defined(OS_ANDROID)
-  return service_manifest_data_pack_.get();
-}
-
-bool ChromeMainDelegate::ShouldEnableProfilerRecording() {
-  switch (chrome::GetChannel()) {
-    case version_info::Channel::UNKNOWN:
-    case version_info::Channel::CANARY:
-      return true;
-    case version_info::Channel::DEV:
-    case version_info::Channel::BETA:
-    case version_info::Channel::STABLE:
-    default:
-      // Don't enable instrumentation.
-      return false;
-  }
 }
 
 service_manager::ProcessType ChromeMainDelegate::OverrideProcessType() {

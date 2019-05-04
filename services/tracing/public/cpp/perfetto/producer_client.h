@@ -70,13 +70,17 @@ class COMPONENT_EXPORT(TRACING_CPP) ProducerClient
     std::string name_;
   };
 
-  ProducerClient();
+  // Returns the process-wide instance of the ProducerClient.
+  static ProducerClient* Get();
+
   ~ProducerClient() override;
 
   static void DeleteSoonForTesting(std::unique_ptr<ProducerClient>);
 
   // Returns the taskrunner used by Perfetto.
   static base::SequencedTaskRunner* GetTaskRunner();
+
+  void Connect(mojom::PerfettoServicePtr perfetto_service);
 
   // Create the messagepipes that'll be used to connect
   // to the service-side ProducerHost, on the correct
@@ -115,6 +119,8 @@ class COMPONENT_EXPORT(TRACING_CPP) ProducerClient
       perfetto::BufferID target_buffer) override;
   void NotifyFlushComplete(perfetto::FlushRequestID) override;
   perfetto::SharedMemory* shared_memory() const override;
+  void RegisterTraceWriter(uint32_t writer_id, uint32_t target_buffer) override;
+  void UnregisterTraceWriter(uint32_t writer_id) override;
 
   // These ProducerEndpoint functions are only used on the service
   // side and should not be called on the clients.
@@ -125,9 +131,16 @@ class COMPONENT_EXPORT(TRACING_CPP) ProducerClient
 
   static void ResetTaskRunnerForTesting();
 
+ protected:
+  // protected for testing.
+  ProducerClient();
+
  private:
+  friend class base::NoDestructor<ProducerClient>;
+
   void CommitDataOnSequence(mojom::CommitDataRequestPtr request);
   void AddDataSourceOnSequence(DataSourceBase*);
+  void RegisterDataSourceWithHost(DataSourceBase* data_source);
 
   // The callback will be run on the |origin_task_runner|, meaning
   // the same sequence as CreateMojoMessagePipes() got called on.

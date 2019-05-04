@@ -128,10 +128,8 @@ EVT AMDGPUTargetLowering::getEquivalentMemType(LLVMContext &Ctx, EVT VT) {
 }
 
 unsigned AMDGPUTargetLowering::numBitsUnsigned(SDValue Op, SelectionDAG &DAG) {
-  KnownBits Known;
   EVT VT = Op.getValueType();
-  DAG.computeKnownBits(Op, Known);
-
+  KnownBits Known = DAG.computeKnownBits(Op);
   return VT.getSizeInBits() - Known.countMinLeadingZeros();
 }
 
@@ -552,6 +550,8 @@ static bool fnegFoldsIntoOp(unsigned Opc) {
   case ISD::FMAD:
   case ISD::FMINNUM:
   case ISD::FMAXNUM:
+  case ISD::FMINNUM_IEEE:
+  case ISD::FMAXNUM_IEEE:
   case ISD::FSIN:
   case ISD::FTRUNC:
   case ISD::FRINT:
@@ -653,8 +653,11 @@ bool AMDGPUTargetLowering::ShouldShrinkFPConstant(EVT VT) const {
 }
 
 bool AMDGPUTargetLowering::shouldReduceLoadWidth(SDNode *N,
-                                                 ISD::LoadExtType,
+                                                 ISD::LoadExtType ExtTy,
                                                  EVT NewVT) const {
+  // TODO: This may be worth removing. Check regression tests for diffs.
+  if (!TargetLoweringBase::shouldReduceLoadWidth(N, ExtTy, NewVT))
+    return false;
 
   unsigned NewSize = NewVT.getStoreSizeInBits();
 
@@ -664,6 +667,18 @@ bool AMDGPUTargetLowering::shouldReduceLoadWidth(SDNode *N,
 
   EVT OldVT = N->getValueType(0);
   unsigned OldSize = OldVT.getStoreSizeInBits();
+
+  MemSDNode *MN = cast<MemSDNode>(N);
+  unsigned AS = MN->getAddressSpace();
+  // Do not shrink an aligned scalar load to sub-dword.
+  // Scalar engine cannot do sub-dword loads.
+  if (OldSize >= 32 && NewSize < 32 && MN->getAlignment() >= 4 &&
+      (AS == AMDGPUAS::CONSTANT_ADDRESS ||
+       AS == AMDGPUAS::CONSTANT_ADDRESS_32BIT ||
+       (isa<LoadSDNode>(N) &&
+        AS == AMDGPUAS::GLOBAL_ADDRESS && MN->isInvariant())) &&
+      AMDGPUInstrInfo::isUniformMMO(MN->getMemOperand()))
+    return false;
 
   // Don't produce extloads from sub 32-bit types. SI doesn't have scalar
   // extloads, so doing one requires using a buffer_load. In cases where we
@@ -2702,21 +2717,33 @@ static bool isI24(SDValue Op, SelectionDAG &DAG) {
     AMDGPUTargetLowering::numBitsSigned(Op, DAG) < 24;
 }
 
-static bool simplifyI24(SDNode *Node24, unsigned OpIdx,
-                        TargetLowering::DAGCombinerInfo &DCI) {
-
+static SDValue simplifyI24(SDNode *Node24,
+                           TargetLowering::DAGCombinerInfo &DCI) {
   SelectionDAG &DAG = DCI.DAG;
-  SDValue Op = Node24->getOperand(OpIdx);
+  SDValue LHS = Node24->getOperand(0);
+  SDValue RHS = Node24->getOperand(1);
+
+  APInt Demanded = APInt::getLowBitsSet(LHS.getValueSizeInBits(), 24);
+
+  // First try to simplify using GetDemandedBits which allows the operands to
+  // have other uses, but will only perform simplifications that involve
+  // bypassing some nodes for this user.
+  SDValue DemandedLHS = DAG.GetDemandedBits(LHS, Demanded);
+  SDValue DemandedRHS = DAG.GetDemandedBits(RHS, Demanded);
+  if (DemandedLHS || DemandedRHS)
+    return DAG.getNode(Node24->getOpcode(), SDLoc(Node24), Node24->getVTList(),
+                       DemandedLHS ? DemandedLHS : LHS,
+                       DemandedRHS ? DemandedRHS : RHS);
+
+  // Now try SimplifyDemandedBits which can simplify the nodes used by our
+  // operands if this node is the only user.
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
-  EVT VT = Op.getValueType();
+  if (TLI.SimplifyDemandedBits(LHS, Demanded, DCI))
+    return SDValue(Node24, 0);
+  if (TLI.SimplifyDemandedBits(RHS, Demanded, DCI))
+    return SDValue(Node24, 0);
 
-  APInt Demanded = APInt::getLowBitsSet(VT.getSizeInBits(), 24);
-  APInt KnownZero, KnownOne;
-  TargetLowering::TargetLoweringOpt TLO(DAG, true, true);
-  if (TLI.SimplifyDemandedBits(Node24, OpIdx, Demanded, DCI, TLO))
-    return true;
-
-  return false;
+  return SDValue();
 }
 
 template <typename IntTy>
@@ -2953,8 +2980,7 @@ SDValue AMDGPUTargetLowering::performShlCombine(SDNode *N,
     // shl (ext x) => zext (shl x), if shift does not overflow int
     if (VT != MVT::i64)
       break;
-    KnownBits Known;
-    DAG.computeKnownBits(X, Known);
+    KnownBits Known = DAG.computeKnownBits(X);
     unsigned LZ = Known.countMinLeadingZeros();
     if (LZ < RHSVal)
       break;
@@ -3113,8 +3139,7 @@ SDValue AMDGPUTargetLowering::performTruncateCombine(
          Src.getOpcode() == ISD::SRA ||
          Src.getOpcode() == ISD::SHL)) {
       SDValue Amt = Src.getOperand(1);
-      KnownBits Known;
-      DAG.computeKnownBits(Amt, Known);
+      KnownBits Known = DAG.computeKnownBits(Amt);
       unsigned Size = VT.getScalarSizeInBits();
       if ((Known.isConstant() && Known.getConstant().ule(Size)) ||
           (Known.getBitWidth() - Known.countMinLeadingZeros() <= Log2_32(Size))) {
@@ -3266,8 +3291,8 @@ SDValue AMDGPUTargetLowering::performMulLoHi24Combine(
   SelectionDAG &DAG = DCI.DAG;
 
   // Simplify demanded bits before splitting into multiple users.
-  if (simplifyI24(N, 0, DCI) || simplifyI24(N, 1, DCI))
-    return SDValue();
+  if (SDValue V = simplifyI24(N, DCI))
+    return V;
 
   SDValue N0 = N->getOperand(0);
   SDValue N1 = N->getOperand(1);
@@ -3512,6 +3537,10 @@ static unsigned inverseMinMax(unsigned Opc) {
     return ISD::FMINNUM;
   case ISD::FMINNUM:
     return ISD::FMAXNUM;
+  case ISD::FMAXNUM_IEEE:
+    return ISD::FMINNUM_IEEE;
+  case ISD::FMINNUM_IEEE:
+    return ISD::FMAXNUM_IEEE;
   case AMDGPUISD::FMAX_LEGACY:
     return AMDGPUISD::FMIN_LEGACY;
   case AMDGPUISD::FMIN_LEGACY:
@@ -3617,6 +3646,8 @@ SDValue AMDGPUTargetLowering::performFNegCombine(SDNode *N,
   }
   case ISD::FMAXNUM:
   case ISD::FMINNUM:
+  case ISD::FMAXNUM_IEEE:
+  case ISD::FMINNUM_IEEE:
   case AMDGPUISD::FMAX_LEGACY:
   case AMDGPUISD::FMIN_LEGACY: {
     // fneg (fmaxnum x, y) -> fminnum (fneg x), (fneg y)
@@ -3797,9 +3828,10 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
       if (Src.getValueType() == MVT::i64) {
         SDLoc SL(N);
         uint64_t CVal = C->getZExtValue();
-        return DAG.getNode(ISD::BUILD_VECTOR, SL, DestVT,
-                           DAG.getConstant(Lo_32(CVal), SL, MVT::i32),
-                           DAG.getConstant(Hi_32(CVal), SL, MVT::i32));
+        SDValue BV = DAG.getNode(ISD::BUILD_VECTOR, SL, MVT::v2i32,
+                                 DAG.getConstant(Lo_32(CVal), SL, MVT::i32),
+                                 DAG.getConstant(Hi_32(CVal), SL, MVT::i32));
+        return DAG.getNode(ISD::BITCAST, SL, DestVT, BV);
       }
     }
 
@@ -3846,9 +3878,8 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
   case AMDGPUISD::MUL_U24:
   case AMDGPUISD::MULHI_I24:
   case AMDGPUISD::MULHI_U24: {
-    // If the first call to simplify is successfull, then N may end up being
-    // deleted, so we shouldn't call simplifyI24 again.
-    simplifyI24(N, 0, DCI) || simplifyI24(N, 1, DCI);
+    if (SDValue V = simplifyI24(N, DCI))
+      return V;
     return SDValue();
   }
   case AMDGPUISD::MUL_LOHI_I24:
@@ -4161,6 +4192,7 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(TBUFFER_STORE_FORMAT_D16)
   NODE_NAME_CASE(TBUFFER_LOAD_FORMAT)
   NODE_NAME_CASE(TBUFFER_LOAD_FORMAT_D16)
+  NODE_NAME_CASE(DS_ORDERED_COUNT)
   NODE_NAME_CASE(ATOMIC_CMP_SWAP)
   NODE_NAME_CASE(ATOMIC_INC)
   NODE_NAME_CASE(ATOMIC_DEC)
@@ -4270,33 +4302,42 @@ void AMDGPUTargetLowering::computeKnownBitsForTargetNode(
   }
   case AMDGPUISD::MUL_U24:
   case AMDGPUISD::MUL_I24: {
-    KnownBits LHSKnown, RHSKnown;
-    DAG.computeKnownBits(Op.getOperand(0), LHSKnown, Depth + 1);
-    DAG.computeKnownBits(Op.getOperand(1), RHSKnown, Depth + 1);
-
+    KnownBits LHSKnown = DAG.computeKnownBits(Op.getOperand(0), Depth + 1);
+    KnownBits RHSKnown = DAG.computeKnownBits(Op.getOperand(1), Depth + 1);
     unsigned TrailZ = LHSKnown.countMinTrailingZeros() +
                       RHSKnown.countMinTrailingZeros();
     Known.Zero.setLowBits(std::min(TrailZ, 32u));
 
-    unsigned LHSValBits = 32 - std::max(LHSKnown.countMinSignBits(), 8u);
-    unsigned RHSValBits = 32 - std::max(RHSKnown.countMinSignBits(), 8u);
-    unsigned MaxValBits = std::min(LHSValBits + RHSValBits, 32u);
-    if (MaxValBits >= 32)
-      break;
+    // Truncate to 24 bits.
+    LHSKnown = LHSKnown.trunc(24);
+    RHSKnown = RHSKnown.trunc(24);
+
     bool Negative = false;
     if (Opc == AMDGPUISD::MUL_I24) {
-      bool LHSNegative = !!(LHSKnown.One  & (1 << 23));
-      bool LHSPositive = !!(LHSKnown.Zero & (1 << 23));
-      bool RHSNegative = !!(RHSKnown.One  & (1 << 23));
-      bool RHSPositive = !!(RHSKnown.Zero & (1 << 23));
+      unsigned LHSValBits = 24 - LHSKnown.countMinSignBits();
+      unsigned RHSValBits = 24 - RHSKnown.countMinSignBits();
+      unsigned MaxValBits = std::min(LHSValBits + RHSValBits, 32u);
+      if (MaxValBits >= 32)
+        break;
+      bool LHSNegative = LHSKnown.isNegative();
+      bool LHSPositive = LHSKnown.isNonNegative();
+      bool RHSNegative = RHSKnown.isNegative();
+      bool RHSPositive = RHSKnown.isNonNegative();
       if ((!LHSNegative && !LHSPositive) || (!RHSNegative && !RHSPositive))
         break;
       Negative = (LHSNegative && RHSPositive) || (LHSPositive && RHSNegative);
-    }
-    if (Negative)
-      Known.One.setHighBits(32 - MaxValBits);
-    else
+      if (Negative)
+        Known.One.setHighBits(32 - MaxValBits);
+      else
+        Known.Zero.setHighBits(32 - MaxValBits);
+    } else {
+      unsigned LHSValBits = 24 - LHSKnown.countMinLeadingZeros();
+      unsigned RHSValBits = 24 - RHSKnown.countMinLeadingZeros();
+      unsigned MaxValBits = std::min(LHSValBits + RHSValBits, 32u);
+      if (MaxValBits >= 32)
+        break;
       Known.Zero.setHighBits(32 - MaxValBits);
+    }
     break;
   }
   case AMDGPUISD::PERM: {
@@ -4304,9 +4345,8 @@ void AMDGPUTargetLowering::computeKnownBitsForTargetNode(
     if (!CMask)
       return;
 
-    KnownBits LHSKnown, RHSKnown;
-    DAG.computeKnownBits(Op.getOperand(0), LHSKnown, Depth + 1);
-    DAG.computeKnownBits(Op.getOperand(1), RHSKnown, Depth + 1);
+    KnownBits LHSKnown = DAG.computeKnownBits(Op.getOperand(0), Depth + 1);
+    KnownBits RHSKnown = DAG.computeKnownBits(Op.getOperand(1), Depth + 1);
     unsigned Sel = CMask->getZExtValue();
 
     for (unsigned I = 0; I < 32; I += 8) {

@@ -311,7 +311,7 @@ static const uint8_t ImportThunkARM64[] = {
 };
 
 // Windows-specific.
-// A chunk for DLL import jump table entry. In a final output, it's
+// A chunk for DLL import jump table entry. In a final output, its
 // contents will be a JMP instruction to some __imp_ symbol.
 class ImportThunkChunkX64 : public Chunk {
 public:
@@ -368,7 +368,9 @@ public:
 // See comments for DefinedLocalImport class.
 class LocalImportChunk : public Chunk {
 public:
-  explicit LocalImportChunk(Defined *S) : Sym(S) {}
+  explicit LocalImportChunk(Defined *S) : Sym(S) {
+    Alignment = Config->Wordsize;
+  }
   size_t getSize() const override;
   void getBaserels(std::vector<Baserel> *Res) override;
   void writeTo(uint8_t *Buf) const override;

@@ -8,9 +8,9 @@
 #ifndef GrOpList_DEFINED
 #define GrOpList_DEFINED
 
-#include "GrColor.h"
 #include "GrProxyRef.h"
 #include "GrTextureProxy.h"
+#include "SkColorData.h"
 #include "SkRefCnt.h"
 #include "SkTDArray.h"
 
@@ -86,11 +86,7 @@ public:
      */
     SkDEBUGCODE(virtual void dump(bool printDependencies) const;)
 
-    SkDEBUGCODE(virtual int numOps() const = 0;)
     SkDEBUGCODE(virtual int numClips() const { return 0; })
-
-    // TODO: it would be nice for this to be hidden
-    void setStencilLoadOp(GrLoadOp loadOp) { fStencilLoadOp = loadOp; }
 
 protected:
     bool isInstantiated() const;
@@ -107,7 +103,7 @@ protected:
     GrAuditTrail*         fAuditTrail;
 
     GrLoadOp              fColorLoadOp    = GrLoadOp::kLoad;
-    GrColor               fLoadClearColor = 0x0;
+    SkPMColor4f           fLoadClearColor = SK_PMColor4fTRANSPARENT;
     GrLoadOp              fStencilLoadOp  = GrLoadOp::kLoad;
 
     // List of texture proxies whose contents are being prepared on a worker thread
@@ -122,7 +118,7 @@ private:
     SkDEBUGCODE(void validate() const);
     void closeThoseWhoDependOnMe(const GrCaps&);
 
-    // Remove all Ops which reference proxies that have not been instantiated.
+    // Remove all Ops which reference proxies that are not instantiated.
     virtual void purgeOpsWithUninstantiatedProxies() = 0;
 
     // Feed proxy usage intervals to the GrResourceAllocator class

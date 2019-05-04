@@ -39,6 +39,10 @@ void WebRuntimeFeatures::EnableBlinkHeapIncrementalMarking(bool enable) {
   RuntimeEnabledFeatures::SetHeapIncrementalMarkingEnabled(enable);
 }
 
+void WebRuntimeFeatures::EnableBlinkHeapUnifiedGarbageCollection(bool enable) {
+  RuntimeEnabledFeatures::SetHeapUnifiedGarbageCollectionEnabled(enable);
+}
+
 void WebRuntimeFeatures::EnableBloatedRendererDetection(bool enable) {
   RuntimeEnabledFeatures::SetBloatedRendererDetectionEnabled(enable);
 }
@@ -49,6 +53,10 @@ void WebRuntimeFeatures::EnableExperimentalFeatures(bool enable) {
 
 void WebRuntimeFeatures::EnableWebBluetooth(bool enable) {
   RuntimeEnabledFeatures::SetWebBluetoothEnabled(enable);
+}
+
+void WebRuntimeFeatures::EnableWebBluetoothScanning(bool enable) {
+  RuntimeEnabledFeatures::SetWebBluetoothScanningEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnableWebNfc(bool enable) {
@@ -64,6 +72,14 @@ void WebRuntimeFeatures::EnableFeatureFromString(const std::string& name,
   RuntimeEnabledFeatures::SetFeatureEnabledFromString(name, enable);
 }
 
+bool WebRuntimeFeatures::IsBlinkGenPropertyTreesEnabled() {
+  return RuntimeEnabledFeatures::BlinkGenPropertyTreesEnabled();
+}
+
+bool WebRuntimeFeatures::IsFractionalScrollOffsetsEnabled() {
+  return RuntimeEnabledFeatures::FractionalScrollOffsetsEnabled();
+}
+
 void WebRuntimeFeatures::EnableTestOnlyFeatures(bool enable) {
   RuntimeEnabledFeatures::SetTestFeaturesEnabled(enable);
 }
@@ -72,8 +88,8 @@ void WebRuntimeFeatures::EnableOriginTrialControlledFeatures(bool enable) {
   RuntimeEnabledFeatures::SetOriginTrialControlledFeaturesEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableOutOfBlinkCORS(bool enable) {
-  RuntimeEnabledFeatures::SetOutOfBlinkCORSEnabled(enable);
+void WebRuntimeFeatures::EnableOutOfBlinkCors(bool enable) {
+  RuntimeEnabledFeatures::SetOutOfBlinkCorsEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnableAccelerated2dCanvas(bool enable) {
@@ -104,6 +120,10 @@ void WebRuntimeFeatures::EnableIsolatedCodeCache(bool enable) {
   RuntimeEnabledFeatures::SetIsolatedCodeCacheEnabled(enable);
 }
 
+void WebRuntimeFeatures::EnableWasmCodeCache(bool enable) {
+  RuntimeEnabledFeatures::SetWasmCodeCacheEnabled(enable);
+}
+
 void WebRuntimeFeatures::EnableCanvas2dImageChromium(bool enable) {
   RuntimeEnabledFeatures::SetCanvas2dImageChromiumEnabled(enable);
 }
@@ -132,6 +152,10 @@ void WebRuntimeFeatures::EnableScrollTopLeftInterop(bool enable) {
   RuntimeEnabledFeatures::SetScrollTopLeftInteropEnabled(enable);
 }
 
+void WebRuntimeFeatures::EnableKeyboardFocusableScrollers(bool enable) {
+  RuntimeEnabledFeatures::SetKeyboardFocusableScrollersEnabled(enable);
+}
+
 void WebRuntimeFeatures::EnableDatabase(bool enable) {
   RuntimeEnabledFeatures::SetDatabaseEnabled(enable);
 }
@@ -148,12 +172,12 @@ void WebRuntimeFeatures::EnableFileSystem(bool enable) {
   RuntimeEnabledFeatures::SetFileSystemEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableForceTallerSelectPopup(bool enable) {
-  RuntimeEnabledFeatures::SetForceTallerSelectPopupEnabled(enable);
+void WebRuntimeFeatures::EnableFirstContentfulPaintPlusPlus(bool enable) {
+  RuntimeEnabledFeatures::SetFirstContentfulPaintPlusPlusEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableGamepadExtensions(bool enable) {
-  RuntimeEnabledFeatures::SetGamepadExtensionsEnabled(enable);
+void WebRuntimeFeatures::EnableForceTallerSelectPopup(bool enable) {
+  RuntimeEnabledFeatures::SetForceTallerSelectPopupEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnableGamepadVibration(bool enable) {
@@ -172,12 +196,18 @@ void WebRuntimeFeatures::EnableHeapCompaction(bool enable) {
   RuntimeEnabledFeatures::SetHeapCompactionEnabled(enable);
 }
 
+void WebRuntimeFeatures::EnableImplicitRootScroller(bool enable) {
+  RuntimeEnabledFeatures::SetImplicitRootScrollerEnabled(enable);
+}
+
 void WebRuntimeFeatures::EnableInputMultipleFieldsUI(bool enable) {
   RuntimeEnabledFeatures::SetInputMultipleFieldsUIEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableJankTracking(bool enable) {
+void WebRuntimeFeatures::EnableJankTracking(bool enable, bool use_sweep_line) {
   RuntimeEnabledFeatures::SetJankTrackingEnabled(enable);
+  RuntimeEnabledFeatures::SetJankTrackingSweepLineEnabled(enable &&
+                                                          use_sweep_line);
 }
 
 void WebRuntimeFeatures::EnableLayeredAPI(bool enable) {
@@ -240,10 +270,6 @@ void WebRuntimeFeatures::EnableNavigatorContentUtils(bool enable) {
   RuntimeEnabledFeatures::SetNavigatorContentUtilsEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableNestedWorkers(bool enable) {
-  RuntimeEnabledFeatures::SetNestedWorkersEnabled(enable);
-}
-
 void WebRuntimeFeatures::EnableNetInfoDownlinkMax(bool enable) {
   RuntimeEnabledFeatures::SetNetInfoDownlinkMaxEnabled(enable);
 }
@@ -270,6 +296,10 @@ bool WebRuntimeFeatures::IsOriginTrialsEnabled() {
 
 void WebRuntimeFeatures::EnableOverflowIconsForMediaControls(bool enable) {
   RuntimeEnabledFeatures::SetOverflowIconsForMediaControlsEnabled(enable);
+}
+
+void WebRuntimeFeatures::EnableOverscrollCustomization(bool enable) {
+  RuntimeEnabledFeatures::SetOverscrollCustomizationEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnablePageLifecycle(bool enable) {
@@ -316,10 +346,6 @@ void WebRuntimeFeatures::EnablePortals(bool enable) {
   RuntimeEnabledFeatures::SetPortalsEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnablePreloadDefaultIsMetadata(bool enable) {
-  RuntimeEnabledFeatures::SetPreloadDefaultIsMetadataEnabled(enable);
-}
-
 void WebRuntimeFeatures::EnablePreloadImageSrcSetEnabled(bool enable) {
   RuntimeEnabledFeatures::SetPreloadImageSrcSetEnabled(enable);
 }
@@ -328,12 +354,20 @@ void WebRuntimeFeatures::EnableRasterInducingScroll(bool enable) {
   RuntimeEnabledFeatures::SetRasterInducingScrollEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableScriptedSpeech(bool enable) {
-  RuntimeEnabledFeatures::SetScriptedSpeechEnabled(enable);
+void WebRuntimeFeatures::EnableScriptedSpeechRecognition(bool enable) {
+  RuntimeEnabledFeatures::SetScriptedSpeechRecognitionEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableSlimmingPaintV2(bool enable) {
-  RuntimeEnabledFeatures::SetSlimmingPaintV2Enabled(enable);
+void WebRuntimeFeatures::EnableScriptedSpeechSynthesis(bool enable) {
+  RuntimeEnabledFeatures::SetScriptedSpeechSynthesisEnabled(enable);
+}
+
+bool WebRuntimeFeatures::IsCompositeAfterPaintEnabled() {
+  return RuntimeEnabledFeatures::CompositeAfterPaintEnabled();
+}
+
+void WebRuntimeFeatures::EnableUserActivationSameOriginVisibility(bool enable) {
+  RuntimeEnabledFeatures::SetUserActivationSameOriginVisibilityEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnableUserActivationV2(bool enable) {
@@ -374,10 +408,6 @@ void WebRuntimeFeatures::EnableSharedArrayBuffer(bool enable) {
 
 void WebRuntimeFeatures::EnableSharedWorker(bool enable) {
   RuntimeEnabledFeatures::SetSharedWorkerEnabled(enable);
-}
-
-void WebRuntimeFeatures::EnableSignedHTTPExchange(bool enable) {
-  RuntimeEnabledFeatures::SetSignedHTTPExchangeEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnablePreciseMemoryInfo(bool enable) {
@@ -432,12 +462,18 @@ void WebRuntimeFeatures::EnableRenderingPipelineThrottling(bool enable) {
   RuntimeEnabledFeatures::SetRenderingPipelineThrottlingEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableRequireCSSExtensionForFile(bool enable) {
-  RuntimeEnabledFeatures::SetRequireCSSExtensionForFileEnabled(enable);
-}
-
 void WebRuntimeFeatures::EnableResourceLoadScheduler(bool enable) {
   RuntimeEnabledFeatures::SetResourceLoadSchedulerEnabled(enable);
+}
+
+void WebRuntimeFeatures::EnableRestrictLazyFrameLoadingToDataSaver(
+    bool enable) {
+  RuntimeEnabledFeatures::SetRestrictLazyFrameLoadingToDataSaverEnabled(enable);
+}
+
+void WebRuntimeFeatures::EnableRestrictLazyImageLoadingToDataSaver(
+    bool enable) {
+  RuntimeEnabledFeatures::SetRestrictLazyImageLoadingToDataSaverEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnableExpensiveBackgroundTimerThrottling(bool enable) {
@@ -450,10 +486,6 @@ void WebRuntimeFeatures::EnableScrollAnchorSerialization(bool enable) {
 
 void WebRuntimeFeatures::EnableSecMetadata(bool enable) {
   RuntimeEnabledFeatures::SetSecMetadataEnabled(enable);
-}
-
-void WebRuntimeFeatures::EnableServiceWorkerScriptFullCodeCache(bool enable) {
-  RuntimeEnabledFeatures::SetServiceWorkerScriptFullCodeCacheEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnableTimerThrottlingForBackgroundTabs(bool enable) {
@@ -528,28 +560,16 @@ void WebRuntimeFeatures::EnableMediaEngagementBypassAutoplayPolicies(
       enable);
 }
 
-void WebRuntimeFeatures::EnableV8ContextSnapshot(bool enable) {
-  RuntimeEnabledFeatures::SetV8ContextSnapshotEnabled(enable);
-}
-
 void WebRuntimeFeatures::EnableAutomationControlled(bool enable) {
   RuntimeEnabledFeatures::SetAutomationControlledEnabled(enable);
-}
-
-void WebRuntimeFeatures::EnableWorkStealingInScriptRunner(bool enable) {
-  RuntimeEnabledFeatures::SetWorkStealingInScriptRunnerEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnableScheduledScriptStreaming(bool enable) {
   RuntimeEnabledFeatures::SetScheduledScriptStreamingEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnablePWAFullCodeCache(bool enable) {
-  RuntimeEnabledFeatures::SetPWAFullCodeCacheEnabled(enable);
-}
-
-void WebRuntimeFeatures::EnableOffMainThreadWebSocket(bool enable) {
-  RuntimeEnabledFeatures::SetOffMainThreadWebSocketEnabled(enable);
+void WebRuntimeFeatures::EnableScriptStreamingOnPreload(bool enable) {
+  RuntimeEnabledFeatures::SetScriptStreamingOnPreloadEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnableExperimentalProductivityFeatures(bool enable) {
@@ -568,12 +588,24 @@ void WebRuntimeFeatures::EnableMediaControlsExpandGesture(bool enable) {
   RuntimeEnabledFeatures::SetMediaControlsExpandGestureEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableHrefTranslate(bool enable) {
-  RuntimeEnabledFeatures::SetHrefTranslateEnabled(enable);
+void WebRuntimeFeatures::EnableTranslateService(bool enable) {
+  RuntimeEnabledFeatures::SetTranslateServiceEnabled(enable);
 }
 
 void WebRuntimeFeatures::EnableBackgroundFetch(bool enable) {
   RuntimeEnabledFeatures::SetBackgroundFetchEnabled(enable);
+}
+
+void WebRuntimeFeatures::EnableMergeBlockingNonBlockingPools(bool enable) {
+  RuntimeEnabledFeatures::SetMergeBlockingNonBlockingPoolsEnabled(enable);
+}
+
+void WebRuntimeFeatures::EnableGetDisplayMedia(bool enable) {
+  RuntimeEnabledFeatures::SetGetDisplayMediaEnabled(enable);
+}
+
+void WebRuntimeFeatures::EnableForbidSyncXHRInPageDismissal(bool enable) {
+  RuntimeEnabledFeatures::SetForbidSyncXHRInPageDismissalEnabled(enable);
 }
 
 }  // namespace blink

@@ -8,6 +8,12 @@ namespace installer {
 
 namespace switches {
 
+// Allow an update of Chrome from a higher version to a lower version.
+// Ordinarily, such downgrades are disallowed. An administrator may wish to
+// allow them in circumstances where the potential loss of user data is
+// permissable.
+const char kAllowDowngrade[] = "allow-downgrade";
+
 // Run the installer for Chrome SxS.
 const char kChromeSxS[] = "chrome-sxs";
 
@@ -190,6 +196,9 @@ const wchar_t kChromeChildDll[] = L"chrome_child.dll";
 const wchar_t kChromeExe[] = L"chrome.exe";
 const wchar_t kChromeNewExe[] = L"new_chrome.exe";
 const wchar_t kChromeOldExe[] = L"old_chrome.exe";
+const wchar_t kChromeProxyExe[] = L"chrome_proxy.exe";
+const wchar_t kChromeProxyNewExe[] = L"new_chrome_proxy.exe";
+const wchar_t kChromeProxyOldExe[] = L"old_chrome_proxy.exe";
 const wchar_t kCmdOnOsUpgrade[] = L"on-os-upgrade";
 const wchar_t kCmdStoreDMToken[] = L"store-dmtoken";
 const wchar_t kEulaSentinelFile[] = L"EULA Accepted";

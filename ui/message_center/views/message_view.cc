@@ -118,39 +118,16 @@ void MessageView::SetIsNested() {
   is_nested_ = true;
   // Update enability since it might be changed by "is_nested" flag.
   slide_out_controller_.set_slide_mode(CalculateSlideMode());
+  slide_out_controller_.set_update_opacity(false);
 
   SetBorder(views::CreateRoundedRectBorder(
       kNotificationBorderThickness, kNotificationCornerRadius, kBorderColor));
-
-  auto* control_buttons_view = GetControlButtonsView();
-  if (control_buttons_view) {
-    int control_button_count =
-        (control_buttons_view->settings_button() ? 1 : 0) +
-        (control_buttons_view->snooze_button() ? 1 : 0);
-    if (control_button_count)
-      slide_out_controller_.EnableSwipeControl(control_button_count);
-    // TODO(crbug.com/1177464): support updating the swipe control when
-    // should_show_setting_buttons is changed after notification creation.
-  }
+  if (GetControlButtonsView())
+    GetControlButtonsView()->ShowCloseButton(GetMode() != Mode::PINNED);
 }
 
 void MessageView::CloseSwipeControl() {
   slide_out_controller_.CloseSwipeControl();
-}
-
-bool MessageView::IsCloseButtonFocused() const {
-  auto* control_buttons_view = GetControlButtonsView();
-  return control_buttons_view ? control_buttons_view->IsCloseButtonFocused()
-                              : false;
-}
-
-void MessageView::RequestFocusOnCloseButton() {
-  auto* control_buttons_view = GetControlButtonsView();
-  if (!control_buttons_view)
-    return;
-
-  control_buttons_view->RequestFocusOnCloseButton();
-  UpdateControlButtonsVisibility();
 }
 
 void MessageView::SetExpanded(bool expanded) {
@@ -324,7 +301,13 @@ ui::Layer* MessageView::GetSlideOutLayer() {
   return is_nested_ ? layer() : GetWidget()->GetLayer();
 }
 
-void MessageView::OnSlideChanged() {
+void MessageView::OnSlideStarted() {
+  for (auto* observer : slide_observers_) {
+    observer->OnSlideStarted(notification_id_);
+  }
+}
+
+void MessageView::OnSlideChanged(bool in_progress) {
   for (auto* observer : slide_observers_) {
     observer->OnSlideChanged(notification_id_);
   }
@@ -385,11 +368,16 @@ float MessageView::GetSlideAmount() const {
 void MessageView::SetSettingMode(bool setting_mode) {
   setting_mode_ = setting_mode;
   slide_out_controller_.set_slide_mode(CalculateSlideMode());
+  UpdateControlButtonsVisibility();
 }
 
 void MessageView::DisableSlideForcibly(bool disable) {
   disable_slide_ = disable;
   slide_out_controller_.set_slide_mode(CalculateSlideMode());
+}
+
+void MessageView::SetSlideButtonWidth(int control_button_width) {
+  slide_out_controller_.SetSwipeControlWidth(control_button_width);
 }
 
 void MessageView::OnCloseButtonPressed() {
@@ -398,13 +386,31 @@ void MessageView::OnCloseButtonPressed() {
 }
 
 void MessageView::OnSettingsButtonPressed(const ui::Event& event) {
-  slide_out_controller_.CloseSwipeControl();
   MessageCenter::Get()->ClickOnSettingsButton(notification_id_);
 }
 
 void MessageView::OnSnoozeButtonPressed(const ui::Event& event) {
-  slide_out_controller_.CloseSwipeControl();
   // No default implementation for snooze.
+}
+
+bool MessageView::ShouldShowControlButtons() const {
+#if defined(OS_CHROMEOS)
+  // Users on ChromeOS are used to the Settings and Close buttons not being
+  // visible at all times, but users on other platforms expect them to be
+  // visible.
+  auto* control_buttons_view = GetControlButtonsView();
+  return control_buttons_view &&
+         (control_buttons_view->IsAnyButtonFocused() ||
+          (GetMode() != Mode::SETTING && IsMouseHovered()));
+#else
+  return true;
+#endif
+}
+
+void MessageView::UpdateControlButtonsVisibility() {
+  auto* control_buttons_view = GetControlButtonsView();
+  if (control_buttons_view)
+    control_buttons_view->ShowButtons(ShouldShowControlButtons());
 }
 
 void MessageView::SetDrawBackgroundAsActive(bool active) {

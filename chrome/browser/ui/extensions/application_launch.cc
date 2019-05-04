@@ -32,6 +32,7 @@
 #include "chrome/browser/ui/extensions/hosted_app_browser_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
+#include "chrome/browser/web_applications/components/web_app_tab_helper_base.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
@@ -178,7 +179,7 @@ ui::WindowShowState DetermineWindowShowState(
 }
 
 WebContents* OpenApplicationTab(const AppLaunchParams& launch_params,
-                           const GURL& url) {
+                                const GURL& url) {
   const Extension* extension = GetExtension(launch_params);
   CHECK(extension);
   Profile* const profile = launch_params.profile;
@@ -226,7 +227,7 @@ WebContents* OpenApplicationTab(const AppLaunchParams& launch_params,
         url,
         content::Referrer::SanitizeForRequest(
             url, content::Referrer(existing_tab->GetURL(),
-                                   blink::kWebReferrerPolicyDefault)),
+                                   network::mojom::ReferrerPolicy::kDefault)),
         disposition, transition, false));
     // Reset existing_tab as OpenURL() may have clobbered it.
     existing_tab = browser->tab_strip_model()->GetActiveWebContents();
@@ -243,6 +244,11 @@ WebContents* OpenApplicationTab(const AppLaunchParams& launch_params,
     Navigate(&params);
     contents = params.navigated_or_inserted_contents;
   }
+
+  web_app::WebAppTabHelperBase* tab_helper =
+      web_app::WebAppTabHelperBase::FromWebContents(contents);
+  DCHECK(tab_helper);
+  tab_helper->SetAppId(extension->id());
 
 #if defined(OS_CHROMEOS)
   // In ash, LAUNCH_FULLSCREEN launches in the OpenApplicationWindow function
@@ -292,7 +298,8 @@ WebContents* OpenEnabledApplication(const AppLaunchParams& params) {
       NOTREACHED();
       break;
     }
-    case extensions::LAUNCH_CONTAINER_PANEL:
+    // Panels are deprecated. Launch a normal window instead.
+    case extensions::LAUNCH_CONTAINER_PANEL_DEPRECATED:
     case extensions::LAUNCH_CONTAINER_WINDOW:
       tab = OpenApplicationWindow(params, url);
       break;
@@ -383,8 +390,16 @@ WebContents* ShowApplicationWindow(const AppLaunchParams& params,
   Navigate(&nav_params);
 
   WebContents* web_contents = nav_params.navigated_or_inserted_contents;
+
   extensions::HostedAppBrowserController::SetAppPrefsForWebContents(
       browser->hosted_app_controller(), web_contents);
+  if (extension) {
+    web_app::WebAppTabHelperBase* tab_helper =
+        web_app::WebAppTabHelperBase::FromWebContents(web_contents);
+    DCHECK(tab_helper);
+    tab_helper->SetAppId(extension->id());
+  }
+
   browser->window()->Show();
 
   // TODO(jcampan): http://crbug.com/8123 we should not need to set the initial

@@ -9,47 +9,61 @@
 
 #include "test_utils/angle_test_instantiate.h"
 
-#include <map>
 #include <iostream>
+#include <map>
 
-#include "EGLWindow.h"
-#include "OSWindow.h"
-#include "compiler/translator/Compiler.h"
-#include "compiler/translator/InitializeGlobals.h"
+#include "angle_gl.h"
+#include "common/platform.h"
 #include "test_utils/angle_test_configs.h"
+#include "util/EGLWindow.h"
+#include "util/OSWindow.h"
+#include "util/system_utils.h"
+
+#if defined(ANGLE_PLATFORM_WINDOWS)
+#    include "util/windows/WGLWindow.h"
+#endif  // defined(ANGLE_PLATFORM_WINDOWS)
 
 namespace angle
 {
-
-bool IsPlatformAvailable(const CompilerParameters &param)
+namespace
 {
-    switch (param.output)
-    {
-        case SH_HLSL_4_1_OUTPUT:
-        case SH_HLSL_4_0_FL9_3_OUTPUT:
-        case SH_HLSL_3_0_OUTPUT:
-        {
-            TPoolAllocator allocator;
-            InitializePoolIndex();
-            allocator.push();
-            SetGlobalPoolAllocator(&allocator);
-            ShHandle translator =
-                sh::ConstructCompiler(GL_FRAGMENT_SHADER, SH_WEBGL2_SPEC, param.output);
-            bool success = translator != nullptr;
-            SetGlobalPoolAllocator(nullptr);
-            allocator.pop();
-            FreePoolIndex();
-            if (!success)
-            {
-                return false;
-            }
-            break;
-        }
-        default:
-            break;
-    }
-    return true;
+bool IsANGLEConfigSupported(const PlatformParameters &param, OSWindow *osWindow)
+{
+    std::unique_ptr<angle::Library> eglLibrary;
+
+#if defined(ANGLE_USE_UTIL_LOADER)
+    eglLibrary.reset(angle::OpenSharedLibrary(ANGLE_EGL_LIBRARY_NAME));
+#endif
+
+    EGLWindow *eglWindow =
+        EGLWindow::New(param.majorVersion, param.minorVersion, param.eglParameters);
+    bool result = eglWindow->initializeGL(osWindow, eglLibrary.get());
+    eglWindow->destroyGL();
+    EGLWindow::Delete(&eglWindow);
+    return result;
 }
+
+bool IsWGLConfigSupported(const PlatformParameters &param, OSWindow *osWindow)
+{
+#if defined(ANGLE_PLATFORM_WINDOWS) && defined(ANGLE_USE_UTIL_LOADER)
+    std::unique_ptr<angle::Library> openglLibrary(angle::OpenSharedLibrary("opengl32"));
+
+    WGLWindow *wglWindow = WGLWindow::New(param.majorVersion, param.minorVersion);
+    bool result          = wglWindow->initializeGL(osWindow, openglLibrary.get());
+    wglWindow->destroyGL();
+    WGLWindow::Delete(&wglWindow);
+    return result;
+#else
+    return false;
+#endif  // defined(ANGLE_PLATFORM_WINDOWS) && defined(ANGLE_USE_UTIL_LOADER)
+}
+
+bool IsNativeConfigSupported(const PlatformParameters &param, OSWindow *osWindow)
+{
+    // Not yet implemented.
+    return false;
+}
+}  // namespace
 
 bool IsPlatformAvailable(const PlatformParameters &param)
 {
@@ -87,15 +101,15 @@ bool IsPlatformAvailable(const PlatformParameters &param)
             break;
 #endif
 
-      case EGL_PLATFORM_ANGLE_TYPE_NULL_ANGLE:
+        case EGL_PLATFORM_ANGLE_TYPE_NULL_ANGLE:
 #ifndef ANGLE_ENABLE_NULL
-          return false;
+            return false;
 #endif
-          break;
+            break;
 
-      default:
-          std::cout << "Unknown test platform: " << param << std::endl;
-          return false;
+        default:
+            std::cout << "Unknown test platform: " << param << std::endl;
+            return false;
     }
 
     static std::map<PlatformParameters, bool> paramAvailabilityCache;
@@ -106,27 +120,33 @@ bool IsPlatformAvailable(const PlatformParameters &param)
     }
     else
     {
-        OSWindow *osWindow = CreateOSWindow();
-        bool result = osWindow->initialize("CONFIG_TESTER", 1, 1);
-
+        OSWindow *osWindow = OSWindow::New();
+        bool result        = osWindow->initialize("CONFIG_TESTER", 1, 1);
         if (result)
         {
-            EGLWindow *eglWindow =
-                new EGLWindow(param.majorVersion, param.minorVersion, param.eglParameters);
-            result = eglWindow->initializeGL(osWindow);
-
-            eglWindow->destroyGL();
-            SafeDelete(eglWindow);
+            switch (param.driver)
+            {
+                case GLESDriverType::AngleEGL:
+                    result = IsANGLEConfigSupported(param, osWindow);
+                    break;
+                case GLESDriverType::SystemEGL:
+                    result = IsNativeConfigSupported(param, osWindow);
+                    break;
+                case GLESDriverType::SystemWGL:
+                    result = IsWGLConfigSupported(param, osWindow);
+                    break;
+            }
         }
 
         osWindow->destroy();
-        SafeDelete(osWindow);
+        OSWindow::Delete(&osWindow);
 
         paramAvailabilityCache[param] = result;
 
         if (!result)
         {
-            std::cout << "Skipping tests using configuration " << param << " because it is not available." << std::endl;
+            std::cout << "Skipping tests using configuration " << param
+                      << " because it is not available." << std::endl;
         }
 
         return result;

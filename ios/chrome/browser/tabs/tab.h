@@ -26,7 +26,6 @@ class GURL;
 @class FormSuggestionController;
 @protocol TabDialogDelegate;
 @class Tab;
-@class TabModel;
 
 namespace ios {
 class ChromeBrowserState;
@@ -75,19 +74,11 @@ extern NSString* const kProxyPassthroughHeaderValue;
 // Browser state associated with this Tab.
 @property(nonatomic, readonly) ios::ChromeBrowserState* browserState;
 
-// The current title of the tab.
-@property(nonatomic, readonly) NSString* title;
-
-@property(nonatomic, readonly) NSString* urlDisplayString;
-
 // ID associated with this tab.
 @property(nonatomic, readonly) NSString* tabId;
 
 // The Webstate associated with this Tab.
 @property(nonatomic, readonly) web::WebState* webState;
-
-@property(nonatomic, readonly) BOOL canGoBack;
-@property(nonatomic, readonly) BOOL canGoForward;
 
 @property(nonatomic, readonly)
     OverscrollActionsController* overscrollActionsController;
@@ -97,25 +88,10 @@ extern NSString* const kProxyPassthroughHeaderValue;
 // Delegate used to show HTTP Authentication dialogs.
 @property(nonatomic, weak) id<TabDialogDelegate> dialogDelegate;
 
-// Whether this tab is displaying a voice search result.
-@property(nonatomic, readonly) BOOL isVoiceSearchResultsTab;
-
-// |YES| if the tab has finished loading.
-@property(nonatomic, readonly) BOOL loadFinished;
-
 // Creates a new Tab with the given WebState.
 - (instancetype)initWithWebState:(web::WebState*)webState;
 
 - (instancetype)init NS_UNAVAILABLE;
-
-// Sets the parent tab model for this tab.  Can only be called if the tab does
-// not already have a parent tab model set.
-// TODO(crbug.com/228575): Create a delegate interface and remove this.
-- (void)setParentTabModel:(TabModel*)model;
-
-// The view to display in the view hierarchy based on the current URL. Won't be
-// nil. It is up to the caller to size the view and confirm |webUsageEnabled|.
-- (UIView*)view;
 
 // The view that generates print data when printing. It can be nil when printing
 // is not supported with this tab. It can be different from |Tab view|.
@@ -133,31 +109,8 @@ extern NSString* const kProxyPassthroughHeaderValue;
 // be populated. Can return null.
 - (web::NavigationManager*)navigationManager;
 
-// Navigate forwards or backwards to |item|.
-- (void)goToItem:(const web::NavigationItem*)item;
-
-// Navigates forwards or backwards.
-// TODO(crbug.com/661664): These are passthroughs to the Tab's WebState's
-// NavigationManager. Convert all callers and remove these methods.
-- (void)goBack;
-- (void)goForward;
-
-// Returns the timestamp of the last time the tab is visited.
-- (double)lastVisitedTimestamp;
-
-// Updates the timestamp of the last time the tab is visited.
-- (void)updateLastVisitedTimestamp;
-
 // Called before capturing a snapshot for Tab.
 - (void)willUpdateSnapshot;
-
-// Whether or not desktop user agent is used for the currently visible page.
-@property(nonatomic, readonly) BOOL usesDesktopUserAgent;
-
-// Loads the original url of the last non-redirect item (including non-history
-// items). Used by request desktop/mobile site so that the updated user agent is
-// used.
-- (void)reloadWithUserAgentType:(web::UserAgentType)userAgentType;
 
 // Evaluates U2F result.
 - (void)evaluateU2FResultFromURL:(const GURL&)url;

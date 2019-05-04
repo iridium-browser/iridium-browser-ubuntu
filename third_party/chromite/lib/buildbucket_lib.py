@@ -22,7 +22,6 @@ import os
 import urllib
 
 from chromite.cbuildbot import topology
-from chromite.lib.const import waterfall
 from chromite.lib import auth
 from chromite.lib import constants
 from chromite.lib import cros_logging as logging
@@ -40,17 +39,6 @@ SEARCH_LIMIT_DEFAULT = 100
 MAX_BUILDS_LIMIT = 100
 # Default max_builds number
 MAX_BUILDS_DEFAULT = 10
-
-WATERFALL_BUCKET_MAP = {
-    waterfall.WATERFALL_INTERNAL:
-        constants.CHROMEOS_BUILDBUCKET_BUCKET,
-    waterfall.WATERFALL_EXTERNAL:
-        constants.CHROMIUMOS_BUILDBUCKET_BUCKET,
-    waterfall.WATERFALL_RELEASE:
-        constants.CHROMEOS_RELEASE_BUILDBUCKET_BUCKET,
-    waterfall.WATERFALL_SWARMING:
-        constants.INTERNAL_SWARMING_BUILDBUCKET_BUCKET,
-}
 
 # A running build on a buildbot should determin the buildbucket
 # instance based on the topology information.
@@ -547,3 +535,23 @@ def GetBuildTags(content, tag):
       result.append(tag_pair[1])
 
   return result
+
+def GetResultDetails(content):
+  """Return parsed result_details_json blob, or Nones."""
+  json_blob = GetNestedAttr(content, ['result_details_json'])
+  return json.loads(json_blob) if json_blob else None
+
+def GetBotId(content):
+  """Return the bot id that ran a build, or None."""
+  result_details = GetResultDetails(content)
+  if not result_details:
+    return None
+
+  # This produces a list of bot_ids for each build (or None).
+  # I don't think there can ever be more than one entry in the list, but
+  # could be zero.
+  bot_ids = GetNestedAttr(result_details, ['swarming', 'bot_dimensions', 'id'])
+  if not bot_ids:
+    return None
+
+  return bot_ids[0]

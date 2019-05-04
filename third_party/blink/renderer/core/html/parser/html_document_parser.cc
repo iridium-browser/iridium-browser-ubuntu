@@ -47,8 +47,9 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
-#include "third_party/blink/renderer/core/loader/link_loader.h"
 #include "third_party/blink/renderer/core/loader/navigation_scheduler.h"
+#include "third_party/blink/renderer/core/loader/preload_helper.h"
+#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/script/html_parser_script_runner.h"
 #include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
@@ -64,7 +65,7 @@
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 // This is a direct transcription of step 4 from:
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-end.html#fragment-case
@@ -77,19 +78,19 @@ static HTMLTokenizer::State TokenizerStateForContextElement(
 
   const QualifiedName& context_tag = context_element->TagQName();
 
-  if (context_tag.Matches(titleTag) || context_tag.Matches(textareaTag))
+  if (context_tag.Matches(kTitleTag) || context_tag.Matches(kTextareaTag))
     return HTMLTokenizer::kRCDATAState;
-  if (context_tag.Matches(styleTag) || context_tag.Matches(xmpTag) ||
-      context_tag.Matches(iframeTag) ||
-      (context_tag.Matches(noembedTag) && options.plugins_enabled) ||
-      (context_tag.Matches(noscriptTag) && options.script_enabled) ||
-      context_tag.Matches(noframesTag))
+  if (context_tag.Matches(kStyleTag) || context_tag.Matches(kXmpTag) ||
+      context_tag.Matches(kIFrameTag) ||
+      (context_tag.Matches(kNoembedTag) && options.plugins_enabled) ||
+      (context_tag.Matches(kNoscriptTag) && options.script_enabled) ||
+      context_tag.Matches(kNoframesTag))
     return report_errors ? HTMLTokenizer::kRAWTEXTState
                          : HTMLTokenizer::kPLAINTEXTState;
-  if (context_tag.Matches(scriptTag))
+  if (context_tag.Matches(kScriptTag))
     return report_errors ? HTMLTokenizer::kScriptDataState
                          : HTMLTokenizer::kPLAINTEXTState;
-  if (context_tag.Matches(plaintextTag))
+  if (context_tag.Matches(kPlaintextTag))
     return HTMLTokenizer::kPLAINTEXTState;
   return HTMLTokenizer::kDataState;
 }
@@ -166,7 +167,7 @@ void HTMLDocumentParser::Dispose() {
     StopBackgroundParser();
 }
 
-void HTMLDocumentParser::Trace(blink::Visitor* visitor) {
+void HTMLDocumentParser::Trace(Visitor* visitor) {
   visitor->Trace(tree_builder_);
   visitor->Trace(parser_scheduler_);
   visitor->Trace(xss_auditor_delegate_);
@@ -322,7 +323,7 @@ void HTMLDocumentParser::EnqueueTokenizedChunk(
     // Note that on commit, the loader dispatched preloads for all the non-media
     // links.
     GetDocument()->Loader()->DispatchLinkHeaderPreloads(
-        &chunk->viewport, LinkLoader::kOnlyLoadMedia);
+        &chunk->viewport, PreloadHelper::kOnlyLoadMedia);
     tried_loading_link_headers_ = true;
   }
 
@@ -807,9 +808,18 @@ void HTMLDocumentParser::StartBackgroundParser() {
       BackgroundHTMLParser::Create(std::move(config), loading_task_runner_);
   // TODO(csharrison): This is a hack to initialize MediaValuesCached on the
   // correct thread. We should get rid of it.
+
+  // TODO(domfarolino): Remove this once Priority Hints is no longer in Origin
+  // Trial. This currently exists because the TokenPreloadScanner needs to know
+  // the status of the Priority Hints Origin Trial, and has no way of figuring
+  // this out on its own. See https://crbug.com/821464.
+  bool priority_hints_origin_trial_enabled =
+      origin_trials::PriorityHintsEnabled(GetDocument());
+
   background_parser_->Init(
       GetDocument()->Url(), CachedDocumentParameters::Create(GetDocument()),
-      MediaValuesCached::MediaValuesCachedData(*GetDocument()));
+      MediaValuesCached::MediaValuesCachedData(*GetDocument()),
+      priority_hints_origin_trial_enabled);
 }
 
 void HTMLDocumentParser::StopBackgroundParser() {
@@ -1028,9 +1038,15 @@ void HTMLDocumentParser::ResumeParsingAfterPause() {
     return;
 
   if (have_background_parser_) {
+    // If we paused in the middle of processing a token chunk,
+    // deal with that before starting to pump.
     if (last_chunk_before_pause_) {
       ValidateSpeculations(std::move(last_chunk_before_pause_));
       DCHECK(!last_chunk_before_pause_);
+      PumpPendingSpeculations();
+    } else if (!IsScheduledForUnpause()) {
+      // Otherwise, start pumping if we're not already scheduled to unpause
+      // already.
       PumpPendingSpeculations();
     }
     return;
@@ -1211,8 +1227,9 @@ std::unique_ptr<HTMLPreloadScanner> HTMLDocumentParser::CreatePreloadScanner(
 }
 
 void HTMLDocumentParser::ScanAndPreload(HTMLPreloadScanner* scanner) {
-  PreloadRequestStream requests =
-      scanner->Scan(GetDocument()->ValidBaseElementURL(), nullptr);
+  bool seen_csp_meta_tag = false;
+  PreloadRequestStream requests = scanner->Scan(
+      GetDocument()->ValidBaseElementURL(), nullptr, seen_csp_meta_tag);
   preloader_->TakeAndPreload(requests);
 }
 

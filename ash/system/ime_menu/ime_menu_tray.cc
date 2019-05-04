@@ -6,6 +6,7 @@
 
 #include "ash/accessibility/accessibility_controller.h"
 #include "ash/ime/ime_controller.h"
+#include "ash/keyboard/ash_keyboard_controller.h"
 #include "ash/keyboard/virtual_keyboard_controller.h"
 #include "ash/public/cpp/ash_constants.h"
 #include "ash/resources/vector_icons/vector_icons.h"
@@ -271,54 +272,43 @@ class ImeButtonsView : public views::View, public views::ButtonListener {
 
 // A list of available IMEs shown in the opt-in IME menu, which has a different
 // height depending on the number of IMEs in the list.
-class ImeMenuListView : public ImeListView, public DetailedViewDelegate {
+class ImeMenuListView : public ImeListView {
  public:
-  ImeMenuListView() : ImeListView(this, false /* use_unified_theme */) {
-    set_should_focus_ime_after_selection_with_keyboard(true);
-  }
-
+  ImeMenuListView() : ImeMenuListView(std::make_unique<Delegate>()) {}
   ~ImeMenuListView() override = default;
 
-  // DetailedViewDelegate:
-  void TransitionToMainView(bool restore_focus) override {}
-  void CloseBubble() override {}
-  SkColor GetBackgroundColor(ui::NativeTheme* native_theme) override {
-    return native_theme->GetSystemColor(
-        ui::NativeTheme::kColorId_BubbleBackground);
-  }
-  bool IsOverflowIndicatorEnabled() const override { return true; }
-  TriView* CreateTitleRow(int string_id) override { return nullptr; }
-  views::View* CreateTitleSeparator() override { return nullptr; }
-  void ShowStickyHeaderSeparator(views::View* view,
-                                 bool show_separator) override {}
-  views::Separator* CreateListSubHeaderSeparator() override { return nullptr; }
-  HoverHighlightView* CreateScrollListItem(
-      ViewClickListener* listener,
-      const gfx::VectorIcon& icon,
-      const base::string16& text) override {
-    return nullptr;
-  }
-  views::Button* CreateBackButton(views::ButtonListener* listener) override {
-    return nullptr;
-  }
-  views::Button* CreateInfoButton(views::ButtonListener* listener,
-                                  int info_accessible_name_id) override {
-    return nullptr;
-  }
-  views::Button* CreateSettingsButton(views::ButtonListener* listener,
-                                      int setting_accessible_name_id) override {
-    return nullptr;
-  }
-  views::Button* CreateHelpButton(views::ButtonListener* listener) override {
-    return nullptr;
+ private:
+  class Delegate : public DetailedViewDelegate {
+   public:
+    Delegate() : DetailedViewDelegate(nullptr /* tray_controller */) {}
+
+    // DetailedViewDelegate:
+    void TransitionToMainView(bool restore_focus) override {}
+    void CloseBubble() override {}
+    SkColor GetBackgroundColor(ui::NativeTheme* native_theme) override {
+      return native_theme->GetSystemColor(
+          ui::NativeTheme::kColorId_BubbleBackground);
+    }
+    bool IsOverflowIndicatorEnabled() const override { return true; }
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(Delegate);
+  };
+
+  ImeMenuListView(std::unique_ptr<Delegate> delegate)
+      : ImeListView(delegate.get(), false /* use_unified_theme */) {
+    set_should_focus_ime_after_selection_with_keyboard(true);
+    delegate_ = std::move(delegate);
   }
 
- protected:
+  // ImeListView:
   void Layout() override {
     gfx::Range height_range = GetImeListViewRange();
     scroller()->ClipHeightTo(height_range.start(), height_range.end());
     ImeListView::Layout();
   }
+
+  std::unique_ptr<Delegate> delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ImeMenuListView);
 };
@@ -397,8 +387,10 @@ void ImeMenuTray::ShowKeyboardWithKeyset(
     chromeos::input_method::mojom::ImeKeyset keyset) {
   CloseBubble();
 
-  Shell::Get()->virtual_keyboard_controller()->ForceShowKeyboardWithKeyset(
-      keyset);
+  Shell::Get()
+      ->ash_keyboard_controller()
+      ->virtual_keyboard_controller()
+      ->ForceShowKeyboardWithKeyset(keyset);
 }
 
 bool ImeMenuTray::ShouldShowBottomButtons() {
@@ -427,7 +419,7 @@ bool ImeMenuTray::ShouldShowBottomButtons() {
 
 bool ImeMenuTray::ShouldShowKeyboardToggle() const {
   return keyboard_suppressed_ &&
-         !Shell::Get()->accessibility_controller()->IsVirtualKeyboardEnabled();
+         !Shell::Get()->accessibility_controller()->virtual_keyboard_enabled();
 }
 
 base::string16 ImeMenuTray::GetAccessibleNameForTray() {
@@ -499,7 +491,7 @@ base::string16 ImeMenuTray::GetAccessibleNameForBubble() {
 }
 
 bool ImeMenuTray::ShouldEnableExtraKeyboardAccessibility() {
-  return Shell::Get()->accessibility_controller()->IsSpokenFeedbackEnabled();
+  return Shell::Get()->accessibility_controller()->spoken_feedback_enabled();
 }
 
 void ImeMenuTray::HideBubble(const TrayBubbleView* bubble_view) {
@@ -569,7 +561,7 @@ void ImeMenuTray::CreateImageView() {
     label_ = nullptr;
   }
   image_view_ = new ImeMenuImageView();
-  image_view_->SetTooltipText(
+  image_view_->set_tooltip_text(
       l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_IME));
   tray_container()->AddChildView(image_view_);
 }

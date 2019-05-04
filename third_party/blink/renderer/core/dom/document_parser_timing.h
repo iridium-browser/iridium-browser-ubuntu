@@ -22,6 +22,7 @@ class DocumentParserTiming final
  public:
   static const char kSupplementName[];
 
+  explicit DocumentParserTiming(Document&);
   virtual ~DocumentParserTiming() = default;
 
   static DocumentParserTiming& From(Document&);
@@ -96,10 +97,9 @@ class DocumentParserTiming final
     return parser_blocked_on_script_execution_from_document_write_duration_;
   }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  explicit DocumentParserTiming(Document&);
   void NotifyDocumentParserTimingChanged();
 
   TimeTicks parser_start_;

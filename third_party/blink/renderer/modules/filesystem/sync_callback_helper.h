@@ -45,19 +45,23 @@ class DOMFileSystemCallbacksSyncHelper final
           DOMFileSystemCallbacksSyncHelper<SuccessCallback, CallbackArg>> {
  public:
   static DOMFileSystemCallbacksSyncHelper* Create() {
-    return new DOMFileSystemCallbacksSyncHelper();
+    return MakeGarbageCollected<DOMFileSystemCallbacksSyncHelper>();
   }
+
+  DOMFileSystemCallbacksSyncHelper() = default;
 
   void Trace(blink::Visitor* visitor) { visitor->Trace(result_); }
 
   SuccessCallback* GetSuccessCallback() {
-    return new SuccessCallbackImpl(this);
+    return MakeGarbageCollected<SuccessCallbackImpl>(this);
   }
-  ErrorCallbackBase* GetErrorCallback() { return new ErrorCallbackImpl(this); }
+  ErrorCallbackBase* GetErrorCallback() {
+    return MakeGarbageCollected<ErrorCallbackImpl>(this);
+  }
 
   CallbackArg* GetResultOrThrow(ExceptionState& exception_state) {
     if (error_code_ != base::File::FILE_OK) {
-      FileError::ThrowDOMException(exception_state, error_code_);
+      file_error::ThrowDOMException(exception_state, error_code_);
       return nullptr;
     }
 
@@ -67,6 +71,9 @@ class DOMFileSystemCallbacksSyncHelper final
  private:
   class SuccessCallbackImpl final : public SuccessCallback {
    public:
+    explicit SuccessCallbackImpl(DOMFileSystemCallbacksSyncHelper* helper)
+        : helper_(helper) {}
+
     void Trace(blink::Visitor* visitor) override {
       visitor->Trace(helper_);
       SuccessCallback::Trace(visitor);
@@ -77,8 +84,6 @@ class DOMFileSystemCallbacksSyncHelper final
     }
 
    private:
-    explicit SuccessCallbackImpl(DOMFileSystemCallbacksSyncHelper* helper)
-        : helper_(helper) {}
     Member<DOMFileSystemCallbacksSyncHelper> helper_;
 
     friend class DOMFileSystemCallbacksSyncHelper;
@@ -86,6 +91,9 @@ class DOMFileSystemCallbacksSyncHelper final
 
   class ErrorCallbackImpl final : public ErrorCallbackBase {
    public:
+    explicit ErrorCallbackImpl(DOMFileSystemCallbacksSyncHelper* helper)
+        : helper_(helper) {}
+
     void Trace(blink::Visitor* visitor) override {
       visitor->Trace(helper_);
       ErrorCallbackBase::Trace(visitor);
@@ -96,14 +104,10 @@ class DOMFileSystemCallbacksSyncHelper final
     }
 
    private:
-    explicit ErrorCallbackImpl(DOMFileSystemCallbacksSyncHelper* helper)
-        : helper_(helper) {}
     Member<DOMFileSystemCallbacksSyncHelper> helper_;
 
     friend class DOMFileSystemCallbacksSyncHelper;
   };
-
-  DOMFileSystemCallbacksSyncHelper() = default;
 
   Member<CallbackArg> result_;
   base::File::Error error_code_ = base::File::FILE_OK;

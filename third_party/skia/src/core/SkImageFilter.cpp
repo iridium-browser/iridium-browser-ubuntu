@@ -27,6 +27,7 @@
 #include "GrTextureProxy.h"
 #include "SkGr.h"
 #endif
+#include <atomic>
 
 void SkImageFilter::CropRect::applyTo(const SkIRect& imageBounds,
                                       const SkMatrix& ctm,
@@ -69,13 +70,12 @@ void SkImageFilter::CropRect::applyTo(const SkIRect& imageBounds,
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 static int32_t next_image_filter_unique_id() {
-    static int32_t gImageFilterUniqueID;
+    static std::atomic<int32_t> nextID{1};
 
-    // Never return 0.
     int32_t id;
     do {
-        id = sk_atomic_inc(&gImageFilterUniqueID) + 1;
-    } while (0 == id);
+        id = nextID++;
+    } while (id == 0);
     return id;
 }
 
@@ -248,9 +248,12 @@ sk_sp<SkSpecialImage> SkImageFilter::DrawWithFP(GrContext* context,
 
     sk_sp<SkColorSpace> colorSpace = sk_ref_sp(outputProperties.colorSpace());
     GrPixelConfig config = SkColorType2GrPixelConfig(outputProperties.colorType());
+    GrBackendFormat format =
+            context->contextPriv().caps()->getBackendFormatFromColorType(
+                    outputProperties.colorType());
     sk_sp<GrRenderTargetContext> renderTargetContext(
         context->contextPriv().makeDeferredRenderTargetContext(
-                                SkBackingFit::kApprox, bounds.width(), bounds.height(),
+                                format, SkBackingFit::kApprox, bounds.width(), bounds.height(),
                                 config, std::move(colorSpace)));
     if (!renderTargetContext) {
         return nullptr;

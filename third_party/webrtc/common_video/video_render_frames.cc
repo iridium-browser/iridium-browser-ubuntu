@@ -10,10 +10,12 @@
 
 #include "common_video/video_render_frames.h"
 
+#include <type_traits>
 #include <utility>
 
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/timeutils.h"
+#include "rtc_base/time_utils.h"
 #include "system_wrappers/include/metrics.h"
 
 namespace webrtc {

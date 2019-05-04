@@ -15,6 +15,7 @@
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
+#include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "content/common/frame_messages.h"
@@ -65,13 +66,15 @@ TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
       did_swap_compositor_frame_(false) {
 #if defined(OS_ANDROID)
   frame_sink_id_ = AllocateFrameSinkId();
-  GetHostFrameSinkManager()->RegisterFrameSinkId(frame_sink_id_, this);
+  GetHostFrameSinkManager()->RegisterFrameSinkId(
+      frame_sink_id_, this, viz::ReportFirstSurfaceActivation::kYes);
 #else
   default_background_color_ = SK_ColorWHITE;
   // Not all tests initialize or need an image transport factory.
   if (ImageTransportFactory::GetInstance()) {
     frame_sink_id_ = AllocateFrameSinkId();
-    GetHostFrameSinkManager()->RegisterFrameSinkId(frame_sink_id_, this);
+    GetHostFrameSinkManager()->RegisterFrameSinkId(
+        frame_sink_id_, this, viz::ReportFirstSurfaceActivation::kYes);
 #if DCHECK_IS_ON()
     GetHostFrameSinkManager()->SetFrameSinkDebugLabel(
         frame_sink_id_, "TestRenderWidgetHostView");
@@ -80,6 +83,12 @@ TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
 #endif
 
   host()->SetView(this);
+
+  if (host()->delegate() && host()->delegate()->GetInputEventRouter() &&
+      GetFrameSinkId().is_valid()) {
+    host()->delegate()->GetInputEventRouter()->AddFrameSinkIdOwner(
+        GetFrameSinkId(), this);
+  }
 
 #if defined(USE_AURA)
   window_.reset(new aura::Window(
@@ -192,8 +201,9 @@ const viz::FrameSinkId& TestRenderWidgetHostView::GetFrameSinkId() const {
   return frame_sink_id_;
 }
 
-const viz::LocalSurfaceId& TestRenderWidgetHostView::GetLocalSurfaceId() const {
-  return viz::ParentLocalSurfaceIdAllocator::InvalidLocalSurfaceId();
+const viz::LocalSurfaceIdAllocation&
+TestRenderWidgetHostView::GetLocalSurfaceIdAllocation() const {
+  return viz::ParentLocalSurfaceIdAllocator::InvalidLocalSurfaceIdAllocation();
 }
 
 viz::SurfaceId TestRenderWidgetHostView::GetCurrentSurfaceId() const {
@@ -287,8 +297,8 @@ void TestRenderViewHost::SimulateWasShown() {
   GetWidget()->WasShown(false /* record_presentation_time */);
 }
 
-WebPreferences TestRenderViewHost::TestComputeWebkitPrefs() {
-  return ComputeWebkitPrefs();
+WebPreferences TestRenderViewHost::TestComputeWebPreferences() {
+  return ComputeWebPreferences();
 }
 
 void TestRenderViewHost::OnWebkitPreferencesChanged() {

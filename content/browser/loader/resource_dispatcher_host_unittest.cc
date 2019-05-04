@@ -13,6 +13,7 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -48,7 +49,6 @@
 #include "content/public/browser/resource_throttle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/process_type.h"
@@ -86,7 +86,7 @@
 #include "storage/browser/blob/shareable_file_reference.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/mojom/page/page_visibility_state.mojom.h"
+#include "third_party/blink/public/mojom/appcache/appcache.mojom.h"
 
 // TODO(eroman): Write unit tests for SafeBrowsing that exercise
 //               SafeBrowsingResourceHandler.
@@ -108,7 +108,7 @@ static network::ResourceRequest CreateResourceRequest(const char* method,
   request.load_flags = 0;
   request.plugin_child_id = -1;
   request.resource_type = type;
-  request.appcache_host_id = kAppCacheNoHostId;
+  request.appcache_host_id = blink::mojom::kAppCacheNoHostId;
   request.should_reset_appcache = false;
   request.render_frame_id = 0;
   request.is_main_frame = true;
@@ -121,7 +121,7 @@ static network::ResourceRequest CreateResourceRequest(const char* method,
 // This is used to create a filter matching a specified child id.
 class TestFilterSpecifyingChild : public ResourceMessageFilter {
  public:
-  TestFilterSpecifyingChild(BrowserContext* browser_context, int process_id)
+  TestFilterSpecifyingChild(TestBrowserContext* browser_context, int process_id)
       : ResourceMessageFilter(
             process_id,
             nullptr,
@@ -129,11 +129,12 @@ class TestFilterSpecifyingChild : public ResourceMessageFilter {
             nullptr,
             nullptr,
             nullptr,
-            BrowserContext::GetSharedCorsOriginAccessList(browser_context),
+            browser_context->GetSharedCorsOriginAccessList(),
             base::Bind(&TestFilterSpecifyingChild::GetContexts,
                        base::Unretained(this)),
             base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO})),
-        resource_context_(browser_context->GetResourceContext()) {
+        resource_context_(browser_context->GetResourceContext()),
+        url_request_context_(browser_context->GetRequestContext()) {
     InitializeForTest();
     set_peer_process_for_testing(base::Process::Current());
   }
@@ -154,17 +155,18 @@ class TestFilterSpecifyingChild : public ResourceMessageFilter {
                    ResourceContext** resource_context,
                    net::URLRequestContext** request_context) {
     *resource_context = resource_context_;
-    *request_context = resource_context_->GetRequestContext();
+    *request_context = url_request_context_->GetURLRequestContext();
   }
 
   ResourceContext* resource_context_;
+  scoped_refptr<net::URLRequestContextGetter> url_request_context_;
 
   DISALLOW_COPY_AND_ASSIGN(TestFilterSpecifyingChild);
 };
 
 class TestFilter : public TestFilterSpecifyingChild {
  public:
-  explicit TestFilter(BrowserContext* browser_context)
+  explicit TestFilter(TestBrowserContext* browser_context)
       : TestFilterSpecifyingChild(
             browser_context,
             ChildProcessHostImpl::GenerateChildProcessUniqueId()) {
@@ -658,12 +660,12 @@ class ResourceDispatcherHostTest : public testing::TestWithParam<TestMode> {
             // Enabled features
             {},
             // Disabled features
-            {network::features::kOutOfBlinkCORS});
+            {network::features::kOutOfBlinkCors});
         break;
       case TestMode::kWithOutOfBlinkCors:
         scoped_feature_list_.InitWithFeatures(
             // Enabled features
-            {network::features::kOutOfBlinkCORS,
+            {network::features::kOutOfBlinkCors,
              blink::features::kServiceWorkerServicification},
             // Disabled features
             {});
@@ -675,9 +677,8 @@ class ResourceDispatcherHostTest : public testing::TestWithParam<TestMode> {
     content::RunAllTasksUntilIdle();
 
     filter_ = MakeTestFilter();
-    // TODO(cbentzel): Better way to get URLRequestContext?
     net::URLRequestContext* request_context =
-        browser_context_->GetResourceContext()->GetRequestContext();
+        browser_context_->GetRequestContext()->GetURLRequestContext();
     job_factory_.reset(new TestURLRequestJobFactory(this));
     request_context->set_job_factory(job_factory_.get());
     request_context->set_network_delegate(&network_delegate_);
@@ -837,14 +838,16 @@ class ResourceDispatcherHostTest : public testing::TestWithParam<TestMode> {
             blink::WebMixedContentContextType::kBlockable,
             false /* is_form_submission */, GURL() /* searchable_form_url */,
             std::string() /* searchable_form_encoding */,
-            url::Origin::Create(url), GURL() /* client_side_redirect_url */,
+            GURL() /* client_side_redirect_url */,
             base::nullopt /* devtools_initiator_info */);
     CommonNavigationParams common_params;
     common_params.url = url;
+    common_params.initiator_origin = url::Origin::Create(url);
+
     std::unique_ptr<NavigationRequestInfo> request_info(
         new NavigationRequestInfo(common_params, std::move(begin_params), url,
-                                  true, false, false, -1, false, false, false,
-                                  false, nullptr,
+                                  url::Origin::Create(url), true, false, false,
+                                  -1, false, false, false, false, nullptr,
                                   base::UnguessableToken::Create(),
                                   base::UnguessableToken::Create()));
     std::unique_ptr<NavigationURLLoader> test_loader =
@@ -867,7 +870,7 @@ class ResourceDispatcherHostTest : public testing::TestWithParam<TestMode> {
   }
 
   bool IsAborted(const network::TestURLLoaderClient& client) {
-    // TODO(toyoshim): Once NetworkService or OutOfBlinkCORS is enabled, these
+    // TODO(toyoshim): Once NetworkService or OutOfBlinkCors is enabled, these
     // expectations below should be receiving a completion with ERR_ABORTED.
     if (!client.has_received_completion())
       return client.has_received_connection_error();
@@ -881,7 +884,7 @@ class ResourceDispatcherHostTest : public testing::TestWithParam<TestMode> {
       auto type = static_cast<net::EffectiveConnectionType>(i);
       c[type] =
           network::ResourceSchedulerParamsManager::ParamsForNetworkQuality(
-              max_delayable_requests, 0.0, false);
+              max_delayable_requests, 0.0, false, base::nullopt);
     }
     host_.scheduler()->SetResourceSchedulerParamsManagerForTests(
         network::ResourceSchedulerParamsManager(c));
@@ -2185,7 +2188,9 @@ class ExternalProtocolBrowserClient : public TestContentBrowserClient {
       NavigationUIData* navigation_data,
       bool is_main_frame,
       ui::PageTransition page_transition,
-      bool has_user_gesture) override {
+      bool has_user_gesture,
+      const std::string& method,
+      const net::HttpRequestHeaders& headers) override {
     return false;
   }
 
@@ -2246,6 +2251,7 @@ TEST_P(ResourceDispatcherHostTest, DataSentBeforeDetach) {
 
   // Get a bit of data before cancelling.
   EXPECT_TRUE(net::URLRequestTestJob::ProcessOnePendingMessage());
+  client.RunUntilResponseBodyArrived();
 
   // Simulate a cancellation coming from the renderer.
   loader = nullptr;

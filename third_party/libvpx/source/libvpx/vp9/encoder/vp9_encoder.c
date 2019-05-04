@@ -43,6 +43,9 @@
 #include "vp9/encoder/vp9_aq_cyclicrefresh.h"
 #include "vp9/encoder/vp9_aq_variance.h"
 #include "vp9/encoder/vp9_bitstream.h"
+#if CONFIG_INTERNAL_STATS
+#include "vp9/encoder/vp9_blockiness.h"
+#endif
 #include "vp9/encoder/vp9_context_tree.h"
 #include "vp9/encoder/vp9_encodeframe.h"
 #include "vp9/encoder/vp9_encodemb.h"
@@ -52,6 +55,9 @@
 #include "vp9/encoder/vp9_extend.h"
 #include "vp9/encoder/vp9_firstpass.h"
 #include "vp9/encoder/vp9_mbgraph.h"
+#if CONFIG_NON_GREEDY_MV
+#include "vp9/encoder/vp9_mcomp.h"
+#endif
 #include "vp9/encoder/vp9_multi_thread.h"
 #include "vp9/encoder/vp9_noise_estimate.h"
 #include "vp9/encoder/vp9_picklpf.h"
@@ -2107,7 +2113,7 @@ static void cal_nmvsadcosts_hp(int *mvsadcost[2]) {
 
 VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
                                 BufferPool *const pool) {
-  unsigned int i, frame;
+  unsigned int i;
   VP9_COMP *volatile const cpi = vpx_memalign(32, sizeof(VP9_COMP));
   VP9_COMMON *volatile const cm = cpi != NULL ? &cpi->common : NULL;
 
@@ -2358,22 +2364,10 @@ VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
   vp9_set_speed_features_framesize_independent(cpi);
   vp9_set_speed_features_framesize_dependent(cpi);
 
-  if (cpi->sf.enable_tpl_model) {
-    for (frame = 0; frame < MAX_LAG_BUFFERS; ++frame) {
-      int mi_cols = mi_cols_aligned_to_sb(cm->mi_cols);
-      int mi_rows = mi_cols_aligned_to_sb(cm->mi_rows);
-
-      CHECK_MEM_ERROR(cm, cpi->tpl_stats[frame].tpl_stats_ptr,
-                      vpx_calloc(mi_rows * mi_cols,
-                                 sizeof(*cpi->tpl_stats[frame].tpl_stats_ptr)));
-      cpi->tpl_stats[frame].is_valid = 0;
-      cpi->tpl_stats[frame].width = mi_cols;
-      cpi->tpl_stats[frame].height = mi_rows;
-      cpi->tpl_stats[frame].stride = mi_cols;
-      cpi->tpl_stats[frame].mi_rows = cm->mi_rows;
-      cpi->tpl_stats[frame].mi_cols = cm->mi_cols;
-    }
-  }
+#if CONFIG_NON_GREEDY_MV
+  cpi->feature_score_loc_alloc = 0;
+#endif  // CONFIG_NON_GREEDY_MV
+  for (i = 0; i < MAX_ARF_GOP_SIZE; ++i) cpi->tpl_stats[i].tpl_stats_ptr = NULL;
 
   // Allocate memory to store variances for a frame.
   CHECK_MEM_ERROR(cm, cpi->source_diff_var, vpx_calloc(cm->MBs, sizeof(diff)));
@@ -2448,6 +2442,17 @@ VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
   vp9_init_quantizer(cpi);
 
   vp9_loop_filter_init(cm);
+
+  // Set up the unit scaling factor used during motion search.
+#if CONFIG_VP9_HIGHBITDEPTH
+  vp9_setup_scale_factors_for_frame(&cpi->me_sf, cm->width, cm->height,
+                                    cm->width, cm->height,
+                                    cm->use_highbitdepth);
+#else
+  vp9_setup_scale_factors_for_frame(&cpi->me_sf, cm->width, cm->height,
+                                    cm->width, cm->height);
+#endif  // CONFIG_VP9_HIGHBITDEPTH
+  cpi->td.mb.me_sf = &cpi->me_sf;
 
   cm->error.setjmp = 0;
 
@@ -2561,7 +2566,12 @@ void vp9_remove_compressor(VP9_COMP *cpi) {
   vp9_denoiser_free(&(cpi->denoiser));
 #endif
 
-  for (frame = 0; frame < MAX_LAG_BUFFERS; ++frame) {
+#if CONFIG_NON_GREEDY_MV
+  vpx_free(cpi->feature_score_loc_arr);
+  vpx_free(cpi->feature_score_loc_sort);
+  vpx_free(cpi->feature_score_loc_heap);
+#endif
+  for (frame = 0; frame < MAX_ARF_GOP_SIZE; ++frame) {
     vpx_free(cpi->tpl_stats[frame].tpl_stats_ptr);
     cpi->tpl_stats[frame].is_valid = 0;
   }
@@ -2980,7 +2990,7 @@ static int recode_loop_test(VP9_COMP *cpi, int high_limit, int low_limit, int q,
   return force_recode;
 }
 
-void update_ref_frames(VP9_COMP *cpi) {
+static void update_ref_frames(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
   BufferPool *const pool = cm->buffer_pool;
   GF_GROUP *const gf_group = &cpi->twopass.gf_group;
@@ -3217,8 +3227,8 @@ void vp9_scale_references(VP9_COMP *cpi) {
         if (cpi->oxcf.pass == 0 && !cpi->use_svc) {
           // Check for release of scaled reference.
           buf_idx = cpi->scaled_ref_idx[ref_frame - 1];
-          buf = (buf_idx != INVALID_IDX) ? &pool->frame_bufs[buf_idx] : NULL;
-          if (buf != NULL) {
+          if (buf_idx != INVALID_IDX) {
+            buf = &pool->frame_bufs[buf_idx];
             --buf->ref_count;
             cpi->scaled_ref_idx[ref_frame - 1] = INVALID_IDX;
           }
@@ -3249,22 +3259,21 @@ static void release_scaled_references(VP9_COMP *cpi) {
     refresh[2] = (cpi->refresh_alt_ref_frame) ? 1 : 0;
     for (i = LAST_FRAME; i <= ALTREF_FRAME; ++i) {
       const int idx = cpi->scaled_ref_idx[i - 1];
-      RefCntBuffer *const buf =
-          idx != INVALID_IDX ? &cm->buffer_pool->frame_bufs[idx] : NULL;
-      const YV12_BUFFER_CONFIG *const ref = get_ref_frame_buffer(cpi, i);
-      if (buf != NULL &&
-          (refresh[i - 1] || (buf->buf.y_crop_width == ref->y_crop_width &&
-                              buf->buf.y_crop_height == ref->y_crop_height))) {
-        --buf->ref_count;
-        cpi->scaled_ref_idx[i - 1] = INVALID_IDX;
+      if (idx != INVALID_IDX) {
+        RefCntBuffer *const buf = &cm->buffer_pool->frame_bufs[idx];
+        const YV12_BUFFER_CONFIG *const ref = get_ref_frame_buffer(cpi, i);
+        if (refresh[i - 1] || (buf->buf.y_crop_width == ref->y_crop_width &&
+                               buf->buf.y_crop_height == ref->y_crop_height)) {
+          --buf->ref_count;
+          cpi->scaled_ref_idx[i - 1] = INVALID_IDX;
+        }
       }
     }
   } else {
-    for (i = 0; i < MAX_REF_FRAMES; ++i) {
+    for (i = 0; i < REFS_PER_FRAME; ++i) {
       const int idx = cpi->scaled_ref_idx[i];
-      RefCntBuffer *const buf =
-          idx != INVALID_IDX ? &cm->buffer_pool->frame_bufs[idx] : NULL;
-      if (buf != NULL) {
+      if (idx != INVALID_IDX) {
+        RefCntBuffer *const buf = &cm->buffer_pool->frame_bufs[idx];
         --buf->ref_count;
         cpi->scaled_ref_idx[i] = INVALID_IDX;
       }
@@ -3456,6 +3465,11 @@ static void set_size_dependent_vars(VP9_COMP *cpi, int *q, int *bottom_index,
 
   // Decide q and q bounds.
   *q = vp9_rc_pick_q_and_bounds(cpi, bottom_index, top_index);
+
+  if (cpi->oxcf.rc_mode == VPX_CBR && cpi->rc.force_max_q) {
+    *q = cpi->rc.worst_quality;
+    cpi->rc.force_max_q = 0;
+  }
 
   if (!frame_is_intra_only(cm)) {
     vp9_set_high_precision_mv(cpi, (*q) < HIGH_PRECISION_MV_QTHRESH);
@@ -3661,20 +3675,24 @@ static INLINE void set_raw_source_frame(VP9_COMP *cpi) {
 static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
                                       uint8_t *dest) {
   VP9_COMMON *const cm = &cpi->common;
+  SVC *const svc = &cpi->svc;
   int q = 0, bottom_index = 0, top_index = 0;
+  int no_drop_scene_change = 0;
   const INTERP_FILTER filter_scaler =
       (is_one_pass_cbr_svc(cpi))
-          ? cpi->svc.downsample_filter_type[cpi->svc.spatial_layer_id]
+          ? svc->downsample_filter_type[svc->spatial_layer_id]
           : EIGHTTAP;
   const int phase_scaler =
       (is_one_pass_cbr_svc(cpi))
-          ? cpi->svc.downsample_filter_phase[cpi->svc.spatial_layer_id]
+          ? svc->downsample_filter_phase[svc->spatial_layer_id]
           : 0;
 
   if (cm->show_existing_frame) {
     if (is_psnr_calc_enabled(cpi)) set_raw_source_frame(cpi);
     return 1;
   }
+
+  svc->time_stamp_prev[svc->spatial_layer_id] = svc->time_stamp_superframe;
 
   // Flag to check if its valid to compute the source sad (used for
   // scene detection and for superblock content state in CBR mode).
@@ -3688,25 +3706,25 @@ static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
   if (is_one_pass_cbr_svc(cpi) &&
       cpi->un_scaled_source->y_width == cm->width << 2 &&
       cpi->un_scaled_source->y_height == cm->height << 2 &&
-      cpi->svc.scaled_temp.y_width == cm->width << 1 &&
-      cpi->svc.scaled_temp.y_height == cm->height << 1) {
+      svc->scaled_temp.y_width == cm->width << 1 &&
+      svc->scaled_temp.y_height == cm->height << 1) {
     // For svc, if it is a 1/4x1/4 downscaling, do a two-stage scaling to take
     // advantage of the 1:2 optimized scaler. In the process, the 1/2x1/2
     // result will be saved in scaled_temp and might be used later.
-    const INTERP_FILTER filter_scaler2 = cpi->svc.downsample_filter_type[1];
-    const int phase_scaler2 = cpi->svc.downsample_filter_phase[1];
+    const INTERP_FILTER filter_scaler2 = svc->downsample_filter_type[1];
+    const int phase_scaler2 = svc->downsample_filter_phase[1];
     cpi->Source = vp9_svc_twostage_scale(
-        cm, cpi->un_scaled_source, &cpi->scaled_source, &cpi->svc.scaled_temp,
+        cm, cpi->un_scaled_source, &cpi->scaled_source, &svc->scaled_temp,
         filter_scaler, phase_scaler, filter_scaler2, phase_scaler2);
-    cpi->svc.scaled_one_half = 1;
+    svc->scaled_one_half = 1;
   } else if (is_one_pass_cbr_svc(cpi) &&
              cpi->un_scaled_source->y_width == cm->width << 1 &&
              cpi->un_scaled_source->y_height == cm->height << 1 &&
-             cpi->svc.scaled_one_half) {
+             svc->scaled_one_half) {
     // If the spatial layer is 1/2x1/2 and the scaling is already done in the
     // two-stage scaling, use the result directly.
-    cpi->Source = &cpi->svc.scaled_temp;
-    cpi->svc.scaled_one_half = 0;
+    cpi->Source = &svc->scaled_temp;
+    svc->scaled_one_half = 0;
   } else {
     cpi->Source = vp9_scale_if_required(
         cm, cpi->un_scaled_source, &cpi->scaled_source, (cpi->oxcf.pass == 0),
@@ -3714,8 +3732,8 @@ static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
   }
 #ifdef OUTPUT_YUV_SVC_SRC
   // Write out at most 3 spatial layers.
-  if (is_one_pass_cbr_svc(cpi) && cpi->svc.spatial_layer_id < 3) {
-    vpx_write_yuv_frame(yuv_svc_src[cpi->svc.spatial_layer_id], cpi->Source);
+  if (is_one_pass_cbr_svc(cpi) && svc->spatial_layer_id < 3) {
+    vpx_write_yuv_frame(yuv_svc_src[svc->spatial_layer_id], cpi->Source);
   }
 #endif
   // Unfiltered raw source used in metrics calculation if the source
@@ -3735,9 +3753,9 @@ static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
   }
 
   if ((cpi->use_svc &&
-       (cpi->svc.spatial_layer_id < cpi->svc.number_spatial_layers - 1 ||
-        cpi->svc.temporal_layer_id < cpi->svc.number_temporal_layers - 1 ||
-        cpi->svc.current_superframe < 1)) ||
+       (svc->spatial_layer_id < svc->number_spatial_layers - 1 ||
+        svc->temporal_layer_id < svc->number_temporal_layers - 1 ||
+        svc->current_superframe < 1)) ||
       cpi->resize_pending || cpi->resize_state || cpi->external_resize ||
       cpi->resize_state != ORIG) {
     cpi->compute_source_sad_onepass = 0;
@@ -3772,6 +3790,10 @@ static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
            cm->mi_rows * cm->mi_cols * sizeof(*cpi->consec_zero_mv));
   }
 
+#if CONFIG_VP9_TEMPORAL_DENOISING
+  if (cpi->oxcf.noise_sensitivity > 0 && cpi->use_svc)
+    vp9_denoiser_reset_on_first_frame(cpi);
+#endif
   vp9_update_noise_estimate(cpi);
 
   // Scene detection is always used for VBR mode or screen-content case.
@@ -3786,18 +3808,35 @@ static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
        (cpi->oxcf.speed >= 5 && cpi->oxcf.speed < 8)))
     vp9_scene_detection_onepass(cpi);
 
-  if (cpi->svc.spatial_layer_id == 0)
-    cpi->svc.high_source_sad_superframe = cpi->rc.high_source_sad;
+  if (svc->spatial_layer_id == svc->first_spatial_layer_to_encode) {
+    svc->high_source_sad_superframe = cpi->rc.high_source_sad;
+    svc->high_num_blocks_with_motion = cpi->rc.high_num_blocks_with_motion;
+    // On scene change reset temporal layer pattern to TL0.
+    // Note that if the base/lower spatial layers are skipped: instead of
+    // inserting base layer here, we force max-q for the next superframe
+    // with lower spatial layers: this is done in vp9_encodedframe_overshoot()
+    // when max-q is decided for the current layer.
+    // Only do this reset for bypass/flexible mode.
+    if (svc->high_source_sad_superframe && svc->temporal_layer_id > 0 &&
+        svc->temporal_layering_mode == VP9E_TEMPORAL_LAYERING_MODE_BYPASS) {
+      // rc->high_source_sad will get reset so copy it to restore it.
+      int tmp_high_source_sad = cpi->rc.high_source_sad;
+      vp9_svc_reset_temporal_layers(cpi, cm->frame_type == KEY_FRAME);
+      cpi->rc.high_source_sad = tmp_high_source_sad;
+    }
+  }
 
   // For 1 pass CBR, check if we are dropping this frame.
   // Never drop on key frame, if base layer is key for svc,
   // on scene change, or if superframe has layer sync.
+  if ((cpi->rc.high_source_sad || svc->high_source_sad_superframe) &&
+      !(cpi->rc.use_post_encode_drop && svc->last_layer_dropped[0]))
+    no_drop_scene_change = 1;
   if (cpi->oxcf.pass == 0 && cpi->oxcf.rc_mode == VPX_CBR &&
-      !frame_is_intra_only(cm) && !cpi->rc.high_source_sad &&
-      !cpi->svc.high_source_sad_superframe &&
-      !cpi->svc.superframe_has_layer_sync &&
+      !frame_is_intra_only(cm) && !no_drop_scene_change &&
+      !svc->superframe_has_layer_sync &&
       (!cpi->use_svc ||
-       !cpi->svc.layer_context[cpi->svc.temporal_layer_id].is_key_frame)) {
+       !svc->layer_context[svc->temporal_layer_id].is_key_frame)) {
     if (vp9_rc_drop_frame(cpi)) return 0;
   }
 
@@ -3805,22 +3844,25 @@ static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
   // when svc->force_zero_mode_spatial_ref = 1. Under those conditions we can
   // avoid this frame-level upsampling (for non intra_only frames).
   if (frame_is_intra_only(cm) == 0 &&
-      !(is_one_pass_cbr_svc(cpi) && cpi->svc.force_zero_mode_spatial_ref)) {
+      !(is_one_pass_cbr_svc(cpi) && svc->force_zero_mode_spatial_ref)) {
     vp9_scale_references(cpi);
   }
 
   set_size_independent_vars(cpi);
   set_size_dependent_vars(cpi, &q, &bottom_index, &top_index);
 
+  // search method and step parameter might be changed in speed settings.
+  init_motion_estimation(cpi);
+
   if (cpi->sf.copy_partition_flag) alloc_copy_partition_data(cpi);
 
   if (cpi->sf.svc_use_lowres_part &&
-      cpi->svc.spatial_layer_id == cpi->svc.number_spatial_layers - 2) {
-    if (cpi->svc.prev_partition_svc == NULL) {
+      svc->spatial_layer_id == svc->number_spatial_layers - 2) {
+    if (svc->prev_partition_svc == NULL) {
       CHECK_MEM_ERROR(
-          cm, cpi->svc.prev_partition_svc,
+          cm, svc->prev_partition_svc,
           (BLOCK_SIZE *)vpx_calloc(cm->mi_stride * cm->mi_rows,
-                                   sizeof(*cpi->svc.prev_partition_svc)));
+                                   sizeof(*svc->prev_partition_svc)));
     }
   }
 
@@ -3832,6 +3874,12 @@ static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
     cpi->use_skin_detection = 1;
   }
 
+  // Enable post encode frame dropping for CBR on non key frame, when
+  // ext_use_post_encode_drop is specified by user.
+  cpi->rc.use_post_encode_drop = cpi->rc.ext_use_post_encode_drop &&
+                                 cpi->oxcf.rc_mode == VPX_CBR &&
+                                 cm->frame_type != KEY_FRAME;
+
   vp9_set_quantizer(cm, q);
   vp9_set_variance_partition_thresholds(cpi, q, 0);
 
@@ -3842,16 +3890,24 @@ static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
   if (cpi->use_svc) {
     // On non-zero spatial layer, check for disabling inter-layer
     // prediction.
-    if (cpi->svc.spatial_layer_id > 0) vp9_svc_constrain_inter_layer_pred(cpi);
+    if (svc->spatial_layer_id > 0) vp9_svc_constrain_inter_layer_pred(cpi);
     vp9_svc_assert_constraints_pattern(cpi);
   }
 
+  if (cpi->rc.last_post_encode_dropped_scene_change) {
+    cpi->rc.high_source_sad = 1;
+    svc->high_source_sad_superframe = 1;
+    // For now disable use_source_sad since Last_Source will not be the previous
+    // encoded but the dropped one.
+    cpi->sf.use_source_sad = 0;
+    cpi->rc.last_post_encode_dropped_scene_change = 0;
+  }
   // Check if this high_source_sad (scene/slide change) frame should be
   // encoded at high/max QP, and if so, set the q and adjust some rate
   // control parameters.
   if (cpi->sf.overshoot_detection_cbr_rt == FAST_DETECTION_MAXQ &&
       (cpi->rc.high_source_sad ||
-       (cpi->use_svc && cpi->svc.high_source_sad_superframe))) {
+       (cpi->use_svc && svc->high_source_sad_superframe))) {
     if (vp9_encodedframe_overshoot(cpi, -1, &q)) {
       vp9_set_quantizer(cm, q);
       vp9_set_variance_partition_thresholds(cpi, q, 0);
@@ -3886,7 +3942,7 @@ static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
   // For SVC: all spatial layers are checked for re-encoding.
   if (cpi->sf.overshoot_detection_cbr_rt == RE_ENCODE_MAXQ &&
       (cpi->rc.high_source_sad ||
-       (cpi->use_svc && cpi->svc.high_source_sad_superframe))) {
+       (cpi->use_svc && svc->high_source_sad_superframe))) {
     int frame_size = 0;
     // Get an estimate of the encoded frame size.
     save_coding_context(cpi);
@@ -3960,9 +4016,9 @@ static void encode_with_recode_loop(VP9_COMP *cpi, size_t *size,
 
   set_size_independent_vars(cpi);
 
-  enable_acl = cpi->sf.allow_acl
-                   ? (cm->frame_type == KEY_FRAME) || (cm->show_frame == 0)
-                   : 0;
+  enable_acl = cpi->sf.allow_acl ? (cm->frame_type == KEY_FRAME) ||
+                                       (cpi->twopass.gf_group.index == 1)
+                                 : 0;
 
   do {
     vpx_clear_system_state();
@@ -4051,6 +4107,8 @@ static void encode_with_recode_loop(VP9_COMP *cpi, size_t *size,
       vp9_setup_in_frame_q_adj(cpi);
     } else if (oxcf->aq_mode == LOOKAHEAD_AQ) {
       vp9_alt_ref_aq_setup_map(cpi->alt_ref_aq, cpi);
+    } else if (oxcf->aq_mode == PSNR_AQ) {
+      vp9_psnr_aq_mode_setup(&cm->seg);
     }
 
     vp9_encode_frame(cpi);
@@ -4622,8 +4680,13 @@ static void encode_frame_to_data_rate(VP9_COMP *cpi, size_t *size,
   TX_SIZE t;
 
   // SVC: skip encoding of enhancement layer if the layer target bandwidth = 0.
+  // If in constrained layer drop mode (svc.framedrop_mode != LAYER_DROP) and
+  // base spatial layer was dropped, no need to set svc.skip_enhancement_layer,
+  // as whole superframe will be dropped.
   if (cpi->use_svc && cpi->svc.spatial_layer_id > 0 &&
-      cpi->oxcf.target_bandwidth == 0) {
+      cpi->oxcf.target_bandwidth == 0 &&
+      !(cpi->svc.framedrop_mode != LAYER_DROP &&
+        cpi->svc.drop_spatial_layer[0])) {
     cpi->svc.skip_enhancement_layer = 1;
     vp9_rc_postencode_update_drop_frame(cpi);
     cpi->ext_refresh_frame_flags_pending = 0;
@@ -4720,19 +4783,6 @@ static void encode_frame_to_data_rate(VP9_COMP *cpi, size_t *size,
                cm->ref_frame_map[cpi->alt_fb_idx]);
   }
 
-  cpi->last_frame_dropped = 0;
-  cpi->svc.last_layer_dropped[cpi->svc.spatial_layer_id] = 0;
-  // Keep track of the frame buffer index updated/refreshed for the
-  // current encoded TL0 superframe.
-  if (cpi->svc.temporal_layer_id == 0) {
-    if (cpi->refresh_last_frame)
-      cpi->svc.fb_idx_upd_tl0[cpi->svc.spatial_layer_id] = cpi->lst_fb_idx;
-    else if (cpi->refresh_golden_frame)
-      cpi->svc.fb_idx_upd_tl0[cpi->svc.spatial_layer_id] = cpi->gld_fb_idx;
-    else if (cpi->refresh_alt_ref_frame)
-      cpi->svc.fb_idx_upd_tl0[cpi->svc.spatial_layer_id] = cpi->alt_fb_idx;
-  }
-
   // Disable segmentation if it decrease rate/distortion ratio
   if (cpi->oxcf.aq_mode == LOOKAHEAD_AQ)
     vp9_try_disable_lookahead_aq(cpi, size, dest);
@@ -4779,8 +4829,32 @@ static void encode_frame_to_data_rate(VP9_COMP *cpi, size_t *size,
   // Pick the loop filter level for the frame.
   loopfilter_frame(cpi, cm);
 
+  if (cpi->rc.use_post_encode_drop) save_coding_context(cpi);
+
   // build the bitstream
   vp9_pack_bitstream(cpi, dest, size);
+
+  if (cpi->rc.use_post_encode_drop && cm->base_qindex < cpi->rc.worst_quality &&
+      cpi->svc.spatial_layer_id == 0 && post_encode_drop_cbr(cpi, size)) {
+    restore_coding_context(cpi);
+    return;
+  }
+
+  cpi->last_frame_dropped = 0;
+  cpi->svc.last_layer_dropped[cpi->svc.spatial_layer_id] = 0;
+  if (cpi->svc.spatial_layer_id == cpi->svc.number_spatial_layers - 1)
+    cpi->svc.num_encoded_top_layer++;
+
+  // Keep track of the frame buffer index updated/refreshed for the
+  // current encoded TL0 superframe.
+  if (cpi->svc.temporal_layer_id == 0) {
+    if (cpi->refresh_last_frame)
+      cpi->svc.fb_idx_upd_tl0[cpi->svc.spatial_layer_id] = cpi->lst_fb_idx;
+    else if (cpi->refresh_golden_frame)
+      cpi->svc.fb_idx_upd_tl0[cpi->svc.spatial_layer_id] = cpi->gld_fb_idx;
+    else if (cpi->refresh_alt_ref_frame)
+      cpi->svc.fb_idx_upd_tl0[cpi->svc.spatial_layer_id] = cpi->alt_fb_idx;
+  }
 
   if (cm->seg.update_map) update_reference_segmentation_map(cpi);
 
@@ -4910,6 +4984,8 @@ static void init_ref_frame_bufs(VP9_COMMON *cm) {
   cm->new_fb_idx = INVALID_IDX;
   for (i = 0; i < REF_FRAMES; ++i) {
     cm->ref_frame_map[i] = INVALID_IDX;
+  }
+  for (i = 0; i < FRAME_BUFFERS; ++i) {
     pool->frame_bufs[i].ref_count = 0;
   }
 }
@@ -5089,10 +5165,6 @@ static void check_src_altref(VP9_COMP *cpi,
 }
 
 #if CONFIG_INTERNAL_STATS
-extern double vp9_get_blockiness(const uint8_t *img1, int img1_pitch,
-                                 const uint8_t *img2, int img2_pitch, int width,
-                                 int height);
-
 static void adjust_image_stat(double y, double u, double v, double all,
                               ImageStat *s) {
   s->stat[Y] += y;
@@ -5335,26 +5407,33 @@ static void update_level_info(VP9_COMP *cpi, size_t *size, int arf_src_index) {
 typedef struct GF_PICTURE {
   YV12_BUFFER_CONFIG *frame;
   int ref_frame[3];
+  FRAME_UPDATE_TYPE update_type;
 } GF_PICTURE;
 
-void init_gop_frames(VP9_COMP *cpi, GF_PICTURE *gf_picture,
-                     const GF_GROUP *gf_group, int *tpl_group_frames) {
+static void init_gop_frames(VP9_COMP *cpi, GF_PICTURE *gf_picture,
+                            const GF_GROUP *gf_group, int *tpl_group_frames) {
   VP9_COMMON *cm = &cpi->common;
   int frame_idx = 0;
   int i;
   int gld_index = -1;
   int alt_index = -1;
   int lst_index = -1;
+  int arf_index_stack[MAX_ARF_LAYERS];
+  int arf_stack_size = 0;
   int extend_frame_count = 0;
   int pframe_qindex = cpi->tpl_stats[2].base_qindex;
+  int frame_gop_offset = 0;
 
   RefCntBuffer *frame_bufs = cm->buffer_pool->frame_bufs;
-  int recon_frame_index[REFS_PER_FRAME + 1] = { -1, -1, -1, -1 };
+  int8_t recon_frame_index[REFS_PER_FRAME + MAX_ARF_LAYERS];
+
+  memset(recon_frame_index, -1, sizeof(recon_frame_index));
+  stack_init(arf_index_stack, MAX_ARF_LAYERS);
 
   // TODO(jingning): To be used later for gf frame type parsing.
   (void)gf_group;
 
-  for (i = 0; i < FRAME_BUFFERS && frame_idx < REFS_PER_FRAME + 1; ++i) {
+  for (i = 0; i < FRAME_BUFFERS; ++i) {
     if (frame_bufs[i].ref_count == 0) {
       alloc_frame_mvs(cm, i);
       if (vpx_realloc_frame_buffer(&frame_bufs[i].buf, cm->width, cm->height,
@@ -5369,6 +5448,8 @@ void init_gop_frames(VP9_COMP *cpi, GF_PICTURE *gf_picture,
 
       recon_frame_index[frame_idx] = i;
       ++frame_idx;
+
+      if (frame_idx >= REFS_PER_FRAME + cpi->oxcf.enable_auto_arf) break;
     }
   }
 
@@ -5382,21 +5463,24 @@ void init_gop_frames(VP9_COMP *cpi, GF_PICTURE *gf_picture,
   // Initialize Golden reference frame.
   gf_picture[0].frame = get_ref_frame_buffer(cpi, GOLDEN_FRAME);
   for (i = 0; i < 3; ++i) gf_picture[0].ref_frame[i] = -1;
+  gf_picture[0].update_type = gf_group->update_type[0];
   gld_index = 0;
   ++*tpl_group_frames;
 
-  // Initialize ARF frame
+  // Initialize base layer ARF frame
   gf_picture[1].frame = cpi->Source;
   gf_picture[1].ref_frame[0] = gld_index;
   gf_picture[1].ref_frame[1] = lst_index;
   gf_picture[1].ref_frame[2] = alt_index;
+  gf_picture[1].update_type = gf_group->update_type[1];
   alt_index = 1;
   ++*tpl_group_frames;
 
   // Initialize P frames
-  for (frame_idx = 2; frame_idx < MAX_LAG_BUFFERS; ++frame_idx) {
-    struct lookahead_entry *buf =
-        vp9_lookahead_peek(cpi->lookahead, frame_idx - 2);
+  for (frame_idx = 2; frame_idx < MAX_ARF_GOP_SIZE; ++frame_idx) {
+    struct lookahead_entry *buf;
+    frame_gop_offset = gf_group->frame_gop_index[frame_idx];
+    buf = vp9_lookahead_peek(cpi->lookahead, frame_gop_offset - 1);
 
     if (buf == NULL) break;
 
@@ -5404,25 +5488,44 @@ void init_gop_frames(VP9_COMP *cpi, GF_PICTURE *gf_picture,
     gf_picture[frame_idx].ref_frame[0] = gld_index;
     gf_picture[frame_idx].ref_frame[1] = lst_index;
     gf_picture[frame_idx].ref_frame[2] = alt_index;
+    gf_picture[frame_idx].update_type = gf_group->update_type[frame_idx];
+
+    switch (gf_group->update_type[frame_idx]) {
+      case ARF_UPDATE:
+        stack_push(arf_index_stack, alt_index, arf_stack_size);
+        ++arf_stack_size;
+        alt_index = frame_idx;
+        break;
+      case LF_UPDATE: lst_index = frame_idx; break;
+      case OVERLAY_UPDATE:
+        gld_index = frame_idx;
+        alt_index = stack_pop(arf_index_stack, arf_stack_size);
+        --arf_stack_size;
+        break;
+      case USE_BUF_FRAME:
+        lst_index = alt_index;
+        alt_index = stack_pop(arf_index_stack, arf_stack_size);
+        --arf_stack_size;
+        break;
+      default: break;
+    }
 
     ++*tpl_group_frames;
-    lst_index = frame_idx;
 
     // The length of group of pictures is baseline_gf_interval, plus the
     // beginning golden frame from last GOP, plus the last overlay frame in
     // the same GOP.
-    if (frame_idx == cpi->rc.baseline_gf_interval + 1) break;
+    if (frame_idx == gf_group->gf_group_size) break;
   }
 
-  gld_index = frame_idx;
-  lst_index = VPXMAX(0, frame_idx - 1);
   alt_index = -1;
   ++frame_idx;
+  ++frame_gop_offset;
 
   // Extend two frames outside the current gf group.
   for (; frame_idx < MAX_LAG_BUFFERS && extend_frame_count < 2; ++frame_idx) {
     struct lookahead_entry *buf =
-        vp9_lookahead_peek(cpi->lookahead, frame_idx - 2);
+        vp9_lookahead_peek(cpi->lookahead, frame_gop_offset - 1);
 
     if (buf == NULL) break;
 
@@ -5432,16 +5535,25 @@ void init_gop_frames(VP9_COMP *cpi, GF_PICTURE *gf_picture,
     gf_picture[frame_idx].ref_frame[0] = gld_index;
     gf_picture[frame_idx].ref_frame[1] = lst_index;
     gf_picture[frame_idx].ref_frame[2] = alt_index;
+    gf_picture[frame_idx].update_type = LF_UPDATE;
     lst_index = frame_idx;
     ++*tpl_group_frames;
     ++extend_frame_count;
+    ++frame_gop_offset;
   }
 }
 
-void init_tpl_stats(VP9_COMP *cpi) {
+static void init_tpl_stats(VP9_COMP *cpi) {
   int frame_idx;
-  for (frame_idx = 0; frame_idx < MAX_LAG_BUFFERS; ++frame_idx) {
+  for (frame_idx = 0; frame_idx < MAX_ARF_GOP_SIZE; ++frame_idx) {
     TplDepFrame *tpl_frame = &cpi->tpl_stats[frame_idx];
+#if CONFIG_NON_GREEDY_MV
+    int rf_idx;
+    for (rf_idx = 0; rf_idx < 3; ++rf_idx) {
+      tpl_frame->mv_dist_sum[rf_idx] = 0;
+      tpl_frame->mv_cost_sum[rf_idx] = 0;
+    }
+#endif
     memset(tpl_frame->tpl_stats_ptr, 0,
            tpl_frame->height * tpl_frame->width *
                sizeof(*tpl_frame->tpl_stats_ptr));
@@ -5450,44 +5562,17 @@ void init_tpl_stats(VP9_COMP *cpi) {
 }
 
 #if CONFIG_NON_GREEDY_MV
-static void prepare_nb_full_mvs(const TplDepFrame *tpl_frame, int mi_row,
-                                int mi_col, int_mv *nb_full_mvs) {
-  const int dirs[NB_MVS_NUM][2] = { { -1, 0 }, { 0, -1 }, { 1, 0 }, { 0, 1 } };
-  int i;
-  for (i = 0; i < NB_MVS_NUM; ++i) {
-    int r = dirs[i][0];
-    int c = dirs[i][1];
-    if (mi_row + r >= 0 && mi_row + r < tpl_frame->mi_rows && mi_col + c >= 0 &&
-        mi_col + c < tpl_frame->mi_cols) {
-      const TplDepStats *tpl_ptr =
-          &tpl_frame
-               ->tpl_stats_ptr[(mi_row + r) * tpl_frame->stride + mi_col + c];
-      if (tpl_ptr->ready) {
-        nb_full_mvs[i].as_mv.row = tpl_ptr->mv.as_mv.row >> 3;
-        nb_full_mvs[i].as_mv.col = tpl_ptr->mv.as_mv.col >> 3;
-      } else {
-        nb_full_mvs[i].as_int = INVALID_MV;
-      }
-    } else {
-      nb_full_mvs[i].as_int = INVALID_MV;
-    }
-  }
-}
-#endif
-
-#if CONFIG_NON_GREEDY_MV
-uint32_t motion_compensated_prediction(VP9_COMP *cpi, ThreadData *td,
-                                       int frame_idx, uint8_t *cur_frame_buf,
-                                       uint8_t *ref_frame_buf, int stride,
-                                       BLOCK_SIZE bsize, int mi_row, int mi_col,
-                                       TplDepStats *tpl_stats, int rf_idx) {
-  MV *mv = &tpl_stats->mv_arr[rf_idx].as_mv;
+static uint32_t motion_compensated_prediction(
+    VP9_COMP *cpi, ThreadData *td, int frame_idx, uint8_t *cur_frame_buf,
+    uint8_t *ref_frame_buf, int stride, BLOCK_SIZE bsize, int mi_row,
+    int mi_col, MV *mv, int rf_idx, double *mv_dist, double *mv_cost) {
 #else   // CONFIG_NON_GREEDY_MV
-uint32_t motion_compensated_prediction(VP9_COMP *cpi, ThreadData *td,
-                                       int frame_idx, uint8_t *cur_frame_buf,
-                                       uint8_t *ref_frame_buf, int stride,
-                                       BLOCK_SIZE bsize, int mi_row, int mi_col,
-                                       MV *mv) {
+static uint32_t motion_compensated_prediction(VP9_COMP *cpi, ThreadData *td,
+                                              int frame_idx,
+                                              uint8_t *cur_frame_buf,
+                                              uint8_t *ref_frame_buf,
+                                              int stride, BLOCK_SIZE bsize,
+                                              int mi_row, int mi_col, MV *mv) {
 #endif  // CONFIG_NON_GREEDY_MV
   MACROBLOCK *const x = &td->mb;
   MACROBLOCKD *const xd = &x->e_mbd;
@@ -5503,7 +5588,7 @@ uint32_t motion_compensated_prediction(VP9_COMP *cpi, ThreadData *td,
 #if CONFIG_NON_GREEDY_MV
   // lambda is used to adjust the importance of motion vector consitency.
   // TODO(angiebird): Figure out lambda's proper value.
-  double lambda = 10000;
+  double lambda = cpi->tpl_stats[frame_idx].lambda;
   int_mv nb_full_mvs[NB_MVS_NUM];
 #endif
 
@@ -5527,11 +5612,11 @@ uint32_t motion_compensated_prediction(VP9_COMP *cpi, ThreadData *td,
 #if CONFIG_NON_GREEDY_MV
   (void)search_method;
   (void)sadpb;
-  prepare_nb_full_mvs(&cpi->tpl_stats[frame_idx], mi_row, mi_col, nb_full_mvs);
-  vp9_full_pixel_diamond_new(cpi, x, &best_ref_mv1_full, step_param, lambda,
-                             MAX_MVSEARCH_STEPS - 1 - step_param, 1,
-                             &cpi->fn_ptr[bsize], nb_full_mvs, tpl_stats,
-                             rf_idx);
+  vp9_prepare_nb_full_mvs(&cpi->tpl_stats[frame_idx], mi_row, mi_col, rf_idx,
+                          bsize, nb_full_mvs);
+  vp9_full_pixel_diamond_new(cpi, x, &best_ref_mv1_full, step_param, lambda, 1,
+                             &cpi->fn_ptr[bsize], nb_full_mvs, NB_MVS_NUM, mv,
+                             mv_dist, mv_cost);
 #else
   (void)frame_idx;
   (void)mi_row;
@@ -5544,18 +5629,19 @@ uint32_t motion_compensated_prediction(VP9_COMP *cpi, ThreadData *td,
   /* restore UMV window */
   x->mv_limits = tmp_mv_limits;
 
+  // TODO(yunqing): may use higher tap interp filter than 2 taps.
   // Ignore mv costing by sending NULL pointer instead of cost array
   bestsme = cpi->find_fractional_mv_step(
       x, mv, &best_ref_mv1, cpi->common.allow_high_precision_mv, x->errorperbit,
       &cpi->fn_ptr[bsize], 0, mv_sf->subpel_search_level,
-      cond_cost_list(cpi, cost_list), NULL, NULL, &distortion, &sse, NULL, 0,
-      0);
+      cond_cost_list(cpi, cost_list), NULL, NULL, &distortion, &sse, NULL, 0, 0,
+      USE_2_TAPS);
 
   return bestsme;
 }
 
-int get_overlap_area(int grid_pos_row, int grid_pos_col, int ref_pos_row,
-                     int ref_pos_col, int block, BLOCK_SIZE bsize) {
+static int get_overlap_area(int grid_pos_row, int grid_pos_col, int ref_pos_row,
+                            int ref_pos_col, int block, BLOCK_SIZE bsize) {
   int width = 0, height = 0;
   int bw = 4 << b_width_log2_lookup[bsize];
   int bh = 4 << b_height_log2_lookup[bsize];
@@ -5583,7 +5669,7 @@ int get_overlap_area(int grid_pos_row, int grid_pos_col, int ref_pos_row,
   return width * height;
 }
 
-int round_floor(int ref_pos, int bsize_pix) {
+static int round_floor(int ref_pos, int bsize_pix) {
   int round;
   if (ref_pos < 0)
     round = -(1 + (-ref_pos - 1) / bsize_pix);
@@ -5593,49 +5679,28 @@ int round_floor(int ref_pos, int bsize_pix) {
   return round;
 }
 
-void tpl_model_store(TplDepStats *tpl_stats, int mi_row, int mi_col,
-                     BLOCK_SIZE bsize, int stride,
-                     const TplDepStats *src_stats) {
+static void tpl_model_store(TplDepStats *tpl_stats, int mi_row, int mi_col,
+                            BLOCK_SIZE bsize, int stride) {
   const int mi_height = num_8x8_blocks_high_lookup[bsize];
   const int mi_width = num_8x8_blocks_wide_lookup[bsize];
+  const TplDepStats *src_stats = &tpl_stats[mi_row * stride + mi_col];
   int idx, idy;
 
-  int64_t intra_cost = src_stats->intra_cost / (mi_height * mi_width);
-  int64_t inter_cost = src_stats->inter_cost / (mi_height * mi_width);
-
-  TplDepStats *tpl_ptr;
-
-  intra_cost = VPXMAX(1, intra_cost);
-  inter_cost = VPXMAX(1, inter_cost);
-
   for (idy = 0; idy < mi_height; ++idy) {
-    tpl_ptr = &tpl_stats[(mi_row + idy) * stride + mi_col];
     for (idx = 0; idx < mi_width; ++idx) {
-#if CONFIG_NON_GREEDY_MV
-      int rf_idx;
-      for (rf_idx = 0; rf_idx < 3; ++rf_idx) {
-        tpl_ptr->mv_dist[rf_idx] = src_stats->mv_dist[rf_idx];
-        tpl_ptr->mv_cost[rf_idx] = src_stats->mv_cost[rf_idx];
-        tpl_ptr->inter_cost_arr[rf_idx] = src_stats->inter_cost;
-        tpl_ptr->recon_error_arr[rf_idx] = src_stats->recon_error_arr[rf_idx];
-        tpl_ptr->sse_arr[rf_idx] = src_stats->sse_arr[rf_idx];
-        tpl_ptr->mv_arr[rf_idx].as_int = src_stats->mv_arr[rf_idx].as_int;
-      }
-      tpl_ptr->feature_score = src_stats->feature_score;
-      tpl_ptr->ready = 1;
-#endif
-      tpl_ptr->intra_cost = intra_cost;
-      tpl_ptr->inter_cost = inter_cost;
+      TplDepStats *tpl_ptr = &tpl_stats[(mi_row + idy) * stride + mi_col + idx];
+      const int64_t mc_flow = tpl_ptr->mc_flow;
+      const int64_t mc_ref_cost = tpl_ptr->mc_ref_cost;
+      *tpl_ptr = *src_stats;
+      tpl_ptr->mc_flow = mc_flow;
+      tpl_ptr->mc_ref_cost = mc_ref_cost;
       tpl_ptr->mc_dep_cost = tpl_ptr->intra_cost + tpl_ptr->mc_flow;
-      tpl_ptr->ref_frame_index = src_stats->ref_frame_index;
-      tpl_ptr->mv.as_int = src_stats->mv.as_int;
-      ++tpl_ptr;
     }
   }
 }
 
-void tpl_model_update_b(TplDepFrame *tpl_frame, TplDepStats *tpl_stats,
-                        int mi_row, int mi_col, const BLOCK_SIZE bsize) {
+static void tpl_model_update_b(TplDepFrame *tpl_frame, TplDepStats *tpl_stats,
+                               int mi_row, int mi_col, const BLOCK_SIZE bsize) {
   TplDepFrame *ref_tpl_frame = &tpl_frame[tpl_stats->ref_frame_index];
   TplDepStats *ref_stats = ref_tpl_frame->tpl_stats_ptr;
   MV mv = tpl_stats->mv.as_mv;
@@ -5690,8 +5755,8 @@ void tpl_model_update_b(TplDepFrame *tpl_frame, TplDepStats *tpl_stats,
   }
 }
 
-void tpl_model_update(TplDepFrame *tpl_frame, TplDepStats *tpl_stats,
-                      int mi_row, int mi_col, const BLOCK_SIZE bsize) {
+static void tpl_model_update(TplDepFrame *tpl_frame, TplDepStats *tpl_stats,
+                             int mi_row, int mi_col, const BLOCK_SIZE bsize) {
   int idx, idy;
   const int mi_height = num_8x8_blocks_high_lookup[bsize];
   const int mi_width = num_8x8_blocks_wide_lookup[bsize];
@@ -5706,9 +5771,10 @@ void tpl_model_update(TplDepFrame *tpl_frame, TplDepStats *tpl_stats,
   }
 }
 
-void get_quantize_error(MACROBLOCK *x, int plane, tran_low_t *coeff,
-                        tran_low_t *qcoeff, tran_low_t *dqcoeff,
-                        TX_SIZE tx_size, int64_t *recon_error, int64_t *sse) {
+static void get_quantize_error(MACROBLOCK *x, int plane, tran_low_t *coeff,
+                               tran_low_t *qcoeff, tran_low_t *dqcoeff,
+                               TX_SIZE tx_size, int64_t *recon_error,
+                               int64_t *sse) {
   MACROBLOCKD *const xd = &x->e_mbd;
   const struct macroblock_plane *const p = &x->plane[plane];
   const struct macroblockd_plane *const pd = &xd->plane[plane];
@@ -5717,9 +5783,21 @@ void get_quantize_error(MACROBLOCK *x, int plane, tran_low_t *coeff,
   int pix_num = 1 << num_pels_log2_lookup[txsize_to_bsize[tx_size]];
   const int shift = tx_size == TX_32X32 ? 0 : 2;
 
+#if CONFIG_VP9_HIGHBITDEPTH
+  if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
+    vp9_highbd_quantize_fp_32x32(coeff, pix_num, x->skip_block, p->round_fp,
+                                 p->quant_fp, qcoeff, dqcoeff, pd->dequant,
+                                 &eob, scan_order->scan, scan_order->iscan);
+  } else {
+    vp9_quantize_fp_32x32(coeff, pix_num, x->skip_block, p->round_fp,
+                          p->quant_fp, qcoeff, dqcoeff, pd->dequant, &eob,
+                          scan_order->scan, scan_order->iscan);
+  }
+#else
   vp9_quantize_fp_32x32(coeff, pix_num, x->skip_block, p->round_fp, p->quant_fp,
                         qcoeff, dqcoeff, pd->dequant, &eob, scan_order->scan,
                         scan_order->iscan);
+#endif  // CONFIG_VP9_HIGHBITDEPTH
 
   *recon_error = vp9_block_error(coeff, dqcoeff, pix_num, sse) >> shift;
   *recon_error = VPXMAX(*recon_error, 1);
@@ -5728,8 +5806,21 @@ void get_quantize_error(MACROBLOCK *x, int plane, tran_low_t *coeff,
   *sse = VPXMAX(*sse, 1);
 }
 
-void wht_fwd_txfm(int16_t *src_diff, int bw, tran_low_t *coeff,
-                  TX_SIZE tx_size) {
+#if CONFIG_VP9_HIGHBITDEPTH
+static void highbd_wht_fwd_txfm(int16_t *src_diff, int bw, tran_low_t *coeff,
+                                TX_SIZE tx_size) {
+  // TODO(sdeng): Implement SIMD based high bit-depth Hadamard transforms.
+  switch (tx_size) {
+    case TX_8X8: vpx_highbd_hadamard_8x8(src_diff, bw, coeff); break;
+    case TX_16X16: vpx_highbd_hadamard_16x16(src_diff, bw, coeff); break;
+    case TX_32X32: vpx_highbd_hadamard_32x32(src_diff, bw, coeff); break;
+    default: assert(0);
+  }
+}
+#endif  // CONFIG_VP9_HIGHBITDEPTH
+
+static void wht_fwd_txfm(int16_t *src_diff, int bw, tran_low_t *coeff,
+                         TX_SIZE tx_size) {
   switch (tx_size) {
     case TX_8X8: vpx_hadamard_8x8(src_diff, bw, coeff); break;
     case TX_16X16: vpx_hadamard_16x16(src_diff, bw, coeff); break;
@@ -5763,14 +5854,24 @@ double get_feature_score(uint8_t *buf, ptrdiff_t stride, int rows, int cols) {
 }
 #endif
 
-void mode_estimation(VP9_COMP *cpi, MACROBLOCK *x, MACROBLOCKD *xd,
-                     struct scale_factors *sf, GF_PICTURE *gf_picture,
-                     int frame_idx, int16_t *src_diff, tran_low_t *coeff,
-                     tran_low_t *qcoeff, tran_low_t *dqcoeff, int mi_row,
-                     int mi_col, BLOCK_SIZE bsize, TX_SIZE tx_size,
-                     YV12_BUFFER_CONFIG *ref_frame[], uint8_t *predictor,
-                     int64_t *recon_error, int64_t *sse,
-                     TplDepStats *tpl_stats) {
+static void set_mv_limits(const VP9_COMMON *cm, MACROBLOCK *x, int mi_row,
+                          int mi_col) {
+  x->mv_limits.row_min = -((mi_row * MI_SIZE) + (17 - 2 * VP9_INTERP_EXTEND));
+  x->mv_limits.row_max =
+      (cm->mi_rows - 1 - mi_row) * MI_SIZE + (17 - 2 * VP9_INTERP_EXTEND);
+  x->mv_limits.col_min = -((mi_col * MI_SIZE) + (17 - 2 * VP9_INTERP_EXTEND));
+  x->mv_limits.col_max =
+      ((cm->mi_cols - 1 - mi_col) * MI_SIZE) + (17 - 2 * VP9_INTERP_EXTEND);
+}
+
+static void mode_estimation(VP9_COMP *cpi, MACROBLOCK *x, MACROBLOCKD *xd,
+                            struct scale_factors *sf, GF_PICTURE *gf_picture,
+                            int frame_idx, TplDepFrame *tpl_frame,
+                            int16_t *src_diff, tran_low_t *coeff,
+                            tran_low_t *qcoeff, tran_low_t *dqcoeff, int mi_row,
+                            int mi_col, BLOCK_SIZE bsize, TX_SIZE tx_size,
+                            YV12_BUFFER_CONFIG *ref_frame[], uint8_t *predictor,
+                            int64_t *recon_error, int64_t *sse) {
   VP9_COMMON *cm = &cpi->common;
   ThreadData *td = &cpi->td;
 
@@ -5789,8 +5890,10 @@ void mode_estimation(VP9_COMP *cpi, MACROBLOCK *x, MACROBLOCKD *xd,
   PREDICTION_MODE mode;
   int mb_y_offset = mi_row * MI_SIZE * xd->cur_buf->y_stride + mi_col * MI_SIZE;
   MODE_INFO mi_above, mi_left;
-
-  memset(tpl_stats, 0, sizeof(*tpl_stats));
+  const int mi_height = num_8x8_blocks_high_lookup[bsize];
+  const int mi_width = num_8x8_blocks_wide_lookup[bsize];
+  TplDepStats *tpl_stats =
+      &tpl_frame->tpl_stats_ptr[mi_row * tpl_frame->stride + mi_col];
 
   xd->mb_to_top_edge = -((mi_row * MI_SIZE) * 8);
   xd->mb_to_bottom_edge = ((cm->mi_rows - 1 - mi_row) * MI_SIZE) * 8;
@@ -5816,11 +5919,23 @@ void mode_estimation(VP9_COMP *cpi, MACROBLOCK *x, MACROBLOCKD *xd,
     vp9_predict_intra_block(xd, b_width_log2_lookup[bsize], tx_size, mode, src,
                             src_stride, dst, dst_stride, 0, 0, 0);
 
+#if CONFIG_VP9_HIGHBITDEPTH
+    if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
+      vpx_highbd_subtract_block(bh, bw, src_diff, bw, src, src_stride, dst,
+                                dst_stride, xd->bd);
+      highbd_wht_fwd_txfm(src_diff, bw, coeff, tx_size);
+      intra_cost = vpx_highbd_satd(coeff, pix_num);
+    } else {
+      vpx_subtract_block(bh, bw, src_diff, bw, src, src_stride, dst,
+                         dst_stride);
+      wht_fwd_txfm(src_diff, bw, coeff, tx_size);
+      intra_cost = vpx_satd(coeff, pix_num);
+    }
+#else
     vpx_subtract_block(bh, bw, src_diff, bw, src, src_stride, dst, dst_stride);
-
     wht_fwd_txfm(src_diff, bw, coeff, tx_size);
-
     intra_cost = vpx_satd(coeff, pix_num);
+#endif  // CONFIG_VP9_HIGHBITDEPTH
 
     if (intra_cost < best_intra_cost) best_intra_cost = intra_cost;
   }
@@ -5828,32 +5943,16 @@ void mode_estimation(VP9_COMP *cpi, MACROBLOCK *x, MACROBLOCKD *xd,
   // Motion compensated prediction
   best_mv.as_int = 0;
 
-  (void)mb_y_offset;
-  // Motion estimation column boundary
-  x->mv_limits.col_min = -((mi_col * MI_SIZE) + (17 - 2 * VP9_INTERP_EXTEND));
-  x->mv_limits.col_max =
-      ((cm->mi_cols - 1 - mi_col) * MI_SIZE) + (17 - 2 * VP9_INTERP_EXTEND);
-
-#if CONFIG_NON_GREEDY_MV
-  tpl_stats->feature_score = get_feature_score(
-      xd->cur_buf->y_buffer + mb_y_offset, xd->cur_buf->y_stride, bw, bh);
-#endif
+  set_mv_limits(cm, x, mi_row, mi_col);
 
   for (rf_idx = 0; rf_idx < 3; ++rf_idx) {
     int_mv mv;
-    if (ref_frame[rf_idx] == NULL) {
-#if CONFIG_NON_GREEDY_MV
-      tpl_stats->inter_cost_arr[rf_idx] = -1;
-#endif
-      continue;
-    }
+    if (ref_frame[rf_idx] == NULL) continue;
 
 #if CONFIG_NON_GREEDY_MV
-    motion_compensated_prediction(
-        cpi, td, frame_idx, xd->cur_buf->y_buffer + mb_y_offset,
-        ref_frame[rf_idx]->y_buffer + mb_y_offset, xd->cur_buf->y_stride, bsize,
-        mi_row, mi_col, tpl_stats, rf_idx);
-    mv.as_int = tpl_stats->mv_arr[rf_idx].as_int;
+    (void)td;
+    mv.as_int =
+        get_pyramid_mv(tpl_frame, rf_idx, bsize, mi_row, mi_col)->as_int;
 #else
     motion_compensated_prediction(
         cpi, td, frame_idx, xd->cur_buf->y_buffer + mb_y_offset,
@@ -5861,8 +5960,6 @@ void mode_estimation(VP9_COMP *cpi, MACROBLOCK *x, MACROBLOCKD *xd,
         mi_row, mi_col, &mv.as_mv);
 #endif
 
-    // TODO(jingning): Not yet support high bit-depth in the next three
-    // steps.
 #if CONFIG_VP9_HIGHBITDEPTH
     if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
       vp9_highbd_build_inter_predictor(
@@ -5873,6 +5970,8 @@ void mode_estimation(VP9_COMP *cpi, MACROBLOCK *x, MACROBLOCKD *xd,
       vpx_highbd_subtract_block(
           bh, bw, src_diff, bw, xd->cur_buf->y_buffer + mb_y_offset,
           xd->cur_buf->y_stride, &predictor[0], bw, xd->bd);
+      highbd_wht_fwd_txfm(src_diff, bw, coeff, tx_size);
+      inter_cost = vpx_highbd_satd(coeff, pix_num);
     } else {
       vp9_build_inter_predictor(
           ref_frame[rf_idx]->y_buffer + mb_y_offset,
@@ -5881,6 +5980,8 @@ void mode_estimation(VP9_COMP *cpi, MACROBLOCK *x, MACROBLOCKD *xd,
       vpx_subtract_block(bh, bw, src_diff, bw,
                          xd->cur_buf->y_buffer + mb_y_offset,
                          xd->cur_buf->y_stride, &predictor[0], bw);
+      wht_fwd_txfm(src_diff, bw, coeff, tx_size);
+      inter_cost = vpx_satd(coeff, pix_num);
     }
 #else
     vp9_build_inter_predictor(ref_frame[rf_idx]->y_buffer + mb_y_offset,
@@ -5890,10 +5991,9 @@ void mode_estimation(VP9_COMP *cpi, MACROBLOCK *x, MACROBLOCKD *xd,
     vpx_subtract_block(bh, bw, src_diff, bw,
                        xd->cur_buf->y_buffer + mb_y_offset,
                        xd->cur_buf->y_stride, &predictor[0], bw);
-#endif
     wht_fwd_txfm(src_diff, bw, coeff, tx_size);
-
     inter_cost = vpx_satd(coeff, pix_num);
+#endif
 
 #if CONFIG_NON_GREEDY_MV
     tpl_stats->inter_cost_arr[rf_idx] = inter_cost;
@@ -5917,15 +6017,224 @@ void mode_estimation(VP9_COMP *cpi, MACROBLOCK *x, MACROBLOCKD *xd,
   }
   best_intra_cost = VPXMAX(best_intra_cost, 1);
   best_inter_cost = VPXMIN(best_intra_cost, best_inter_cost);
-  tpl_stats->inter_cost = best_inter_cost << TPL_DEP_COST_SCALE_LOG2;
-  tpl_stats->intra_cost = best_intra_cost << TPL_DEP_COST_SCALE_LOG2;
-  tpl_stats->mc_dep_cost = tpl_stats->intra_cost + tpl_stats->mc_flow;
+  tpl_stats->inter_cost = VPXMAX(
+      1, (best_inter_cost << TPL_DEP_COST_SCALE_LOG2) / (mi_height * mi_width));
+  tpl_stats->intra_cost = VPXMAX(
+      1, (best_intra_cost << TPL_DEP_COST_SCALE_LOG2) / (mi_height * mi_width));
   tpl_stats->ref_frame_index = gf_picture[frame_idx].ref_frame[best_rf_idx];
   tpl_stats->mv.as_int = best_mv.as_int;
 }
 
-void mc_flow_dispenser(VP9_COMP *cpi, GF_PICTURE *gf_picture, int frame_idx,
-                       BLOCK_SIZE bsize) {
+#if CONFIG_NON_GREEDY_MV
+static int compare_feature_score(const void *a, const void *b) {
+  const FEATURE_SCORE_LOC *aa = *(FEATURE_SCORE_LOC *const *)a;
+  const FEATURE_SCORE_LOC *bb = *(FEATURE_SCORE_LOC *const *)b;
+  if (aa->feature_score < bb->feature_score) {
+    return 1;
+  } else if (aa->feature_score > bb->feature_score) {
+    return -1;
+  } else {
+    return 0;
+  }
+}
+
+static void do_motion_search(VP9_COMP *cpi, ThreadData *td, int frame_idx,
+                             YV12_BUFFER_CONFIG **ref_frame, BLOCK_SIZE bsize,
+                             int mi_row, int mi_col) {
+  VP9_COMMON *cm = &cpi->common;
+  MACROBLOCK *x = &td->mb;
+  MACROBLOCKD *xd = &x->e_mbd;
+  TplDepFrame *tpl_frame = &cpi->tpl_stats[frame_idx];
+  TplDepStats *tpl_stats =
+      &tpl_frame->tpl_stats_ptr[mi_row * tpl_frame->stride + mi_col];
+  const int mb_y_offset =
+      mi_row * MI_SIZE * xd->cur_buf->y_stride + mi_col * MI_SIZE;
+  int rf_idx;
+
+  set_mv_limits(cm, x, mi_row, mi_col);
+
+  for (rf_idx = 0; rf_idx < 3; ++rf_idx) {
+    int_mv *mv = get_pyramid_mv(tpl_frame, rf_idx, bsize, mi_row, mi_col);
+    if (ref_frame[rf_idx] == NULL) {
+      tpl_stats->ready[rf_idx] = 0;
+      continue;
+    } else {
+      tpl_stats->ready[rf_idx] = 1;
+    }
+    motion_compensated_prediction(
+        cpi, td, frame_idx, xd->cur_buf->y_buffer + mb_y_offset,
+        ref_frame[rf_idx]->y_buffer + mb_y_offset, xd->cur_buf->y_stride, bsize,
+        mi_row, mi_col, &mv->as_mv, rf_idx, &tpl_stats->mv_dist[rf_idx],
+        &tpl_stats->mv_cost[rf_idx]);
+  }
+}
+
+#define CHANGE_MV_SEARCH_ORDER 1
+#define USE_PQSORT 1
+#define RE_COMPUTE_MV_INCONSISTENCY 1
+
+#if CHANGE_MV_SEARCH_ORDER
+#if USE_PQSORT
+static void max_heap_pop(FEATURE_SCORE_LOC **heap, int *size,
+                         FEATURE_SCORE_LOC **output) {
+  if (*size > 0) {
+    *output = heap[0];
+    --*size;
+    if (*size > 0) {
+      int p, l, r;
+      heap[0] = heap[*size];
+      p = 0;
+      l = 2 * p + 1;
+      r = 2 * p + 2;
+      while (l < *size) {
+        FEATURE_SCORE_LOC *tmp;
+        int c = l;
+        if (r < *size && heap[r]->feature_score > heap[l]->feature_score) {
+          c = r;
+        }
+        if (heap[p]->feature_score >= heap[c]->feature_score) {
+          break;
+        }
+        tmp = heap[p];
+        heap[p] = heap[c];
+        heap[c] = tmp;
+        p = c;
+        l = 2 * p + 1;
+        r = 2 * p + 2;
+      }
+    }
+  } else {
+    assert(0);
+  }
+}
+
+static void max_heap_push(FEATURE_SCORE_LOC **heap, int *size,
+                          FEATURE_SCORE_LOC *input) {
+  int c, p;
+  FEATURE_SCORE_LOC *tmp;
+  heap[*size] = input;
+  ++*size;
+  c = *size - 1;
+  p = c >> 1;
+  while (c > 0 && heap[c]->feature_score > heap[p]->feature_score) {
+    tmp = heap[p];
+    heap[p] = heap[c];
+    heap[c] = tmp;
+    c = p;
+    p >>= 1;
+  }
+}
+
+static void add_nb_blocks_to_heap(VP9_COMP *cpi, const TplDepFrame *tpl_frame,
+                                  BLOCK_SIZE bsize, int mi_row, int mi_col,
+                                  int *heap_size) {
+  const int mi_unit = num_8x8_blocks_wide_lookup[bsize];
+  const int dirs[NB_MVS_NUM][2] = { { -1, 0 }, { 0, -1 }, { 1, 0 }, { 0, 1 } };
+  int i;
+  for (i = 0; i < NB_MVS_NUM; ++i) {
+    int r = dirs[i][0] * mi_unit;
+    int c = dirs[i][1] * mi_unit;
+    if (mi_row + r >= 0 && mi_row + r < tpl_frame->mi_rows && mi_col + c >= 0 &&
+        mi_col + c < tpl_frame->mi_cols) {
+      FEATURE_SCORE_LOC *fs_loc =
+          &cpi->feature_score_loc_arr[(mi_row + r) * tpl_frame->stride +
+                                      (mi_col + c)];
+      if (fs_loc->visited == 0) {
+        max_heap_push(cpi->feature_score_loc_heap, heap_size, fs_loc);
+      }
+    }
+  }
+}
+#endif  // USE_PQSORT
+#endif  // CHANGE_MV_SEARCH_ORDER
+
+static void build_motion_field(VP9_COMP *cpi, MACROBLOCKD *xd, int frame_idx,
+                               YV12_BUFFER_CONFIG *ref_frame[3],
+                               BLOCK_SIZE bsize) {
+  VP9_COMMON *cm = &cpi->common;
+  ThreadData *td = &cpi->td;
+  TplDepFrame *tpl_frame = &cpi->tpl_stats[frame_idx];
+  const int mi_height = num_8x8_blocks_high_lookup[bsize];
+  const int mi_width = num_8x8_blocks_wide_lookup[bsize];
+  int fs_loc_sort_size;
+  int fs_loc_heap_size;
+  int mi_row, mi_col;
+
+  tpl_frame->lambda = 250;
+
+  fs_loc_sort_size = 0;
+  for (mi_row = 0; mi_row < cm->mi_rows; mi_row += mi_height) {
+    for (mi_col = 0; mi_col < cm->mi_cols; mi_col += mi_width) {
+      const int mb_y_offset =
+          mi_row * MI_SIZE * xd->cur_buf->y_stride + mi_col * MI_SIZE;
+      const int bw = 4 << b_width_log2_lookup[bsize];
+      const int bh = 4 << b_height_log2_lookup[bsize];
+      TplDepStats *tpl_stats =
+          &tpl_frame->tpl_stats_ptr[mi_row * tpl_frame->stride + mi_col];
+      FEATURE_SCORE_LOC *fs_loc =
+          &cpi->feature_score_loc_arr[mi_row * tpl_frame->stride + mi_col];
+      tpl_stats->feature_score = get_feature_score(
+          xd->cur_buf->y_buffer + mb_y_offset, xd->cur_buf->y_stride, bw, bh);
+      fs_loc->visited = 0;
+      fs_loc->feature_score = tpl_stats->feature_score;
+      fs_loc->mi_row = mi_row;
+      fs_loc->mi_col = mi_col;
+      cpi->feature_score_loc_sort[fs_loc_sort_size] = fs_loc;
+      ++fs_loc_sort_size;
+    }
+  }
+
+  qsort(cpi->feature_score_loc_sort, fs_loc_sort_size,
+        sizeof(*cpi->feature_score_loc_sort), compare_feature_score);
+
+  for (mi_row = 0; mi_row < cm->mi_rows; mi_row += mi_height) {
+    for (mi_col = 0; mi_col < cm->mi_cols; mi_col += mi_width) {
+      int rf_idx;
+      for (rf_idx = 0; rf_idx < 3; ++rf_idx) {
+        TplDepStats *tpl_stats =
+            &tpl_frame->tpl_stats_ptr[mi_row * tpl_frame->stride + mi_col];
+        tpl_stats->ready[rf_idx] = 0;
+      }
+    }
+  }
+
+#if CHANGE_MV_SEARCH_ORDER
+#if !USE_PQSORT
+  for (i = 0; i < fs_loc_sort_size; ++i) {
+    FEATURE_SCORE_LOC *fs_loc = cpi->feature_score_loc_sort[i];
+    do_motion_search(cpi, td, frame_idx, ref_frame, bsize, fs_loc->mi_row,
+                     fs_loc->mi_col);
+  }
+#else   // !USE_PQSORT
+  fs_loc_heap_size = 0;
+  max_heap_push(cpi->feature_score_loc_heap, &fs_loc_heap_size,
+                cpi->feature_score_loc_sort[0]);
+
+  while (fs_loc_heap_size > 0) {
+    FEATURE_SCORE_LOC *fs_loc;
+    max_heap_pop(cpi->feature_score_loc_heap, &fs_loc_heap_size, &fs_loc);
+
+    fs_loc->visited = 1;
+
+    do_motion_search(cpi, td, frame_idx, ref_frame, bsize, fs_loc->mi_row,
+                     fs_loc->mi_col);
+
+    add_nb_blocks_to_heap(cpi, tpl_frame, bsize, fs_loc->mi_row, fs_loc->mi_col,
+                          &fs_loc_heap_size);
+  }
+#endif  // !USE_PQSORT
+#else   // CHANGE_MV_SEARCH_ORDER
+  for (mi_row = 0; mi_row < cm->mi_rows; mi_row += mi_height) {
+    for (mi_col = 0; mi_col < cm->mi_cols; mi_col += mi_width) {
+      do_motion_search(cpi, td, frame_idx, ref_frame, bsize, mi_row, mi_col);
+    }
+  }
+#endif  // CHANGE_MV_SEARCH_ORDER
+}
+#endif  // CONFIG_NON_GREEDY_MV
+
+static void mc_flow_dispenser(VP9_COMP *cpi, GF_PICTURE *gf_picture,
+                              int frame_idx, BLOCK_SIZE bsize) {
   TplDepFrame *tpl_frame = &cpi->tpl_stats[frame_idx];
   YV12_BUFFER_CONFIG *this_frame = gf_picture[frame_idx].frame;
   YV12_BUFFER_CONFIG *ref_frame[3] = { NULL, NULL, NULL };
@@ -5954,6 +6263,9 @@ void mc_flow_dispenser(VP9_COMP *cpi, GF_PICTURE *gf_picture, int frame_idx,
   const int mi_height = num_8x8_blocks_high_lookup[bsize];
   const int mi_width = num_8x8_blocks_wide_lookup[bsize];
   int64_t recon_error, sse;
+#if CONFIG_NON_GREEDY_MV
+  int square_block_idx;
+#endif
 
   // Setup scaling factor
 #if CONFIG_VP9_HIGHBITDEPTH
@@ -5984,9 +6296,7 @@ void mc_flow_dispenser(VP9_COMP *cpi, GF_PICTURE *gf_picture, int frame_idx,
   xd->cur_buf = this_frame;
 
   // Get rd multiplier set up.
-  rdmult =
-      (int)vp9_compute_rd_mult_based_on_qindex(cpi, tpl_frame->base_qindex);
-  if (rdmult < 1) rdmult = 1;
+  rdmult = vp9_compute_rd_mult_based_on_qindex(cpi, tpl_frame->base_qindex);
   set_error_per_bit(&cpi->td.mb, rdmult);
   vp9_initialize_me_consts(cpi, &cpi->td.mb, tpl_frame->base_qindex);
 
@@ -5995,23 +6305,48 @@ void mc_flow_dispenser(VP9_COMP *cpi, GF_PICTURE *gf_picture, int frame_idx,
   cm->base_qindex = tpl_frame->base_qindex;
   vp9_frame_init_quantizer(cpi);
 
-  for (mi_row = 0; mi_row < cm->mi_rows; mi_row += mi_height) {
-    // Motion estimation row boundary
-    x->mv_limits.row_min = -((mi_row * MI_SIZE) + (17 - 2 * VP9_INTERP_EXTEND));
-    x->mv_limits.row_max =
-        (cm->mi_rows - 1 - mi_row) * MI_SIZE + (17 - 2 * VP9_INTERP_EXTEND);
-    for (mi_col = 0; mi_col < cm->mi_cols; mi_col += mi_width) {
-      TplDepStats tpl_stats;
-      mode_estimation(cpi, x, xd, &sf, gf_picture, frame_idx, src_diff, coeff,
-                      qcoeff, dqcoeff, mi_row, mi_col, bsize, tx_size,
-                      ref_frame, predictor, &recon_error, &sse, &tpl_stats);
+#if CONFIG_NON_GREEDY_MV
+  for (square_block_idx = 0; square_block_idx < SQUARE_BLOCK_SIZES;
+       ++square_block_idx) {
+    BLOCK_SIZE square_bsize = square_block_idx_to_bsize(square_block_idx);
+    build_motion_field(cpi, xd, frame_idx, ref_frame, square_bsize);
+  }
+#endif
 
+  for (mi_row = 0; mi_row < cm->mi_rows; mi_row += mi_height) {
+    for (mi_col = 0; mi_col < cm->mi_cols; mi_col += mi_width) {
+      mode_estimation(cpi, x, xd, &sf, gf_picture, frame_idx, tpl_frame,
+                      src_diff, coeff, qcoeff, dqcoeff, mi_row, mi_col, bsize,
+                      tx_size, ref_frame, predictor, &recon_error, &sse);
       // Motion flow dependency dispenser.
       tpl_model_store(tpl_frame->tpl_stats_ptr, mi_row, mi_col, bsize,
-                      tpl_frame->stride, &tpl_stats);
+                      tpl_frame->stride);
 
       tpl_model_update(cpi->tpl_stats, tpl_frame->tpl_stats_ptr, mi_row, mi_col,
                        bsize);
+#if CONFIG_NON_GREEDY_MV
+      {
+        int rf_idx;
+        TplDepStats *this_tpl_stats =
+            &tpl_frame->tpl_stats_ptr[mi_row * tpl_frame->stride + mi_col];
+        for (rf_idx = 0; rf_idx < 3; ++rf_idx) {
+#if RE_COMPUTE_MV_INCONSISTENCY
+          MV this_mv =
+              get_pyramid_mv(tpl_frame, rf_idx, bsize, mi_row, mi_col)->as_mv;
+          MV full_mv;
+          int_mv nb_full_mvs[NB_MVS_NUM];
+          vp9_prepare_nb_full_mvs(tpl_frame, mi_row, mi_col, rf_idx, bsize,
+                                  nb_full_mvs);
+          full_mv.row = this_mv.row >> 3;
+          full_mv.col = this_mv.col >> 3;
+          this_tpl_stats->mv_cost[rf_idx] =
+              vp9_nb_mvs_inconsistency(&full_mv, nb_full_mvs, NB_MVS_NUM);
+#endif  // RE_COMPUTE_MV_INCONSISTENCY
+          tpl_frame->mv_dist_sum[rf_idx] += this_tpl_stats->mv_dist[rf_idx];
+          tpl_frame->mv_cost_sum[rf_idx] += this_tpl_stats->mv_cost[rf_idx];
+        }
+      }
+#endif  // CONFIG_NON_GREEDY_MV
     }
   }
 }
@@ -6057,7 +6392,7 @@ static void dump_tpl_stats(const VP9_COMP *cpi, int tpl_group_frames,
         if ((mi_row % mi_height) == 0 && (mi_col % mi_width) == 0) {
           const TplDepStats *tpl_ptr =
               &tpl_frame->tpl_stats_ptr[mi_row * tpl_frame->stride + mi_col];
-          int_mv mv = tpl_ptr->mv_arr[idx];
+          int_mv mv = *get_pyramid_mv(tpl_frame, idx, bsize, mi_row, mi_col);
           printf("%d %d %d %d\n", mi_row, mi_col, mv.as_mv.row, mv.as_mv.col);
         }
       }
@@ -6087,8 +6422,75 @@ static void dump_tpl_stats(const VP9_COMP *cpi, int tpl_group_frames,
 #endif  // DUMP_TPL_STATS
 #endif  // CONFIG_NON_GREEDY_MV
 
+static void init_tpl_buffer(VP9_COMP *cpi) {
+  VP9_COMMON *cm = &cpi->common;
+  int frame;
+
+  const int mi_cols = mi_cols_aligned_to_sb(cm->mi_cols);
+  const int mi_rows = mi_cols_aligned_to_sb(cm->mi_rows);
+#if CONFIG_NON_GREEDY_MV
+  int sqr_bsize;
+  int rf_idx;
+
+  // TODO(angiebird): This probably needs further modifications to support
+  // frame scaling later on.
+  if (cpi->feature_score_loc_alloc == 0) {
+    // The smallest block size of motion field is 4x4, but the mi_unit is 8x8,
+    // therefore the number of units is "mi_rows * mi_cols * 4" here.
+    CHECK_MEM_ERROR(
+        cm, cpi->feature_score_loc_arr,
+        vpx_calloc(mi_rows * mi_cols * 4, sizeof(*cpi->feature_score_loc_arr)));
+    CHECK_MEM_ERROR(cm, cpi->feature_score_loc_sort,
+                    vpx_calloc(mi_rows * mi_cols * 4,
+                               sizeof(*cpi->feature_score_loc_sort)));
+    CHECK_MEM_ERROR(cm, cpi->feature_score_loc_heap,
+                    vpx_calloc(mi_rows * mi_cols * 4,
+                               sizeof(*cpi->feature_score_loc_heap)));
+
+    cpi->feature_score_loc_alloc = 1;
+  }
+#endif
+
+  // TODO(jingning): Reduce the actual memory use for tpl model build up.
+  for (frame = 0; frame < MAX_ARF_GOP_SIZE; ++frame) {
+    if (cpi->tpl_stats[frame].width >= mi_cols &&
+        cpi->tpl_stats[frame].height >= mi_rows &&
+        cpi->tpl_stats[frame].tpl_stats_ptr)
+      continue;
+
+#if CONFIG_NON_GREEDY_MV
+    vpx_free(cpi->tpl_stats[frame].pyramid_mv_arr);
+    for (rf_idx = 0; rf_idx < 3; ++rf_idx) {
+      for (sqr_bsize = 0; sqr_bsize < SQUARE_BLOCK_SIZES; ++sqr_bsize) {
+        CHECK_MEM_ERROR(
+            cm, cpi->tpl_stats[frame].pyramid_mv_arr[rf_idx][sqr_bsize],
+            vpx_calloc(
+                mi_rows * mi_cols,
+                sizeof(
+                    *cpi->tpl_stats[frame].pyramid_mv_arr[rf_idx][sqr_bsize])));
+      }
+    }
+#endif
+    vpx_free(cpi->tpl_stats[frame].tpl_stats_ptr);
+    CHECK_MEM_ERROR(cm, cpi->tpl_stats[frame].tpl_stats_ptr,
+                    vpx_calloc(mi_rows * mi_cols,
+                               sizeof(*cpi->tpl_stats[frame].tpl_stats_ptr)));
+    cpi->tpl_stats[frame].is_valid = 0;
+    cpi->tpl_stats[frame].width = mi_cols;
+    cpi->tpl_stats[frame].height = mi_rows;
+    cpi->tpl_stats[frame].stride = mi_cols;
+    cpi->tpl_stats[frame].mi_rows = cm->mi_rows;
+    cpi->tpl_stats[frame].mi_cols = cm->mi_cols;
+  }
+
+  for (frame = 0; frame < REF_FRAMES; ++frame) {
+    cpi->enc_frame_buf[frame].mem_valid = 0;
+    cpi->enc_frame_buf[frame].released = 1;
+  }
+}
+
 static void setup_tpl_stats(VP9_COMP *cpi) {
-  GF_PICTURE gf_picture[MAX_LAG_BUFFERS];
+  GF_PICTURE gf_picture[MAX_ARF_GOP_SIZE];
   const GF_GROUP *gf_group = &cpi->twopass.gf_group;
   int tpl_group_frames = 0;
   int frame_idx;
@@ -6100,6 +6502,7 @@ static void setup_tpl_stats(VP9_COMP *cpi) {
 
   // Backward propagation from tpl_group_frames to 1.
   for (frame_idx = tpl_group_frames - 1; frame_idx > 0; --frame_idx) {
+    if (gf_picture[frame_idx].update_type == USE_BUF_FRAME) continue;
     mc_flow_dispenser(cpi, gf_picture, frame_idx, bsize);
   }
 #if CONFIG_NON_GREEDY_MV
@@ -6121,6 +6524,7 @@ int vp9_get_compressed_data(VP9_COMP *cpi, unsigned int *frame_flags,
   struct lookahead_entry *last_source = NULL;
   struct lookahead_entry *source = NULL;
   int arf_src_index;
+  const int gf_group_index = cpi->twopass.gf_group.index;
   int i;
 
   if (is_one_pass_cbr_svc(cpi)) {
@@ -6168,7 +6572,7 @@ int vp9_get_compressed_data(VP9_COMP *cpi, unsigned int *frame_flags,
   }
 
   // Clear arf index stack before group of pictures processing starts.
-  if (cpi->twopass.gf_group.index == 1) {
+  if (gf_group_index == 1) {
     stack_init(cpi->twopass.gf_group.arf_index_stack, MAX_LAG_BUFFERS * 2);
     cpi->twopass.gf_group.stack_size = 0;
   }
@@ -6316,10 +6720,13 @@ int vp9_get_compressed_data(VP9_COMP *cpi, unsigned int *frame_flags,
     level_rc_framerate(cpi, arf_src_index);
 
   if (cpi->oxcf.pass != 0 || cpi->use_svc || frame_is_intra_only(cm) == 1) {
-    for (i = 0; i < MAX_REF_FRAMES; ++i) cpi->scaled_ref_idx[i] = INVALID_IDX;
+    for (i = 0; i < REFS_PER_FRAME; ++i) cpi->scaled_ref_idx[i] = INVALID_IDX;
   }
 
-  if (arf_src_index && cpi->sf.enable_tpl_model) {
+  if (gf_group_index == 1 &&
+      cpi->twopass.gf_group.update_type[gf_group_index] == ARF_UPDATE &&
+      cpi->sf.enable_tpl_model) {
+    init_tpl_buffer(cpi);
     vp9_estimate_qp_gop(cpi);
     setup_tpl_stats(cpi);
   }

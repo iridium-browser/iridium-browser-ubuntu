@@ -7,9 +7,10 @@
 #include <memory>
 #include <utility>
 
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/sync/base/model_type.h"
+#include "components/sync/base/storage_option.h"
 #include "components/sync/driver/configure_context.h"
 #include "components/sync/driver/data_type_encryption_handler.h"
 #include "components/sync/driver/data_type_manager_observer.h"
@@ -35,8 +36,7 @@ ModelTypeSet AddControlTypesTo(ModelTypeSet types) {
 
 ConfigureContext BuildConfigureContext(
     ConfigureReason reason,
-    ConfigureContext::StorageOption storage_option =
-        ConfigureContext::STORAGE_ON_DISK) {
+    StorageOption storage_option = STORAGE_ON_DISK) {
   ConfigureContext context;
   context.reason = reason;
   context.storage_option = storage_option;
@@ -278,8 +278,7 @@ class SyncDataTypeManagerImplTest : public testing::Test {
                     BuildConfigureContext(CONFIGURE_REASON_RECONFIGURATION));
   }
 
-  void Configure(ModelTypeSet desired_types,
-                 ConfigureContext::StorageOption storage_option) {
+  void Configure(ModelTypeSet desired_types, StorageOption storage_option) {
     dtm_->Configure(desired_types,
                     BuildConfigureContext(CONFIGURE_REASON_RECONFIGURATION,
                                           storage_option));
@@ -334,7 +333,8 @@ class SyncDataTypeManagerImplTest : public testing::Test {
     return configurer_.last_params();
   }
 
-  base::MessageLoopForUI ui_loop_;
+  base::test::ScopedTaskEnvironment task_environment_{
+      base::test::ScopedTaskEnvironment::MainThreadType::UI};
   DataTypeController::TypeMap controllers_;
   TestSyncClient sync_client_;
   FakeModelTypeConfigurer configurer_;
@@ -1782,8 +1782,7 @@ TEST_F(SyncDataTypeManagerImplTest, PurgeDataOnStartingPersistent) {
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK, DataTypeStatusTable());
 
-  Configure(ModelTypeSet(BOOKMARKS, AUTOFILL_WALLET_DATA),
-            ConfigureContext::STORAGE_ON_DISK);
+  Configure(ModelTypeSet(BOOKMARKS, AUTOFILL_WALLET_DATA), STORAGE_ON_DISK);
   ASSERT_EQ(DataTypeManager::CONFIGURING, dtm_->state());
 
   FinishDownload(ModelTypeSet(), ModelTypeSet());
@@ -1804,8 +1803,7 @@ TEST_F(SyncDataTypeManagerImplTest, PurgeDataOnStartingPersistent) {
   // Now we restart with a reduced set of data types.
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK, DataTypeStatusTable());
-  Configure(ModelTypeSet(AUTOFILL_WALLET_DATA),
-            ConfigureContext::STORAGE_ON_DISK);
+  Configure(ModelTypeSet(AUTOFILL_WALLET_DATA), STORAGE_ON_DISK);
   ASSERT_EQ(DataTypeManager::CONFIGURING, dtm_->state());
 
   FinishDownload(ModelTypeSet(), ModelTypeSet());
@@ -1832,8 +1830,7 @@ TEST_F(SyncDataTypeManagerImplTest, DontPurgeDataOnStartingEphemeral) {
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK, DataTypeStatusTable());
 
-  Configure(ModelTypeSet(BOOKMARKS, AUTOFILL_WALLET_DATA),
-            ConfigureContext::STORAGE_ON_DISK);
+  Configure(ModelTypeSet(BOOKMARKS, AUTOFILL_WALLET_DATA), STORAGE_ON_DISK);
   ASSERT_EQ(DataTypeManager::CONFIGURING, dtm_->state());
 
   FinishDownload(ModelTypeSet(), ModelTypeSet());
@@ -1854,8 +1851,7 @@ TEST_F(SyncDataTypeManagerImplTest, DontPurgeDataOnStartingEphemeral) {
   // Now we restart in ephemeral mode, with a reduced set of data types.
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK, DataTypeStatusTable());
-  Configure(ModelTypeSet(AUTOFILL_WALLET_DATA),
-            ConfigureContext::STORAGE_IN_MEMORY);
+  Configure(ModelTypeSet(AUTOFILL_WALLET_DATA), STORAGE_IN_MEMORY);
   ASSERT_EQ(DataTypeManager::CONFIGURING, dtm_->state());
 
   FinishDownload(ModelTypeSet(), ModelTypeSet());
@@ -1879,8 +1875,7 @@ TEST_F(SyncDataTypeManagerImplTest, PurgeDataOnReconfiguringPersistent) {
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK, DataTypeStatusTable());
 
-  Configure(ModelTypeSet(BOOKMARKS, AUTOFILL_WALLET_DATA),
-            ConfigureContext::STORAGE_ON_DISK);
+  Configure(ModelTypeSet(BOOKMARKS, AUTOFILL_WALLET_DATA), STORAGE_ON_DISK);
   ASSERT_EQ(DataTypeManager::CONFIGURING, dtm_->state());
 
   FinishDownload(ModelTypeSet(), ModelTypeSet());
@@ -1895,8 +1890,7 @@ TEST_F(SyncDataTypeManagerImplTest, PurgeDataOnReconfiguringPersistent) {
   // Now we reconfigure with a reduced set of data types.
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK, DataTypeStatusTable());
-  Configure(ModelTypeSet(AUTOFILL_WALLET_DATA),
-            ConfigureContext::STORAGE_ON_DISK);
+  Configure(ModelTypeSet(AUTOFILL_WALLET_DATA), STORAGE_ON_DISK);
   ASSERT_EQ(DataTypeManager::CONFIGURING, dtm_->state());
 
   FinishDownload(ModelTypeSet(), ModelTypeSet());
@@ -1919,8 +1913,7 @@ TEST_F(SyncDataTypeManagerImplTest, DontPurgeDataOnReconfiguringEphemeral) {
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK, DataTypeStatusTable());
 
-  Configure(ModelTypeSet(BOOKMARKS, AUTOFILL_WALLET_DATA),
-            ConfigureContext::STORAGE_ON_DISK);
+  Configure(ModelTypeSet(BOOKMARKS, AUTOFILL_WALLET_DATA), STORAGE_ON_DISK);
   ASSERT_EQ(DataTypeManager::CONFIGURING, dtm_->state());
 
   FinishDownload(ModelTypeSet(), ModelTypeSet());
@@ -1935,8 +1928,7 @@ TEST_F(SyncDataTypeManagerImplTest, DontPurgeDataOnReconfiguringEphemeral) {
   // Now we reconfigure into ephemeral mode, with a reduced set of data types.
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK, DataTypeStatusTable());
-  Configure(ModelTypeSet(AUTOFILL_WALLET_DATA),
-            ConfigureContext::STORAGE_IN_MEMORY);
+  Configure(ModelTypeSet(AUTOFILL_WALLET_DATA), STORAGE_IN_MEMORY);
   ASSERT_EQ(DataTypeManager::CONFIGURING, dtm_->state());
 
   FinishDownload(ModelTypeSet(), ModelTypeSet());

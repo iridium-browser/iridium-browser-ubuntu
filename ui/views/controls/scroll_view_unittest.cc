@@ -318,11 +318,6 @@ class WidgetScrollViewTest : public test::WidgetTest,
     quit_closure_.Run();
     quit_closure_.Reset();
   }
-  void OnCompositingStarted(ui::Compositor* compositor,
-                            base::TimeTicks start_time) override {}
-  void OnCompositingEnded(ui::Compositor* compositor) override {}
-  void OnCompositingChildResizing(ui::Compositor* compositor) override {}
-  void OnCompositingShuttingDown(ui::Compositor* compositor) override {}
 
   Widget* widget_ = nullptr;
 
@@ -1025,8 +1020,9 @@ TEST_F(WidgetScrollViewTest, ScrollersOnRest) {
   const float y_offset = 3;
   const int kSteps = 1;
   const int kNnumFingers = 2;
-  generator.ScrollSequence(generator.current_location(), base::TimeDelta(), 0,
-                           y_offset, kSteps, kNnumFingers);
+  generator.ScrollSequence(generator.current_screen_location(),
+                           base::TimeDelta(), 0, y_offset, kSteps,
+                           kNnumFingers);
 
   // Horizontal scroller should start fading out immediately.
   EXPECT_EQ(kMaxOpacity, bar[HORIZONTAL]->layer()->opacity());
@@ -1044,8 +1040,9 @@ TEST_F(WidgetScrollViewTest, ScrollersOnRest) {
   // Then, scrolling horizontally should show the horizontal scroller. The
   // vertical scroller should still be visible, running its hide timer.
   const float x_offset = 5;
-  generator.ScrollSequence(generator.current_location(), base::TimeDelta(),
-                           x_offset, 0, kSteps, kNnumFingers);
+  generator.ScrollSequence(generator.current_screen_location(),
+                           base::TimeDelta(), x_offset, 0, kSteps,
+                           kNnumFingers);
   for (ScrollBarOrientation orientation : {HORIZONTAL, VERTICAL}) {
     EXPECT_EQ(kMaxOpacity, bar[orientation]->layer()->opacity());
     EXPECT_EQ(kMaxOpacity, bar[orientation]->layer()->GetTargetOpacity());

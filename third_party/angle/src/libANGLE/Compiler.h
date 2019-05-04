@@ -21,17 +21,17 @@ namespace rx
 {
 class CompilerImpl;
 class GLImplFactory;
-}
+}  // namespace rx
 
 namespace gl
 {
-class ContextState;
 class ShCompilerInstance;
+class State;
 
 class Compiler final : public RefCountObjectNoID
 {
   public:
-    Compiler(rx::GLImplFactory *implFactory, const ContextState &data);
+    Compiler(rx::GLImplFactory *implFactory, const State &data);
 
     ShCompilerInstance getInstance(ShaderType shaderType);
     void putInstance(ShCompilerInstance &&instance);

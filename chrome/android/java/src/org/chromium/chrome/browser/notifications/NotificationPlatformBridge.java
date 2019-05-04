@@ -4,8 +4,8 @@
 
 package org.chromium.chrome.browser.notifications;
 
+import android.app.Fragment;
 import android.app.Notification;
-import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
 import android.content.Context;
@@ -15,6 +15,8 @@ import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.support.annotation.Nullable;
+import android.support.customtabs.trusted.TrustedWebActivityServiceConnectionManager;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
@@ -29,11 +31,11 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.browserservices.TrustedWebActivityClient;
+import org.chromium.chrome.browser.browserservices.TrustedWebActivityUmaRecorder;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions;
 import org.chromium.chrome.browser.notifications.channels.SiteChannelsManager;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
-import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.website.SingleCategoryPreferences;
 import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
@@ -47,8 +49,6 @@ import org.chromium.webapk.lib.client.WebApkValidator;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.concurrent.TimeUnit;
-
-import javax.annotation.Nullable;
 
 /**
  * Provides the ability for the NotificationPlatformBridgeAndroid to talk to the Android platform
@@ -129,10 +129,12 @@ public class NotificationPlatformBridge {
         if (sNotificationManagerOverride != null) {
             mNotificationManager = sNotificationManagerOverride;
         } else {
-            mNotificationManager = new NotificationManagerProxyImpl(
-                    (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE));
+            mNotificationManager = new NotificationManagerProxyImpl(context);
         }
-        mTwaClient = new TrustedWebActivityClient();
+        mTwaClient = new TrustedWebActivityClient(
+                new TrustedWebActivityServiceConnectionManager(context),
+                new TrustedWebActivityUmaRecorder(),
+                NotificationUmaTracker.getInstance());
     }
 
     /**
@@ -264,11 +266,9 @@ public class NotificationPlatformBridge {
         String origin = getOriginFromIntent(incomingIntent);
         boolean launchSingleWebsitePreferences = origin != null;
 
-        String fragmentName = launchSingleWebsitePreferences
-                ? SingleWebsitePreferences.class.getName()
-                : SingleCategoryPreferences.class.getName();
-        Intent preferencesIntent =
-                PreferencesLauncher.createIntentForSettingsPage(applicationContext, fragmentName);
+        Class<? extends Fragment> fragment = launchSingleWebsitePreferences
+                ? SingleWebsitePreferences.class
+                : SingleCategoryPreferences.class;
 
         Bundle fragmentArguments;
         if (launchSingleWebsitePreferences) {
@@ -286,9 +286,8 @@ public class NotificationPlatformBridge {
                     applicationContext.getResources().getString(
                             R.string.push_notifications_permission_title));
         }
-        preferencesIntent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, fragmentArguments);
 
-        applicationContext.startActivity(preferencesIntent);
+        PreferencesLauncher.launchSettingsPage(applicationContext, fragment, fragmentArguments);
     }
 
     /**
@@ -495,8 +494,8 @@ public class NotificationPlatformBridge {
             final String title, final String body, final Bitmap image, final Bitmap icon,
             final Bitmap badge, final int[] vibrationPattern, final long timestamp,
             final boolean renotify, final boolean silent, final ActionInfo[] actions) {
-        final String webApkPackage =
-                WebApkValidator.queryWebApkPackage(ContextUtils.getApplicationContext(), scopeUrl);
+        final String webApkPackage = WebApkValidator.queryFirstWebApkPackage(
+                ContextUtils.getApplicationContext(), scopeUrl);
         if (webApkPackage != null) {
             WebApkIdentityServiceClient.CheckBrowserBacksWebApkCallback callback =
                     new WebApkIdentityServiceClient.CheckBrowserBacksWebApkCallback() {
@@ -598,12 +597,10 @@ public class NotificationPlatformBridge {
                     notificationBuilder);
         } else {
             // Set up a pending intent for going to the settings screen for |origin|.
-            Intent settingsIntent = PreferencesLauncher.createIntentForSettingsPage(
-                    context, SingleWebsitePreferences.class.getName());
-            settingsIntent.setData(makeIntentData(notificationId, origin, -1 /* actionIndex */));
-            settingsIntent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS,
+            Intent settingsIntent = PreferencesLauncher.createIntentForSettingsPage(context,
+                    SingleWebsitePreferences.class.getName(),
                     SingleWebsitePreferences.createFragmentArgsForSite(origin));
-
+            settingsIntent.setData(makeIntentData(notificationId, origin, -1 /* actionIndex */));
             PendingIntent pendingSettingsIntent = PendingIntent.getActivity(context,
                     PENDING_INTENT_REQUEST_CODE, settingsIntent, PendingIntent.FLAG_UPDATE_CURRENT);
 
@@ -703,7 +700,7 @@ public class NotificationPlatformBridge {
     private void closeNotification(final String notificationId, String scopeUrl,
             boolean hasQueriedWebApkPackage, String webApkPackage) {
         if (!hasQueriedWebApkPackage) {
-            final String webApkPackageFound = WebApkValidator.queryWebApkPackage(
+            final String webApkPackageFound = WebApkValidator.queryFirstWebApkPackage(
                     ContextUtils.getApplicationContext(), scopeUrl);
             if (webApkPackageFound != null) {
                 WebApkIdentityServiceClient.CheckBrowserBacksWebApkCallback callback =

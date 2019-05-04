@@ -4,10 +4,8 @@
 
 #include "chrome/browser/apps/platform_apps/api/browser_context_keyed_service_factories.h"
 
-#include "build/build_config.h"
-
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/apps/platform_apps/api/easy_unlock_private/easy_unlock_private_api.h"
+#include "chrome/browser/apps/platform_apps/api/arc_apps_private/arc_apps_private_api.h"
 #endif
 
 namespace chrome_apps {
@@ -15,7 +13,7 @@ namespace api {
 
 void EnsureAPIBrowserContextKeyedServiceFactoriesBuilt() {
 #if defined(OS_CHROMEOS)
-  EasyUnlockPrivateAPI::GetFactoryInstance();
+  ArcAppsPrivateAPI::GetFactoryInstance();
 #endif
 }
 

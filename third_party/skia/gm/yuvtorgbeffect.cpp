@@ -19,7 +19,7 @@
 #include "SkGradientShader.h"
 #include "effects/GrYUVtoRGBEffect.h"
 #include "ops/GrDrawOp.h"
-#include "ops/GrRectOpFactory.h"
+#include "ops/GrFillRectOp.h"
 
 #define YSIZE 8
 #define USIZE 4
@@ -121,7 +121,8 @@ protected:
 
                 std::unique_ptr<GrFragmentProcessor> fp(
                         GrYUVtoRGBEffect::Make(proxies, yuvaIndices,
-                                               static_cast<SkYUVColorSpace>(space)));
+                                               static_cast<SkYUVColorSpace>(space),
+                                               GrSamplerState::Filter::kNearest));
                 if (fp) {
                     GrPaint grPaint;
                     grPaint.setXPFactory(GrPorterDuffXPFactory::Get(SkBlendMode::kSrc));
@@ -129,8 +130,8 @@ protected:
                     SkMatrix viewMatrix;
                     viewMatrix.setTranslate(x, y);
                     renderTargetContext->priv().testingOnly_addDrawOp(
-                            GrRectOpFactory::MakeNonAAFill(context, std::move(grPaint), viewMatrix,
-                                                           renderRect, GrAAType::kNone));
+                            GrFillRectOp::Make(context, std::move(grPaint), GrAAType::kNone,
+                                               viewMatrix, renderRect));
                 }
                 x += renderRect.width() + kTestPad;
             }
@@ -244,13 +245,14 @@ protected:
             GrPaint grPaint;
             grPaint.setXPFactory(GrPorterDuffXPFactory::Get(SkBlendMode::kSrc));
             auto fp = GrYUVtoRGBEffect::Make(proxies, yuvaIndices,
-                                             static_cast<SkYUVColorSpace>(space));
+                                             static_cast<SkYUVColorSpace>(space),
+                                             GrSamplerState::Filter::kNearest);
             if (fp) {
                 SkMatrix viewMatrix;
                 viewMatrix.setTranslate(x, y);
                 grPaint.addColorFragmentProcessor(std::move(fp));
-                std::unique_ptr<GrDrawOp> op(GrRectOpFactory::MakeNonAAFill(
-                          context, std::move(grPaint), viewMatrix, renderRect, GrAAType::kNone));
+                std::unique_ptr<GrDrawOp> op(GrFillRectOp::Make(context, std::move(grPaint),
+                        GrAAType::kNone, viewMatrix, renderRect));
                 renderTargetContext->priv().testingOnly_addDrawOp(std::move(op));
             }
         }

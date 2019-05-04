@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -16,6 +17,7 @@
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "net/base/net_export.h"
+#include "net/dns/public/dns_protocol.h"
 
 namespace base {
 class BigEndianWriter;
@@ -36,13 +38,31 @@ struct Header;
 struct NET_EXPORT_PRIVATE DnsResourceRecord {
   DnsResourceRecord();
   explicit DnsResourceRecord(const DnsResourceRecord& other);
+  DnsResourceRecord(DnsResourceRecord&& other);
   ~DnsResourceRecord();
+
+  DnsResourceRecord& operator=(const DnsResourceRecord& other);
+  DnsResourceRecord& operator=(DnsResourceRecord&& other);
+
+  // A helper to set |owned_rdata| that also sets |rdata| to point to it.
+  // See the definition of |owned_rdata| below.
+  void SetOwnedRdata(std::string value);
+
+  // NAME (variable length) + TYPE (2 bytes) + CLASS (2 bytes) + TTL (4 bytes) +
+  // RDLENGTH (2 bytes) + RDATA (variable length)
+  //
+  // Uses |owned_rdata| for RDATA if non-empty.
+  size_t CalculateRecordSize() const;
 
   std::string name;  // in dotted form
   uint16_t type = 0;
   uint16_t klass = 0;
   uint32_t ttl = 0;
-  base::StringPiece rdata;  // points to the original response buffer
+  // Points to the original response buffer or otherwise to |owned_rdata|.
+  base::StringPiece rdata;
+  // Used to construct a DnsResponse from data. This field is empty if |rdata|
+  // points to the response buffer.
+  std::string owned_rdata;
 };
 
 // Iterator to walk over resource records of the DNS response packet.
@@ -116,8 +136,10 @@ class NET_EXPORT_PRIVATE DnsResponse {
   DnsResponse(uint16_t id,
               bool is_authoritative,
               const std::vector<DnsResourceRecord>& answers,
+              const std::vector<DnsResourceRecord>& authority_records,
               const std::vector<DnsResourceRecord>& additional_records,
-              const base::Optional<DnsQuery>& query);
+              const base::Optional<DnsQuery>& query,
+              uint8_t rcode = dns_protocol::kRcodeNOERROR);
 
   // Constructs a response buffer of given length. Used for TCP transactions.
   explicit DnsResponse(size_t length);

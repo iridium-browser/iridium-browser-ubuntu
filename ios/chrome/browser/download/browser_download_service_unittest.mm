@@ -8,10 +8,14 @@
 
 #include "base/macros.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/download/ar_quick_look_tab_helper.h"
 #import "ios/chrome/browser/download/download_manager_tab_helper.h"
+#import "ios/chrome/browser/download/features.h"
 #include "ios/chrome/browser/download/pass_kit_mime_type.h"
 #import "ios/chrome/browser/download/pass_kit_tab_helper.h"
+#include "ios/chrome/browser/download/usdz_mime_type.h"
 #import "ios/web/public/download/download_controller.h"
 #import "ios/web/public/download/download_task.h"
 #import "ios/web/public/test/fakes/fake_download_task.h"
@@ -54,6 +58,33 @@ class StubTabHelper : public TabHelper {
   DISALLOW_COPY_AND_ASSIGN(StubTabHelper);
 };
 
+// Substitutes ARQuickLookTabHelper for testing.
+class TestARQuickLookTabHelper : public ARQuickLookTabHelper {
+ public:
+  static void CreateForWebState(web::WebState* web_state) {
+    web_state->SetUserData(
+        ARQuickLookTabHelper::UserDataKey(),
+        base::WrapUnique(new TestARQuickLookTabHelper(web_state)));
+  }
+
+  // Adds the given task to tasks() lists.
+  void Download(std::unique_ptr<web::DownloadTask> task) override {
+    tasks_.push_back(std::move(task));
+  }
+
+  // Tasks added via Download() call.
+  using DownloadTasks = std::vector<std::unique_ptr<web::DownloadTask>>;
+  const DownloadTasks& tasks() const { return tasks_; }
+
+ private:
+  TestARQuickLookTabHelper(web::WebState* web_state)
+      : ARQuickLookTabHelper(web_state) {}
+
+  DownloadTasks tasks_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestARQuickLookTabHelper);
+};
+
 }  // namespace
 
 // Test fixture for testing BrowserDownloadService class.
@@ -61,7 +92,10 @@ class BrowserDownloadServiceTest : public PlatformTest {
  protected:
   BrowserDownloadServiceTest()
       : browser_state_(browser_state_builder_.Build()) {
+    scoped_feature_list_.InitAndEnableFeature(download::kUsdzPreview);
+
     StubTabHelper<PassKitTabHelper>::CreateForWebState(&web_state_);
+    TestARQuickLookTabHelper::CreateForWebState(&web_state_);
     StubTabHelper<DownloadManagerTabHelper>::CreateForWebState(&web_state_);
 
     // BrowserDownloadServiceFactory sets its service as
@@ -89,6 +123,11 @@ class BrowserDownloadServiceTest : public PlatformTest {
         PassKitTabHelper::FromWebState(&web_state_));
   }
 
+  TestARQuickLookTabHelper* ar_quick_look_tab_helper() {
+    return static_cast<TestARQuickLookTabHelper*>(
+        ARQuickLookTabHelper::FromWebState(&web_state_));
+  }
+
   StubTabHelper<DownloadManagerTabHelper>* download_manager_tab_helper() {
     return static_cast<StubTabHelper<DownloadManagerTabHelper>*>(
         DownloadManagerTabHelper::FromWebState(&web_state_));
@@ -101,6 +140,7 @@ class BrowserDownloadServiceTest : public PlatformTest {
   std::unique_ptr<BrowserDownloadService> service_;
   web::TestWebState web_state_;
   base::HistogramTester histogram_tester_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // Tests that BrowserDownloadService downloads the task using
@@ -118,6 +158,31 @@ TEST_F(BrowserDownloadServiceTest, PkPassMimeType) {
   histogram_tester_.ExpectUniqueSample(
       "Download.IOSDownloadMimeType",
       static_cast<base::HistogramBase::Sample>(DownloadMimeTypeResult::PkPass),
+      1);
+}
+
+// Tests that BrowserDownloadService downloads the task using
+// ARQuickLookTabHelper.
+TEST_F(BrowserDownloadServiceTest, UsdzMimeType) {
+  if (!download::IsUsdzPreviewEnabled()) {
+    // Disabled on iOS versions below 12 because QLPreviewController is not
+    // available.
+    return;
+  }
+
+  ASSERT_TRUE(download_controller()->GetDelegate());
+  auto task =
+      std::make_unique<web::FakeDownloadTask>(GURL(kUrl), kUsdzMimeType);
+  web::DownloadTask* task_ptr = task.get();
+  download_controller()->GetDelegate()->OnDownloadCreated(
+      download_controller(), &web_state_, std::move(task));
+  ASSERT_EQ(1U, ar_quick_look_tab_helper()->tasks().size());
+  EXPECT_EQ(task_ptr, ar_quick_look_tab_helper()->tasks()[0].get());
+  ASSERT_TRUE(download_manager_tab_helper()->tasks().empty());
+  histogram_tester_.ExpectUniqueSample(
+      "Download.IOSDownloadMimeType",
+      static_cast<base::HistogramBase::Sample>(
+          DownloadMimeTypeResult::UniversalSceneDescription),
       1);
 }
 

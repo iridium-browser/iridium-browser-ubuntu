@@ -61,23 +61,15 @@ constexpr char kScopePhotos[] = "https://www.googleapis.com/auth/photos";
 
 NtpBackgroundService::NtpBackgroundService(
     identity::IdentityManager* const identity_manager,
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    const base::Optional<GURL>& collections_api_url_override,
-    const base::Optional<GURL>& collection_images_api_url_override,
-    const base::Optional<GURL>& albums_api_url_override,
-    const base::Optional<GURL>& photos_api_base_url_override,
-    const base::Optional<std::string>& image_options_override)
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
     : url_loader_factory_(url_loader_factory),
       identity_manager_(identity_manager) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  collections_api_url_ =
-      collections_api_url_override.value_or(GURL(kCollectionsUrl));
-  collection_images_api_url_ =
-      collection_images_api_url_override.value_or(GURL(kCollectionImagesUrl));
-  albums_api_url_ = albums_api_url_override.value_or(GURL(kAlbumsUrl));
-  photos_api_base_url_ =
-      photos_api_base_url_override.value_or(GURL(kAlbumPhotosBaseUrl));
-  image_options_ = image_options_override.value_or(kImageOptions);
+  collections_api_url_ = GURL(kCollectionsUrl);
+  collection_images_api_url_ = GURL(kCollectionImagesUrl);
+  albums_api_url_ = GURL(kAlbumsUrl);
+  photos_api_base_url_ = GURL(kAlbumPhotosBaseUrl);
+  image_options_ = kImageOptions;
 }
 
 NtpBackgroundService::~NtpBackgroundService() = default;
@@ -286,7 +278,7 @@ void NtpBackgroundService::FetchAlbumInfo() {
   // This is particularly important if the current token fetch results in an
   // auth error because the user has since signed out.
   album_info_.clear();
-  OAuth2TokenService::ScopeSet scopes{kScopePhotos};
+  identity::ScopeSet scopes{kScopePhotos};
   token_fetcher_ = std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
       "ntp_backgrounds_service", identity_manager_, scopes,
       base::BindOnce(&NtpBackgroundService::GetAccessTokenForAlbumCallback,
@@ -407,7 +399,7 @@ void NtpBackgroundService::FetchAlbumPhotos(
   album_photos_.clear();
   requested_album_id_ = album_id;
   requested_photo_container_id_ = photo_container_id;
-  OAuth2TokenService::ScopeSet scopes{kScopePhotos};
+  identity::ScopeSet scopes{kScopePhotos};
   token_fetcher_ = std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
       "ntp_backgrounds_service", identity_manager_, scopes,
       base::BindOnce(&NtpBackgroundService::GetAccessTokenForPhotosCallback,
@@ -519,6 +511,20 @@ void NtpBackgroundService::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
+bool NtpBackgroundService::IsValidBackdropUrl(const GURL& url) const {
+  for (auto& image : collection_images_) {
+    if (image.image_url == url)
+      return true;
+  }
+  return false;
+}
+
+void NtpBackgroundService::AddValidBackdropUrlForTesting(const GURL& url) {
+  CollectionImage image;
+  image.image_url = url;
+  collection_images_.push_back(image);
+}
+
 void NtpBackgroundService::NotifyObservers(FetchComplete fetch_complete) {
   for (auto& observer : observers_) {
     switch (fetch_complete) {
@@ -548,6 +554,10 @@ GURL NtpBackgroundService::FormatAlbumPhotosBaseApiUrl(
       base::StringPrintf(kPhotosUrlRequestFormat, album_id.c_str(),
                          photo_container_id.c_str()));
   return api_url;
+}
+
+std::string NtpBackgroundService::GetImageOptionsForTesting() {
+  return kImageOptions;
 }
 
 GURL NtpBackgroundService::GetAlbumPhotosApiUrl() const {

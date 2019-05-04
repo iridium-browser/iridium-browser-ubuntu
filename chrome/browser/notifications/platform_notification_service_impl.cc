@@ -74,7 +74,7 @@ static bool ShouldDisplayWebNotificationOnFullScreen(Profile* profile,
     if (browser->profile() != profile)
       continue;
 
-    const content::WebContents* active_contents =
+    content::WebContents* active_contents =
         browser->tab_strip_model()->GetActiveWebContents();
     if (!active_contents)
       continue;
@@ -157,6 +157,8 @@ void PlatformNotificationServiceImpl::DisplayPersistentNotification(
     const blink::PlatformNotificationData& notification_data,
     const blink::NotificationResources& notification_resources) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  closed_notifications_.erase(notification_id);
 
   // Posted tasks can request notifications to be added, which would cause a
   // crash (see |ScopedKeepAlive|). We just do nothing here, the user would not
@@ -367,14 +369,10 @@ PlatformNotificationServiceImpl::CreateNotificationFromData(
         gfx::Image::CreateFrom1xBitmap(notification_resources.image));
   }
 
-  // Badges are only supported on Android, primarily because it's the only
-  // platform that makes good use of them in the status bar.
-#if defined(OS_ANDROID)
   // TODO(peter): Handle different screen densities instead of always using the
   // 1x bitmap - crbug.com/585815.
   notification.set_small_image(
       gfx::Image::CreateFrom1xBitmap(notification_resources.badge));
-#endif  // defined(OS_ANDROID)
 
   // Developer supplied action buttons.
   std::vector<message_center::ButtonInfo> buttons;

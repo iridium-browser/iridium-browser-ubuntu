@@ -26,6 +26,9 @@
 #include "components/autofill/core/browser/payments/payments_customer_data.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
 #include "components/autofill/core/browser/suggestion.h"
+#include "components/autofill/core/browser/sync_utils.h"
+#include "components/autofill/core/browser/test_data_creator.h"
+#include "components/autofill/core/browser/webdata/autofill_change.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service_observer.h"
 #include "components/history/core/browser/history_service_observer.h"
@@ -33,10 +36,9 @@
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_member.h"
 #include "components/signin/core/browser/account_info.h"
+#include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/sync/driver/sync_service_observer.h"
 #include "components/webdata/common/web_data_service_consumer.h"
-#include "third_party/libaddressinput/src/cpp/include/libaddressinput/source.h"
-#include "third_party/libaddressinput/src/cpp/include/libaddressinput/storage.h"
 
 class Browser;
 class PrefService;
@@ -72,6 +74,7 @@ class PersonalDataManager : public KeyedService,
                             public AutofillWebDataServiceObserverOnUISequence,
                             public history::HistoryServiceObserver,
                             public syncer::SyncServiceObserver,
+                            public GaiaCookieManagerService::Observer,
                             public AccountInfoGetter {
  public:
   explicit PersonalDataManager(const std::string& app_locale);
@@ -92,6 +95,7 @@ class PersonalDataManager : public KeyedService,
             identity::IdentityManager* identity_manager,
             AutofillProfileValidator* client_profile_validator,
             history::HistoryService* history_service,
+            GaiaCookieManagerService* cookie_manager_service,
             bool is_off_the_record);
 
   // KeyedService:
@@ -121,6 +125,12 @@ class PersonalDataManager : public KeyedService,
   // AccountInfoGetter:
   AccountInfo GetAccountInfoForPaymentsServer() const override;
   bool IsSyncFeatureEnabled() const override;
+
+  // GaiaCookieManagerService::Observer:
+  void OnGaiaCookieDeletedByUserAction() override;
+
+  // Returns the current sync status.
+  AutofillSyncSigninState GetSyncSigninState() const;
 
   // Adds a listener to be notified of PersonalDataManager events.
   virtual void AddObserver(PersonalDataManagerObserver* observer);
@@ -191,10 +201,8 @@ class PersonalDataManager : public KeyedService,
   // Resets the card for |guid| to the masked state.
   void ResetFullServerCard(const std::string& guid);
 
-  // Resets all unmasked cards to the masked state if |is_dry_run| is false.
-  // Only records the number of cards that would have been remasked if
-  // |is_dry_run| is true.
-  void ResetFullServerCards(bool is_dry_run = false);
+  // Resets all unmasked cards to the masked state.
+  void ResetFullServerCards();
 
   // Deletes all server profiles and cards (both masked and unmasked).
   void ClearAllServerData();
@@ -207,7 +215,7 @@ class PersonalDataManager : public KeyedService,
 
   // Returns whether server credit cards are stored in account (i.e. ephemeral)
   // storage.
-  bool IsUsingAccountStorageForServerCardsForTest() const;
+  bool IsUsingAccountStorageForServerDataForTest() const;
 
   // Sets which SyncService to use and observe in a test. |sync_service| is not
   // owned by this class and must outlive |this|.
@@ -222,7 +230,7 @@ class PersonalDataManager : public KeyedService,
   virtual CreditCard* GetCreditCardByNumber(const std::string& number);
 
   // Gets the field types availabe in the stored address and credit card data.
-  void GetNonEmptyTypes(ServerFieldTypeSet* non_empty_types);
+  void GetNonEmptyTypes(ServerFieldTypeSet* non_empty_types) const;
 
   // Returns whether the personal data has been loaded from the web database.
   virtual bool IsDataLoaded() const;
@@ -244,21 +252,16 @@ class PersonalDataManager : public KeyedService,
   virtual PaymentsCustomerData* GetPaymentsCustomerData() const;
 
   // Updates the validity states of |profiles| according to server validity map.
-  void UpdateProfilesValidityMapsIfNeeded(
-      std::vector<AutofillProfile*>& profiles);
+  void UpdateProfilesServerValidityMapsIfNeeded(
+      const std::vector<AutofillProfile*>& profiles);
 
   // Updates the validity states of |profiles| according to client side
   // validation API: |client_profile_validator_|.
-  void UpdateClientValidityStates(std::vector<AutofillProfile*>& profiles);
+  void UpdateClientValidityStates(
+      const std::vector<AutofillProfile*>& profiles);
 
   // Returns the profiles to suggest to the user, ordered by frecency.
   std::vector<AutofillProfile*> GetProfilesToSuggest() const;
-
-  // Remove profiles that haven't been used after |min_last_used| from
-  // |profiles|. The relative ordering of |profiles| is maintained.
-  static void RemoveProfilesNotUsedSinceTimestamp(
-      base::Time min_last_used,
-      std::vector<AutofillProfile*>* profiles);
 
   // Remove profiles that whose |type| field is flagged as invalid, if Chrome
   // is configured to not make suggestions based on invalid data.
@@ -324,7 +327,7 @@ class PersonalDataManager : public KeyedService,
   // otherwise appends |new_profile| to the end of that list. Fills
   // |merged_profiles| with the result. Returns the |guid| of the new or updated
   // profile.
-  std::string MergeProfile(
+  static std::string MergeProfile(
       const AutofillProfile& new_profile,
       std::vector<std::unique_ptr<AutofillProfile>>* existing_profiles,
       const std::string& app_locale,
@@ -357,7 +360,7 @@ class PersonalDataManager : public KeyedService,
   // if the card number of |credit_card| is equal to any local card or any
   // unmasked server card known by the browser, or |TypeAndLastFourDigits| of
   // |credit_card| is equal to any masked server card known by the browser.
-  bool IsKnownCard(const CreditCard& credit_card);
+  bool IsKnownCard(const CreditCard& credit_card) const;
 
   // Check whether a card is a server card or has a duplicated server card.
   bool IsServerCard(const CreditCard* credit_card) const;
@@ -366,6 +369,24 @@ class PersonalDataManager : public KeyedService,
   void SetSyncingForTest(bool is_syncing_for_test) {
     is_syncing_for_test_ = is_syncing_for_test;
   }
+
+  // Returns whether a row to give the option of showing cards from the user's
+  // account should be shown in the dropdown.
+  bool ShouldShowCardsFromAccountOption() const;
+
+  // Triggered when a user selects the option to see cards from their account.
+  // Records the sync transport consent.
+  void OnUserAcceptedCardsFromAccountOption();
+
+  // Logs the fact that the server card link was clicked including information
+  // about the current sync state.
+  void LogServerCardLinkClicked() const;
+
+  // Records the sync transport consent if the user is in sync transport mode.
+  virtual void OnUserAcceptedUpstreamOffer();
+
+  // Triggered when a profile is added/updated/removed on db.
+  void OnAutofillProfileChanged(const AutofillProfileDeepChange& change);
 
  protected:
   // Only PersonalDataManagerFactory and certain tests can create instances of
@@ -419,6 +440,8 @@ class PersonalDataManager : public KeyedService,
       PersonalDataManagerTest,
       ConvertWalletAddressesAndUpdateWalletCards_MultipleSimilarWalletAddresses);  // NOLINT
   FRIEND_TEST_ALL_PREFIXES(PersonalDataManagerTest,
+                           DoNotConvertWalletAddressesInEphemeralStorage);
+  FRIEND_TEST_ALL_PREFIXES(PersonalDataManagerTest,
                            DeleteDisusedCreditCards_OncePerVersion);
   FRIEND_TEST_ALL_PREFIXES(PersonalDataManagerTest,
                            DeleteDisusedCreditCards_DoNothingWhenDisabled);
@@ -468,15 +491,9 @@ class PersonalDataManager : public KeyedService,
                               std::vector<AutofillProfile>* profiles);
 
   // Sets |web_profiles_| to the contents of |profiles| and updates the web
-  // database by adding, updating and removing profiles.
-  // The relationship between this and Refresh is subtle.
-  // A call to |SetProfiles| could include out-of-date data that may conflict
-  // if we didn't refresh-to-latest before an Autofill window was opened for
-  // editing. |SetProfiles| is implemented to make a "best effort" to apply the
-  // changes, but in extremely rare edge cases it is possible not all of the
-  // updates in |profiles| make it to the DB.  This is why SetProfiles will
-  // invoke Refresh after finishing, to ensure we get into a
-  // consistent state.  See Refresh for details.
+  // database by adding, updating and removing profiles. |web_profiles_| need to
+  // be updated at the end of the function, since some tasks cannot tolerate
+  // database delays.
   virtual void SetProfiles(std::vector<AutofillProfile>* profiles);
 
   // Sets |credit_cards_| to the contents of |credit_cards| and updates the web
@@ -544,6 +561,9 @@ class PersonalDataManager : public KeyedService,
   // https://crbug.com/871301
   void MoveJapanCityToStreetAddress();
 
+  // Called when the |profile| is validated by the AutofillProfileValidator.
+  virtual void OnValidated(const AutofillProfile* profile);
+
   // Get the profiles fields validity map by |guid|.
   const ProfileValidityMap& GetProfileValidityByGUID(const std::string& guid);
 
@@ -585,7 +605,7 @@ class PersonalDataManager : public KeyedService,
   base::ObserverList<PersonalDataManagerObserver>::Unchecked observers_;
 
   // |profile_valditiies_need_update| whenever the profile validities are out of
-  bool profile_validities_need_update = true;
+  bool profiles_server_validities_need_update_ = true;
 
  private:
   // Saves |imported_credit_card| to the WebDB if it exists. Returns the guid of
@@ -611,10 +631,6 @@ class PersonalDataManager : public KeyedService,
       const base::string16& field_contents,
       const std::vector<CreditCard*>& cards_to_suggest) const;
 
-  // Returns true if the given credit card can be deleted in a major version
-  // upgrade. The card will need to be local and disused, to be deletable.
-  bool IsCreditCardDeletable(CreditCard* card);
-
   // Runs the routine that removes the orphan rows in the autofill tables if
   // it's never been done.
   void RemoveOrphanAutofillTableRows();
@@ -636,8 +652,8 @@ class PersonalDataManager : public KeyedService,
   // testing purposes.
   void DedupeProfiles(
       std::vector<std::unique_ptr<AutofillProfile>>* existing_profiles,
-      std::unordered_set<AutofillProfile*>* profile_guids_to_delete,
-      std::unordered_map<std::string, std::string>* guids_merge_map);
+      std::unordered_set<std::string>* profile_guids_to_delete,
+      std::unordered_map<std::string, std::string>* guids_merge_map) const;
 
   // Updates the credit cards' billing address reference based on the merges
   // that happened during the dedupe, as defined in |guids_merge_map|. Also
@@ -665,26 +681,29 @@ class PersonalDataManager : public KeyedService,
   // Goes through the Wallet cards to find cards where the billing address is a
   // Wallet address which was already converted in a previous pass. Looks for a
   // matching local profile and updates the |guids_merge_map| to make the card
-  // refert to it.
+  // refer to it.
   bool UpdateWalletCardsAlreadyConvertedBillingAddresses(
-      std::vector<AutofillProfile>* local_profiles,
-      std::unordered_map<std::string, AutofillProfile*>* server_id_profiles_map,
-      std::unordered_map<std::string, std::string>* guids_merge_map);
+      const std::vector<AutofillProfile>& local_profiles,
+      const std::unordered_map<std::string, AutofillProfile*>&
+          server_id_profiles_map,
+      std::unordered_map<std::string, std::string>* guids_merge_map) const;
 
   // Tries to merge the |server_address| into the |existing_profiles| if
   // possible. Adds it to the list if no match is found. The existing profiles
   // should be sorted by decreasing frecency outside of this method, since this
   // will be called multiple times in a row. Returns the guid of the new or
   // updated profile.
-  std::string MergeServerAddressesIntoProfiles(
+  static std::string MergeServerAddressesIntoProfiles(
       const AutofillProfile& server_address,
-      std::vector<AutofillProfile>* existing_profiles);
+      std::vector<AutofillProfile>* existing_profiles,
+      const std::string& app_locale,
+      const std::string& primary_account_email);
 
   // Removes profile from web database according to |guid| and resets credit
   // card's billing address if that address is used by any credit cards.
   // The method does not refresh, this allows multiple removal with one
   // refreshing in the end.
-  void RemoveAutofillProfileByGUIDAndBlankCreditCardReferecne(
+  void RemoveAutofillProfileByGUIDAndBlankCreditCardReference(
       const std::string& guid);
 
   // Returns true if an address can be deleted in a major version upgrade.
@@ -694,16 +713,6 @@ class PersonalDataManager : public KeyedService,
       AutofillProfile* profile,
       const std::unordered_set<std::string>& used_billing_address_guids);
 
-  // If the AutofillCreateDataForTest feature is enabled, this helper creates
-  // autofill address data that would otherwise be difficult to create
-  // manually using the UI.
-  void MaybeCreateTestAddresses();
-
-  // If the AutofillCreateDataForTest feature is enabled, this helper creates
-  // autofill credit card data that would otherwise be difficult to create
-  // manually using the UI.
-  void MaybeCreateTestCreditCards();
-
   // Applies various fixes and cleanups on autofill addresses.
   void ApplyAddressFixesAndCleanups();
 
@@ -711,13 +720,26 @@ class PersonalDataManager : public KeyedService,
   void ApplyCardFixesAndCleanups();
 
   // Resets |synced_profile_validity_|.
-  void ResetProfileValidity() {
-    synced_profile_validity_.reset();
-    profile_validities_need_update = true;
-  };
+  void ResetProfileValidity();
 
-  // Called when the |profile| is validated by the AutofillProfileValidator.
-  void OnValidated(AutofillProfile* profile);
+  // Add/Update/Remove profiles on DB.
+  void AddProfileToDB(const AutofillProfile& profile);
+  void UpdateProfileInDB(const AutofillProfile& profile);
+  void RemoveProfileFromDB(const std::string& guid);
+
+  // Look at the next profile change for profile with guid = |guid|, and handle
+  // it.
+  void HandleNextProfileChange(const std::string& guid);
+  // returns true if there is any profile change that's still on going.
+  bool ProfileChangesAreOnGoing();
+  // returns true if there is any ongoing change for profile with guid = |guid|
+  // that's still on going.
+  bool ProfileChangesAreOnGoing(const std::string& guid);
+  // Remove the change from the |ongoing_profile_changes_|, handle next task or
+  // Refresh.
+  void OnProfileChangeDone(const std::string& guid);
+  // Clear |ongoing_profile_changes_|.
+  void ClearOnGoingProfileChanges();
 
   const std::string app_locale_;
 
@@ -727,10 +749,15 @@ class PersonalDataManager : public KeyedService,
   // The PrefService that this instance uses. Must outlive this instance.
   PrefService* pref_service_ = nullptr;
 
-  // The HistoryService to observed by the personal data manager. Must
+  // The HistoryService to be observed by the personal data manager. Must
   // outlive this instance. This unowned pointer is retained so the PDM can
   // remove itself from the history service's observer list on shutdown.
   history::HistoryService* history_service_ = nullptr;
+
+  // The GaiaCookieManagerService to be observed by the personal data manager.
+  // Must outlive this instance. This unowned pointer is retained so the PDM can
+  // remove itself from the cookie manager service's observer list on shutdown.
+  GaiaCookieManagerService* cookie_manager_service_ = nullptr;
 
   // Pref registrar for managing the change observers.
   PrefChangeRegistrar pref_registrar_;
@@ -740,7 +767,12 @@ class PersonalDataManager : public KeyedService,
   // |profile_validities_need_update| whenever this is changed.
   std::unique_ptr<UserProfileValidityMap> synced_profile_validity_;
 
-  AutofillProfileValidator* client_profile_validator_;
+  // A timely ordered list of on going changes for each profile.
+  std::unordered_map<std::string, std::queue<AutofillProfileDeepChange>>
+      ongoing_profile_changes_;
+
+  // The client side profile validator.
+  AutofillProfileValidator* client_profile_validator_ = nullptr;
 
   // The identity manager that this instance uses. Must outlive this instance.
   identity::IdentityManager* identity_manager_ = nullptr;
@@ -773,12 +805,15 @@ class PersonalDataManager : public KeyedService,
   // Whether new information was received from the sync server.
   bool has_synced_new_data_ = false;
 
-  // True if test data has been created this session.
-  bool has_created_test_addresses_ = false;
-  bool has_created_test_credit_cards_ = false;
+  // Used to create test data. If the AutofillCreateDataForTest feature is
+  // enabled, this helper creates autofill profiles and credit card data that
+  // would otherwise be difficult to create manually using the UI.
+  TestDataCreator test_data_creator_;
 
   // Whether sync should be considered on in a test.
   bool is_syncing_for_test_ = false;
+
+  base::WeakPtrFactory<PersonalDataManager> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PersonalDataManager);
 };

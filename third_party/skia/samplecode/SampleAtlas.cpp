@@ -13,6 +13,7 @@
 #include "SkRandom.h"
 #include "SkRSXform.h"
 #include "SkSurface.h"
+#include "SkTextUtils.h"
 
 typedef void (*DrawAtlasProc)(SkCanvas*, SkImage*, const SkRSXform[], const SkRect[],
                               const SkColor[], int, const SkRect*, const SkPaint*);
@@ -44,20 +45,21 @@ static sk_sp<SkImage> make_atlas(int atlasSize, int cellSize) {
     SkCanvas* canvas = surface->getCanvas();
 
     SkPaint paint;
-    paint.setAntiAlias(true);
     SkRandom rand;
 
     const SkScalar half = cellSize * SK_ScalarHalf;
     const char* s = "01234567890!@#$%^&*=+<>?abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    paint.setTextSize(28);
-    paint.setTextAlign(SkPaint::kCenter_Align);
+    SkFont font(nullptr, 28);
+
     int i = 0;
     for (int y = 0; y < atlasSize; y += cellSize) {
         for (int x = 0; x < atlasSize; x += cellSize) {
             paint.setColor(rand.nextU());
             paint.setAlpha(0xFF);
             int index = i % strlen(s);
-            canvas->drawText(&s[index], 1, x + half, y + half + half/2, paint);
+            SkTextUtils::Draw(canvas, &s[index], 1, kUTF8_SkTextEncoding,
+                              x + half, y + half + half/2, font, paint,
+                              SkTextUtils::kCenter_Align);
             i += 1;
         }
     }

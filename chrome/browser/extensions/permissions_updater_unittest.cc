@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/ref_counted.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/extensions/permissions_test_util.h"
 #include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_test_util.h"
@@ -118,17 +120,6 @@ class PermissionsUpdaterListener : public content::NotificationObserver {
 class PermissionsUpdaterTest : public ExtensionServiceTestBase {
 };
 
-scoped_refptr<Extension> LoadOurManifest() {
-  base::FilePath path;
-  path = path.AppendASCII("api_test")
-      .AppendASCII("permissions")
-      .AppendASCII("optional");
-  return LoadManifest(path.AsUTF8Unsafe(),
-                      "manifest.json",
-                      Manifest::INTERNAL,
-                      Extension::NO_FLAGS);
-}
-
 void AddPattern(URLPatternSet* extent, const std::string& pattern) {
   int schemes = URLPattern::SCHEME_ALL;
   extent->AddPattern(URLPattern(schemes, pattern));
@@ -144,11 +135,12 @@ class PermissionsUpdaterTestDelegate : public PermissionsUpdater::Delegate {
       const Extension* extension,
       std::unique_ptr<const PermissionSet>* granted_permissions) override {
     // Remove the cookie permission.
-    APIPermissionSet api_permission_set((*granted_permissions)->apis());
+    APIPermissionSet api_permission_set =
+        (*granted_permissions)->apis().Clone();
     api_permission_set.erase(APIPermission::kCookie);
-    granted_permissions->reset(
-        new PermissionSet(api_permission_set, ManifestPermissionSet(),
-                          URLPatternSet(), URLPatternSet()));
+    granted_permissions->reset(new PermissionSet(
+        std::move(api_permission_set), ManifestPermissionSet(), URLPatternSet(),
+        URLPatternSet()));
   }
 
  private:
@@ -164,17 +156,24 @@ TEST_F(PermissionsUpdaterTest, GrantAndRevokeOptionalPermissions) {
   InitializeEmptyExtensionService();
 
   // Load the test extension.
-  scoped_refptr<Extension> extension = LoadOurManifest();
-  ASSERT_TRUE(extension.get());
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("permissions")
+          .AddPermissions({"management", "http://a.com/*"})
+          .SetManifestKey("optional_permissions",
+                          ListBuilder()
+                              .Append("http://*.c.com/*")
+                              .Append("notifications")
+                              .Build())
+          .Build();
 
   APIPermissionSet default_apis;
   default_apis.insert(APIPermission::kManagement);
-  ManifestPermissionSet empty_manifest_permissions;
 
   URLPatternSet default_hosts;
   AddPattern(&default_hosts, "http://a.com/*");
-  PermissionSet default_permissions(default_apis, empty_manifest_permissions,
-                                    default_hosts, URLPatternSet());
+  PermissionSet default_permissions(default_apis.Clone(),
+                                    ManifestPermissionSet(), default_hosts,
+                                    URLPatternSet());
 
   // Make sure it loaded properly.
   ASSERT_EQ(default_permissions,
@@ -189,16 +188,14 @@ TEST_F(PermissionsUpdaterTest, GrantAndRevokeOptionalPermissions) {
   apis.insert(APIPermission::kNotifications);
   URLPatternSet hosts;
   AddPattern(&hosts, "http://*.c.com/*");
-  URLPatternSet scriptable_hosts;
-  AddPattern(&scriptable_hosts, "http://*.example.com/*");
 
   {
-    PermissionSet delta(apis, empty_manifest_permissions, hosts,
-                        scriptable_hosts);
+    PermissionSet delta(apis.Clone(), ManifestPermissionSet(), hosts,
+                        URLPatternSet());
 
     PermissionsUpdaterListener listener;
     PermissionsUpdater(profile_.get())
-        .GrantOptionalPermissions(*extension, delta);
+        .GrantOptionalPermissions(*extension, delta, base::DoNothing::Once());
 
     listener.Wait();
 
@@ -227,13 +224,14 @@ TEST_F(PermissionsUpdaterTest, GrantAndRevokeOptionalPermissions) {
     // In the second part of the test, we'll remove the permissions that we
     // just added except for 'notifications'.
     apis.erase(APIPermission::kNotifications);
-    PermissionSet delta(apis, empty_manifest_permissions, hosts,
-                        scriptable_hosts);
+    PermissionSet delta(apis.Clone(), ManifestPermissionSet(), hosts,
+                        URLPatternSet());
 
     PermissionsUpdaterListener listener;
     PermissionsUpdater(profile_.get())
         .RevokeOptionalPermissions(*extension, delta,
-                                   PermissionsUpdater::REMOVE_SOFT);
+                                   PermissionsUpdater::REMOVE_SOFT,
+                                   base::DoNothing::Once());
     listener.Wait();
 
     // Verify that the notification was correct.
@@ -266,7 +264,8 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissions) {
   auto api_permission_set = [](APIPermission::ID id) {
     APIPermissionSet apis;
     apis.insert(id);
-    return std::make_unique<PermissionSet>(apis, ManifestPermissionSet(),
+    return std::make_unique<PermissionSet>(std::move(apis),
+                                           ManifestPermissionSet(),
                                            URLPatternSet(), URLPatternSet());
   };
 
@@ -293,8 +292,8 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissions) {
     EXPECT_TRUE(updater.GetRevokablePermissions(extension.get())->IsEmpty());
 
     // Add the optional "cookies" permission.
-    updater.GrantOptionalPermissions(
-        *extension, *api_permission_set(APIPermission::kCookie));
+    permissions_test_util::GrantOptionalPermissionsAndWaitForCompletion(
+        profile(), *extension, *api_permission_set(APIPermission::kCookie));
     const PermissionsData* permissions = extension->permissions_data();
     // The extension should have the permission in its active permissions and
     // its granted permissions (stored in prefs). And, the permission should
@@ -307,8 +306,8 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissions) {
                     ->HasAPIPermission(APIPermission::kCookie));
 
     // Repeat with "tabs".
-    updater.GrantOptionalPermissions(*extension,
-                                     *api_permission_set(APIPermission::kTab));
+    permissions_test_util::GrantOptionalPermissionsAndWaitForCompletion(
+        profile(), *extension, *api_permission_set(APIPermission::kTab));
     EXPECT_TRUE(permissions->HasAPIPermission(APIPermission::kTab));
     granted_permissions = prefs->GetGrantedPermissions(extension->id());
     EXPECT_TRUE(granted_permissions->HasAPIPermission(APIPermission::kTab));
@@ -318,9 +317,9 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissions) {
     // Remove the "tabs" permission. The extension should no longer have it
     // in its active or granted permissions, and it shouldn't be revokable.
     // The extension should still have the "cookies" permission.
-    updater.RevokeOptionalPermissions(*extension,
-                                      *api_permission_set(APIPermission::kTab),
-                                      PermissionsUpdater::REMOVE_HARD);
+    permissions_test_util::RevokeOptionalPermissionsAndWaitForCompletion(
+        profile(), *extension, *api_permission_set(APIPermission::kTab),
+        PermissionsUpdater::REMOVE_HARD);
     EXPECT_FALSE(permissions->HasAPIPermission(APIPermission::kTab));
     granted_permissions = prefs->GetGrantedPermissions(extension->id());
     EXPECT_FALSE(granted_permissions->HasAPIPermission(APIPermission::kTab));
@@ -483,12 +482,13 @@ TEST_F(PermissionsUpdaterTest,
 
   APIPermissionSet apis;
   apis.insert(APIPermission::kTab);
-  PermissionSet optional_permissions(apis, ManifestPermissionSet(),
+  PermissionSet optional_permissions(std::move(apis), ManifestPermissionSet(),
                                      URLPatternSet(), URLPatternSet());
 
   // Granting permissions should update both runtime-granted permissions and
   // granted permissions.
-  updater.GrantOptionalPermissions(*extension, optional_permissions);
+  permissions_test_util::GrantOptionalPermissionsAndWaitForCompletion(
+      profile(), *extension, optional_permissions);
   EXPECT_EQ(optional_permissions,
             *prefs->GetRuntimeGrantedPermissions(extension->id()));
   EXPECT_EQ(optional_permissions,
@@ -497,8 +497,9 @@ TEST_F(PermissionsUpdaterTest,
   // Removing permissions with REMOVE_SOFT should not remove the permission
   // from runtime-granted permissions or granted permissions; this happens when
   // the extension opts into lower privilege.
-  updater.RevokeOptionalPermissions(*extension, optional_permissions,
-                                    PermissionsUpdater::REMOVE_SOFT);
+  permissions_test_util::RevokeOptionalPermissionsAndWaitForCompletion(
+      profile(), *extension, optional_permissions,
+      PermissionsUpdater::REMOVE_SOFT);
   EXPECT_EQ(optional_permissions,
             *prefs->GetRuntimeGrantedPermissions(extension->id()));
   EXPECT_EQ(optional_permissions,
@@ -510,9 +511,11 @@ TEST_F(PermissionsUpdaterTest,
   // Note: we need to add back the permission first, so it shows up as a
   // revokable permission.
   // TODO(devlin): Inactive, but granted, permissions should be revokable.
-  updater.GrantOptionalPermissions(*extension, optional_permissions);
-  updater.RevokeOptionalPermissions(*extension, optional_permissions,
-                                    PermissionsUpdater::REMOVE_HARD);
+  permissions_test_util::GrantOptionalPermissionsAndWaitForCompletion(
+      profile(), *extension, optional_permissions);
+  permissions_test_util::RevokeOptionalPermissionsAndWaitForCompletion(
+      profile(), *extension, optional_permissions,
+      PermissionsUpdater::REMOVE_HARD);
   EXPECT_TRUE(prefs->GetRuntimeGrantedPermissions(extension->id())->IsEmpty());
   EXPECT_TRUE(prefs->GetGrantedPermissions(extension->id())->IsEmpty());
 }
@@ -555,7 +558,8 @@ TEST_F(PermissionsUpdaterTest,
   // Granting runtime-granted permissions should update the runtime granted
   // permissions store in preferences, but *not* granted permissions in
   // preferences.
-  updater.GrantRuntimePermissions(*extension, runtime_granted_permissions);
+  permissions_test_util::GrantRuntimePermissionsAndWaitForCompletion(
+      profile(), *extension, runtime_granted_permissions);
   EXPECT_EQ(runtime_granted_permissions,
             *prefs->GetRuntimeGrantedPermissions(extension->id()));
   EXPECT_EQ(*initial_granted_permissions,
@@ -564,7 +568,8 @@ TEST_F(PermissionsUpdaterTest,
   // Removing runtime-granted permissions should not remove the permission
   // from runtime-granted permissions; granted permissions should remain
   // unchanged.
-  updater.RevokeRuntimePermissions(*extension, runtime_granted_permissions);
+  permissions_test_util::RevokeRuntimePermissionsAndWaitForCompletion(
+      profile(), *extension, runtime_granted_permissions);
 
   EXPECT_TRUE(prefs->GetRuntimeGrantedPermissions(extension->id())->IsEmpty());
   EXPECT_EQ(*initial_granted_permissions,
@@ -619,7 +624,8 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissionsWithRuntimeHostPermissions) {
                                        URLPatternSet());
     // Give the extension access to the test site. Now, the test site permission
     // should be revokable.
-    updater.GrantRuntimePermissions(*extension, permission_set);
+    permissions_test_util::GrantRuntimePermissionsAndWaitForCompletion(
+        profile(), *extension, permission_set);
     EXPECT_TRUE(extension->permissions_data()
                     ->active_permissions()
                     .HasExplicitAccessToOrigin(kOrigin));
@@ -628,8 +634,8 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissionsWithRuntimeHostPermissions) {
 
     // Revoke the test site permission. The extension should no longer have
     // access to test site, and the revokable permissions should be empty.
-    updater.RevokeOptionalPermissions(*extension, permission_set,
-                                      PermissionsUpdater::REMOVE_HARD);
+    permissions_test_util::RevokeRuntimePermissionsAndWaitForCompletion(
+        profile(), *extension, permission_set);
     EXPECT_FALSE(extension->permissions_data()
                      ->active_permissions()
                      .HasExplicitAccessToOrigin(kOrigin));
@@ -697,8 +703,10 @@ TEST_F(PermissionsUpdaterTest, ChromeFaviconIsNotARevokableHost) {
         ExtensionBuilder("all urls extension")
             .AddPermission("<all_urls>")
             .Build();
-    URLPattern all_urls_pattern(Extension::kValidHostPermissionSchemes,
-                                "<all_urls>");
+    URLPattern all_urls_pattern(
+        Extension::kValidHostPermissionSchemes &
+            ~(URLPattern::SCHEME_CHROMEUI | URLPattern::SCHEME_FILE),
+        "<all_urls>");
     PermissionsUpdater updater(profile());
     updater.InitializePermissions(extension.get());
 
@@ -714,11 +722,8 @@ TEST_F(PermissionsUpdaterTest, ChromeFaviconIsNotARevokableHost) {
 
     std::unique_ptr<const PermissionSet> revokable_permissions =
         updater.GetRevokablePermissions(extension.get());
-    // TODO(https://crbug.com/859600): <all_urls> will report containing
-    // chrome://favicon/, even though it shouldn't since the scheme doesn't
-    // match.
-    // EXPECT_FALSE(revokable_permissions->explicit_hosts().ContainsPattern(
-    //     chrome_favicon_pattern));
+    EXPECT_FALSE(revokable_permissions->explicit_hosts().ContainsPattern(
+        chrome_favicon_pattern));
     EXPECT_TRUE(revokable_permissions->explicit_hosts().ContainsPattern(
         all_urls_pattern));
 
@@ -790,7 +795,8 @@ TEST_F(PermissionsUpdaterTest, GrantingBroadRuntimePermissions) {
   const PermissionSet runtime_permissions(
       APIPermissionSet(), ManifestPermissionSet(),
       URLPatternSet({kAllGooglePattern}), URLPatternSet());
-  updater.GrantRuntimePermissions(*extension, runtime_permissions);
+  permissions_test_util::GrantRuntimePermissionsAndWaitForCompletion(
+      profile(), *extension, runtime_permissions);
 
   // The extension object's permission should never include un-requested
   // permissions, so it should only include maps.google.com.
@@ -823,7 +829,8 @@ TEST_F(PermissionsUpdaterTest, GrantingBroadRuntimePermissions) {
   }
 
   // Revoke the host permission.
-  updater.RevokeRuntimePermissions(*extension, runtime_permissions);
+  permissions_test_util::RevokeRuntimePermissionsAndWaitForCompletion(
+      profile(), *extension, runtime_permissions);
 
   EXPECT_FALSE(extension->permissions_data()
                    ->active_permissions()

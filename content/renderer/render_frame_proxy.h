@@ -112,6 +112,11 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
       const FrameReplicationState& replicated_state,
       const base::UnguessableToken& devtools_frame_token);
 
+  // Creates a RenderFrameProxy to be used with a portal owned by |parent|.
+  // |routing_id| is the routing id of this new RenderFrameProxy.
+  static RenderFrameProxy* CreateProxyForPortal(RenderFrameImpl* parent,
+                                                int proxy_routing_id);
+
   // Returns the RenderFrameProxy for the given routing ID.
   static RenderFrameProxy* FromRoutingID(int routing_id);
 
@@ -138,6 +143,10 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
   // Out-of-process child frames receive a signal from RenderWidget when the
   // zoom level has changed.
   void OnZoomLevelChanged(double zoom_level);
+
+  // Out-of-process child frames receive a signal from RenderWidget when the
+  // page scale factor has changed.
+  void OnPageScaleFactorChanged(float page_scale_factor);
 
   // Invoked by RenderWidget when a new capture sequence number was set,
   // indicating that surfaces should be synchronized.
@@ -192,6 +201,8 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
                           bool has_user_gesture) override;
   void Navigate(const blink::WebURLRequest& request,
                 bool should_replace_current_entry,
+                bool is_opener_navigation,
+                bool prevent_sandboxed_download,
                 mojo::ScopedMessagePipeHandle blob_url_token) override;
   void FrameRectsChanged(const blink::WebRect& local_frame_rect,
                          const blink::WebRect& screen_space_rect) override;
@@ -212,6 +223,8 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
 
   // IPC handlers
   void OnDidStartLoading();
+
+  void WasEvicted();
 
  private:
   RenderFrameProxy(int routing_id);
@@ -262,6 +275,7 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
   void OnEnableAutoResize(const gfx::Size& min_size, const gfx::Size& max_size);
   void OnDisableAutoResize();
   void OnSetHasReceivedUserGestureBeforeNavigation(bool value);
+  void OnRenderFallbackContent() const;
 
 #if defined(USE_AURA)
   // MusEmbeddedFrameDelegate

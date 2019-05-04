@@ -186,7 +186,7 @@ enum {
                             UMA_ACCESSIBILITYSERVICEINFO_MAX)
 
 using SearchKeyToPredicateMap =
-    base::hash_map<base::string16, AccessibilityMatchPredicate>;
+    std::unordered_map<base::string16, AccessibilityMatchPredicate>;
 base::LazyInstance<SearchKeyToPredicateMap>::Leaky
     g_search_key_to_predicate_map = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<base::string16>::Leaky g_all_search_keys =
@@ -1096,7 +1096,8 @@ void WebContentsAccessibilityAndroid::OnAutofillPopupDisplayed(
   DeleteAutofillPopupProxy();
 
   g_autofill_popup_proxy_node = BrowserAccessibility::Create();
-  g_autofill_popup_proxy_node_ax_node = new ui::AXNode(nullptr, -1, -1);
+  g_autofill_popup_proxy_node_ax_node =
+      new ui::AXNode(nullptr, nullptr, -1, -1);
   ui::AXNodeData ax_node_data;
   ax_node_data.role = ax::mojom::Role::kMenu;
   ax_node_data.SetName("Autofill");

@@ -123,10 +123,10 @@ ClientSideDetectionService::~ClientSideDetectionService() {
 }
 
 // static
-ClientSideDetectionService* ClientSideDetectionService::Create(
+std::unique_ptr<ClientSideDetectionService> ClientSideDetectionService::Create(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  return new ClientSideDetectionService(url_loader_factory);
+  return base::WrapUnique(new ClientSideDetectionService(url_loader_factory));
 }
 
 void ClientSideDetectionService::SetEnabledAndRefreshState(bool enabled) {
@@ -261,9 +261,10 @@ void ClientSideDetectionService::SendModelToProcess(
     return;
   }
   ChromeService::GetInstance()->connector()->BindInterface(
-      service_manager::Identity(chrome::mojom::kRendererServiceName,
-                                process->GetChildIdentity().user_id(),
-                                process->GetChildIdentity().instance()),
+      service_manager::ServiceFilter::ByNameWithIdInGroup(
+          chrome::mojom::kRendererServiceName,
+          process->GetChildIdentity().instance_id(),
+          process->GetChildIdentity().instance_group()),
       &phishing);
   phishing->SetPhishingModel(model);
 }

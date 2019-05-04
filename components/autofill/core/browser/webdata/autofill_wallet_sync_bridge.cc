@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/base64.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
@@ -20,6 +21,7 @@
 #include "components/autofill/core/browser/webdata/autofill_webdata_backend.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/autofill_util.h"
+#include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/model/entity_data.h"
 #include "components/sync/model/mutable_data_batch.h"
 #include "components/sync/model/sync_merge_result.h"
@@ -51,11 +53,86 @@ std::string GetSpecificsIdFromAutofillWalletSpecifics(
   return std::string();
 }
 
+std::string GetSpecificsIdFromAutofillProfile(const AutofillProfile& profile) {
+  // Both server_id and specifics_id are _not_ base64 encoded.
+  return profile.server_id();
+}
+
+std::string GetSpecificsIdFromCreditCard(const CreditCard& card) {
+  // Both server_id and specifics_id are _not_ base64 encoded.
+  return card.server_id();
+}
+
+std::string GetSpecificsIdFromPaymentsCustomerData(
+    const PaymentsCustomerData& customer_data) {
+  // Both customer_id and specifics_id are _not_ base64 encoded.
+  return customer_data.customer_id;
+}
+
+// Returns the client tag for wallet data specifics id.
 std::string GetClientTagForWalletDataSpecificsId(
     const std::string& specifics_id) {
   // Unlike for the wallet_metadata model type, the wallet_data expects
   // specifics id directly as client tags.
   return specifics_id;
+}
+
+// Returns the storage key to be used for wallet data for the specified wallet
+// data |specifics_id|.
+std::string GetStorageKeyForWalletDataSpecificsId(
+    const std::string& specifics_id) {
+  // We use the (non-base64-encoded) |specifics_id| directly as the storage key,
+  // this function only hides this definition from all its call sites.
+  return specifics_id;
+}
+
+// Creates a EntityData object corresponding to the specified |address|.
+std::unique_ptr<EntityData> CreateEntityDataFromAutofillServerProfile(
+    const AutofillProfile& address,
+    bool enforce_utf8) {
+  auto entity_data = std::make_unique<EntityData>();
+  entity_data->non_unique_name =
+      "Server profile " +
+      GetBase64EncodedId(GetSpecificsIdFromAutofillProfile(address));
+
+  AutofillWalletSpecifics* wallet_specifics =
+      entity_data->specifics.mutable_autofill_wallet();
+  SetAutofillWalletSpecificsFromServerProfile(address, wallet_specifics,
+                                              enforce_utf8);
+
+  return entity_data;
+}
+
+// Creates a EntityData object corresponding to the specified |card|.
+std::unique_ptr<EntityData> CreateEntityDataFromCard(const CreditCard& card,
+                                                     bool enforce_utf8) {
+  auto entity_data = std::make_unique<EntityData>();
+  entity_data->non_unique_name =
+      "Server card " + GetBase64EncodedId(GetSpecificsIdFromCreditCard(card));
+
+  AutofillWalletSpecifics* wallet_specifics =
+      entity_data->specifics.mutable_autofill_wallet();
+  SetAutofillWalletSpecificsFromServerCard(card, wallet_specifics,
+                                           enforce_utf8);
+
+  return entity_data;
+}
+
+// Creates a EntityData object corresponding to the specified |customer_data|.
+std::unique_ptr<EntityData> CreateEntityDataFromPaymentsCustomerData(
+    const PaymentsCustomerData& customer_data) {
+  auto entity_data = std::make_unique<EntityData>();
+  entity_data->non_unique_name =
+      "Payments customer data " +
+      GetBase64EncodedId(GetSpecificsIdFromPaymentsCustomerData(customer_data));
+
+  AutofillWalletSpecifics* wallet_specifics =
+      entity_data->specifics.mutable_autofill_wallet();
+
+  SetAutofillWalletSpecificsFromPaymentsCustomerData(customer_data,
+                                                     wallet_specifics);
+
+  return entity_data;
 }
 
 }  // namespace
@@ -64,7 +141,6 @@ std::string GetClientTagForWalletDataSpecificsId(
 void AutofillWalletSyncBridge::CreateForWebDataServiceAndBackend(
     const std::string& app_locale,
     const base::RepeatingCallback<void(bool)>& active_callback,
-    bool has_persistent_storage,
     AutofillWebDataBackend* web_data_backend,
     AutofillWebDataService* web_data_service) {
   web_data_service->GetDBUserData()->SetUserData(
@@ -74,7 +150,7 @@ void AutofillWalletSyncBridge::CreateForWebDataServiceAndBackend(
           std::make_unique<syncer::ClientTagBasedModelTypeProcessor>(
               syncer::AUTOFILL_WALLET_DATA,
               /*dump_stack=*/base::RepeatingClosure()),
-          has_persistent_storage, web_data_backend));
+          web_data_backend));
 }
 
 // static
@@ -88,10 +164,8 @@ syncer::ModelTypeSyncBridge* AutofillWalletSyncBridge::FromWebDataService(
 AutofillWalletSyncBridge::AutofillWalletSyncBridge(
     const base::RepeatingCallback<void(bool)>& active_callback,
     std::unique_ptr<syncer::ModelTypeChangeProcessor> change_processor,
-    bool has_persistent_storage,
     AutofillWebDataBackend* web_data_backend)
     : ModelTypeSyncBridge(std::move(change_processor)),
-      has_persistent_storage_(has_persistent_storage),
       active_callback_(active_callback),
       initial_sync_done_(false),
       web_data_backend_(web_data_backend) {
@@ -114,6 +188,15 @@ AutofillWalletSyncBridge::CreateMetadataChangeList() {
 base::Optional<syncer::ModelError> AutofillWalletSyncBridge::MergeSyncData(
     std::unique_ptr<syncer::MetadataChangeList> metadata_change_list,
     syncer::EntityChangeList entity_data) {
+  // All metadata changes have been already written, return early for an error.
+  base::Optional<syncer::ModelError> error =
+      static_cast<syncer::SyncMetadataStoreChangeList*>(
+          metadata_change_list.get())
+          ->TakeError();
+  if (error) {
+    return error;
+  }
+
   SetSyncData(entity_data);
 
   // After the first sync, we are sure that initial sync is done.
@@ -121,6 +204,8 @@ base::Optional<syncer::ModelError> AutofillWalletSyncBridge::MergeSyncData(
     initial_sync_done_ = true;
     active_callback_.Run(true);
   }
+  // TODO(crbug.com/853688): Update the AutofillTable API to know about write
+  // errors and report them here.
   return base::nullopt;
 }
 
@@ -140,54 +225,7 @@ void AutofillWalletSyncBridge::GetData(StorageKeyList storage_keys,
 }
 
 void AutofillWalletSyncBridge::GetAllDataForDebugging(DataCallback callback) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  std::vector<std::unique_ptr<AutofillProfile>> profiles;
-  std::vector<std::unique_ptr<CreditCard>> cards;
-  std::unique_ptr<PaymentsCustomerData> customer_data;
-  if (!GetAutofillTable()->GetServerProfiles(&profiles) ||
-      !GetAutofillTable()->GetServerCreditCards(&cards) ||
-      !GetAutofillTable()->GetPaymentsCustomerData(&customer_data)) {
-    change_processor()->ReportError(
-        {FROM_HERE, "Failed to load entries from table."});
-    return;
-  }
-
-  // Convert all non base 64 strings so that they can be displayed properly.
-  auto batch = std::make_unique<syncer::MutableDataBatch>();
-  for (const std::unique_ptr<AutofillProfile>& entry : profiles) {
-    std::unique_ptr<EntityData> entity_data =
-        CreateEntityDataFromAutofillServerProfile(*entry);
-    sync_pb::WalletPostalAddress* wallet_address =
-        entity_data->specifics.mutable_autofill_wallet()->mutable_address();
-
-    wallet_address->set_id(GetBase64EncodedServerId(wallet_address->id()));
-
-    batch->Put(GetStorageKeyForEntryServerId(entry->server_id()),
-               std::move(entity_data));
-  }
-  for (const std::unique_ptr<CreditCard>& entry : cards) {
-    std::unique_ptr<EntityData> entity_data = CreateEntityDataFromCard(*entry);
-    sync_pb::WalletMaskedCreditCard* wallet_card =
-        entity_data->specifics.mutable_autofill_wallet()->mutable_masked_card();
-
-    wallet_card->set_id(GetBase64EncodedServerId(wallet_card->id()));
-    // The billing address id might refer to a local profile guid which doesn't
-    // need to be encoded.
-    if (!base::IsStringUTF8(wallet_card->billing_address_id())) {
-      wallet_card->set_billing_address_id(
-          GetBase64EncodedServerId(wallet_card->billing_address_id()));
-    }
-
-    batch->Put(GetStorageKeyForEntryServerId(entry->server_id()),
-               std::move(entity_data));
-  }
-
-  if (customer_data) {
-    batch->Put(GetStorageKeyForEntryServerId(customer_data->customer_id),
-               CreateEntityDataFromPaymentsCustomerData(*customer_data));
-  }
-  std::move(callback).Run(std::move(batch));
+  GetAllDataImpl(std::move(callback), /*enforce_utf8=*/true);
 }
 
 std::string AutofillWalletSyncBridge::GetClientTag(
@@ -202,8 +240,9 @@ std::string AutofillWalletSyncBridge::GetClientTag(
 std::string AutofillWalletSyncBridge::GetStorageKey(
     const syncer::EntityData& entity_data) {
   DCHECK(entity_data.specifics.has_autofill_wallet());
-  return GetStorageKeyForSpecificsId(GetSpecificsIdFromAutofillWalletSpecifics(
-      entity_data.specifics.autofill_wallet()));
+  return GetStorageKeyForWalletDataSpecificsId(
+      GetSpecificsIdFromAutofillWalletSpecifics(
+          entity_data.specifics.autofill_wallet()));
 }
 
 bool AutofillWalletSyncBridge::SupportsIncrementalUpdates() const {
@@ -231,6 +270,11 @@ AutofillWalletSyncBridge::ApplyStopSyncChanges(
 }
 
 void AutofillWalletSyncBridge::GetAllDataForTesting(DataCallback callback) {
+  GetAllDataImpl(std::move(callback), /*enforce_utf8=*/false);
+}
+
+void AutofillWalletSyncBridge::GetAllDataImpl(DataCallback callback,
+                                              bool enforce_utf8) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   std::vector<std::unique_ptr<AutofillProfile>> profiles;
@@ -246,16 +290,19 @@ void AutofillWalletSyncBridge::GetAllDataForTesting(DataCallback callback) {
 
   auto batch = std::make_unique<syncer::MutableDataBatch>();
   for (const std::unique_ptr<AutofillProfile>& entry : profiles) {
-    batch->Put(GetStorageKeyForEntryServerId(entry->server_id()),
-               CreateEntityDataFromAutofillServerProfile(*entry));
+    batch->Put(GetStorageKeyForWalletDataSpecificsId(
+                   GetSpecificsIdFromAutofillProfile(*entry)),
+               CreateEntityDataFromAutofillServerProfile(*entry, enforce_utf8));
   }
   for (const std::unique_ptr<CreditCard>& entry : cards) {
-    batch->Put(GetStorageKeyForEntryServerId(entry->server_id()),
-               CreateEntityDataFromCard(*entry));
+    batch->Put(GetStorageKeyForWalletDataSpecificsId(
+                   GetSpecificsIdFromCreditCard(*entry)),
+               CreateEntityDataFromCard(*entry, enforce_utf8));
   }
 
   if (customer_data) {
-    batch->Put(GetStorageKeyForEntryServerId(customer_data->customer_id),
+    batch->Put(GetStorageKeyForWalletDataSpecificsId(
+                   GetSpecificsIdFromPaymentsCustomerData(*customer_data)),
                CreateEntityDataFromPaymentsCustomerData(*customer_data));
   }
   std::move(callback).Run(std::move(batch));
@@ -267,29 +314,26 @@ void AutofillWalletSyncBridge::SetSyncData(
 
   // Extract the Autofill types from the sync |entity_data|.
   std::vector<CreditCard> wallet_cards;
+  std::vector<AutofillProfile> wallet_addresses;
   std::vector<PaymentsCustomerData> customer_data;
-  if (has_persistent_storage_) {
-    // When in persistent storage mode, we update wallet addresses.
-    std::vector<AutofillProfile> wallet_addresses;
-    PopulateWalletTypesFromSyncData(entity_data, &wallet_cards,
-                                    &wallet_addresses, &customer_data);
-    wallet_data_changed |= SetWalletAddresses(std::move(wallet_addresses));
-  } else {
-    // When in ephemeral storage mode, we ignore wallet addresses.
-    PopulateWalletTypesFromSyncData(entity_data, &wallet_cards, nullptr,
-                                    &customer_data);
-  }
+  PopulateWalletTypesFromSyncData(entity_data, &wallet_cards, &wallet_addresses,
+                                  &customer_data);
 
-  // In both cases, we need to update wallet cards and payments customer data.
-  wallet_data_changed |= SetWalletCards(std::move(wallet_cards));
-  wallet_data_changed |= SetPaymentsCustomerData(std::move(customer_data));
+  bool should_log_diff;
+  wallet_data_changed |=
+      SetPaymentsCustomerData(std::move(customer_data), &should_log_diff);
+  wallet_data_changed |=
+      SetWalletCards(std::move(wallet_cards), should_log_diff);
+  wallet_data_changed |=
+      SetWalletAddresses(std::move(wallet_addresses), should_log_diff);
 
   if (web_data_backend_ && wallet_data_changed)
     web_data_backend_->NotifyOfMultipleAutofillChanges();
 }
 
 bool AutofillWalletSyncBridge::SetWalletCards(
-    std::vector<CreditCard> wallet_cards) {
+    std::vector<CreditCard> wallet_cards,
+    bool log_diff) {
   // Users can set billing address of the server credit card locally, but that
   // information does not propagate to either Chrome Sync or Google Payments
   // server. To preserve user's preferred billing address and most recent use
@@ -306,17 +350,21 @@ bool AutofillWalletSyncBridge::SetWalletCards(
   AutofillWalletDiff<CreditCard> diff =
       ComputeAutofillWalletDiff(existing_cards, wallet_cards);
 
-  // Record only local changes that correspond to changes in the payments
-  // backend and not local changes due to initial sync.
-  if (initial_sync_done_) {
-    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletCardsAdded", diff.items_added);
-    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletCardsRemoved", diff.items_removed);
-    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletCardsAddedOrRemoved",
+  if (log_diff) {
+    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletCards2.Added", diff.items_added);
+    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletCards2.Removed",
+                             diff.items_removed);
+    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletCards2.AddedOrRemoved",
                              diff.items_added + diff.items_removed);
   }
 
   if (!diff.IsEmpty()) {
-    table->SetServerCreditCards(wallet_cards);
+    if (base::FeatureList::IsEnabled(
+            ::switches::kSyncUSSAutofillWalletMetadata)) {
+      table->SetServerCardsData(wallet_cards);
+    } else {
+      table->SetServerCreditCards(wallet_cards);
+    }
     for (const CreditCardChange& change : diff.changes)
       web_data_backend_->NotifyOfCreditCardChanged(change);
     return true;
@@ -325,7 +373,8 @@ bool AutofillWalletSyncBridge::SetWalletCards(
 }
 
 bool AutofillWalletSyncBridge::SetWalletAddresses(
-    std::vector<AutofillProfile> wallet_addresses) {
+    std::vector<AutofillProfile> wallet_addresses,
+    bool log_diff) {
   // In the common case, the database won't have changed. Committing an update
   // to the database will require at least one DB page write and will schedule
   // a fsync. To avoid this I/O, it should be more efficient to do a read and
@@ -336,18 +385,22 @@ bool AutofillWalletSyncBridge::SetWalletAddresses(
   AutofillWalletDiff<AutofillProfile> diff =
       ComputeAutofillWalletDiff(existing_addresses, wallet_addresses);
 
-  // Record only local changes that correspond to changes in the payments
-  // backend and not local changes due to initial sync.
-  if (initial_sync_done_) {
-    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletAddressesAdded", diff.items_added);
-    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletAddressesRemoved",
+  if (log_diff) {
+    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletAddresses2.Added",
+                             diff.items_added);
+    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletAddresses2.Removed",
                              diff.items_removed);
-    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletAddressesAddedOrRemoved",
+    UMA_HISTOGRAM_COUNTS_100("Autofill.WalletAddresses2.AddedOrRemoved",
                              diff.items_added + diff.items_removed);
   }
 
   if (!diff.IsEmpty()) {
-    table->SetServerProfiles(wallet_addresses);
+    if (base::FeatureList::IsEnabled(
+            ::switches::kSyncUSSAutofillWalletMetadata)) {
+      table->SetServerAddressesData(wallet_addresses);
+    } else {
+      table->SetServerProfiles(wallet_addresses);
+    }
     for (const AutofillProfileChange& change : diff.changes)
       web_data_backend_->NotifyOfAutofillProfileChanged(change);
     return true;
@@ -356,11 +409,8 @@ bool AutofillWalletSyncBridge::SetWalletAddresses(
 }
 
 bool AutofillWalletSyncBridge::SetPaymentsCustomerData(
-    std::vector<PaymentsCustomerData> customer_data) {
-  // In the common case, the database won't have changed. Committing an update
-  // to the database will require at least one DB page write and will schedule
-  // a fsync. To avoid this I/O, it should be more efficient to do a read and
-  // only do the writes if something changed.
+    std::vector<PaymentsCustomerData> customer_data,
+    bool* should_log_diff) {
   AutofillTable* table = GetAutofillTable();
   std::unique_ptr<PaymentsCustomerData> existing_entry;
   table->GetPaymentsCustomerData(&existing_entry);
@@ -376,6 +426,15 @@ bool AutofillWalletSyncBridge::SetPaymentsCustomerData(
                   << " payments-customer-data entries; expected 0 or 1.";
   }
 #endif  // DCHECK_IS_ON()
+
+  // We report the diff to metrics only if this is an incremental change where
+  // the user had sync set-up (having PaymentsCustomerData is a pre-requisite
+  // for having any other data) and continues to have sync set-up (continuing
+  // having a PaymentsCustomerData entity). As a side effect, this excludes
+  // reporting diffs for users that newly got a GPay account and sync
+  // PaymentsCustomerData for the first time but this is the best we can do to
+  // have the metrics consistent with Directory implementation.
+  *should_log_diff = existing_entry && new_entry;
 
   if (!new_entry && existing_entry) {
     // Clear the existing entry in the DB.
@@ -428,7 +487,7 @@ AutofillWalletSyncBridge::ComputeAutofillWalletDiff(
     if (cmp < 0) {
       ++result.items_removed;
       result.changes.emplace_back(AutofillDataModelChange<Item>::REMOVE,
-                                  (*old_it)->guid(), nullptr);
+                                  (*old_it)->server_id(), nullptr);
       ++old_it;
     } else if (cmp == 0) {
       ++old_it;
@@ -436,7 +495,7 @@ AutofillWalletSyncBridge::ComputeAutofillWalletDiff(
     } else {
       ++result.items_added;
       result.changes.emplace_back(AutofillDataModelChange<Item>::ADD,
-                                  (*new_it)->guid(), *new_it);
+                                  (*new_it)->server_id(), *new_it);
       ++new_it;
     }
   }

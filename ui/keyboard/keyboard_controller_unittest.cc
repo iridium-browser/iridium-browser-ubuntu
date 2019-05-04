@@ -35,6 +35,8 @@
 #include "ui/keyboard/keyboard_ui.h"
 #include "ui/keyboard/keyboard_util.h"
 #include "ui/keyboard/test/keyboard_test_util.h"
+#include "ui/keyboard/test/test_keyboard_layout_delegate.h"
+#include "ui/keyboard/test/test_keyboard_ui.h"
 #include "ui/wm/core/default_activation_client.h"
 
 #if defined(USE_OZONE)
@@ -43,8 +45,6 @@
 
 namespace keyboard {
 namespace {
-
-const int kDefaultVirtualKeyboardHeight = 100;
 
 // Steps a layer animation until it is completed. Animations must be enabled.
 void RunAnimationForLayer(ui::Layer* layer) {
@@ -109,19 +109,6 @@ class KeyboardContainerObserver : public aura::WindowObserver {
   DISALLOW_COPY_AND_ASSIGN(KeyboardContainerObserver);
 };
 
-class TestKeyboardLayoutDelegate : public KeyboardLayoutDelegate {
- public:
-  TestKeyboardLayoutDelegate() {}
-  ~TestKeyboardLayoutDelegate() override {}
-
-  // Overridden from keyboard::KeyboardLayoutDelegate
-  void MoveKeyboardToDisplay(const display::Display& display) override {}
-  void MoveKeyboardToTouchableDisplay() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestKeyboardLayoutDelegate);
-};
-
 class SetModeCallbackInvocationCounter {
  public:
   SetModeCallbackInvocationCounter() : weak_factory_invoke_(this) {}
@@ -166,14 +153,13 @@ class KeyboardControllerTest : public aura::test::AuraTestBase,
     aura::test::AuraTestBase::SetUp();
     new wm::DefaultActivationClient(root_window());
     focus_controller_.reset(new TestFocusController(root_window()));
-    layout_delegate_.reset(new TestKeyboardLayoutDelegate());
+    layout_delegate_.reset(new TestKeyboardLayoutDelegate(root_window()));
 
     // Force enable the virtual keyboard.
     keyboard::SetTouchKeyboardEnabled(true);
     controller_.EnableKeyboard(
         std::make_unique<TestKeyboardUI>(host()->GetInputMethod()),
         layout_delegate_.get());
-    controller_.ActivateKeyboardInContainer(root_window());
     controller_.AddObserver(this);
   }
 
@@ -215,7 +201,9 @@ class KeyboardControllerTest : public aura::test::AuraTestBase,
     is_visible_ = is_visible;
     is_visible_number_of_calls_++;
   }
-  void OnKeyboardDisabled() override { keyboard_disabled_ = true; }
+  void OnKeyboardEnabledChanged(bool is_enabled) override {
+    keyboard_disabled_ = !is_enabled;
+  }
   void ClearKeyboardDisabled() { keyboard_disabled_ = false; }
 
   int visible_bounds_number_of_calls() const {
@@ -247,14 +235,7 @@ class KeyboardControllerTest : public aura::test::AuraTestBase,
     if (client && client->GetTextInputType() != ui::TEXT_INPUT_TYPE_NONE &&
         client->GetTextInputMode() != ui::TEXT_INPUT_MODE_NONE) {
       input_method->ShowVirtualKeyboardIfEnabled();
-      if (controller().GetKeyboardWindow()->bounds().height() == 0) {
-        // Set initial bounds for test keyboard window.
-        controller().GetKeyboardWindow()->SetBounds(
-            KeyboardBoundsFromRootBounds(root_window()->bounds(),
-                                         kDefaultVirtualKeyboardHeight));
-        // Simulate the keyboard contents finish loading
-        controller_.NotifyKeyboardWindowLoaded();
-      }
+      ASSERT_TRUE(keyboard::WaitUntilShown());
     }
   }
 
@@ -301,14 +282,11 @@ TEST_F(KeyboardControllerTest, KeyboardSize) {
 
   controller().LoadKeyboardWindowInBackground();
 
+  // The keyboard window should not be visible.
   aura::Window* keyboard_window = controller().GetKeyboardWindow();
+  EXPECT_FALSE(keyboard_window->IsVisible());
 
-  // The container should be positioned at the bottom of screen and has 0
-  // height.
   const gfx::Rect screen_bounds = root_window()->bounds();
-  const gfx::Rect initial_keyboard_bounds = keyboard_window->bounds();
-  EXPECT_EQ(0, initial_keyboard_bounds.height());
-  EXPECT_EQ(screen_bounds.height(), initial_keyboard_bounds.y());
 
   // Attempt to change window width or move window up from the bottom are
   // ignored. Changing window height is supported.
@@ -531,8 +509,8 @@ TEST_F(KeyboardControllerTest, SetOccludedBoundsChangesFullscreenBounds) {
   controller().LoadKeyboardWindowInBackground();
 
   // Keyboard is hidden, so SetContainerType should be synchronous.
-  controller().SetContainerType(ContainerType::FULLSCREEN, base::nullopt,
-                                base::DoNothing());
+  controller().SetContainerType(mojom::ContainerType::kFullscreen,
+                                base::nullopt, base::DoNothing());
 
   // KeyboardController only notifies occluded bound changes when the keyboard
   // is visible.
@@ -569,7 +547,8 @@ class KeyboardControllerAnimationTest : public KeyboardControllerTest {
 
     // Preload the keyboard contents so that we can set its bounds.
     controller().LoadKeyboardWindowInBackground();
-    controller().NotifyKeyboardWindowLoaded();
+    // Wait for the keyboard contents to load.
+    base::RunLoop().RunUntilIdle();
     keyboard_window()->SetBounds(root_window()->bounds());
   }
 
@@ -634,7 +613,7 @@ TEST_F(KeyboardControllerAnimationTest, ContainerAnimation) {
   EXPECT_FALSE(notified_is_visible());
 
   SetModeCallbackInvocationCounter invocation_counter;
-  controller().SetContainerType(ContainerType::FLOATING, base::nullopt,
+  controller().SetContainerType(mojom::ContainerType::kFloating, base::nullopt,
                                 invocation_counter.GetInvocationCallback());
   EXPECT_EQ(1, invocation_counter.invocation_count_for_status(true));
   EXPECT_EQ(0, invocation_counter.invocation_count_for_status(false));
@@ -650,7 +629,7 @@ TEST_F(KeyboardControllerAnimationTest, ContainerAnimation) {
   // callback should do nothing when container mode is set to the current active
   // container type. An unnecessary call gets registered synchronously as a
   // failure status to the callback.
-  controller().SetContainerType(ContainerType::FLOATING, base::nullopt,
+  controller().SetContainerType(mojom::ContainerType::kFloating, base::nullopt,
                                 invocation_counter.GetInvocationCallback());
   EXPECT_EQ(1, invocation_counter.invocation_count_for_status(true));
   EXPECT_EQ(1, invocation_counter.invocation_count_for_status(false));
@@ -662,12 +641,13 @@ TEST_F(KeyboardControllerAnimationTest, ChangeContainerModeWithBounds) {
   ui::Layer* layer = keyboard_window()->layer();
   ShowKeyboard();
   RunAnimationForLayer(layer);
-  EXPECT_EQ(ContainerType::FULL_WIDTH, controller().GetActiveContainerType());
+  EXPECT_EQ(mojom::ContainerType::kFullWidth,
+            controller().GetActiveContainerType());
   EXPECT_TRUE(keyboard_window()->IsVisible());
 
   // Changing the mode to another mode invokes hiding + showing.
   const gfx::Rect target_bounds(0, 0, 1200, 600);
-  controller().SetContainerType(ContainerType::FLOATING,
+  controller().SetContainerType(mojom::ContainerType::kFloating,
                                 base::make_optional(target_bounds),
                                 invocation_counter.GetInvocationCallback());
   // The container window shouldn't be resized until it's hidden even if the
@@ -701,22 +681,6 @@ TEST_F(KeyboardControllerAnimationTest, ContainerShowWhileHide) {
   RunAnimationForLayer(layer);
   EXPECT_TRUE(keyboard_window()->IsVisible());
   EXPECT_EQ(1.0, layer->opacity());
-}
-
-TEST_F(KeyboardControllerAnimationTest,
-       SetKeyboardWindowBoundsOnDeactivatedKeyboard) {
-  // Ensure keyboard ui is populated
-  ui::Layer* layer = keyboard_window()->layer();
-  ShowKeyboard();
-  RunAnimationForLayer(layer);
-
-  ASSERT_TRUE(keyboard_window());
-
-  controller().DeactivateKeyboard();
-
-  // lingering handle to the contents window is adjusted.
-  // container_window's LayoutManager should abort silently and not crash.
-  keyboard_window()->SetBounds(gfx::Rect());
 }
 
 TEST_F(KeyboardControllerTest, DisplayChangeShouldNotifyBoundsChange) {
@@ -781,9 +745,9 @@ TEST_F(KeyboardControllerAnimationTest, FloatingKeyboardEnsureCaretInWorkArea) {
   MockTextInputClient mock_input_client;
   EXPECT_CALL(mock_input_client, EnsureCaretNotInRect(gfx::Rect())).Times(1);
 
-  controller().SetContainerType(keyboard::ContainerType::FLOATING,
-                                base::nullopt, base::DoNothing());
-  ASSERT_EQ(keyboard::ContainerType::FLOATING,
+  controller().SetContainerType(mojom::ContainerType::kFloating, base::nullopt,
+                                base::DoNothing());
+  ASSERT_EQ(mojom::ContainerType::kFloating,
             controller().GetActiveContainerType());
 
   // Ensure keyboard ui is populated

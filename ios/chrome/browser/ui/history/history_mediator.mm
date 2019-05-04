@@ -38,12 +38,12 @@ const CGFloat kFaviconMinWidthHeight = 16;
   return self;
 }
 
-#pragma mark - HistoryImageDataSource
+#pragma mark - TableViewFaviconDataSource
 
 - (FaviconAttributes*)faviconForURL:(const GURL&)URL
                          completion:(void (^)(FaviconAttributes*))completion {
   FaviconAttributes* cachedAttributes = self.faviconLoader->FaviconForUrl(
-      URL, kFaviconMinWidthHeight, kFaviconWidthHeight,
+      URL, kFaviconWidthHeight, kFaviconMinWidthHeight,
       /*fallback_to_google_server=*/false, ^(FaviconAttributes* attributes) {
         completion(attributes);
       });

@@ -43,8 +43,6 @@ namespace {
 
 const int32_t kEventDispositionUndefined = -1;
 
-const size_t kTenSeconds = 10 * 1000 * 1000;
-
 cc::ScrollState CreateScrollStateForGesture(const WebGestureEvent& event) {
   cc::ScrollStateData scroll_state_data;
   switch (event.GetType()) {
@@ -144,7 +142,7 @@ InputHandlerProxy::InputHandlerProxy(cc::InputHandler* input_handler,
       input_handler_(input_handler),
       synchronous_input_handler_(nullptr),
       allow_root_animate_(true),
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
       expect_scroll_update_end_(false),
 #endif
       gesture_scroll_on_impl_thread_(false),
@@ -156,7 +154,9 @@ InputHandlerProxy::InputHandlerProxy(cc::InputHandler* input_handler,
       has_ongoing_compositor_scroll_or_pinch_(false),
       is_first_gesture_scroll_update_(false),
       tick_clock_(base::DefaultTickClock::GetInstance()),
-      snap_fling_controller_(std::make_unique<cc::SnapFlingController>(this)) {
+      snap_fling_controller_(std::make_unique<cc::SnapFlingController>(this)),
+      compositor_touch_action_enabled_(
+          base::FeatureList::IsEnabled(features::kCompositorTouchAction)) {
   DCHECK(client);
   input_handler_->BindToClient(this);
   cc::ScrollElasticityHelper* scroll_elasticity_helper =
@@ -165,14 +165,9 @@ InputHandlerProxy::InputHandlerProxy(cc::InputHandler* input_handler,
     scroll_elasticity_controller_.reset(
         new InputScrollElasticityController(scroll_elasticity_helper));
   }
-  compositor_event_queue_ =
-      base::FeatureList::IsEnabled(features::kVsyncAlignedInputEvents)
-          ? std::make_unique<CompositorThreadEventQueue>()
-          : nullptr;
-  scroll_predictor_ =
-      base::FeatureList::IsEnabled(features::kResamplingScrollEvents)
-          ? std::make_unique<ScrollPredictor>()
-          : nullptr;
+  compositor_event_queue_ = std::make_unique<CompositorThreadEventQueue>();
+  scroll_predictor_ = std::make_unique<ScrollPredictor>(
+      base::FeatureList::IsEnabled(features::kResamplingScrollEvents));
 }
 
 InputHandlerProxy::~InputHandlerProxy() {}
@@ -201,8 +196,7 @@ void InputHandlerProxy::HandleInputEventWithLatencyInfo(
 
   // Note: Other input can race ahead of gesture input as they don't have to go
   // through the queue, but we believe it's OK to do so.
-  if (!compositor_event_queue_ ||
-      !IsGestureScrollOrPinch(event_with_callback->event().GetType())) {
+  if (!IsGestureScrollOrPinch(event_with_callback->event().GetType())) {
     DispatchSingleInputEvent(std::move(event_with_callback),
                              tick_clock_->NowTicks());
     return;
@@ -257,33 +251,6 @@ void InputHandlerProxy::HandleInputEventWithLatencyInfo(
 void InputHandlerProxy::DispatchSingleInputEvent(
     std::unique_ptr<EventWithCallback> event_with_callback,
     const base::TimeTicks now) {
-  if (compositor_event_queue_ &&
-      IsGestureScrollOrPinch(event_with_callback->event().GetType())) {
-    // Report the coalesced count only for continuous events to avoid the noise
-    // from non-continuous events.
-    if (IsContinuousGestureEvent(event_with_callback->event().GetType())) {
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "Event.CompositorThreadEventQueue.Continuous.HeadQueueingTime",
-          (now - event_with_callback->creation_timestamp()).InMicroseconds(), 1,
-          kTenSeconds, 50);
-
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "Event.CompositorThreadEventQueue.Continuous.TailQueueingTime",
-          (now - event_with_callback->last_coalesced_timestamp())
-              .InMicroseconds(),
-          1, kTenSeconds, 50);
-
-      UMA_HISTOGRAM_COUNTS_1000(
-          "Event.CompositorThreadEventQueue.CoalescedCount",
-          static_cast<int>(event_with_callback->coalesced_count()));
-    } else {
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "Event.CompositorThreadEventQueue.NonContinuous.QueueingTime",
-          (now - event_with_callback->creation_timestamp()).InMicroseconds(), 1,
-          kTenSeconds, 50);
-    }
-  }
-
   ui::LatencyInfo monitored_latency_info = event_with_callback->latency_info();
   std::unique_ptr<cc::SwapPromiseMonitor> latency_info_swap_promise_monitor =
       input_handler_->CreateLatencyInfoSwapPromiseMonitor(
@@ -318,9 +285,6 @@ void InputHandlerProxy::DispatchSingleInputEvent(
 }
 
 void InputHandlerProxy::DispatchQueuedInputEvents() {
-  if (!compositor_event_queue_)
-    return;
-
   // Calling |NowTicks()| is expensive so we only want to do it once.
   base::TimeTicks now = tick_clock_->NowTicks();
   while (!compositor_event_queue_->empty()) {
@@ -585,10 +549,10 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleGestureScrollBegin(
     const WebGestureEvent& gesture_event) {
   TRACE_EVENT0("input", "InputHandlerProxy::HandleGestureScrollBegin");
 
-  if (compositor_event_queue_ && scroll_predictor_)
+  if (scroll_predictor_)
     scroll_predictor_->ResetOnGestureScrollBegin(gesture_event);
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
   expect_scroll_update_end_ = true;
 #endif
   cc::ScrollState scroll_state = CreateScrollStateForGesture(gesture_event);
@@ -648,7 +612,7 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleGestureScrollBegin(
 InputHandlerProxy::EventDisposition
 InputHandlerProxy::HandleGestureScrollUpdate(
     const WebGestureEvent& gesture_event) {
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
   DCHECK(expect_scroll_update_end_);
 #endif
 
@@ -699,7 +663,7 @@ InputHandlerProxy::HandleGestureScrollUpdate(
 
   if (snap_fling_controller_->HandleGestureScrollUpdate(
           GetGestureScrollUpdateInfo(gesture_event))) {
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
     expect_scroll_update_end_ = false;
 #endif
     gesture_scroll_on_impl_thread_ = false;
@@ -729,7 +693,7 @@ InputHandlerProxy::HandleGestureScrollUpdate(
 InputHandlerProxy::EventDisposition InputHandlerProxy::HandleGestureScrollEnd(
   const WebGestureEvent& gesture_event) {
   TRACE_EVENT0("input", "InputHandlerProxy::HandleGestureScrollEnd");
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
   DCHECK(expect_scroll_update_end_);
   expect_scroll_update_end_ = false;
 #endif
@@ -788,7 +752,14 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HitTestTouchEvent(
           event_listener_type ==
           cc::InputHandler::TouchStartOrMoveEventListenerType::
               HANDLER_ON_SCROLLING_LAYER;
-      result = DID_NOT_HANDLE;
+      // A non-passive touch start / move will always set the whitelisted touch
+      // action to kTouchActionNone, and in that case we do not ack the event
+      // from the compositor.
+      if (compositor_touch_action_enabled_ && white_listed_touch_action &&
+          *white_listed_touch_action != cc::kTouchActionNone)
+        result = DID_HANDLE_NON_BLOCKING;
+      else
+        result = DID_NOT_HANDLE;
       break;
     }
   }

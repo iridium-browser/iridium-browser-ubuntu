@@ -25,6 +25,7 @@
 #include "chrome/browser/ui/translate/translate_bubble_model_impl.h"
 #include "chrome/browser/ui/translate/translate_bubble_view_state_transition.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/md_text_button_with_down_arrow.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
@@ -41,7 +42,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/controls/button/blue_button.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/md_text_button.h"
@@ -86,7 +86,6 @@ TranslateBubbleView::~TranslateBubbleView() {
 views::Widget* TranslateBubbleView::ShowBubble(
     views::View* anchor_view,
     views::Button* highlighted_button,
-    const gfx::Point& anchor_point,
     content::WebContents* web_contents,
     translate::TranslateStep step,
     translate::TranslateErrors::Type error_type,
@@ -127,7 +126,7 @@ views::Widget* TranslateBubbleView::ShowBubble(
   std::unique_ptr<TranslateBubbleModel> model(
       new TranslateBubbleModelImpl(step, std::move(ui_delegate)));
   TranslateBubbleView* view = new TranslateBubbleView(
-      anchor_view, anchor_point, std::move(model), error_type, web_contents);
+      anchor_view, std::move(model), error_type, web_contents);
 
   if (highlighted_button)
     view->SetHighlightedButton(highlighted_button);
@@ -423,7 +422,8 @@ void TranslateBubbleView::StyledLabelLinkClicked(views::StyledLabel* label,
 }
 
 void TranslateBubbleView::OnWidgetClosing(views::Widget* widget) {
-  if (GetBubbleFrameView()->close_button_clicked()) {
+  if (GetBubbleFrameView()->GetWidget()->closed_reason() ==
+      views::Widget::ClosedReason::kCloseButtonClicked) {
     model_->DeclineTranslation();
     translate::ReportUiAction(translate::CLOSE_BUTTON_CLICKED);
   }
@@ -435,11 +435,10 @@ TranslateBubbleModel::ViewState TranslateBubbleView::GetViewState() const {
 
 TranslateBubbleView::TranslateBubbleView(
     views::View* anchor_view,
-    const gfx::Point& anchor_point,
     std::unique_ptr<TranslateBubbleModel> model,
     translate::TranslateErrors::Type error_type,
     content::WebContents* web_contents)
-    : LocationBarBubbleDelegateView(anchor_view, anchor_point, web_contents),
+    : LocationBarBubbleDelegateView(anchor_view, gfx::Point(), web_contents),
       before_translate_view_(NULL),
       translating_view_(NULL),
       after_translate_view_(NULL),
@@ -457,6 +456,7 @@ TranslateBubbleView::TranslateBubbleView(
       is_in_incognito_window_(
           web_contents && web_contents->GetBrowserContext()->IsOffTheRecord()),
       should_always_translate_(false) {
+  DCHECK(anchor_view);
   translate_bubble_view_ = this;
   if (web_contents)  // web_contents can be null in unit_tests.
     mouse_handler_.reset(new WebContentMouseHandler(this, web_contents));
@@ -615,10 +615,9 @@ views::View* TranslateBubbleView::CreateViewBeforeTranslate() {
   accept_button->set_id(BUTTON_ID_TRANSLATE);
 
   accept_button->SetIsDefault(true);
-  before_translate_options_button_ =
-      views::MdTextButton::CreateSecondaryUiButton(
-          this,
-          l10n_util::GetStringUTF16(IDS_TRANSLATE_BUBBLE_OPTIONS_MENU_BUTTON));
+  before_translate_options_button_ = new views::MdTextButtonWithDownArrow(
+      this,
+      l10n_util::GetStringUTF16(IDS_TRANSLATE_BUBBLE_OPTIONS_MENU_BUTTON));
   before_translate_options_button_->set_id(BUTTON_ID_OPTIONS_MENU);
   before_translate_options_button_->set_request_focus_on_press(true);
 
@@ -703,10 +702,9 @@ views::View* TranslateBubbleView::CreateViewAfterTranslate() {
   button->set_id(BUTTON_ID_SHOW_ORIGINAL);
   layout->AddView(button);
 
-  views::Button* options_menu_button =
-      views::MdTextButton::CreateSecondaryUiButton(
-          this,
-          l10n_util::GetStringUTF16(IDS_TRANSLATE_BUBBLE_OPTIONS_MENU_BUTTON));
+  views::Button* options_menu_button = new views::MdTextButtonWithDownArrow(
+      this,
+      l10n_util::GetStringUTF16(IDS_TRANSLATE_BUBBLE_OPTIONS_MENU_BUTTON));
   options_menu_button->set_id(BUTTON_ID_OPTIONS_MENU);
   options_menu_button->set_request_focus_on_press(true);
 

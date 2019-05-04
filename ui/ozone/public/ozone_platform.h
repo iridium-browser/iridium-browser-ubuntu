@@ -11,10 +11,8 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
-#include "services/service_manager/public/cpp/bind_source_info.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "ui/gfx/buffer_types.h"
-#include "ui/gfx/native_widget_types.h"
 #include "ui/ozone/ozone_export.h"
 
 namespace display {
@@ -40,6 +38,7 @@ class PlatformWindow;
 class PlatformWindowDelegate;
 class SurfaceFactoryOzone;
 class SystemInputInjector;
+class PlatformClipboard;
 
 struct PlatformWindowInitProperties;
 
@@ -87,19 +86,9 @@ class OZONE_EXPORT OzonePlatform {
 
   // Struct used to indicate platform properties.
   struct PlatformProperties {
-    PlatformProperties();
-    PlatformProperties(bool needs_request,
-                       bool custom_frame_default,
-                       bool can_use_system_title_bar,
-                       bool requires_mojo_for_ipc,
-                       std::vector<gfx::BufferFormat> buffer_formats);
-    ~PlatformProperties();
-    PlatformProperties(const PlatformProperties& other);
-
-    // Fuchsia only: set to true when the platforms requires
-    // |view_owner_request| field in PlatformWindowInitProperties when creating
-    // a window.
-    bool needs_view_owner_request = false;
+    // Fuchsia only: set to true when the platforms requires |view_token| field
+    // in PlatformWindowInitProperties when creating a window.
+    bool needs_view_token = false;
 
     // Determine whether we should default to native decorations or the custom
     // frame based on the currently-running window manager.
@@ -112,9 +101,6 @@ class OZONE_EXPORT OzonePlatform {
     // Determines if the platform requires mojo communication for the IPC.
     // Currently used only by the Ozone/Wayland platform.
     bool requires_mojo = false;
-
-    // Wayland only: carries buffer formats supported by a Wayland server.
-    std::vector<gfx::BufferFormat> supported_buffer_formats;
   };
 
   using StartupCallback = base::OnceCallback<void(OzonePlatform*)>;
@@ -161,6 +147,11 @@ class OZONE_EXPORT OzonePlatform {
   virtual std::unique_ptr<display::NativeDisplayDelegate>
   CreateNativeDisplayDelegate() = 0;
   virtual std::unique_ptr<PlatformScreen> CreateScreen();
+  virtual PlatformClipboard* GetPlatformClipboard();
+
+  // Returns true if the specified buffer format is supported.
+  virtual bool IsNativePixmapConfigSupported(gfx::BufferFormat format,
+                                             gfx::BufferUsage usage) const;
 
   // Returns a struct that contains configuration and requirements for the
   // current platform implementation.

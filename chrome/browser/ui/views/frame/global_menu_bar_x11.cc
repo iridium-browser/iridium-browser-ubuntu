@@ -233,6 +233,7 @@ GlobalMenuBarCommand tools_menu[] = {
 
     {IDS_VIEW_SOURCE, IDC_VIEW_SOURCE},
     {IDS_DEV_TOOLS, IDC_DEV_TOOLS},
+    {IDS_DEV_TOOLS_ELEMENTS, IDC_DEV_TOOLS_INSPECT},
     {IDS_DEV_TOOLS_CONSOLE, IDC_DEV_TOOLS_CONSOLE},
     {IDS_DEV_TOOLS_DEVICES, IDC_DEV_TOOLS_DEVICES},
 
@@ -568,9 +569,8 @@ void GlobalMenuBarX11::AddHistoryItemToMenu(HistoryItem* item,
 void GlobalMenuBarX11::GetTopSitesData() {
   DCHECK(top_sites_);
 
-  top_sites_->GetMostVisitedURLs(
-      base::Bind(&GlobalMenuBarX11::OnTopSitesReceived,
-                 weak_ptr_factory_.GetWeakPtr()), false);
+  top_sites_->GetMostVisitedURLs(base::Bind(
+      &GlobalMenuBarX11::OnTopSitesReceived, weak_ptr_factory_.GetWeakPtr()));
 }
 
 void GlobalMenuBarX11::OnTopSitesReceived(

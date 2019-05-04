@@ -43,7 +43,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/common/pref_names.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "components/prefs/pref_service.h"
 #endif
 
@@ -366,8 +366,6 @@ class LocalDiscoveryUITest : public WebUIBrowserTest {
                                          kResponseRegisterComplete);
 
     identity::MakePrimaryAccountAvailable(
-        SigninManagerFactory::GetForProfile(browser()->profile()),
-        ProfileOAuth2TokenServiceFactory::GetForProfile(browser()->profile()),
         IdentityManagerFactory::GetForProfile(browser()->profile()),
         kSampleUser);
 

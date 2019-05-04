@@ -20,10 +20,11 @@
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -221,7 +222,7 @@ BackendImpl::~BackendImpl() {
         FROM_HERE,
         base::BindOnce(&FinalCleanupCallback, base::Unretained(this)));
     // http://crbug.com/74623
-    base::ThreadRestrictions::ScopedAllowWait allow_wait;
+    base::ScopedAllowBaseSyncPrimitivesOutsideBlockingScope allow_wait;
     done_.Wait();
   }
 }
@@ -941,7 +942,7 @@ int32_t BackendImpl::GetCurrentEntryId() const {
   return data_->header.this_id;
 }
 
-int BackendImpl::MaxFileSize() const {
+int64_t BackendImpl::MaxFileSize() const {
   return cache_type() == net::PNACL_CACHE ? max_size_ : max_size_ / 8;
 }
 
@@ -1250,6 +1251,15 @@ int32_t BackendImpl::GetEntryCount() const {
   }
 
   return not_deleted;
+}
+
+net::Error BackendImpl::OpenOrCreateEntry(const std::string& key,
+                                          net::RequestPriority request_priority,
+                                          EntryWithOpened* entry_struct,
+                                          CompletionOnceCallback callback) {
+  DCHECK(!callback.is_null());
+  background_queue_.OpenOrCreateEntry(key, entry_struct, std::move(callback));
+  return net::ERR_IO_PENDING;
 }
 
 net::Error BackendImpl::OpenEntry(const std::string& key,
@@ -2126,7 +2136,7 @@ bool BackendImpl::CheckEntry(EntryImpl* cache_entry) {
   bool ok = block_files_.IsValid(cache_entry->entry()->address());
   ok = ok && block_files_.IsValid(cache_entry->rankings()->address());
   EntryStore* data = cache_entry->entry()->Data();
-  for (size_t i = 0; i < arraysize(data->data_addr); i++) {
+  for (size_t i = 0; i < base::size(data->data_addr); i++) {
     if (data->data_addr[i]) {
       Addr address(data->data_addr[i]);
       if (address.is_block_file())

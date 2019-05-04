@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_USB_USB_CHOOSER_CONTROLLER_H_
 #define CHROME_BROWSER_USB_USB_CHOOSER_CONTROLLER_H_
 
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -27,7 +28,7 @@ class WebContents;
 // UsbChooserController creates a chooser for WebUSB.
 // It is owned by ChooserBubbleDelegate.
 class UsbChooserController : public ChooserController,
-                             public UsbChooserContext::Observer {
+                             public UsbChooserContext::DeviceObserver {
  public:
   UsbChooserController(
       content::RenderFrameHost* render_frame_host,
@@ -46,7 +47,7 @@ class UsbChooserController : public ChooserController,
   void Close() override;
   void OpenHelpCenterUrl() const override;
 
-  // UsbChooserContext::Observer implementation:
+  // UsbChooserContext::DeviceObserver implementation:
   void OnDeviceAdded(const device::mojom::UsbDeviceInfo& device_info) override;
   void OnDeviceRemoved(
       const device::mojom::UsbDeviceInfo& device_info) override;
@@ -63,11 +64,11 @@ class UsbChooserController : public ChooserController,
 
   content::WebContents* const web_contents_;
   base::WeakPtr<UsbChooserContext> chooser_context_;
-  ScopedObserver<UsbChooserContext, UsbChooserContext::Observer> observer_;
+  ScopedObserver<UsbChooserContext, UsbChooserContext::DeviceObserver>
+      observer_;
 
-  // Each pair is a (device, device name).
-  std::vector<std::pair<device::mojom::UsbDeviceInfoPtr, base::string16>>
-      devices_;
+  // Each pair is a (device guid, device name).
+  std::vector<std::pair<std::string, base::string16>> devices_;
   // Maps from device name to number of devices.
   std::unordered_map<base::string16, int> device_name_map_;
   base::WeakPtrFactory<UsbChooserController> weak_factory_;

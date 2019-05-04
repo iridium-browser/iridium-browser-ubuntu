@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -82,10 +83,6 @@ class ChromeUserManagerImpl
 
   // UserManager implementation:
   void Shutdown() override;
-  void UserLoggedIn(const AccountId& account_id,
-                    const std::string& user_id_hash,
-                    bool browser_restart,
-                    bool is_child) override;
   user_manager::UserList GetUsersAllowedForMultiProfile() const override;
   user_manager::UserList GetUsersAllowedForSupervisedUsersCreation()
       const override;
@@ -131,7 +128,8 @@ class ChromeUserManagerImpl
                              const std::string& user_id) override;
   void OnExternalDataFetched(const std::string& policy,
                              const std::string& user_id,
-                             std::unique_ptr<std::string> data) override;
+                             std::unique_ptr<std::string> data,
+                             const base::FilePath& file_path) override;
 
   // policy::DeviceLocalAccountPolicyService::Observer implementation.
   void OnPolicyUpdated(const std::string& user_id) override;
@@ -152,6 +150,10 @@ class ChromeUserManagerImpl
       const AccountId& account_id,
       const AffiliationIDSet& user_affiliation_ids) override;
   bool ShouldReportUser(const std::string& user_id) const override;
+  bool IsManagedSessionEnabledForUser(
+      const user_manager::User& active_user) const override;
+  bool IsFullManagementDisclosureNeeded(
+      policy::DeviceLocalAccountPolicyBroker* broker) const override;
 
  protected:
   const std::string& GetApplicationLocale() const override;

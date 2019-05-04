@@ -31,11 +31,28 @@ std::unique_ptr<QuartcSession> QuartcFactory::CreateQuartcSession(
   // Fixes behavior of StopReading() with level-triggered stream sequencers.
   SetQuicReloadableFlag(quic_stop_reading_when_level_triggered, true);
 
-  // Quartc uses zombie streams -- we close the stream for read as soon as we
-  // create a stream -- this makes the stream a zombie stream. b/115323618
-  // revealed that closing zombie streams is problematic, and enabling this flag
-  // fixes it.
-  SetQuicReloadableFlag(quic_fix_reset_zombie_streams, true);
+  // Fix b/110259444.
+  SetQuicReloadableFlag(quic_fix_spurious_ack_alarm, true);
+
+  // Enable version 45+ to enable SendMessage API.
+  SetQuicReloadableFlag(quic_enable_version_45, true);
+
+  // Fix for inconsistent reporting of crypto handshake.
+  SetQuicReloadableFlag(quic_fix_has_pending_crypto_data, true);
+
+  // Ensure that we don't drop data because QUIC streams refuse to buffer it.
+  // TODO(b/120099046):  Replace this with correct handling of WriteMemSlices().
+  SetQuicFlag(&FLAGS_quic_buffered_data_threshold,
+              std::numeric_limits<int>::max());
+
+  // TODO(b/117157454): Perform version negotiation for Quartc outside of
+  // QuicSession/QuicConnection. Currently default of
+  // quic_restart_flag_quic_no_server_conn_ver_negotiation2 is false,
+  // but we fail blueprint test that sets all QUIC flags to true.
+  //
+  // Forcing flag to false to pass blueprint tests, but eventually we'll have
+  // to implement negotiation outside of QuicConnection.
+  SetQuicRestartFlag(quic_no_server_conn_ver_negotiation2, false);
 
   std::unique_ptr<QuicConnection> quic_connection =
       CreateQuicConnection(perspective, writer.get());
@@ -52,11 +69,27 @@ std::unique_ptr<QuartcSession> QuartcFactory::CreateQuartcSession(
   SetQuicReloadableFlag(quic_enable_ack_decimation, false);
   copt.push_back(kAKD2);
 
+  // Use unlimited decimation in order to reduce number of unbundled ACKs.
+  copt.push_back(kAKDU);
+
   // Enable time-based loss detection.
   copt.push_back(kTIME);
 
-  // Use BBR for congestion control.
-  copt.push_back(kTBBR);
+  QuicSentPacketManager& sent_packet_manager =
+      quic_connection->sent_packet_manager();
+
+  // Default delayed ack time is 25ms.
+  // If data packets are sent less often (e.g. because p-time was modified),
+  // we would force acks to be sent every 25ms regardless, increasing
+  // overhead. Since generally we guarantee a packet every 20ms, changing
+  // this value should have miniscule effect on quality on good connections,
+  // but on poor connections, changing this number significantly reduced the
+  // number of ack-only packets.
+  // The p-time can go up to as high as 120ms, and when it does, it's
+  // when the low overhead is the most important thing. Ideally it should be
+  // above 120ms, but it cannot be higher than 0.5*RTO, which equals to 100ms.
+  sent_packet_manager.set_delayed_ack_time(
+      QuicTime::Delta::FromMilliseconds(100));
 
   // Note: flag settings have no effect for Exoblaze builds since
   // SetQuicReloadableFlag() gets stubbed out.
@@ -75,7 +108,18 @@ std::unique_ptr<QuartcSession> QuartcFactory::CreateQuartcSession(
   copt.push_back(k1RTT);  // Exit STARTUP after 1 RTT with no gains.
   copt.push_back(kIW10);  // 10-packet (14600 byte) initial cwnd.
 
+  if (!quartc_session_config.enable_tail_loss_probe) {
+    copt.push_back(kNTLP);
+  }
+
   quic_connection->set_fill_up_link_during_probing(true);
+
+  // We start ack decimation after 15 packets. Typically, we would see
+  // 1-2 crypto handshake packets, one media packet, and 10 probing packets.
+  // We want to get acks for the probing packets as soon as possible,
+  // but we can start using ack decimation right after first probing completes.
+  // The default was to not start ack decimation for the first 100 packets.
+  quic_connection->set_min_received_before_ack_decimation(15);
 
   // TODO(b/112192153):  Test and possible enable slower startup when pipe
   // filling is ready to use.  Slower startup is kBBRS.
@@ -117,8 +161,19 @@ std::unique_ptr<QuartcSession> QuartcFactory::CreateQuartcSession(
   // The ICE transport provides a unique 5-tuple for each connection. Save
   // overhead by omitting the connection id.
   quic_config.SetBytesForConnectionIdToSend(0);
+
+  // Allow up to 1000 incoming streams at once. Quartc streams typically contain
+  // one audio or video frame and close immediately. However, when a video frame
+  // becomes larger than one packet, there is some delay between the start and
+  // end of each stream. The default maximum of 100 only leaves about 1 second
+  // of headroom (Quartc sends ~30 video frames per second) before QUIC starts
+  // to refuse incoming streams. Back-pressure should clear backlogs of
+  // incomplete streams, but targets 1 second for recovery. Increasing the
+  // number of open streams gives sufficient headroom to recover before QUIC
+  // refuses new streams.
+  quic_config.SetMaxIncomingDynamicStreamsToSend(1000);
   return QuicMakeUnique<QuartcSession>(
-      std::move(quic_connection), quic_config,
+      std::move(quic_connection), quic_config, CurrentSupportedVersions(),
       quartc_session_config.unique_remote_server_id, perspective,
       this /*QuicConnectionHelperInterface*/, clock_, std::move(writer));
 }
@@ -128,7 +183,14 @@ std::unique_ptr<QuicConnection> QuartcFactory::CreateQuicConnection(
     QuartcPacketWriter* packet_writer) {
   // dummy_id and dummy_address are used because Quartc network layer will not
   // use these two.
-  QuicConnectionId dummy_id = 0;
+  QuicConnectionId dummy_id;
+  if (!QuicConnectionIdSupportsVariableLength(perspective)) {
+    dummy_id = QuicConnectionIdFromUInt64(0);
+  } else {
+    char connection_id_bytes[sizeof(uint64_t)] = {};
+    dummy_id = QuicConnectionId(static_cast<char*>(connection_id_bytes),
+                                sizeof(connection_id_bytes));
+  }
   QuicSocketAddress dummy_address(QuicIpAddress::Any4(), 0 /*Port*/);
   return QuicMakeUnique<QuicConnection>(
       dummy_id, dummy_address, this, /*QuicConnectionHelperInterface*/

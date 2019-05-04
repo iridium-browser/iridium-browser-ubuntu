@@ -48,7 +48,7 @@ namespace app_list {
 namespace {
 
 constexpr int kItemGridsBottomPadding = 24;
-constexpr int kOnscreenKeyboardTopPadding = 8;
+constexpr int kOnscreenKeyboardTopPadding = 16;
 
 // Indexes of interesting views in ViewModel of AppListFolderView.
 constexpr int kIndexBackground = 0;
@@ -410,6 +410,8 @@ class ContentsContainerAnimation : public AppListFolderView::Animation,
     // preferred bounds is calculated correctly.
     folder_view_->contents_container()->layer()->SetTransform(gfx::Transform());
     folder_view_->RecordAnimationSmoothness();
+
+    folder_view_->NotifyAccessibilityLocationChanges();
   }
 
  private:
@@ -449,8 +451,7 @@ AppListFolderView::AppListFolderView(AppsContainerView* container_view,
   AddChildView(background_view_);
   view_model_->Add(background_view_, kIndexBackground);
 
-  contents_container_->SetPaintToLayer();
-  contents_container_->layer()->SetFillsBoundsOpaquely(false);
+  contents_container_->SetPaintToLayer(ui::LAYER_NOT_DRAWN);
   AddChildView(contents_container_);
   view_model_->Add(contents_container_, kIndexContentsContainer);
 
@@ -578,7 +579,8 @@ void AppListFolderView::UpdatePreferredBounds() {
   // Calculate the folder icon's bounds relative to AppsContainerView.
   gfx::RectF rect(activated_folder_item_view->GetIconBounds());
   ConvertRectToTarget(activated_folder_item_view, container_view_, &rect);
-  gfx::Rect icon_bounds_in_container = gfx::ToEnclosingRect(rect);
+  gfx::Rect icon_bounds_in_container =
+      container_view_->GetMirroredRect(gfx::ToEnclosingRect(rect));
 
   // The opened folder view's center should try to overlap with the folder
   // item's center while it must fit within the bounds of AppsContainerView and
@@ -655,6 +657,17 @@ void AppListFolderView::UpdateBackgroundMask(int corner_radius,
   background_mask_->layer()->SetFillsBoundsOpaquely(false);
   background_mask_->layer()->SetBounds(background_view_->GetContentsBounds());
   background_view_->layer()->SetMaskLayer(background_mask_->layer());
+}
+
+void AppListFolderView::NotifyAccessibilityLocationChanges() {
+  contents_container_->NotifyAccessibilityEvent(
+      ax::mojom::Event::kLocationChanged, true);
+  items_grid_view_->NotifyAccessibilityEvent(ax::mojom::Event::kLocationChanged,
+                                             true);
+  folder_header_view_->NotifyAccessibilityEvent(
+      ax::mojom::Event::kLocationChanged, true);
+  page_switcher_->NotifyAccessibilityEvent(ax::mojom::Event::kLocationChanged,
+                                           true);
 }
 
 void AppListFolderView::CalculateIdealBounds() {

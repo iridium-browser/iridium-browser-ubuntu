@@ -9,10 +9,4 @@ import("//build/config/ui.gni")
 declare_args() {
   # Enable experimental vulkan backend.
   enable_vulkan = is_linux || is_android || is_fuchsia
-
-  # We want to temporarily disable Vulkan on Android to give us time to
-  # investigate ways to reduce its binary size.
-  if (is_android) {
-    enable_vulkan = false
-  }
 }

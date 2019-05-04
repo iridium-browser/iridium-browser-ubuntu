@@ -23,7 +23,6 @@
 #include "ui/base/hit_test.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/compositor/layer.h"
-#include "ui/display/screen.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/rect.h"
@@ -83,6 +82,7 @@ class DesktopNativeWidgetTopLevelHandler : public aura::WindowObserver {
   static aura::Window* CreateParentWindow(aura::Window* child_window,
                                           const gfx::Rect& bounds,
                                           bool full_screen,
+                                          bool is_menu,
                                           bool root_is_always_on_top) {
     // This instance will get deleted when the widget is destroyed.
     DesktopNativeWidgetTopLevelHandler* top_level_handler =
@@ -91,8 +91,9 @@ class DesktopNativeWidgetTopLevelHandler : public aura::WindowObserver {
     child_window->SetBounds(gfx::Rect(bounds.size()));
 
     Widget::InitParams init_params;
-    init_params.type = full_screen ? Widget::InitParams::TYPE_WINDOW :
-        Widget::InitParams::TYPE_POPUP;
+    init_params.type = full_screen ? Widget::InitParams::TYPE_WINDOW
+                                   : is_menu ? Widget::InitParams::TYPE_MENU
+                                             : Widget::InitParams::TYPE_POPUP;
     init_params.bounds = bounds;
     init_params.ownership = Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET;
     init_params.layer_type = ui::LAYER_NOT_DRAWN;
@@ -198,7 +199,7 @@ class DesktopNativeWidgetAuraWindowParentingClient
         root_is_always_on_top = native_widget->IsAlwaysOnTop();
 
       return DesktopNativeWidgetTopLevelHandler::CreateParentWindow(
-          window, bounds, is_fullscreen, root_is_always_on_top);
+          window, bounds, is_fullscreen, is_menu, root_is_always_on_top);
     }
     return root_window_;
   }
@@ -315,6 +316,8 @@ void DesktopNativeWidgetAura::OnHostClosed() {
   wm::SetActivationClient(host_->window(), NULL);
   focus_client_.reset();
 
+  host_->window()->RemovePreTargetHandler(root_window_event_filter_.get());
+
   host_->RemoveObserver(this);
   host_.reset();
   // WindowEventDispatcher owns |desktop_window_tree_host_|.
@@ -353,6 +356,13 @@ void DesktopNativeWidgetAura::OnDesktopWindowTreeHostDestroyed(
   event_client_.reset();
 }
 
+void DesktopNativeWidgetAura::NotifyAccessibilityEvent(
+    ax::mojom::Event event_type) {
+  if (!GetWidget() || !GetWidget()->GetRootView())
+    return;
+  GetWidget()->GetRootView()->NotifyAccessibilityEvent(event_type, true);
+}
+
 void DesktopNativeWidgetAura::HandleActivationChanged(bool active) {
   if (!native_widget_delegate_->OnNativeWidgetActivationChanged(active))
     return;
@@ -361,6 +371,11 @@ void DesktopNativeWidgetAura::HandleActivationChanged(bool active) {
   if (!activation_client)
     return;
   if (active) {
+    // TODO(nektar): We need to harmonize the firing of accessibility
+    // events between platforms.
+    // https://crbug.com/897177
+    NotifyAccessibilityEvent(ax::mojom::Event::kWindowActivated);
+
     if (GetWidget()->HasFocusManager()) {
       // This function can be called before the focus manager has had a
       // chance to set the focused view. In which case we should get the
@@ -392,6 +407,11 @@ void DesktopNativeWidgetAura::HandleActivationChanged(bool active) {
       GetInputMethod()->OnFocus();
     }
   } else {
+    // TODO(nektar): We need to harmonize the firing of accessibility
+    // events between platforms.
+    // https://crbug.com/897177
+    NotifyAccessibilityEvent(ax::mojom::Event::kWindowDeactivated);
+
     // If we're not active we need to deactivate the corresponding
     // aura::Window. This way if a child widget is active it gets correctly
     // deactivated (child widgets don't get native desktop activation changes,
@@ -707,11 +727,7 @@ std::string DesktopNativeWidgetAura::GetWorkspace() const {
 void DesktopNativeWidgetAura::SetBounds(const gfx::Rect& bounds) {
   if (!content_window_)
     return;
-  aura::Window* root = host_->window();
-  display::Screen* screen = display::Screen::GetScreen();
-  gfx::Rect bounds_in_pixels = screen->DIPToScreenRectInWindow(root, bounds);
-  desktop_window_tree_host_->AsWindowTreeHost()->SetBoundsInPixels(
-      bounds_in_pixels);
+  desktop_window_tree_host_->SetBoundsInDIP(bounds);
 }
 
 void DesktopNativeWidgetAura::SetBoundsConstrained(const gfx::Rect& bounds) {
@@ -832,6 +848,9 @@ void DesktopNativeWidgetAura::Maximize() {
 void DesktopNativeWidgetAura::Minimize() {
   if (content_window_)
     desktop_window_tree_host_->Minimize();
+  internal::RootView* root_view =
+      static_cast<internal::RootView*>(GetWidget()->GetRootView());
+  root_view->ResetEventHandlers();
 }
 
 bool DesktopNativeWidgetAura::IsMaximized() const {
@@ -986,10 +1005,6 @@ void DesktopNativeWidgetAura::OnSizeConstraintsChanged() {
   desktop_window_tree_host_->SizeConstraintsChanged();
 }
 
-void DesktopNativeWidgetAura::RepostNativeEvent(gfx::NativeEvent native_event) {
-  OnEvent(native_event);
-}
-
 std::string DesktopNativeWidgetAura::GetName() const {
   return name_;
 }
@@ -1054,7 +1069,7 @@ bool DesktopNativeWidgetAura::HasHitTestMask() const {
   return native_widget_delegate_->HasHitTestMask();
 }
 
-void DesktopNativeWidgetAura::GetHitTestMask(gfx::Path* mask) const {
+void DesktopNativeWidgetAura::GetHitTestMask(SkPath* mask) const {
   native_widget_delegate_->GetHitTestMask(mask);
 }
 

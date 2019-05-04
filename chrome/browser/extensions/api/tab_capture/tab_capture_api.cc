@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -234,7 +234,7 @@ ExtensionFunction::ResponseAction TabCaptureCaptureFunction::Run() {
   const bool match_incognito_profile = include_incognito_information();
   Browser* target_browser =
       GetLastActiveBrowser(profile, match_incognito_profile);
-  if (!target_browser || target_browser->type() != Browser::TYPE_TABBED)
+  if (!target_browser)
     return RespondNow(Error(kFindingTabError));
 
   content::WebContents* target_contents =
@@ -310,7 +310,7 @@ ExtensionFunction::ResponseAction TabCaptureCaptureOffscreenTabFunction::Run() {
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kWhitelistedExtensionID) == extension()->id() ||
       SimpleFeature::IsIdInArray(extension()->id(), kMediaRouterExtensionIds,
-                                 arraysize(kMediaRouterExtensionIds));
+                                 base::size(kMediaRouterExtensionIds));
   if (!is_whitelisted_extension)
     return RespondNow(Error(kNotWhitelistedForOffscreenTabApi));
 
@@ -421,7 +421,7 @@ ExtensionFunction::ResponseAction TabCaptureGetMediaStreamIdFunction::Run() {
     const bool match_incognito_profile = include_incognito_information();
     Browser* target_browser =
         GetLastActiveBrowser(profile, match_incognito_profile);
-    if (!target_browser || target_browser->type() != Browser::TYPE_TABBED)
+    if (!target_browser)
       return RespondNow(Error(kFindingTabError));
 
     target_contents = target_browser->tab_strip_model()->GetActiveWebContents();

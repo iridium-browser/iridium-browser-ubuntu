@@ -43,6 +43,13 @@ if (is_android) {
   import("//third_party/icu/config.gni")
 }
 
+declare_args() {
+  # Indicates whether keystone registration framework should be enabled (see
+  # action("keystone_registration_framework") below).  There are some tests
+  # where we'd like for it to be disabled. (https://crbug.com/909080)
+  enable_keystone_registration_framework = true
+}
+
 assert(!is_ios, "Chromium/iOS shouldn't use anything in //chrome")
 
 if (enable_resource_whitelist_generation) {
@@ -114,9 +121,7 @@ if (!is_android && !is_mac) {
     ]
     if (is_win) {
       public_deps += [ ":reorder_imports" ]
-    }
-    if (use_aura && (is_win || is_linux)) {
-      data_deps += [ "//chrome/app:service_manifests" ]
+      data_deps += [ ":reorder_imports" ]
     }
     if (is_chromeos) {
       data_deps += [ "//sandbox/linux:chrome_sandbox" ]
@@ -216,6 +221,7 @@ if (!is_android && !is_mac) {
         ]
         data_deps = [
           "//chrome/app/version_assembly:version_assembly_manifest",
+          "//chrome/chrome_proxy",
           "//chrome/elevation_service",
           "//chrome/notification_helper",
         ]
@@ -274,7 +280,7 @@ if (!is_android && !is_mac) {
           "//chrome/common:buildflags",
         ]
 
-        ldflags = [ "-pie" ]
+        ldflags = []
         ldflags += [ "-Wl,--no-keep-memory" ]
 
         # Chrome OS debug builds for arm need to pass --long-plt to the linker.
@@ -284,11 +290,7 @@ if (!is_android && !is_mac) {
         }
 
         if (is_desktop_linux && !is_component_build && !using_sanitizer) {
-          if (is_safestack) {
-            version_script = "//build/linux/chrome.safestack.map"
-          } else {
-            version_script = "//build/linux/chrome.map"
-          }
+          version_script = "//build/linux/chrome.map"
           inputs = [
             version_script,
           ]
@@ -410,6 +412,7 @@ if (is_win) {
       "//chrome/install_static:secondary_module",
       "//chrome_elf",
       "//components/crash/content/app",
+      "//components/gwp_asan/client",
       "//components/policy:generated",
       "//content/app/resources",
       "//content/public/common:service_names",
@@ -516,6 +519,7 @@ if (is_win) {
         "//chrome_elf",
         "//components/browser_watcher:browser_watcher_client",
         "//components/crash/content/app",
+        "//components/gwp_asan/client",
         "//content/public/app:child",
         "//content/public/common:service_names",
         "//headless:headless_shell_child_lib",
@@ -643,10 +647,6 @@ if (is_win) {
       "//chrome/common:version_header",
     ]
 
-    if (is_chrome_branded) {
-      deps += [ ":chrome_helpers" ]
-    }
-
     if (enable_stripping) {
       # At link time, preserve the global symbols specified in the .exports
       # file. All other global symbols will be marked as private. The default
@@ -741,18 +741,6 @@ if (is_win) {
       ":chrome_app_strings",
       "//components/policy:chrome_manifest_bundle",
     ]
-  }
-
-  if (is_chrome_branded) {
-    bundle_data("chrome_helpers") {
-      sources = [
-        "installer/mac/internal/keychain_reauthorizers/$chrome_mac_bundle_id",
-      ]
-
-      outputs = [
-        "{{bundle_contents_dir}}/Helpers/{{source_file_part}}",
-      ]
-    }
   }
 
   bundle_data("chrome_versioned_bundle_data") {
@@ -1054,8 +1042,9 @@ if (is_win) {
       ]
     }
 
-    bundle_data("widevine_cdm_library_manifest") {
+    bundle_data("widevine_cdm_library_manifest_and_license_files") {
       sources = [
+        "$root_out_dir/WidevineCdm/LICENSE",
         "$root_out_dir/WidevineCdm/manifest.json",
       ]
       outputs = [
@@ -1071,7 +1060,7 @@ if (is_win) {
     if (bundle_widevine_cdm) {
       deps = [
         ":widevine_cdm_library_binaries",
-        ":widevine_cdm_library_manifest",
+        ":widevine_cdm_library_manifest_and_license_files",
       ]
     }
   }
@@ -1132,7 +1121,7 @@ if (is_win) {
     }
   }
 
-  if (is_chrome_branded) {
+  if (is_chrome_branded && enable_keystone_registration_framework) {
     action("keystone_registration_framework") {
       script = "//chrome/tools/build/mac/copy_keystone_framework.py"
 
@@ -1240,11 +1229,12 @@ if (is_win) {
     ]
 
     if (is_chrome_branded) {
-      framework_contents += [
-        "Default Apps",
-        "Frameworks",  # For KeystoneRegistration.framework.
-      ]
+      framework_contents += [ "Default Apps" ]
+      if (enable_keystone_registration_framework) {
+        framework_contents += [ "Frameworks" ]  # For KeystoneRegistration.framework.
+      }
     }
+
     if (enable_nacl) {
       framework_contents += [ "Internet Plug-Ins" ]
     }
@@ -1585,6 +1575,7 @@ group("extra_resources") {
   if (!is_android) {
     public_deps += [
       "//chrome/browser/resources:component_extension_resources",
+      "//chrome/browser/resources:local_ntp_resources",
       "//chrome/browser/resources:settings_resources",
     ]
   }
@@ -1595,7 +1586,12 @@ group("extra_resources") {
       "//chrome/browser/resources/chromeos/chromevox",
       "//chrome/browser/resources/chromeos/select_to_speak:build",
       "//chrome/browser/resources/chromeos/switch_access:build",
+      "//third_party/ink:ink_resources",
     ]
+  }
+
+  if (!is_android && !is_chromeos) {
+    public_deps += [ "//chrome/browser/resources:onboarding_welcome_resources" ]
   }
 
   if (enable_extensions) {
@@ -1649,25 +1645,27 @@ if (is_chrome_branded && !is_android) {
   }
 }
 
-chrome_paks("packed_resources") {
-  if (is_mac) {
-    output_dir = "$root_gen_dir/repack"
-    copy_data_to_bundle = true
-  } else {
-    output_dir = root_out_dir
-  }
+if (!is_android) {
+  chrome_paks("packed_resources") {
+    if (is_mac) {
+      output_dir = "$root_gen_dir/repack"
+      copy_data_to_bundle = true
+    } else {
+      output_dir = root_out_dir
+    }
 
-  if (enable_resource_whitelist_generation) {
-    repack_whitelist = chrome_resource_whitelist
-    deps = [
-      "//chrome:resource_whitelist",
-    ]
-  }
+    if (enable_resource_whitelist_generation) {
+      repack_whitelist = chrome_resource_whitelist
+      deps = [
+        "//chrome:resource_whitelist",
+      ]
+    }
 
-  if (is_chrome_branded && !is_mac && !is_android) {
-    public_deps = [
-      ":default_apps",
-    ]
+    if (is_chrome_branded && !is_mac) {
+      public_deps = [
+        ":default_apps",
+      ]
+    }
   }
 }
 

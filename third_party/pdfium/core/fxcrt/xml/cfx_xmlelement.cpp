@@ -13,10 +13,8 @@
 #include "core/fxcrt/xml/cfx_xmlchardata.h"
 #include "core/fxcrt/xml/cfx_xmldocument.h"
 #include "core/fxcrt/xml/cfx_xmltext.h"
-#include "third_party/base/stl_util.h"
 
-CFX_XMLElement::CFX_XMLElement(const WideString& wsTag)
-    : CFX_XMLNode(), name_(wsTag) {
+CFX_XMLElement::CFX_XMLElement(const WideString& wsTag) : name_(wsTag) {
   ASSERT(!name_.IsEmpty());
 }
 
@@ -70,7 +68,7 @@ WideString CFX_XMLElement::GetNamespaceURI() const {
     }
     return pElement->GetAttribute(attr);
   }
-  return L"";
+  return WideString();
 }
 
 WideString CFX_XMLElement::GetTextData() const {
@@ -86,7 +84,7 @@ WideString CFX_XMLElement::GetTextData() const {
 
 void CFX_XMLElement::Save(
     const RetainPtr<IFX_SeekableWriteStream>& pXMLStream) {
-  ByteString bsNameEncoded = name_.UTF8Encode();
+  ByteString bsNameEncoded = name_.ToUTF8();
 
   pXMLStream->WriteString("<");
   pXMLStream->WriteString(bsNameEncoded.AsStringView());
@@ -95,7 +93,7 @@ void CFX_XMLElement::Save(
     // Note, the space between attributes is added by AttributeToString which
     // writes a blank as the first character.
     pXMLStream->WriteString(
-        AttributeToString(it.first, it.second).UTF8Encode().AsStringView());
+        AttributeToString(it.first, it.second).ToUTF8().AsStringView());
   }
 
   if (!GetFirstChild()) {
@@ -114,12 +112,11 @@ void CFX_XMLElement::Save(
   pXMLStream->WriteString(">\n");
 }
 
-CFX_XMLElement* CFX_XMLElement::GetFirstChildNamed(
-    const WideStringView& name) const {
+CFX_XMLElement* CFX_XMLElement::GetFirstChildNamed(WideStringView name) const {
   return GetNthChildNamed(name, 0);
 }
 
-CFX_XMLElement* CFX_XMLElement::GetNthChildNamed(const WideStringView& name,
+CFX_XMLElement* CFX_XMLElement::GetNthChildNamed(WideStringView name,
                                                  size_t idx) const {
   for (auto* child = GetFirstChild(); child; child = child->GetNextSibling()) {
     CFX_XMLElement* elem = ToXMLElement(child);
@@ -139,7 +136,7 @@ bool CFX_XMLElement::HasAttribute(const WideString& name) const {
 
 WideString CFX_XMLElement::GetAttribute(const WideString& name) const {
   auto it = attrs_.find(name);
-  return it != attrs_.end() ? it->second : L"";
+  return it != attrs_.end() ? it->second : WideString();
 }
 
 void CFX_XMLElement::SetAttribute(const WideString& name,

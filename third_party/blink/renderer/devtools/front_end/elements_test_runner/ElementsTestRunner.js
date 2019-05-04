@@ -93,6 +93,14 @@ ElementsTestRunner.findNode = async function(matchFunction, callback) {
 };
 
 /**
+ * @param {function(!Element): boolean} matchFunction
+ * @param {!Promise}
+ */
+ElementsTestRunner.findNodePromise = function(matchFunction) {
+  return new Promise(resolve => ElementsTestRunner.findNode(matchFunction, resolve));
+};
+
+/**
  * @param {!EventListeners.EventListenersView} eventListenersView
  * @param {function():void} callback
  * @param {boolean=} force
@@ -605,8 +613,8 @@ ElementsTestRunner.dumpStyleTreeOutline = function(treeItem, depth) {
 };
 
 ElementsTestRunner.dumpStyleTreeItem = function(treeItem, prefix, depth) {
-  if (treeItem.listItemElement.textContent.indexOf(' width:') !== -1 ||
-      treeItem.listItemElement.textContent.indexOf(' height:') !== -1)
+  const textContent = TestRunner.textContentWithoutStyles(treeItem.listItemElement);
+  if (textContent.indexOf(' width:') !== -1 || textContent.indexOf(' height:') !== -1)
     return;
 
   if (treeItem.listItemElement.classList.contains('inherited'))
@@ -622,7 +630,6 @@ ElementsTestRunner.dumpStyleTreeItem = function(treeItem, prefix, depth) {
   if (treeItem.listItemElement.classList.contains('disabled'))
     typePrefix += '/-- disabled --/ ';
 
-  const textContent = treeItem.listItemElement.textContent;
   TestRunner.addResult(prefix + typePrefix + textContent);
 
   if (--depth) {

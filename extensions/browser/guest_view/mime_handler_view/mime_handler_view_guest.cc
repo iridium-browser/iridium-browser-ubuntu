@@ -102,6 +102,14 @@ MimeHandlerViewGuest::MimeHandlerViewGuest(WebContents* owner_web_contents)
       embedder_widget_routing_id_(MSG_ROUTING_NONE) {}
 
 MimeHandlerViewGuest::~MimeHandlerViewGuest() {
+  // Before attaching is complete, the instance ID is not valid.
+  if (content::MimeHandlerViewMode::UsesCrossProcessFrame() &&
+      element_instance_id() != guest_view::kInstanceIDNone) {
+    if (auto* embedder_frame = GetEmbedderFrame()) {
+      embedder_frame->Send(new ExtensionsGuestViewMsg_DestroyFrameContainer(
+          element_instance_id()));
+    }
+  }
 }
 
 bool MimeHandlerViewGuest::CanUseCrossProcessFrames() {
@@ -361,6 +369,7 @@ bool MimeHandlerViewGuest::ShouldCreateWebContents(
   content::OpenURLParams open_params(target_url, content::Referrer(),
                                      WindowOpenDisposition::NEW_FOREGROUND_TAB,
                                      ui::PAGE_TRANSITION_LINK, true);
+  open_params.initiator_origin = opener->GetLastCommittedOrigin();
   // Extensions are allowed to open popups under circumstances covered by
   // running as a mime handler.
   open_params.user_gesture = true;

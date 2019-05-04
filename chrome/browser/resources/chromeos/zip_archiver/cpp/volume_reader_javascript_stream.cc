@@ -8,9 +8,8 @@
 #include <limits>
 
 #include "base/files/file.h"
+#include "base/logging.h"
 #include "chrome/browser/resources/chromeos/zip_archiver/cpp/javascript_requestor_interface.h"
-#include "ppapi/cpp/logging.h"
-#include "third_party/minizip/src/unzip.h"
 
 VolumeReaderJavaScriptStream::VolumeReaderJavaScriptStream(
     int64_t archive_size,
@@ -54,7 +53,7 @@ int64_t VolumeReaderJavaScriptStream::archive_size() {
 void VolumeReaderJavaScriptStream::SetBufferAndSignal(
     const pp::VarArrayBuffer& array_buffer,
     int64_t read_offset) {
-  PP_DCHECK(read_offset >= 0);
+  DCHECK_GE(read_offset, 0);
 
   // Ignore read ahead in case offset was changed using Skip or Seek and in case
   // we already have available data. This can happen in case of 2+ RequestChunk
@@ -97,7 +96,7 @@ void VolumeReaderJavaScriptStream::SetPassphraseAndSignal(
     const std::string& passphrase) {
   base::AutoLock al(shared_state_lock_);
   // Signal VolumeReaderJavaScriptStream::Passphrase to continue execution.
-  available_passphrase_ = passphrase;
+  available_passphrase_ = base::make_optional(passphrase);
   available_passphrase_cond_.Signal();
 }
 
@@ -109,7 +108,7 @@ void VolumeReaderJavaScriptStream::PassphraseErrorSignal() {
 
 int64_t VolumeReaderJavaScriptStream::Read(int64_t bytes_to_read,
                                            const void** destination_buffer) {
-  PP_DCHECK(bytes_to_read > 0);
+  DCHECK_GT(bytes_to_read, 0);
 
   base::AutoLock al(shared_state_lock_);
 
@@ -194,7 +193,7 @@ int64_t VolumeReaderJavaScriptStream::Seek(int64_t offset,
       new_offset = archive_size_ + offset;
       break;
     default:
-      PP_NOTREACHED();
+      NOTREACHED();
       return -1;
   }
 
@@ -212,16 +211,13 @@ void VolumeReaderJavaScriptStream::SetRequestId(const std::string& request_id) {
   request_id_ = request_id;
 }
 
-std::unique_ptr<std::string> VolumeReaderJavaScriptStream::Passphrase() {
-  std::unique_ptr<std::string> result;
-  // The error is not recoverable. Once passphrase fails to be provided, it is
-  // never asked again. Note, that still users are able to retry entering the
-  // password, unless they click Cancel.
+base::Optional<std::string> VolumeReaderJavaScriptStream::Passphrase() {
+  // Reset the state and prompt the user for a passphrase. Assume a correct
+  // passphrase from a previous request has been saved by the requestor.
   {
     base::AutoLock al(shared_state_lock_);
-    if (passphrase_error_) {
-      return result;
-    }
+    passphrase_error_ = false;
+    available_passphrase_.reset();
   }
 
   // Request the passphrase outside of the lock.
@@ -229,13 +225,10 @@ std::unique_ptr<std::string> VolumeReaderJavaScriptStream::Passphrase() {
 
   base::AutoLock al(shared_state_lock_);
   // Wait for the passphrase from JavaScript.
-  // TODO(amistry): Handle spurious wakeups.
-  available_passphrase_cond_.Wait();
+  while (!passphrase_error_ && !available_passphrase_)
+    available_passphrase_cond_.Wait();
 
-  if (!passphrase_error_)
-    result.reset(new std::string(available_passphrase_));
-
-  return result;
+  return available_passphrase_;
 }
 
 void VolumeReaderJavaScriptStream::RequestChunk(int64_t length) {

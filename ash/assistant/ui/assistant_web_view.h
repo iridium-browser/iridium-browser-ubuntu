@@ -9,33 +9,31 @@
 #include <memory>
 #include <string>
 
-#include "ash/assistant/assistant_controller_observer.h"
+#include "ash/assistant/ui/assistant_view_delegate.h"
 #include "ash/assistant/ui/caption_bar.h"
 #include "base/macros.h"
 #include "base/optional.h"
+#include "mojo/public/cpp/bindings/binding.h"
+#include "services/content/public/cpp/navigable_contents.h"
 #include "ui/aura/window_observer.h"
 #include "ui/views/view.h"
-#include "ui/views/view_observer.h"
-
-namespace base {
-class UnguessableToken;
-}  // namespace base
 
 namespace ash {
 
-class AssistantController;
+enum class AssistantButtonId;
+class AssistantViewDelegate;
 
 // AssistantWebView is a child of AssistantBubbleView which allows Assistant UI
 // to render remotely hosted content within its bubble. It provides a CaptionBar
-// for window level controls and a WebView/ServerRemoteViewHost for embedding
-// web contents.
+// for window level controls and embeds web contents with help from the Content
+// Service.
 class AssistantWebView : public views::View,
-                         public views::ViewObserver,
                          public aura::WindowObserver,
-                         public AssistantControllerObserver,
-                         public CaptionBarDelegate {
+                         public AssistantViewDelegateObserver,
+                         public CaptionBarDelegate,
+                         public content::NavigableContentsObserver {
  public:
-  explicit AssistantWebView(AssistantController* assistant_controller);
+  explicit AssistantWebView(AssistantViewDelegate* delegate);
   ~AssistantWebView() override;
 
   // views::View:
@@ -43,9 +41,8 @@ class AssistantWebView : public views::View,
   gfx::Size CalculatePreferredSize() const override;
   int GetHeightForWidth(int width) const override;
   void ChildPreferredSizeChanged(views::View* child) override;
-
-  // views::ViewObserver:
-  void OnViewIsDeleting(views::View* view) override;
+  void OnFocus() override;
+  void AboutToRequestFocusFromTabTraversal(bool reverse) override;
 
   // views::WindowObserver:
   void OnWindowBoundsChanged(aura::Window* window,
@@ -55,39 +52,38 @@ class AssistantWebView : public views::View,
   void OnWindowDestroying(aura::Window* window) override;
 
   // CaptionBarDelegate:
-  bool OnCaptionButtonPressed(CaptionButtonId id) override;
+  bool OnCaptionButtonPressed(AssistantButtonId id) override;
 
-  // AssistantControllerObserver:
+  // AssistantViewDelegateObserver:
   void OnDeepLinkReceived(
       assistant::util::DeepLinkType type,
       const std::map<std::string, std::string>& params) override;
 
+  // content::NavigableContentsObserver:
+  void DidAutoResizeView(const gfx::Size& new_size) override;
+  void DidStopLoading() override;
+  void DidSuppressNavigation(const GURL& url,
+                             WindowOpenDisposition disposition,
+                             bool from_user_gesture) override;
+
  private:
   void InitLayout();
-  void OnWebContentsReady(
-      const base::Optional<base::UnguessableToken>& embed_token);
-  void ReleaseWebContents();
+  void RemoveContents();
 
-  AssistantController* const assistant_controller_;  // Owned by Shell.
+  AssistantViewDelegate* const delegate_;
 
   CaptionBar* caption_bar_;  // Owned by view hierarchy.
 
-  // In Mash, |content_view_| is owned by the view hierarchy. Otherwise, the
-  // view is owned by the WebContentsManager.
-  views::View* content_view_ = nullptr;
-  gfx::NativeView native_content_view_ = nullptr;
+  content::mojom::NavigableContentsFactoryPtr contents_factory_;
+  std::unique_ptr<content::NavigableContents> contents_;
 
   // Our contents are drawn to a layer that is not masked by our widget's layer.
   // This causes our contents to ignore the corner radius that we have set on
   // the widget. To address this, we apply a separate layer mask to the
-  // contents' layer enforcing our desired corner radius.
-  std::unique_ptr<ui::LayerOwner> content_view_mask_;
+  // contents' native view layer enforcing our desired corner radius.
+  std::unique_ptr<ui::LayerOwner> contents_mask_;
 
-  // Uniquely identifies web contents owned by WebContentsManager.
-  base::Optional<base::UnguessableToken> web_contents_id_token_;
-
-  // Weak pointer factory used for web contents rendering requests.
-  base::WeakPtrFactory<AssistantWebView> web_contents_request_factory_;
+  base::WeakPtrFactory<AssistantWebView> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AssistantWebView);
 };

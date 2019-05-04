@@ -25,18 +25,21 @@
 
 #include "perfetto/base/watchdog_posix.h"
 
-#include "perfetto/base/logging.h"
-#include "perfetto/base/scoped_file.h"
-
 #include <fcntl.h>
 #include <inttypes.h>
 #include <signal.h>
 #include <stdint.h>
+
 #include <fstream>
 #include <thread>
 
-#if PERFETTO_BUILDFLAG(PERFETTO_CHROMIUM_BUILD)
-#error perfetto::base::Watchdog should not be used in Chromium
+#include "perfetto/base/build_config.h"
+#include "perfetto/base/logging.h"
+#include "perfetto/base/scoped_file.h"
+#include "perfetto/base/thread_utils.h"
+
+#if PERFETTO_BUILDFLAG(PERFETTO_EMBEDDER_BUILD)
+#error perfetto::base::Watchdog should not be used in Chromium or embedders
 #endif
 
 namespace perfetto {
@@ -65,15 +68,11 @@ Watchdog::Watchdog(uint32_t polling_interval_ms)
 
 Watchdog::~Watchdog() {
   if (!thread_.joinable()) {
-    PERFETTO_DCHECK(quit_);
+    PERFETTO_DCHECK(!enabled_);
     return;
   }
-
-  {
-    std::lock_guard<std::mutex> guard(mutex_);
-    PERFETTO_DCHECK(!quit_);
-    quit_ = true;
-  }
+  PERFETTO_DCHECK(enabled_);
+  enabled_ = false;
   exit_signal_.notify_one();
   thread_.join();
 }
@@ -84,20 +83,23 @@ Watchdog* Watchdog::GetInstance() {
 }
 
 Watchdog::Timer Watchdog::CreateFatalTimer(uint32_t ms) {
+  if (!enabled_.load(std::memory_order_relaxed))
+    return Watchdog::Timer(0);
+
   return Watchdog::Timer(ms);
 }
 
 void Watchdog::Start() {
   std::lock_guard<std::mutex> guard(mutex_);
   if (thread_.joinable()) {
-    PERFETTO_DCHECK(!quit_);
+    PERFETTO_DCHECK(enabled_);
   } else {
-    PERFETTO_DCHECK(quit_);
+    PERFETTO_DCHECK(!enabled_);
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
     // Kick the thread to start running but only on Android or Linux.
-    quit_ = false;
+    enabled_ = true;
     thread_ = std::thread(&Watchdog::ThreadMain, this);
 #endif
   }
@@ -137,7 +139,7 @@ void Watchdog::ThreadMain() {
   for (;;) {
     exit_signal_.wait_for(guard,
                           std::chrono::milliseconds(polling_interval_ms_));
-    if (quit_)
+    if (!enabled_)
       return;
 
     lseek(stat_fd.get(), 0, SEEK_SET);
@@ -240,8 +242,12 @@ void Watchdog::WindowedInterval::Reset(size_t new_size) {
 }
 
 Watchdog::Timer::Timer(uint32_t ms) {
+  if (!ms)
+    return;  // No-op timer created when the watchdog is disabled.
+
   struct sigevent sev = {};
-  sev.sigev_notify = SIGEV_SIGNAL;
+  sev.sigev_notify = SIGEV_THREAD_ID;
+  sev._sigev_un._tid = base::GetThreadId();
   sev.sigev_signo = SIGABRT;
   PERFETTO_CHECK(timer_create(CLOCK_MONOTONIC, &sev, &timerid_) != -1);
   struct itimerspec its = {};

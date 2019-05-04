@@ -8,7 +8,7 @@ generate_jni("test_support_content_jni_headers") {
   ]
 }
 
-android_library("layouttest_java_support") {
+android_library("web_test_java_support") {
   testonly = true
   deps = [
     "//base:base_java",
@@ -19,7 +19,7 @@ android_library("layouttest_java_support") {
 android_library("content_java_test_support") {
   testonly = true
   deps = [
-    ":layouttest_java_support",
+    ":web_test_java_support",
     "//base:base_java",
     "//base:base_java_test_support",
     "//content/public/android:content_java",
@@ -45,6 +45,7 @@ android_library("content_java_test_support") {
     "javatests/src/org/chromium/content_public/browser/test/util/EqualityCriteria.java",
     "javatests/src/org/chromium/content_public/browser/test/util/HistoryUtils.java",
     "javatests/src/org/chromium/content_public/browser/test/util/JavaScriptUtils.java",
+    "javatests/src/org/chromium/content_public/browser/test/util/DomAutomationController.java",
     "javatests/src/org/chromium/content_public/browser/test/util/KeyUtils.java",
     "javatests/src/org/chromium/content_public/browser/test/util/RenderProcessLimit.java",
     "javatests/src/org/chromium/content_public/browser/test/util/TestCallbackHelperContainer.java",

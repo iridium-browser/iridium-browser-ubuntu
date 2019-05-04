@@ -12,14 +12,17 @@ namespace blink {
 class RTCQuicStream;
 class RTCQuicStreamEventInit;
 
-class RTCQuicStreamEvent final : public Event {
+class MODULES_EXPORT RTCQuicStreamEvent final : public Event {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static RTCQuicStreamEvent* Create(RTCQuicStream* stream);
   static RTCQuicStreamEvent* Create(const AtomicString& type,
-                                    const RTCQuicStreamEventInit& init);
+                                    const RTCQuicStreamEventInit* init);
 
+  RTCQuicStreamEvent(RTCQuicStream* stream);
+  RTCQuicStreamEvent(const AtomicString& type,
+                     const RTCQuicStreamEventInit* init);
   ~RTCQuicStreamEvent() override;
 
   // rtc_quic_stream_event.idl
@@ -32,10 +35,6 @@ class RTCQuicStreamEvent final : public Event {
   void Trace(blink::Visitor*) override;
 
  private:
-  RTCQuicStreamEvent(RTCQuicStream* stream);
-  RTCQuicStreamEvent(const AtomicString& type,
-                     const RTCQuicStreamEventInit& init);
-
   Member<RTCQuicStream> stream_;
 };
 

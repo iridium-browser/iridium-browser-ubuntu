@@ -8,14 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "absl/memory/memory.h"
 #include "api/test/simulated_network.h"
+#include "api/test/video/function_video_encoder_factory.h"
 #include "call/fake_network_pipe.h"
 #include "call/simulated_network.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "system_wrappers/include/sleep.h"
 #include "test/call_test.h"
 #include "test/field_trial.h"
-#include "test/function_video_encoder_factory.h"
 #include "test/gtest.h"
 #include "test/rtcp_packet_parser.h"
 
@@ -165,7 +166,6 @@ TEST_F(RetransmissionEndToEndTest, ReceivesNackAndRetransmitsAudio) {
     void ModifyAudioConfigs(
         AudioSendStream::Config* send_config,
         std::vector<AudioReceiveStream::Config>* receive_configs) override {
-      send_config->rtp.nack.rtp_history_ms = kNackRtpHistoryMs;
       (*receive_configs)[0].rtp.nack.rtp_history_ms = kNackRtpHistoryMs;
       local_ssrc_ = (*receive_configs)[0].rtp.local_ssrc;
       remote_ssrc_ = (*receive_configs)[0].rtp.remote_ssrc;

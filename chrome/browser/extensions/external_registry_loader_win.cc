@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/external_registry_loader_win.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
@@ -16,7 +17,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
-#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "base/version.h"
@@ -79,7 +79,6 @@ void ExternalRegistryLoader::StartLoading() {
 
 std::unique_ptr<base::DictionaryValue>
 ExternalRegistryLoader::LoadPrefsOnBlockingThread() {
-  base::AssertBlockingAllowed();
   auto prefs = std::make_unique<base::DictionaryValue>();
 
   // A map of IDs, to weed out duplicates between HKCU and HKLM.
@@ -229,9 +228,9 @@ void ExternalRegistryLoader::CompleteLoadAndStartWatchingRegistry(
                                  KEY_NOTIFY | KEY_WOW64_32KEY)) ==
       ERROR_SUCCESS) {
     base::win::RegKey::ChangeCallback callback =
-        base::Bind(&ExternalRegistryLoader::OnRegistryKeyChanged,
-                   base::Unretained(this), base::Unretained(&hklm_key_));
-    hklm_key_.StartWatching(callback);
+        base::BindOnce(&ExternalRegistryLoader::OnRegistryKeyChanged,
+                       base::Unretained(this), base::Unretained(&hklm_key_));
+    hklm_key_.StartWatching(std::move(callback));
   } else {
     LOG(WARNING) << "Error observing HKLM: " << result;
   }
@@ -239,9 +238,9 @@ void ExternalRegistryLoader::CompleteLoadAndStartWatchingRegistry(
   if ((result = hkcu_key_.Create(HKEY_CURRENT_USER, kRegistryExtensions,
                                  KEY_NOTIFY)) == ERROR_SUCCESS) {
     base::win::RegKey::ChangeCallback callback =
-        base::Bind(&ExternalRegistryLoader::OnRegistryKeyChanged,
-                   base::Unretained(this), base::Unretained(&hkcu_key_));
-    hkcu_key_.StartWatching(callback);
+        base::BindOnce(&ExternalRegistryLoader::OnRegistryKeyChanged,
+                       base::Unretained(this), base::Unretained(&hkcu_key_));
+    hkcu_key_.StartWatching(std::move(callback));
   } else {
     LOG(WARNING) << "Error observing HKCU: " << result;
   }

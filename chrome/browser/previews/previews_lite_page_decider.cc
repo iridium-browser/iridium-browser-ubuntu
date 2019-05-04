@@ -4,17 +4,21 @@
 
 #include "chrome/browser/previews/previews_lite_page_decider.h"
 
+#include <vector>
+
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
 #include "base/time/default_tick_clock.h"
 #include "build/build_config.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/previews/previews_lite_page_infobar_delegate.h"
 #include "chrome/browser/previews/previews_lite_page_navigation_throttle.h"
 #include "chrome/browser/previews/previews_service.h"
 #include "chrome/browser/previews/previews_service_factory.h"
+#include "chrome/browser/previews/previews_ui_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
@@ -22,7 +26,10 @@
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
+#include "components/previews/content/previews_user_data.h"
 #include "components/previews/core/previews_experiments.h"
+#include "components/previews/core/previews_features.h"
+#include "components/previews/core/previews_switches.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
@@ -34,7 +41,45 @@
 namespace {
 const char kUserNeedsNotification[] =
     "previews.litepage.user-needs-notification";
+const char kHostBlacklist[] = "previews.litepage.host-blacklist";
+
+const size_t kMaxBlacklistEntries = 30;
+
+// Cleans up the given host blacklist by removing all stale (expiry has passed)
+// entries. If after removing all stale entries, the blacklist is still over
+// capacity, then remove the entry with the closest expiration.
+void RemoveStaleEntries(base::DictionaryValue* dict) {
+  std::vector<std::string> keys_to_delete;
+
+  base::Time min_value = base::Time::Max();
+  std::string min_key;
+  for (const auto& iter : dict->DictItems()) {
+    base::Time value = base::Time::FromDoubleT(iter.second.GetDouble());
+
+    // Delete all stale entries.
+    if (value <= base::Time::Now()) {
+      keys_to_delete.push_back(iter.first);
+      continue;
+    }
+
+    // Record the closest expiration in case we need it later on.
+    if (value < min_value) {
+      min_value = value;
+      min_key = iter.first;
+    }
+  }
+
+  // Remove all expired entries.
+  for (const std::string& key : keys_to_delete)
+    dict->RemoveKey(key);
+
+  // Remove the closest expiration if needed.
+  if (dict->DictSize() > kMaxBlacklistEntries)
+    dict->RemoveKey(min_key);
+
+  DCHECK_GE(kMaxBlacklistEntries, dict->DictSize());
 }
+}  // namespace
 
 // This WebContentsObserver watches the rest of the current navigation shows a
 // notification to the user that this preview now exists and will be used on
@@ -80,14 +125,18 @@ class UserNotificationWebContentsObserver
   }
 
   base::OnceClosure ui_shown_callback_;
+  WEB_CONTENTS_USER_DATA_KEY_DECL();
 };
+
+WEB_CONTENTS_USER_DATA_KEY_IMPL(UserNotificationWebContentsObserver)
 
 PreviewsLitePageDecider::PreviewsLitePageDecider(
     content::BrowserContext* browser_context)
     : clock_(base::DefaultTickClock::GetInstance()),
       page_id_(base::RandUint64()),
       drp_settings_(nullptr),
-      pref_service_(nullptr) {
+      pref_service_(nullptr),
+      host_bypass_blacklist_(std::make_unique<base::DictionaryValue>()) {
   if (!browser_context)
     return;
 
@@ -99,12 +148,26 @@ PreviewsLitePageDecider::PreviewsLitePageDecider(
 
   DCHECK(!browser_context->IsOffTheRecord());
 
+  pref_service_ = Profile::FromBrowserContext(browser_context)->GetPrefs();
+  host_bypass_blacklist_ =
+      pref_service_->GetDictionary(kHostBlacklist)->CreateDeepCopy();
+
+  // Note: This switch has no effect if |drp_settings| was null since
+  // |host_bypass_blacklist_| would be empty anyways.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          previews::switches::kClearLitePageRedirectLocalBlacklist)) {
+    host_bypass_blacklist_->Clear();
+    pref_service_->Set(kHostBlacklist, *host_bypass_blacklist_);
+  }
+
+  // Add |this| as an observer to DRP, but if DRP is already initialized, check
+  // the prefs now.
   drp_settings_ = drp_settings;
   drp_settings_->AddDataReductionProxySettingsObserver(this);
-
-  Profile* profile = Profile::FromBrowserContext(browser_context);
-  pref_service_ = profile->GetPrefs();
-  DCHECK(pref_service_);
+  if (drp_settings_->Config()) {
+    OnSettingsInitialized();
+    OnProxyRequestHeadersChanged(drp_settings->GetProxyRequestHeaders());
+  }
 }
 
 PreviewsLitePageDecider::~PreviewsLitePageDecider() = default;
@@ -113,6 +176,8 @@ PreviewsLitePageDecider::~PreviewsLitePageDecider() = default;
 void PreviewsLitePageDecider::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(kUserNeedsNotification, true);
+  registry->RegisterDictionaryPref(kHostBlacklist,
+                                   std::make_unique<base::DictionaryValue>());
 }
 
 // static
@@ -122,6 +187,14 @@ PreviewsLitePageDecider::MaybeCreateThrottleFor(
   DCHECK(handle);
   DCHECK(handle->GetWebContents());
   DCHECK(handle->GetWebContents()->GetBrowserContext());
+
+  if (!handle->IsInMainFrame())
+    return nullptr;
+
+  if (base::FeatureList::IsEnabled(
+          previews::features::kHTTPSServerPreviewsUsingURLLoader)) {
+    return nullptr;
+  }
 
   content::BrowserContext* browser_context =
       handle->GetWebContents()->GetBrowserContext();
@@ -136,15 +209,17 @@ PreviewsLitePageDecider::MaybeCreateThrottleFor(
       previews_service->previews_lite_page_decider();
   DCHECK(decider);
 
-  // TODO(crbug/842233): Replace this logic with PreviewsState.
   bool drp_enabled = decider->drp_settings_->IsDataReductionProxyEnabled();
   bool preview_enabled = previews::params::ArePreviewsAllowed() &&
                          previews::params::IsLitePageServerPreviewsEnabled();
 
+  // Always create a navigation throttle if the feature is enabled. The throttle
+  // itself will check the PreviewsState bit for triggering.
   if (drp_enabled && preview_enabled) {
     return std::make_unique<PreviewsLitePageNavigationThrottle>(handle,
                                                                 decider);
   }
+
   return nullptr;
 }
 
@@ -184,8 +259,16 @@ void PreviewsLitePageDecider::SetDRPSettingsForTesting(
   drp_settings_->AddDataReductionProxySettingsObserver(this);
 }
 
-void PreviewsLitePageDecider::ClearSingleBypassForTesting() {
+void PreviewsLitePageDecider::ClearBlacklist() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  host_bypass_blacklist_->Clear();
+  if (pref_service_)
+    pref_service_->Set(kHostBlacklist, *host_bypass_blacklist_);
+}
+
+void PreviewsLitePageDecider::ClearStateForTesting() {
   single_bypass_.clear();
+  host_bypass_blacklist_->Clear();
 }
 
 void PreviewsLitePageDecider::SetUserHasSeenUINotification() {
@@ -272,6 +355,10 @@ void PreviewsLitePageDecider::ReportDataSavings(int64_t network_bytes,
 
 bool PreviewsLitePageDecider::NeedsToNotifyUser() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          previews::switches::kDoNotRequireLitePageRedirectInfoBar)) {
+    return false;
+  }
   return need_to_show_notification_;
 }
 
@@ -288,4 +375,28 @@ void PreviewsLitePageDecider::NotifyUser(content::WebContents* web_contents) {
   observer->SetUIShownCallback(
       base::BindOnce(&PreviewsLitePageDecider::SetUserHasSeenUINotification,
                      base::Unretained(this)));
+}
+
+void PreviewsLitePageDecider::BlacklistBypassedHost(const std::string& host,
+                                                    base::TimeDelta duration) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // If there is an existing entry, intentionally update it.
+  host_bypass_blacklist_->SetKey(
+      host, base::Value((base::Time::Now() + duration).ToDoubleT()));
+
+  RemoveStaleEntries(host_bypass_blacklist_.get());
+  if (pref_service_)
+    pref_service_->Set(kHostBlacklist, *host_bypass_blacklist_);
+}
+
+bool PreviewsLitePageDecider::HostBlacklistedFromBypass(
+    const std::string& host) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  base::Value* value = host_bypass_blacklist_->FindKey(host);
+  if (!value)
+    return false;
+
+  DCHECK(value->is_double());
+  base::Time expiry = base::Time::FromDoubleT(value->GetDouble());
+  return expiry > base::Time::Now();
 }

@@ -222,10 +222,7 @@ void StabilityMetricsHelper::BrowserChildProcessCrashed() {
   IncrementPrefValue(prefs::kStabilityChildProcessCrashCount);
 }
 
-void StabilityMetricsHelper::LogLoadStarted(bool is_incognito) {
-  base::RecordAction(base::UserMetricsAction("PageLoad"));
-  if (is_incognito)
-    base::RecordAction(base::UserMetricsAction("PageLoadInIncognito"));
+void StabilityMetricsHelper::LogLoadStarted() {
   IncrementPrefValue(prefs::kStabilityPageLoadCount);
   IncrementLongPrefsValue(prefs::kUninstallMetricsPageLoadCount);
   // We need to save the prefs, as page load count is a critical stat, and it
@@ -327,7 +324,8 @@ void StabilityMetricsHelper::IncrementLongPrefsValue(const char* path) {
   local_state_->SetInt64(path, value + 1);
 }
 
-void StabilityMetricsHelper::LogRendererHang() {
+void StabilityMetricsHelper::LogRendererHang(RendererHangCause hang_cause) {
+  UMA_HISTOGRAM_ENUMERATION("ChildProcess.HungRendererCause", hang_cause);
   IncrementPrefValue(prefs::kStabilityRendererHangCount);
 }
 

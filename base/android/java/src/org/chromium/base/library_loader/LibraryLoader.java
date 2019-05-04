@@ -13,6 +13,7 @@ import android.os.Build.VERSION_CODES;
 import android.os.StrictMode;
 import android.os.SystemClock;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.content.ContextCompat;
 import android.system.Os;
 
@@ -38,8 +39,6 @@ import java.io.InputStream;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
-
-import javax.annotation.Nullable;
 
 /**
  * This class provides functionality to load and register the native libraries.
@@ -143,20 +142,6 @@ public class LibraryLoader {
      * libraries instead.
      */
     public static boolean useCrazyLinker() {
-        // TODO(digit): Remove this early return GVR is loadable.
-        // A non-monochrome APK (such as ChromePublic.apk or ChromeModernPublic.apk) on N+ cannot
-        // use the Linker because the latter is incompatible with the GVR library. Fall back
-        // to using System.loadLibrary() or System.load() at the cost of no RELRO sharing.
-        //
-        // A non-monochrome APK (such as ChromePublic.apk) can be installed on N+ in these
-        // circumstances:
-        // * installing APK manually
-        // * after OTA from M to N
-        // * side-installing Chrome (possibly from another release channel)
-        // * Play Store bugs leading to incorrect APK flavor being installed
-        //
-        if (Build.VERSION.SDK_INT >= VERSION_CODES.N) return false;
-
         // The auto-generated NativeLibraries.sUseLinker variable will be true if the
         // build has not explicitly disabled Linker features.
         return NativeLibraries.sUseLinker;

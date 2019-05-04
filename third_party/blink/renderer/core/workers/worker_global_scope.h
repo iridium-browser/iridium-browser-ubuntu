@@ -31,6 +31,7 @@
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "services/service_manager/public/mojom/interface_provider.mojom-blink.h"
+#include "third_party/blink/public/mojom/script/script_type.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_cache_options.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -38,7 +39,6 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/dom_timer_coordinator.h"
-#include "third_party/blink/renderer/core/frame/dom_window_base64.h"
 #include "third_party/blink/renderer/core/messaging/blink_transferable_message.h"
 #include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/workers/worker_animation_frame_provider.h"
@@ -46,6 +46,7 @@
 #include "third_party/blink/renderer/core/workers/worker_settings.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/cached_metadata_handler.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace service_manager {
 class InterfaceProvider;
@@ -59,6 +60,9 @@ class FetchClientSettingsObjectSnapshot;
 class FontFaceSet;
 class OffscreenFontSelector;
 class V8VoidFunction;
+class WorkerClassicScriptLoader;
+class StringOrTrustedScriptURL;
+class TrustedTypePolicyFactory;
 class WorkerLocation;
 class WorkerNavigator;
 class WorkerThread;
@@ -67,8 +71,7 @@ struct GlobalScopeCreationParams;
 class CORE_EXPORT WorkerGlobalScope
     : public WorkerOrWorkletGlobalScope,
       public ActiveScriptWrappable<WorkerGlobalScope>,
-      public Supplementable<WorkerGlobalScope>,
-      public DOMWindowBase64 {
+      public Supplementable<WorkerGlobalScope> {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(WorkerGlobalScope);
 
@@ -78,7 +81,7 @@ class CORE_EXPORT WorkerGlobalScope
   // Returns null if caching is not supported.
   virtual SingleCachedMetadataHandler* CreateWorkerScriptCachedMetadataHandler(
       const KURL& script_url,
-      const Vector<char>* meta_data) {
+      const Vector<uint8_t>* meta_data) {
     return nullptr;
   }
 
@@ -92,7 +95,7 @@ class CORE_EXPORT WorkerGlobalScope
   // WorkerGlobalScope
   WorkerGlobalScope* self() { return this; }
   WorkerLocation* location() const;
-  WorkerNavigator* navigator() const;
+  WorkerNavigator* navigator() const override;
   void close();
   bool isSecureContextForBindings() const {
     return ExecutionContext::IsSecureContext();
@@ -100,12 +103,14 @@ class CORE_EXPORT WorkerGlobalScope
 
   String origin() const;
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(rejectionhandled);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(unhandledrejection);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(error, kError);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(languagechange, kLanguagechange);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(rejectionhandled, kRejectionhandled);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(unhandledrejection, kUnhandledrejection);
 
   // WorkerUtils
-  virtual void importScripts(const Vector<String>& urls, ExceptionState&);
+  virtual void importScripts(const HeapVector<StringOrTrustedScriptURL>& urls,
+                             ExceptionState&);
 
   // ExecutionContext
   const KURL& Url() const final { return url_; }
@@ -136,20 +141,24 @@ class CORE_EXPORT WorkerGlobalScope
   ExecutionContext* GetExecutionContext() const final;
   bool IsWindowOrWorkerGlobalScope() const final { return true; }
 
-  // The following methods implement PausbaleObject semantic
-  // so that WorkerGlobalScope can be paused.
-  void EvaluateClassicScriptPausable(
+  // These methods should be called in the scope of a pausable
+  // task runner. ie. They should not be called when the context
+  // is paused.
+  void EvaluateClassicScript(const KURL& script_url,
+                             String source_code,
+                             std::unique_ptr<Vector<uint8_t>> cached_meta_data,
+                             const v8_inspector::V8StackTraceId& stack_id);
+  void ImportClassicScript(
       const KURL& script_url,
-      AccessControlStatus access_control_status,
-      String source_code,
-      std::unique_ptr<Vector<char>> cached_meta_data,
+      FetchClientSettingsObjectSnapshot* outside_settings_object,
       const v8_inspector::V8StackTraceId& stack_id);
-  void ImportModuleScriptPausable(
+  // Imports the top-level module script for |module_url_record|.
+  virtual void ImportModuleScript(
       const KURL& module_url_record,
       FetchClientSettingsObjectSnapshot* outside_settings_object,
-      network::mojom::FetchCredentialsMode);
-  void ReceiveMessagePausable(BlinkTransferableMessage);
+      network::mojom::FetchCredentialsMode) = 0;
 
+  void ReceiveMessage(BlinkTransferableMessage);
   base::TimeTicks TimeOrigin() const { return time_origin_; }
   WorkerSettings* GetWorkerSettings() const { return worker_settings_.get(); }
 
@@ -169,6 +178,8 @@ class CORE_EXPORT WorkerGlobalScope
     return animation_frame_provider_;
   }
 
+  TrustedTypePolicyFactory* trustedTypes();
+
  protected:
   WorkerGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
                     WorkerThread*,
@@ -181,24 +192,23 @@ class CORE_EXPORT WorkerGlobalScope
   void RemoveURLFromMemoryCache(const KURL&) final;
 
   // Evaluates the given top-level classic script.
-  virtual void EvaluateClassicScript(
+  virtual void EvaluateClassicScriptInternal(
       const KURL& script_url,
-      AccessControlStatus access_control_status,
       String source_code,
-      std::unique_ptr<Vector<char>> cached_meta_data);
+      std::unique_ptr<Vector<uint8_t>> cached_meta_data);
 
-  // Imports the top-level module script for |module_url_record|.
-  virtual void ImportModuleScript(
-      const KURL& module_url_record,
-      FetchClientSettingsObjectSnapshot* outside_settings_object,
-      network::mojom::FetchCredentialsMode) = 0;
-
-  void AddPausedCall(base::OnceClosure closure);
-
-  ScriptType GetScriptType() const { return script_type_; }
+  mojom::ScriptType GetScriptType() const { return script_type_; }
 
  private:
+  virtual void importScriptsFromStrings(const Vector<String>& urls,
+                                        ExceptionState&);
+
   void SetWorkerSettings(std::unique_ptr<WorkerSettings>);
+
+  void DidReceiveResponseForClassicScript(
+      WorkerClassicScriptLoader* classic_script_loader);
+  void DidImportClassicScript(WorkerClassicScriptLoader* classic_script_loader,
+                              const v8_inspector::V8StackTraceId& stack_id);
 
   // |kNotHandled| is used when the script was not in
   // InstalledScriptsManager, which means it was not an installed script.
@@ -216,7 +226,7 @@ class CORE_EXPORT WorkerGlobalScope
       const KURL& script_url,
       KURL* out_response_url,
       String* out_source_code,
-      std::unique_ptr<Vector<char>>* out_cached_meta_data);
+      std::unique_ptr<Vector<uint8_t>>* out_cached_meta_data);
 
   // Tries to load the script synchronously from the WorkerClassicScriptLoader,
   // which requests the script from the browser. This blocks until the script is
@@ -225,14 +235,13 @@ class CORE_EXPORT WorkerGlobalScope
       const KURL& script_url,
       KURL* out_response_url,
       String* out_source_code,
-      std::unique_ptr<Vector<char>>* out_cached_meta_data);
+      std::unique_ptr<Vector<uint8_t>>* out_cached_meta_data);
 
   // ExecutionContext
   EventTarget* ErrorEventTarget() final { return this; }
-  void TasksWereUnpaused() override;
 
   const KURL url_;
-  const ScriptType script_type_;
+  const mojom::ScriptType script_type_;
   const String user_agent_;
   const base::UnguessableToken parent_devtools_token_;
   const V8CacheOptions v8_cache_options_;
@@ -240,6 +249,7 @@ class CORE_EXPORT WorkerGlobalScope
 
   mutable Member<WorkerLocation> location_;
   mutable TraceWrapperMember<WorkerNavigator> navigator_;
+  Member<TrustedTypePolicyFactory> trusted_types_;
 
   WorkerThread* thread_;
 
@@ -260,15 +270,14 @@ class CORE_EXPORT WorkerGlobalScope
   const base::UnguessableToken agent_cluster_id_;
 
   HttpsState https_state_;
-
-  Vector<base::OnceClosure> paused_calls_;
 };
 
-DEFINE_TYPE_CASTS(WorkerGlobalScope,
-                  ExecutionContext,
-                  context,
-                  context->IsWorkerGlobalScope(),
-                  context.IsWorkerGlobalScope());
+template <>
+struct DowncastTraits<WorkerGlobalScope> {
+  static bool AllowFrom(const ExecutionContext& context) {
+    return context.IsWorkerGlobalScope();
+  }
+};
 
 }  // namespace blink
 

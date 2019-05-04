@@ -57,6 +57,7 @@ const char kSyncPrinters[] = "sync.printers";
 const char kSyncPriorityPreferences[] = "sync.priority_preferences";
 const char kSyncReadingList[] = "sync.reading_list";
 const char kSyncSearchEngines[] = "sync.search_engines";
+const char kSyncSendTabToSelf[] = "sync.send_tab_to_self";
 const char kSyncSessions[] = "sync.sessions";
 const char kSyncSupervisedUserSettings[] = "sync.managed_user_settings";
 const char kSyncSupervisedUserSharedSettings[] =
@@ -95,6 +96,10 @@ const char kSyncKeystoreEncryptionBootstrapToken[] =
 // disabled. This will be refreshed every sign-in.
 const char kSyncSpareBootstrapToken[] = "sync.spare_bootstrap_token";
 #endif  // defined(OS_CHROMEOS)
+
+const char kSyncCacheGuid[] = "sync.cache_guid";
+const char kSyncBirthday[] = "sync.birthday";
+const char kSyncBagOfChips[] = "sync.bag_of_chips";
 
 // Stores the timestamp of first sync.
 const char kSyncFirstSyncTime[] = "sync.first_sync_time";

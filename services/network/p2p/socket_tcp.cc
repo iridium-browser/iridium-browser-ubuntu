@@ -19,7 +19,7 @@
 #include "services/network/proxy_resolving_client_socket.h"
 #include "services/network/proxy_resolving_client_socket_factory.h"
 #include "services/network/public/cpp/p2p_param_traits.h"
-#include "third_party/webrtc/media/base/rtputils.h"
+#include "third_party/webrtc/media/base/rtp_utils.h"
 #include "url/gurl.h"
 
 namespace network {
@@ -530,12 +530,14 @@ void P2PSocketStunTcp::DoSend(
     DCHECK_LE(pad_bytes, 4);
     memcpy(send_buffer.buffer->data() + data.size(), padding, pad_bytes);
   }
-  WriteOrQueue(send_buffer);
 
+  // WriteOrQueue may free the memory, so dump it first.
   delegate_->DumpPacket(
       base::make_span(reinterpret_cast<uint8_t*>(send_buffer.buffer->data()),
                       data.size()),
       false);
+
+  WriteOrQueue(send_buffer);
 }
 
 int P2PSocketStunTcp::GetExpectedPacketSize(const uint8_t* data,

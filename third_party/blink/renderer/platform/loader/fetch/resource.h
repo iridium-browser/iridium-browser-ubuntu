@@ -26,6 +26,7 @@
 
 #include <memory>
 #include "base/auto_reset.h"
+#include "base/callback.h"
 #include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "third_party/blink/public/mojom/loader/code_cache.mojom-shared.h"
@@ -45,9 +46,9 @@
 #include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
 #include "third_party/blink/renderer/platform/memory_coordinator.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
@@ -83,19 +84,8 @@ enum class ResourceType : uint8_t {
   kAudio,
   kVideo,
   kManifest,
-  kMock  // Only for testing
-};
-
-// A callback for sending the serialized data of cached metadata back to the
-// platform.
-class CachedMetadataSender {
- public:
-  virtual ~CachedMetadataSender() = default;
-  virtual void Send(const char*, size_t) = 0;
-
-  // IsServedFromCacheStorage is used to alter caching strategy to be more
-  // aggressive. See ScriptController.cpp CacheOptions() for an example.
-  virtual bool IsServedFromCacheStorage() = 0;
+  kMock,  // Only for testing
+  kLast = kMock
 };
 
 // A resource that is held in the cache. Classes who want to use this object
@@ -282,7 +272,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   // Sets the serialized metadata retrieved from the platform's cache.
   // Subclasses of Resource that support cached metadata should override this
   // method with one that fills the current CachedMetadataHandler.
-  virtual void SetSerializedCachedMetadata(const char*, size_t);
+  virtual void SetSerializedCachedMetadata(const uint8_t*, size_t);
 
   AtomicString HttpContentType() const;
 
@@ -316,6 +306,10 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   // revalidation is started SetStaleRevalidationStarted() should be called.
   bool StaleRevalidationRequested() const;
 
+  // Returns true if any response returned from the upstream in the redirect
+  // chain accessed the network.
+  bool NetworkAccessed() const;
+
   // Set that stale revalidation has been started so that subsequent
   // requests won't trigger it again. When stale revalidation is completed
   // this resource will be removed from the MemoryCache so there is no
@@ -346,7 +340,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
 
   virtual void DidSendData(unsigned long long /* bytesSent */,
                            unsigned long long /* totalBytesToBeSent */) {}
-  virtual void DidDownloadData(int) {}
+  virtual void DidDownloadData(unsigned long long) {}
   virtual void DidDownloadToBlob(scoped_refptr<BlobDataHandle>) {}
 
   TimeTicks LoadFinishTime() const { return load_finish_time_; }
@@ -354,10 +348,10 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   void SetEncodedDataLength(int64_t value) {
     response_.SetEncodedDataLength(value);
   }
-  void SetEncodedBodyLength(int value) {
+  void SetEncodedBodyLength(int64_t value) {
     response_.SetEncodedBodyLength(value);
   }
-  void SetDecodedBodyLength(int value) {
+  void SetDecodedBodyLength(int64_t value) {
     response_.SetDecodedBodyLength(value);
   }
 
@@ -424,9 +418,30 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
     return virtual_time_pauser_;
   }
 
+  // See WebURLLoaderClient.
+  base::OnceClosure TakeContinueNavigationRequestCallback() {
+    return std::move(continue_navigation_request_callback_);
+  }
+  void SetContinueNavigationRequestCallback(base::OnceClosure closure) {
+    continue_navigation_request_callback_ = std::move(closure);
+  }
+
  protected:
   Resource(const ResourceRequest&, ResourceType, const ResourceLoaderOptions&);
 
+  // Returns true if the resource has finished any processing it wanted to do
+  // after loading. Should only be used to decide whether to call
+  // NotifyFinished.
+  //
+  // By default this is the same as being loaded (i.e. no processing), but it is
+  // used by ScriptResource to signal that streaming JavaScript compilation
+  // completed. Note that classes overloading this method should also overload
+  // NotifyFinished to not call Resource::NotifyFinished until this value
+  // becomes true.
+  // TODO(hiroshige): Remove this when ScriptResourceContent is introduced.
+  virtual bool IsFinishedInternal() const { return IsLoaded(); }
+
+  virtual void NotifyDataReceived(const char* data, size_t size);
   virtual void NotifyFinished();
 
   void MarkClientFinished(ResourceClient*);
@@ -513,10 +528,6 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   void CheckResourceIntegrity();
   void TriggerNotificationForFinishObservers(base::SingleThreadTaskRunner*);
 
-  // Helper for creating the send callback function for the cached metadata
-  // handler.
-  std::unique_ptr<CachedMetadataSender> CreateCachedMetadataSender() const;
-
   ResourceType type_;
   ResourceStatus status_;
 
@@ -531,12 +542,6 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   size_t encoded_size_;
   size_t encoded_size_memory_usage_;
   size_t decoded_size_;
-
-  // Resource::CalculateOverheadSize() is affected by changes in
-  // |m_resourceRequest.url()|, but |m_overheadSize| is not updated after
-  // initial |m_resourceRequest| is given, to reduce MemoryCache manipulation
-  // and thus potential bugs. crbug.com/594644
-  const size_t overhead_size_;
 
   String cache_identifier_;
 
@@ -566,12 +571,20 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   TaskHandle async_finish_pending_clients_task_;
 
   ResourceRequest resource_request_;
+
+  // Resource::CalculateOverheadSize() is affected by changes in
+  // |m_resourceRequest.url()|, but |m_overheadSize| is not updated after
+  // initial |m_resourceRequest| is given, to reduce MemoryCache manipulation
+  // and thus potential bugs. crbug.com/594644
+  const size_t overhead_size_;
+
   Member<ResourceLoader> loader_;
   ResourceResponse response_;
 
   scoped_refptr<SharedBuffer> data_;
 
   WebScopedVirtualTimePauser virtual_time_pauser_;
+  base::OnceClosure continue_navigation_request_callback_;
 };
 
 class ResourceFactory {

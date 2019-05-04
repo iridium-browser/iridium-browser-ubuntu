@@ -4,8 +4,7 @@
 
 package org.chromium.chrome.browser.password_manager;
 
-import org.chromium.base.Callback;
-import org.chromium.chrome.browser.modelutil.PropertyModel;
+import org.chromium.ui.modelutil.PropertyModel;
 
 /**
  * Data model for the password generation modal dialog.
@@ -20,12 +19,8 @@ class PasswordGenerationDialogModel extends PropertyModel {
     public static final WritableObjectPropertyKey<String> SAVE_EXPLANATION_TEXT =
             new WritableObjectPropertyKey<>();
 
-    /** Callback invoked when the password is accepted or rejected by the user. */
-    public static final WritableObjectPropertyKey<Callback<Boolean>> PASSWORD_ACTION_CALLBACK =
-            new WritableObjectPropertyKey<>();
-
     /** Default constructor */
     public PasswordGenerationDialogModel() {
-        super(GENERATED_PASSWORD, SAVE_EXPLANATION_TEXT, PASSWORD_ACTION_CALLBACK);
+        super(GENERATED_PASSWORD, SAVE_EXPLANATION_TEXT);
     }
 }

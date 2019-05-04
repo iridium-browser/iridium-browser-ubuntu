@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/simple_test_tick_clock.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/views/tabs/alert_indicator.h"
@@ -19,10 +20,10 @@
 #include "chrome/browser/ui/views/tabs/tab_icon.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/tabs/tab_style.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/grit/theme_resources.h"
 #include "chrome/test/views/chrome_views_test_base.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
@@ -50,7 +51,6 @@ class FakeTabController : public TabController {
     return LEADING;
   }
   bool ShouldHideCloseButtonForTab(Tab* tab) const override { return false; }
-  bool ShouldShowCloseButtonOnHover() override { return false; }
   bool MaySetClip() override { return false; }
   void SelectTab(Tab* tab) override {}
   void ExtendSelectionTo(Tab* tab) override {}
@@ -79,9 +79,11 @@ class FakeTabController : public TabController {
   }
   void OnMouseEventInTab(views::View* source,
                          const ui::MouseEvent& event) override {}
-  bool ShouldPaintTab(const Tab* tab, float scale, gfx::Path* clip) override {
+  void UpdateHoverCard(Tab* tab, bool hovered) override {}
+  bool ShouldPaintTab(const Tab* tab, float scale, SkPath* clip) override {
     return true;
   }
+  bool ShouldPaintAsActiveFrame() const override { return true; }
   int GetStrokeThickness() const override { return 0; }
   bool CanPaintThrobberToLayer() const override {
     return paint_throbber_to_layer_;
@@ -89,11 +91,17 @@ class FakeTabController : public TabController {
   bool HasVisibleBackgroundTabShapes() const override { return false; }
   SkColor GetToolbarTopSeparatorColor() const override { return SK_ColorBLACK; }
   SkColor GetTabSeparatorColor() const override { return SK_ColorBLACK; }
-  SkColor GetTabBackgroundColor(TabState state) const override {
-    return state == TAB_ACTIVE ? tab_bg_color_active_ : tab_bg_color_inactive_;
+  SkColor GetTabBackgroundColor(
+      TabState tab_state,
+      BrowserNonClientFrameView::ActiveState active_state =
+          BrowserNonClientFrameView::kUseCurrent) const override {
+    return tab_state == TAB_ACTIVE ? tab_bg_color_active_
+                                   : tab_bg_color_inactive_;
   }
-  SkColor GetTabForegroundColor(TabState state) const override {
-    return state == TAB_ACTIVE ? tab_fg_color_active_ : tab_fg_color_inactive_;
+  SkColor GetTabForegroundColor(TabState tab_state,
+                                SkColor background_color) const override {
+    return tab_state == TAB_ACTIVE ? tab_fg_color_active_
+                                   : tab_fg_color_inactive_;
   }
   int GetBackgroundResourceId(
       bool* has_custom_image,
@@ -137,7 +145,10 @@ class FakeTabController : public TabController {
 
 class TabTest : public ChromeViewsTestBase {
  public:
-  TabTest() {}
+  TabTest() {
+    // Prevent the fake clock from starting at 0 which is the null time.
+    fake_clock_.Advance(base::TimeDelta::FromMilliseconds(2000));
+  }
   ~TabTest() override {}
 
   static TabIcon* GetTabIcon(const Tab& tab) { return tab.icon_; }
@@ -300,6 +311,8 @@ class TabTest : public ChromeViewsTestBase {
       fade_animation->Stop();
   }
 
+  void SetupFakeClock(TabIcon* icon) { icon->clock_ = &fake_clock_; }
+
  protected:
   void InitWidget(Widget* widget) {
     Widget::InitParams params(CreateParams(Widget::InitParams::TYPE_WINDOW));
@@ -318,6 +331,7 @@ class TabTest : public ChromeViewsTestBase {
   }
 
   std::string original_locale_;
+  base::SimpleTestTickClock fake_clock_;
 };
 
 class AlertIndicatorTest : public ChromeViewsTestBase {
@@ -383,7 +397,7 @@ TEST_F(TabTest, HitTestTopPixel) {
   InitWidget(&widget);
 
   FakeTabController tab_controller;
-  Tab tab(&tab_controller, nullptr);
+  Tab tab(&tab_controller);
   widget.GetContentsView()->AddChildView(&tab);
   tab.SizeToPreferredSize();
 
@@ -417,7 +431,7 @@ TEST_F(TabTest, LayoutAndVisibilityOfElements) {
   InitWidget(&widget);
 
   FakeTabController controller;
-  Tab tab(&controller, nullptr);
+  Tab tab(&controller);
   widget.GetContentsView()->AddChildView(&tab);
 
   SkBitmap bitmap;
@@ -469,7 +483,7 @@ TEST_F(TabTest, TooltipProvidedByTab) {
   InitWidget(&widget);
 
   FakeTabController controller;
-  Tab tab(&controller, nullptr);
+  Tab tab(&controller);
   widget.GetContentsView()->AddChildView(&tab);
   tab.SizeToPreferredSize();
 
@@ -519,7 +533,7 @@ TEST_F(TabTest, TooltipProvidedByTab) {
 // shouldn't change the insets of the close button.
 TEST_F(TabTest, CloseButtonLayout) {
   FakeTabController tab_controller;
-  Tab tab(&tab_controller, nullptr);
+  Tab tab(&tab_controller);
   tab.SetBounds(0, 0, 100, 50);
   LayoutTab(&tab);
   gfx::Insets close_button_insets = GetCloseButton(tab)->GetInsets();
@@ -540,7 +554,7 @@ TEST_F(TabTest, CloseButtonFocus) {
   Widget widget;
   InitWidget(&widget);
   FakeTabController tab_controller;
-  Tab tab(&tab_controller, nullptr);
+  Tab tab(&tab_controller);
   widget.GetContentsView()->AddChildView(&tab);
 
   views::ImageButton* tab_close_button = GetCloseButton(tab);
@@ -561,11 +575,12 @@ TEST_F(TabTest, LayeredThrobber) {
   InitWidget(&widget);
 
   FakeTabController tab_controller;
-  Tab tab(&tab_controller, nullptr);
+  Tab tab(&tab_controller);
   widget.GetContentsView()->AddChildView(&tab);
   tab.SizeToPreferredSize();
 
   TabIcon* icon = GetTabIcon(tab);
+  SetupFakeClock(icon);
   TabRendererData data;
   data.url = GURL("http://example.com");
   EXPECT_FALSE(icon->ShowingLoadingAnimation());
@@ -631,11 +646,11 @@ TEST_F(TabTest, LayeredThrobber) {
   EXPECT_TRUE(icon->ShowingLoadingAnimation());
   EXPECT_TRUE(icon->layer());
   tab_controller.set_paint_throbber_to_layer(false);
-  tab.StepLoadingAnimation();
+  tab.StepLoadingAnimation(base::TimeDelta::FromMilliseconds(100));
   EXPECT_TRUE(icon->ShowingLoadingAnimation());
   EXPECT_FALSE(icon->layer());
   tab_controller.set_paint_throbber_to_layer(true);
-  tab.StepLoadingAnimation();
+  tab.StepLoadingAnimation(base::TimeDelta::FromMilliseconds(100));
   EXPECT_TRUE(icon->ShowingLoadingAnimation());
   EXPECT_TRUE(icon->layer());
   data.network_state = TabNetworkState::kNone;
@@ -656,7 +671,7 @@ TEST_F(TabTest, LayeredThrobber) {
 
 TEST_F(TabTest, TitleHiddenWhenSmall) {
   FakeTabController tab_controller;
-  Tab tab(&tab_controller, nullptr);
+  Tab tab(&tab_controller);
   tab.SetBounds(0, 0, 100, 50);
   EXPECT_GT(GetTitleWidth(tab), 0);
   tab.SetBounds(0, 0, 0, 50);
@@ -670,7 +685,7 @@ TEST_F(TabTest, FaviconDoesntMoveWhenShowingAlertIndicator) {
   for (bool is_active_tab : {false, true}) {
     FakeTabController controller;
     controller.set_active_tab(is_active_tab);
-    Tab tab(&controller, nullptr);
+    Tab tab(&controller);
     widget.GetContentsView()->AddChildView(&tab);
     tab.SizeToPreferredSize();
 
@@ -689,7 +704,7 @@ TEST_F(TabTest, SmallTabsHideCloseButton) {
 
   FakeTabController controller;
   controller.set_active_tab(false);
-  Tab tab(&controller, nullptr);
+  Tab tab(&controller);
   widget.GetContentsView()->AddChildView(&tab);
   const int width = tab.tab_style()->GetContentsInsets().width() +
                     Tab::kMinimumContentsWidthForCloseButtons;
@@ -712,7 +727,7 @@ TEST_F(TabTest, ExtraLeftPaddingNotShownOnSmallActiveTab) {
 
   FakeTabController controller;
   controller.set_active_tab(true);
-  Tab tab(&controller, nullptr);
+  Tab tab(&controller);
   widget.GetContentsView()->AddChildView(&tab);
   tab.SetBounds(0, 0, 200, 50);
   const views::View* close = GetCloseButton(tab);
@@ -732,7 +747,7 @@ TEST_F(TabTest, ExtraLeftPaddingShownOnSiteWithoutFavicon) {
   InitWidget(&widget);
 
   FakeTabController controller;
-  Tab tab(&controller, nullptr);
+  Tab tab(&controller);
   widget.GetContentsView()->AddChildView(&tab);
 
   tab.SizeToPreferredSize();
@@ -755,7 +770,7 @@ TEST_F(TabTest, ExtraAlertPaddingNotShownOnSmallActiveTab) {
 
   FakeTabController controller;
   controller.set_active_tab(true);
-  Tab tab(&controller, nullptr);
+  Tab tab(&controller);
   widget.GetContentsView()->AddChildView(&tab);
   TabRendererData data;
   data.alert_state = TabAlertState::AUDIO_PLAYING;
@@ -800,7 +815,7 @@ TEST_F(TabTest, TitleTextHasSufficientContrast) {
   Widget widget;
   InitWidget(&widget);
   FakeTabController controller;
-  Tab tab(&controller, nullptr);
+  Tab tab(&controller);
   widget.GetContentsView()->AddChildView(&tab);
 
   for (const auto& colors : color_schemes) {

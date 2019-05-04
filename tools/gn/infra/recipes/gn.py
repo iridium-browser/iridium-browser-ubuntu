@@ -53,20 +53,13 @@ def RunSteps(api, repository):
     cipd_dir = api.path['start_dir'].join('cipd')
     pkgs = api.cipd.EnsureFile()
     pkgs.add_package('infra/ninja/${platform}', 'version:1.8.2')
-    if api.platform.is_linux:
+    if api.platform.is_linux or api.platform.is_mac:
       pkgs.add_package('fuchsia/clang/${platform}', 'goma')
+    if api.platform.is_linux:
+      pkgs.add_package('fuchsia/sysroot/${platform}',
+                       'git_revision:a28dfa20af063e5ca00634024c85732e20220419',
+                       'sysroot')
     api.cipd.ensure(cipd_dir, pkgs)
-
-  env = {
-      'linux': {
-          'CC': cipd_dir.join('bin', 'clang'),
-          'CXX': cipd_dir.join('bin', 'clang++'),
-          'AR': cipd_dir.join('bin', 'llvm-ar'),
-          'LDFLAGS': '-static-libstdc++ -ldl -lpthread',
-      },
-      'mac': {},
-      'win': {},
-  }[api.platform.name]
 
   # The order is important since release build will get uploaded to CIPD.
   configs = [
@@ -76,22 +69,50 @@ def RunSteps(api, repository):
       },
       {
           'name': 'release',
-          'args': []
+          'args': ['--use-lto', '--use-icf']
       },
   ]
 
-  for config in configs:
-    with api.step.nest(config['name']):
-      with api.step.nest('build'):
-        with api.context(
-            env=env, cwd=src_dir), api.macos_sdk(), api.windows_sdk():
+  with api.macos_sdk(), api.windows_sdk():
+    if api.platform.is_linux:
+      sysroot = '--sysroot=%s' % cipd_dir.join('sysroot')
+      env = {
+          'CC': cipd_dir.join('bin', 'clang'),
+          'CXX': cipd_dir.join('bin', 'clang++'),
+          'AR': cipd_dir.join('bin', 'llvm-ar'),
+          'CFLAGS': sysroot,
+          'LDFLAGS': sysroot,
+      }
+    elif api.platform.is_mac:
+      sysroot = '--sysroot=%s' % api.step(
+          'xcrun', ['xcrun', '--show-sdk-path'],
+          stdout=api.raw_io.output(name='sdk-path', add_output_log=True),
+          step_test_data=
+          lambda: api.raw_io.test_api.stream_output('/some/xcode/path')
+      ).stdout.strip()
+      stdlib = '%s %s %s' % (cipd_dir.join('lib', 'libc++.a'),
+                             cipd_dir.join('lib', 'libc++abi.a'),
+                             cipd_dir.join('lib', 'libunwind.a'))
+      env = {
+          'CC': cipd_dir.join('bin', 'clang'),
+          'CXX': cipd_dir.join('bin', 'clang++'),
+          'AR': cipd_dir.join('bin', 'llvm-ar'),
+          'CFLAGS': sysroot,
+          'LDFLAGS': '%s -nostdlib++ %s' % (sysroot, stdlib),
+      }
+    else:
+      env = {}
+
+    for config in configs:
+      with api.step.nest(config['name']):
+        with api.step.nest('build'), api.context(env=env, cwd=src_dir):
           api.python(
               'generate', src_dir.join('build', 'gen.py'), args=config['args'])
 
           # Windows requires the environment modifications when building too.
           api.step('ninja', [cipd_dir.join('ninja'), '-C', src_dir.join('out')])
 
-      api.step('test', [src_dir.join('out', 'gn_unittests')])
+        api.step('test', [src_dir.join('out', 'gn_unittests')])
 
   if build_input.gerrit_changes:
     return

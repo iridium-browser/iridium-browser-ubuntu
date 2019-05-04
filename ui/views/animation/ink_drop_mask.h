@@ -11,8 +11,9 @@
 #include "ui/gfx/geometry/insets_f.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/path.h"
 #include "ui/views/views_export.h"
+
+class SkPath;
 
 namespace views {
 
@@ -23,10 +24,6 @@ namespace views {
 class VIEWS_EXPORT InkDropMask : public ui::LayerDelegate {
  public:
   ~InkDropMask() override;
-
-  // Should be called whenever the masked layer is resized so that the mask
-  // layer size always matches that of the layer it is masking.
-  void UpdateLayerSize(const gfx::Size& new_layer_size);
 
   ui::Layer* layer() { return &layer_; }
 
@@ -80,13 +77,13 @@ class VIEWS_EXPORT CircleInkDropMask : public InkDropMask {
 // An ink-drop mask that paints a specified path.
 class VIEWS_EXPORT PathInkDropMask : public InkDropMask {
  public:
-  PathInkDropMask(const gfx::Size& layer_size, const gfx::Path& path);
+  PathInkDropMask(const gfx::Size& layer_size, const SkPath& path);
 
  private:
   // InkDropMask:
   void OnPaintLayer(const ui::PaintContext& context) override;
 
-  gfx::Path path_;
+  SkPath path_;
 
   DISALLOW_COPY_AND_ASSIGN(PathInkDropMask);
 };

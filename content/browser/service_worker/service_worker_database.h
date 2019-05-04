@@ -231,6 +231,9 @@ class CONTENT_EXPORT ServiceWorkerDatabase {
       int64_t registration_id,
       const std::vector<std::string>& user_data_name_prefixes);
 
+  // Removes traces of deleted data on disk.
+  Status RewriteDB();
+
   // Reads user data for all registrations that have data with |user_data_name|
   // from the database. Returns OK if they are successfully read or not found.
   Status ReadUserDataForAllRegistrations(
@@ -395,9 +398,9 @@ class CONTENT_EXPORT ServiceWorkerDatabase {
   int64_t next_avail_version_id_;
 
   enum State {
-    UNINITIALIZED,
-    INITIALIZED,
-    DISABLED,
+    DATABASE_STATE_UNINITIALIZED,
+    DATABASE_STATE_INITIALIZED,
+    DATABASE_STATE_DISABLED,
   };
   State state_;
 

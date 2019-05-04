@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
@@ -23,8 +24,6 @@
 #include "components/viz/client/client_resource_provider.h"
 #include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/gpu/raster_context_provider.h"
-#include "components/viz/common/gpu/texture_allocation.h"
-#include "components/viz/common/resources/resource_format_utils.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
@@ -133,7 +132,8 @@ static void RasterizeSourceOOP(
   if (mailbox->IsZero()) {
     DCHECK(!sync_token.HasData());
     auto* sii = context_provider->SharedImageInterface();
-    uint32_t flags = gpu::SHARED_IMAGE_USAGE_RASTER;
+    uint32_t flags = gpu::SHARED_IMAGE_USAGE_RASTER |
+                     gpu::SHARED_IMAGE_USAGE_OOP_RASTERIZATION;
     if (texture_is_overlay_candidate)
       flags |= gpu::SHARED_IMAGE_USAGE_SCANOUT;
     *mailbox = sii->CreateSharedImage(resource_format, resource_size,
@@ -143,16 +143,10 @@ static void RasterizeSourceOOP(
     ri->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
   }
 
-  GLuint texture_id = ri->CreateAndConsumeTexture(
-      texture_is_overlay_candidate, gfx::BufferUsage::SCANOUT, resource_format,
-      mailbox->name);
-
   // TODO(enne): Use the |texture_target|? GpuMemoryBuffer backed textures don't
   // use GL_TEXTURE_2D.
   ri->BeginRasterCHROMIUM(raster_source->background_color(), msaa_sample_count,
                           playback_settings.use_lcd_text,
-                          viz::ResourceFormatToClosestSkColorType(
-                              /*gpu_compositing=*/true, resource_format),
                           playback_settings.raster_color_space, mailbox->name);
   float recording_to_raster_scale =
       transform.scale() / raster_source->recording_scale_factor();
@@ -170,8 +164,6 @@ static void RasterizeSourceOOP(
 
   // TODO(ericrk): Handle unpremultiply+dither for 4444 cases.
   // https://crbug.com/789153
-
-  ri->DeleteTextures(1, &texture_id);
 }
 
 static void RasterizeSource(
@@ -208,9 +200,7 @@ static void RasterizeSource(
     // valid by the time the consume command executes.
     ri->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
   }
-  GLuint texture_id = ri->CreateAndConsumeTexture(
-      texture_is_overlay_candidate, gfx::BufferUsage::SCANOUT, resource_format,
-      mailbox->name);
+  GLuint texture_id = ri->CreateAndConsumeForGpuRaster(mailbox->name);
   {
     ScopedGrContextAccess gr_context_access(context_provider);
     base::Optional<viz::ClientResourceProvider::ScopedSkSurface> scoped_surface;
@@ -249,7 +239,7 @@ static void RasterizeSource(
                                     playback_settings);
   }
 
-  ri->DeleteTextures(1, &texture_id);
+  ri->DeleteGpuRasterTexture(texture_id);
 }
 
 }  // namespace
@@ -353,7 +343,9 @@ GpuRasterBufferProvider::GpuRasterBufferProvider(
       unpremultiply_and_dither_low_bit_depth_tiles_(
           unpremultiply_and_dither_low_bit_depth_tiles),
       enable_oop_rasterization_(enable_oop_rasterization),
-      raster_metric_frequency_(raster_metric_frequency) {
+      raster_metric_frequency_(raster_metric_frequency),
+      random_generator_(base::RandUint64()),
+      uniform_distribution_(1, raster_metric_frequency) {
   DCHECK(compositor_context_provider);
   DCHECK(worker_context_provider);
 }
@@ -419,7 +411,7 @@ bool GpuRasterBufferProvider::IsResourceReadyToDraw(
 
 uint64_t GpuRasterBufferProvider::SetReadyToDrawCallback(
     const std::vector<const ResourcePool::InUsePoolResource*>& resources,
-    const base::Closure& callback,
+    base::OnceClosure callback,
     uint64_t pending_callback_id) const {
   gpu::SyncToken latest_sync_token;
   for (const auto* in_use : resources) {
@@ -438,7 +430,7 @@ uint64_t GpuRasterBufferProvider::SetReadyToDrawCallback(
     // Use the compositor context because we want this callback on the
     // compositor thread.
     compositor_context_provider_->ContextSupport()->SignalSyncToken(
-        latest_sync_token, callback);
+        latest_sync_token, std::move(callback));
   }
 
   return callback_id;
@@ -505,12 +497,8 @@ gpu::SyncToken GpuRasterBufferProvider::PlaybackOnWorkerThreadInternal(
   gpu::raster::RasterInterface* ri = scoped_context.RasterInterface();
   DCHECK(ri);
 
-  raster_tasks_count_++;
-  bool measure_raster_metric = false;
-  if (raster_tasks_count_ == raster_metric_frequency_) {
-    measure_raster_metric = true;
-    raster_tasks_count_ = 0;
-  }
+  const bool measure_raster_metric =
+      uniform_distribution_(random_generator_) == raster_metric_frequency_;
 
   gfx::Rect playback_rect = raster_full_rect;
   if (resource_has_previous_content) {

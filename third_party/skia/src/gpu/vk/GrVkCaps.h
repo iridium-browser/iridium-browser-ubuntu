@@ -10,7 +10,7 @@
 
 #include "GrCaps.h"
 #include "GrVkStencilAttachment.h"
-#include "vk/GrVkDefines.h"
+#include "vk/GrVkTypes.h"
 
 class GrShaderCaps;
 class GrVkExtensions;
@@ -42,7 +42,6 @@ public:
     int getRenderTargetSampleCount(int requestedCount, GrPixelConfig config) const override;
     int maxRenderTargetSampleCount(GrPixelConfig config) const override;
 
-    bool surfaceSupportsWritePixels(const GrSurface*) const override;
     bool surfaceSupportsReadPixels(const GrSurface*) const override { return true; }
 
     bool isConfigTexturableLinearly(GrPixelConfig config) const {
@@ -70,13 +69,6 @@ public:
     // copyImageToBuffer. This flag says that we must do the copy starting from the origin always.
     bool mustDoCopiesFromOrigin() const {
         return fMustDoCopiesFromOrigin;
-    }
-
-    // On Nvidia there is a current bug where we must the current command buffer before copy
-    // operations or else the copy will not happen. This includes copies, blits, resolves, and copy
-    // as draws.
-    bool mustSubmitCommandsBeforeCopyOp() const {
-        return fMustSubmitCommandsBeforeCopyOp;
     }
 
     // Sometimes calls to QueueWaitIdle return before actually signalling the fences
@@ -129,6 +121,9 @@ public:
     // Returns true if the device supports importing Android hardware buffers into Vulkan memory.
     bool supportsAndroidHWBExternalMemory() const { return fSupportsAndroidHWBExternalMemory; }
 
+    // Returns true if it supports ycbcr conversion for samplers
+    bool supportsYcbcrConversion() const { return fSupportsYcbcrConversion; }
+
     /**
      * Helpers used by canCopySurface. In all cases if the SampleCnt parameter is zero that means
      * the surface is not a render target, otherwise it is the number of samples in the render
@@ -147,19 +142,17 @@ public:
     bool canCopyAsDraw(GrPixelConfig dstConfig, bool dstIsRenderable,
                        GrPixelConfig srcConfig, bool srcIsTextureable) const;
 
-    bool canCopySurface(const GrSurfaceProxy* dst, const GrSurfaceProxy* src,
-                        const SkIRect& srcRect, const SkIPoint& dstPoint) const override;
-
     bool initDescForDstCopy(const GrRenderTargetProxy* src, GrSurfaceDesc* desc, GrSurfaceOrigin*,
                             bool* rectsMustMatch, bool* disallowSubrect) const override;
 
-    bool validateBackendTexture(const GrBackendTexture&, SkColorType,
-                                GrPixelConfig*) const override;
-    bool validateBackendRenderTarget(const GrBackendRenderTarget&, SkColorType,
-                                     GrPixelConfig*) const override;
+    GrPixelConfig validateBackendRenderTarget(const GrBackendRenderTarget&,
+                                              SkColorType) const override;
 
-    bool getConfigFromBackendFormat(const GrBackendFormat&, SkColorType,
-                                    GrPixelConfig*) const override;
+    GrPixelConfig getConfigFromBackendFormat(const GrBackendFormat&, SkColorType) const override;
+    GrPixelConfig getYUVAConfigFromBackendFormat(const GrBackendFormat&) const override;
+
+    GrBackendFormat getBackendFormatFromGrColorType(GrColorType ct,
+                                                    GrSRGBEncoded srgbEncoded) const override;
 
 private:
     enum VkVendor {
@@ -181,14 +174,16 @@ private:
                     const GrVkExtensions&);
     void initShaderCaps(const VkPhysicalDeviceProperties&, const VkPhysicalDeviceFeatures2&);
 
-#ifdef GR_TEST_UTILS
-    GrBackendFormat onCreateFormatFromBackendTexture(const GrBackendTexture&) const override;
-#endif
-
     void initConfigTable(const GrVkInterface*, VkPhysicalDevice, const VkPhysicalDeviceProperties&);
     void initStencilFormat(const GrVkInterface* iface, VkPhysicalDevice physDev);
 
+    uint8_t getYcbcrKeyFromYcbcrInfo(const GrVkYcbcrConversionInfo& info);
+
     void applyDriverCorrectnessWorkarounds(const VkPhysicalDeviceProperties&);
+
+    bool onSurfaceSupportsWritePixels(const GrSurface*) const override;
+    bool onCanCopySurface(const GrSurfaceProxy* dst, const GrSurfaceProxy* src,
+                          const SkIRect& srcRect, const SkIPoint& dstPoint) const override;
 
     struct ConfigInfo {
         ConfigInfo() : fOptimalFlags(0), fLinearFlags(0) {}
@@ -215,8 +210,9 @@ private:
 
     StencilFormat fPreferredStencilFormat;
 
+    SkSTArray<1, GrVkYcbcrConversionInfo> fYcbcrInfos;
+
     bool fMustDoCopiesFromOrigin = false;
-    bool fMustSubmitCommandsBeforeCopyOp = false;
     bool fMustSleepOnTearDown = false;
     bool fNewCBOnPipelineChange = false;
     bool fShouldAlwaysUseDedicatedImageMemory = false;
@@ -231,6 +227,8 @@ private:
     bool fSupportsDedicatedAllocation = false;
     bool fSupportsExternalMemory = false;
     bool fSupportsAndroidHWBExternalMemory = false;
+
+    bool fSupportsYcbcrConversion = false;
 
     typedef GrCaps INHERITED;
 };

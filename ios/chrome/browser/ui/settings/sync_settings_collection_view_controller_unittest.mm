@@ -27,7 +27,7 @@
 #include "ios/chrome/browser/sync/sync_setup_service_mock.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller_test.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
-#import "ios/chrome/browser/ui/settings/cells/sync_switch_item.h"
+#import "ios/chrome/browser/ui/settings/cells/legacy/legacy_sync_switch_item.h"
 #import "ios/chrome/browser/ui/settings/cells/text_and_error_item.h"
 #import "ios/chrome/browser/ui/settings/sync_utils/sync_util.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -52,9 +52,8 @@ using testing::Return;
 
 class SyncSetupServiceMockThatFails : public SyncSetupServiceMock {
  public:
-  SyncSetupServiceMockThatFails(browser_sync::ProfileSyncService* sync_service,
-                                PrefService* prefs)
-      : SyncSetupServiceMock(sync_service, prefs) {}
+  SyncSetupServiceMockThatFails(syncer::SyncService* sync_service)
+      : SyncSetupServiceMock(sync_service) {}
   bool IsSyncEnabled() const override { return sync_enabled_; }
   void SetSyncEnabled(bool sync_enabled) override {}
   bool IsSyncingAllDataTypes() const override { return sync_all_; }
@@ -77,10 +76,8 @@ bool SyncSetupServiceMockThatFails::sync_all_ = true;
 
 class SyncSetupServiceMockThatSucceeds : public SyncSetupServiceMockThatFails {
  public:
-  SyncSetupServiceMockThatSucceeds(
-      browser_sync::ProfileSyncService* sync_service,
-      PrefService* prefs)
-      : SyncSetupServiceMockThatFails(sync_service, prefs) {}
+  SyncSetupServiceMockThatSucceeds(syncer::SyncService* sync_service)
+      : SyncSetupServiceMockThatFails(sync_service) {}
   void SetSyncEnabled(bool sync_enabled) override {
     sync_enabled_ = sync_enabled;
   }
@@ -97,30 +94,29 @@ class SyncSettingsCollectionViewControllerTest
       web::BrowserState* context) {
     ios::ChromeBrowserState* chrome_browser_state =
         ios::ChromeBrowserState::FromBrowserState(context);
-    browser_sync::ProfileSyncService* sync_service =
+    syncer::SyncService* sync_service =
         ProfileSyncServiceFactory::GetForBrowserState(chrome_browser_state);
-    return std::make_unique<NiceMock<SyncSetupServiceMock>>(
-        sync_service, chrome_browser_state->GetPrefs());
+    return std::make_unique<NiceMock<SyncSetupServiceMock>>(sync_service);
   }
 
   static std::unique_ptr<KeyedService> CreateSucceedingSyncSetupService(
       web::BrowserState* context) {
     ios::ChromeBrowserState* chrome_browser_state =
         ios::ChromeBrowserState::FromBrowserState(context);
-    browser_sync::ProfileSyncService* sync_service =
+    syncer::SyncService* sync_service =
         ProfileSyncServiceFactory::GetForBrowserState(chrome_browser_state);
     return std::make_unique<NiceMock<SyncSetupServiceMockThatSucceeds>>(
-        sync_service, chrome_browser_state->GetPrefs());
+        sync_service);
   }
 
   static std::unique_ptr<KeyedService> CreateFailingSyncSetupService(
       web::BrowserState* context) {
     ios::ChromeBrowserState* chrome_browser_state =
         ios::ChromeBrowserState::FromBrowserState(context);
-    browser_sync::ProfileSyncService* sync_service =
+    syncer::SyncService* sync_service =
         ProfileSyncServiceFactory::GetForBrowserState(chrome_browser_state);
     return std::make_unique<NiceMock<SyncSetupServiceMockThatFails>>(
-        sync_service, chrome_browser_state->GetPrefs());
+        sync_service);
   }
 
   static std::unique_ptr<KeyedService> CreateProfileSyncService(
@@ -129,7 +125,7 @@ class SyncSettingsCollectionViewControllerTest
         CreateProfileSyncServiceParamsForTest(
             nullptr, ios::ChromeBrowserState::FromBrowserState(context));
     return std::make_unique<NiceMock<browser_sync::ProfileSyncServiceMock>>(
-        &init_params);
+        std::move(init_params));
   }
 
   std::unique_ptr<sync_preferences::PrefServiceSyncable> CreatePrefService() {
@@ -196,7 +192,8 @@ class SyncSettingsCollectionViewControllerTest
     ON_CALL(*mock_profile_sync_service_, GetRegisteredDataTypes())
         .WillByDefault(Return(syncer::ModelTypeSet()));
     mock_profile_sync_service_->Initialize();
-    EXPECT_CALL(*mock_profile_sync_service_, GetPreferredDataTypes())
+    EXPECT_CALL(*mock_profile_sync_service_->GetUserSettingsMock(),
+                GetChosenDataTypes())
         .WillRepeatedly(Return(syncer::UserSelectableTypes()));
   }
 
@@ -244,15 +241,14 @@ TEST_F(SyncSettingsCollectionViewControllerTest, TestModel) {
   EXPECT_EQ(3, NumberOfSections());
 
   EXPECT_EQ(1, NumberOfItemsInSection(0));
-  // There is one item per data type, except for unified consent that is
-  // unsupported by the old UI. In addition, there are two extra items, one
-  // for "Sync Everything" and another for Autofill wallet import.
+  // There are two extra items, one for "Sync Everything" and another for
+  // Autofill wallet import.
   constexpr int expected_number_of_items =
-      SyncSetupService::kNumberOfSyncableDatatypes - 1 + 2;
+      SyncSetupService::kNumberOfSyncableDatatypes + 2;
   EXPECT_EQ(expected_number_of_items, NumberOfItemsInSection(1));
   EXPECT_EQ(2, NumberOfItemsInSection(2));
 
-  SyncSwitchItem* syncItem = GetCollectionViewItem(0, 0);
+  LegacySyncSwitchItem* syncItem = GetCollectionViewItem(0, 0);
   EXPECT_EQ(syncItem.isOn, YES);
   EXPECT_NSEQ(syncItem.text,
               l10n_util::GetNSString(IDS_IOS_SYNC_SETTING_TITLE));
@@ -260,7 +256,7 @@ TEST_F(SyncSettingsCollectionViewControllerTest, TestModel) {
       syncItem.detailText,
       l10n_util::GetNSString(IDS_IOS_SIGN_IN_TO_CHROME_SETTING_SUBTITLE));
 
-  SyncSwitchItem* syncEverythingItem = GetCollectionViewItem(1, 0);
+  LegacySyncSwitchItem* syncEverythingItem = GetCollectionViewItem(1, 0);
   EXPECT_EQ(syncEverythingItem.isOn, YES);
   EXPECT_NSEQ(syncEverythingItem.text,
               l10n_util::GetNSString(IDS_IOS_SYNC_EVERYTHING_TITLE));
@@ -269,17 +265,14 @@ TEST_F(SyncSettingsCollectionViewControllerTest, TestModel) {
   for (int i = 0; i < SyncSetupService::kNumberOfSyncableDatatypes; i++) {
     SyncSetupService::SyncableDatatype dataType =
         static_cast<SyncSetupService::SyncableDatatype>(i);
-    if (dataType == SyncSetupService::kSyncUserEvent) {
-      // Old UI without unified consent doesn't support user event data type.
-      continue;
-    }
-    SyncSwitchItem* syncDataTypeItem = GetCollectionViewItem(1, item++);
+    LegacySyncSwitchItem* syncDataTypeItem = GetCollectionViewItem(1, item++);
     EXPECT_NSEQ(syncDataTypeItem.text,
                 l10n_util::GetNSString(
                     [sync_controller titleIdForSyncableDataType:dataType]));
   }
 
-  SyncSwitchItem* autofillWalletImportItem = GetCollectionViewItem(1, item);
+  LegacySyncSwitchItem* autofillWalletImportItem =
+      GetCollectionViewItem(1, item);
   NSString* title = l10n_util::GetNSString(
       IDS_AUTOFILL_ENABLE_PAYMENTS_INTEGRATION_CHECKBOX_LABEL);
   EXPECT_NSEQ(autofillWalletImportItem.text, title);
@@ -294,7 +287,7 @@ TEST_F(SyncSettingsCollectionViewControllerTest, TestEnabledCellsSyncOff) {
   CreateSyncController();
 
   for (int item = 0; item < NumberOfItemsInSection(1); ++item) {
-    SyncSwitchItem* object = GetCollectionViewItem(1, item);
+    LegacySyncSwitchItem* object = GetCollectionViewItem(1, item);
     EXPECT_FALSE(object.enabled);
   }
 
@@ -308,15 +301,15 @@ TEST_F(SyncSettingsCollectionViewControllerTest,
   TurnSyncEverythingOn();
   CreateSyncController();
 
-  SyncSwitchItem* syncEverythingItem = GetCollectionViewItem(1, 0);
+  LegacySyncSwitchItem* syncEverythingItem = GetCollectionViewItem(1, 0);
   EXPECT_TRUE(syncEverythingItem.enabled);
   for (int item = 1; item <= SyncSetupService::kNumberOfSyncableDatatypes;
        ++item) {
-    SyncSwitchItem* object = GetCollectionViewItem(1, item);
+    LegacySyncSwitchItem* object = GetCollectionViewItem(1, item);
     EXPECT_FALSE(object.enabled);
   }
 
-  SyncSwitchItem* autofillWalletImportItem =
+  LegacySyncSwitchItem* autofillWalletImportItem =
       GetCollectionViewItem(1, NumberOfItemsInSection(1) - 1);
   EXPECT_FALSE(autofillWalletImportItem.enabled);
 
@@ -332,7 +325,7 @@ TEST_F(SyncSettingsCollectionViewControllerTest, TestAutofillWalletImportOff) {
   TurnSyncEverythingOn();
   CreateSyncController();
 
-  SyncSwitchItem* autofillWalletImportItem =
+  LegacySyncSwitchItem* autofillWalletImportItem =
       GetCollectionViewItem(1, NumberOfItemsInSection(1) - 1);
   EXPECT_FALSE(autofillWalletImportItem.isOn);
 }
@@ -345,7 +338,7 @@ TEST_F(SyncSettingsCollectionViewControllerTest, TestAutofillWalletImportOn) {
   TurnSyncEverythingOn();
   CreateSyncController();
 
-  SyncSwitchItem* autofillWalletImportItem =
+  LegacySyncSwitchItem* autofillWalletImportItem =
       GetCollectionViewItem(1, NumberOfItemsInSection(1) - 1);
   EXPECT_TRUE(autofillWalletImportItem.isOn);
 }

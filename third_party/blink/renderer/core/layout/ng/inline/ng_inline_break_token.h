@@ -12,7 +12,7 @@
 namespace blink {
 
 // Represents a break token for an inline node.
-class CORE_EXPORT NGInlineBreakToken : public NGBreakToken {
+class CORE_EXPORT NGInlineBreakToken final : public NGBreakToken {
  public:
   enum NGInlineBreakTokenFlags {
     kDefault = 0,
@@ -93,8 +93,6 @@ class CORE_EXPORT NGInlineBreakToken : public NGBreakToken {
   scoped_refptr<const ComputedStyle> style_;
   unsigned item_index_;
   unsigned text_offset_;
-  unsigned flags_ : 2;  // NGInlineBreakTokenFlags
-  unsigned ignore_floats_ : 1;
 };
 
 DEFINE_TYPE_CASTS(NGInlineBreakToken,

@@ -87,20 +87,8 @@ class ShellSurfaceBase : public SurfaceTreeHost,
   // Sets the system modality.
   void SetSystemModal(bool system_modal);
 
-  // Sets the application ID for the window. The application ID identifies the
-  // general class of applications to which the window belongs.
-  static void SetApplicationId(aura::Window* window,
-                               const base::Optional<std::string>& id);
-  static const std::string* GetApplicationId(const aura::Window* window);
-
   // Set the application ID for the surface.
   void SetApplicationId(const char* application_id);
-
-  // Sets the startup ID for the window. The startup ID identifies the
-  // application using startup notification protocol.
-  static void SetStartupId(aura::Window* window,
-                           const base::Optional<std::string>& id);
-  static const std::string* GetStartupId(aura::Window* window);
 
   // Set the startup ID for the surface.
   void SetStartupId(const char* startup_id);
@@ -134,23 +122,14 @@ class ShellSurfaceBase : public SurfaceTreeHost,
   // Set the miniumum size for the surface.
   void SetMinimumSize(const gfx::Size& size);
 
+  // Set the aspect ratio for the surface.
+  void SetAspectRatio(const gfx::SizeF& aspect_ratio);
+
+  // Set the flag if the surface can maximize or not.
   void SetCanMinimize(bool can_minimize);
 
   // Prevents shell surface from being moved.
   void DisableMovement();
-
-  // Sets the main surface for the window.
-  static void SetMainSurface(aura::Window* window, Surface* surface);
-
-  // Returns the main Surface instance or nullptr if it is not set.
-  // |window| must not be nullptr.
-  static Surface* GetMainSurface(const aura::Window* window);
-
-  // Returns the target surface for the located event |event|.  If an
-  // event handling is grabbed by an window, it'll first examine that
-  // window, then traverse to its transeitn parent if the parent also
-  // requested grab.
-  static Surface* GetTargetSurfaceForLocatedEvent(ui::LocatedEvent* event);
 
   // Returns a trace value representing the state of the surface.
   std::unique_ptr<base::trace_event::TracedValue> AsTracedValue() const;
@@ -177,6 +156,7 @@ class ShellSurfaceBase : public SurfaceTreeHost,
   base::string16 GetWindowTitle() const override;
   bool ShouldShowWindowTitle() const override;
   gfx::ImageSkia GetWindowIcon() override;
+  bool OnCloseRequested(views::Widget::ClosedReason close_reason) override;
   void WindowClosing() override;
   views::Widget* GetWidget() override;
   const views::Widget* GetWidget() const override;
@@ -184,7 +164,7 @@ class ShellSurfaceBase : public SurfaceTreeHost,
   views::NonClientFrameView* CreateNonClientFrameView(
       views::Widget* widget) override;
   bool WidgetHasHitTestMask() const override;
-  void GetWidgetHitTestMask(gfx::Path* mask) const override;
+  void GetWidgetHitTestMask(SkPath* mask) const override;
 
   // Overridden from views::View:
   gfx::Size CalculatePreferredSize() const override;
@@ -311,6 +291,7 @@ class ShellSurfaceBase : public SurfaceTreeHost,
   gfx::Size pending_minimum_size_;
   gfx::Size maximum_size_;
   gfx::Size pending_maximum_size_;
+  gfx::SizeF pending_aspect_ratio_;
   ui::AXTreeID child_ax_tree_id_ = ui::AXTreeIDUnknown();
 
   DISALLOW_COPY_AND_ASSIGN(ShellSurfaceBase);

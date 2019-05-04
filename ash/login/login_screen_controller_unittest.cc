@@ -6,14 +6,13 @@
 
 #include "ash/login/mock_login_screen_client.h"
 #include "ash/login/ui/lock_screen.h"
-#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/session/test_session_controller_client.h"
 #include "ash/shell.h"
 #include "ash/system/status_area_widget.h"
-#include "ash/system/tray/system_tray.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/unified/unified_system_tray.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wallpaper/wallpaper_controller.h"
@@ -38,11 +37,7 @@ bool IsSystemTrayForWindowVisible(WindowType index) {
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   RootWindowController* controller =
       RootWindowController::ForWindow(root_windows[index]);
-  return features::IsSystemTrayUnifiedEnabled()
-             ? controller->GetStatusAreaWidget()
-                   ->unified_system_tray()
-                   ->visible()
-             : controller->GetSystemTray()->visible();
+  return controller->GetStatusAreaWidget()->unified_system_tray()->visible();
 }
 
 TEST_F(LoginScreenControllerTest, RequestAuthentication) {
@@ -103,11 +98,6 @@ TEST_F(LoginScreenControllerTest, RequestEasyUnlock) {
   // Verify HardlockPod mojo call is run with the same account id.
   EXPECT_CALL(*client, HardlockPod(id));
   controller->HardlockPod(id);
-  base::RunLoop().RunUntilIdle();
-
-  // Verify RecordClickOnLockIcon mojo call is run with the same account id.
-  EXPECT_CALL(*client, RecordClickOnLockIcon(id));
-  controller->RecordClickOnLockIcon(id);
   base::RunLoop().RunUntilIdle();
 }
 
@@ -252,6 +242,18 @@ TEST_F(LoginScreenControllerTest, ShowLoginScreenRequiresWallpaper) {
   EXPECT_TRUE(ash::LockScreen::Get()->is_shown());
 
   ash::LockScreen::Get()->Destroy();
+}
+
+TEST_F(LoginScreenControllerTest, SystemTrayFocus) {
+  std::unique_ptr<MockLoginScreenClient> client = BindMockLoginScreenClient();
+
+  EXPECT_CALL(*client, OnFocusLeavingSystemTray(true)).Times(1);
+  Shell::Get()->system_tray_notifier()->NotifyFocusOut(true);
+  Shell::Get()->login_screen_controller()->FlushForTesting();
+
+  EXPECT_CALL(*client, OnFocusLeavingSystemTray(false)).Times(1);
+  Shell::Get()->system_tray_notifier()->NotifyFocusOut(false);
+  Shell::Get()->login_screen_controller()->FlushForTesting();
 }
 
 }  // namespace

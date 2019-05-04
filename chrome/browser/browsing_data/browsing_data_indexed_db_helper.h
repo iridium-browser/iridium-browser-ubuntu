@@ -15,8 +15,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
 #include "content/public/browser/indexed_db_context.h"
-#include "content/public/browser/indexed_db_info.h"
 #include "url/gurl.h"
+
+namespace content {
+struct StorageUsageInfo;
+}
 
 // BrowsingDataIndexedDBHelper is an interface for classes dealing with
 // aggregating and deleting browsing data stored in indexed databases.  A
@@ -27,7 +30,7 @@ class BrowsingDataIndexedDBHelper
     : public base::RefCountedThreadSafe<BrowsingDataIndexedDBHelper> {
  public:
   using FetchCallback =
-      base::Callback<void(const std::list<content::IndexedDBInfo>&)>;
+      base::OnceCallback<void(const std::list<content::StorageUsageInfo>&)>;
 
   // Create a BrowsingDataIndexedDBHelper instance for the indexed databases
   // stored in |context|'s associated profile's user data directory.
@@ -35,7 +38,7 @@ class BrowsingDataIndexedDBHelper
 
   // Starts the fetching process, which will notify its completion via
   // |callback|. This must be called only on the UI thread.
-  virtual void StartFetching(const FetchCallback& callback);
+  virtual void StartFetching(FetchCallback callback);
   // Requests a single indexed database to be deleted in the IndexedDB thread.
   virtual void DeleteIndexedDB(const GURL& origin);
 
@@ -48,7 +51,7 @@ class BrowsingDataIndexedDBHelper
   friend class base::RefCountedThreadSafe<BrowsingDataIndexedDBHelper>;
 
   // Enumerates all indexed database files in the IndexedDB thread.
-  void FetchIndexedDBInfoInIndexedDBThread(const FetchCallback& callback);
+  void FetchIndexedDBInfoInIndexedDBThread(FetchCallback callback);
   // Delete a single indexed database in the IndexedDB thread.
   void DeleteIndexedDBInIndexedDBThread(const GURL& origin);
 
@@ -63,13 +66,12 @@ class CannedBrowsingDataIndexedDBHelper
  public:
   // Contains information about an indexed database.
   struct PendingIndexedDBInfo {
-    PendingIndexedDBInfo(const GURL& origin, const base::string16& name);
+    explicit PendingIndexedDBInfo(const GURL& origin);
     ~PendingIndexedDBInfo();
 
     bool operator<(const PendingIndexedDBInfo& other) const;
 
     GURL origin;
-    base::string16 name;
   };
 
   explicit CannedBrowsingDataIndexedDBHelper(
@@ -77,8 +79,7 @@ class CannedBrowsingDataIndexedDBHelper
 
   // Add a indexed database to the set of canned indexed databases that is
   // returned by this helper.
-  void AddIndexedDB(const GURL& origin,
-                    const base::string16& name);
+  void AddIndexedDB(const GURL& origin);
 
   // Clear the list of canned indexed databases.
   void Reset();
@@ -94,7 +95,7 @@ class CannedBrowsingDataIndexedDBHelper
       GetIndexedDBInfo() const;
 
   // BrowsingDataIndexedDBHelper methods.
-  void StartFetching(const FetchCallback& callback) override;
+  void StartFetching(FetchCallback callback) override;
   void DeleteIndexedDB(const GURL& origin) override;
 
  private:

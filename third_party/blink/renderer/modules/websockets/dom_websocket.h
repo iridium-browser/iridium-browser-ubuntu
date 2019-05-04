@@ -37,7 +37,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/core/dom/pausable_object.h"
+#include "third_party/blink/renderer/core/execution_context/pausable_object.h"
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
@@ -79,6 +79,8 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
                               const String& url,
                               const StringOrStringSequence& protocols,
                               ExceptionState&);
+
+  explicit DOMWebSocket(ExecutionContext*);
   ~DOMWebSocket() override;
 
   enum State { kConnecting = 0, kOpen = 1, kClosing = 2, kClosed = 3 };
@@ -111,10 +113,10 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
   String binaryType() const;
   void setBinaryType(const String&);
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(open);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(close);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(open, kOpen);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(message, kMessage);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(error, kError);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(close, kClose);
 
   // EventTarget functions.
   const AtomicString& InterfaceName() const override;
@@ -122,8 +124,8 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
 
   // PausableObject functions.
   void ContextDestroyed(ExecutionContext*) override;
-  void Pause() override;
-  void Unpause() override;
+  void ContextPaused(PauseState) override;
+  void ContextUnpaused() override;
 
   // ScriptWrappable functions.
   // Prevent this instance from being collected while it's not in CLOSED
@@ -145,16 +147,15 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
 
   static bool IsValidSubprotocolString(const String&);
 
- protected:
-  explicit DOMWebSocket(ExecutionContext*);
-
  private:
   // FIXME: This should inherit blink::EventQueue.
   class EventQueue final : public GarbageCollectedFinalized<EventQueue> {
    public:
     static EventQueue* Create(EventTarget* target) {
-      return new EventQueue(target);
+      return MakeGarbageCollected<EventQueue>(target);
     }
+
+    explicit EventQueue(EventTarget*);
     ~EventQueue();
 
     // Dispatches the event if this queue is active.
@@ -179,8 +180,6 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
       kUnpausePosted,
       kStopped,
     };
-
-    explicit EventQueue(EventTarget*);
 
     // Dispatches queued events if this queue is active.
     // Does nothing otherwise.

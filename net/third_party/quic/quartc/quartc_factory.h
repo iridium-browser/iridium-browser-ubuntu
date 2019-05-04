@@ -47,6 +47,11 @@ struct QuartcSessionConfig {
       QuicTime::Delta::Zero();
   QuicTime::Delta max_time_before_crypto_handshake = QuicTime::Delta::Zero();
   QuicTime::Delta idle_network_timeout = QuicTime::Delta::Zero();
+
+  // Tail loss probes (TLP) are enabled by default, but it may be useful to
+  // disable them in tests. We can also consider disabling them in production
+  // if we discover that tail loss probes add overhead in low bitrate audio.
+  bool enable_tail_loss_probe = true;
 };
 
 // Factory that creates instances of QuartcSession.  Implements the

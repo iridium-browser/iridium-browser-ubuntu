@@ -25,20 +25,23 @@
 #include "ash/shell.h"
 #include "ash/shell_observer.h"
 #include "ash/shell_test_api.h"
+#include "ash/system/unified/unified_system_tray.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wallpaper/wallpaper_controller_test_api.h"
 #include "ash/window_factory.h"
 #include "ash/wm/fullscreen_window_finder.h"
-#include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_backdrop_delegate_impl.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "ash/wm/workspace/backdrop_delegate.h"
 #include "ash/wm/workspace/workspace_window_resizer.h"
 #include "ash/wm/workspace_controller_test_api.h"
+#include "base/command_line.h"
 #include "base/run_loop.h"
 #include "chromeos/audio/chromeos_sounds.h"
 #include "ui/aura/client/aura_constants.h"
@@ -61,6 +64,7 @@
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_ui.h"
 #include "ui/keyboard/keyboard_util.h"
+#include "ui/keyboard/public/keyboard_switches.h"
 #include "ui/keyboard/test/keyboard_test_util.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -122,17 +126,11 @@ class ScopedStickyKeyboardEnabler {
  public:
   ScopedStickyKeyboardEnabler()
       : accessibility_controller_(Shell::Get()->accessibility_controller()),
-        enabled_(accessibility_controller_->IsVirtualKeyboardEnabled()) {
+        enabled_(accessibility_controller_->virtual_keyboard_enabled()) {
     accessibility_controller_->SetVirtualKeyboardEnabled(true);
-    keyboard::KeyboardController::Get()->EnableKeyboard(
-        std::make_unique<keyboard::TestKeyboardUI>(
-            Shell::Get()->window_tree_host_manager()->input_method()),
-        nullptr);
-    keyboard::KeyboardController::Get()->set_keyboard_locked(true);
   }
 
   ~ScopedStickyKeyboardEnabler() {
-    keyboard::KeyboardController::Get()->set_keyboard_locked(false);
     accessibility_controller_->SetVirtualKeyboardEnabled(enabled_);
   }
 
@@ -448,7 +446,7 @@ TEST_F(WorkspaceLayoutManagerTest, MaximizeWithEmptySize) {
   std::unique_ptr<aura::Window> window =
       window_factory::NewWindow(nullptr, aura::client::WINDOW_TYPE_NORMAL);
   window->Init(ui::LAYER_TEXTURED);
-  wm::GetWindowState(window.get())->Maximize();
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
   aura::Window* default_container =
       Shell::GetPrimaryRootWindowController()->GetContainer(
           kShellWindowId_DefaultContainer);
@@ -683,6 +681,17 @@ TEST_F(WorkspaceLayoutManagerTest,
   Shell::Get()->SetDisplayWorkAreaInsets(window.get(),
                                          gfx::Insets(50, 0, 0, 0));
   EXPECT_EQ(expected_bounds.ToString(), window2->bounds().ToString());
+}
+
+TEST_F(WorkspaceLayoutManagerTest, EnsureWindowStateInOverlay) {
+  std::unique_ptr<aura::Window> window =
+      window_factory::NewWindow(nullptr, aura::client::WINDOW_TYPE_NORMAL);
+  window->Init(ui::LAYER_TEXTURED);
+  auto* overlay_container =
+      Shell::GetPrimaryRootWindowController()->GetContainer(
+          kShellWindowId_OverlayContainer);
+  overlay_container->AddChild(window.get());
+  EXPECT_TRUE(window->GetProperty(kWindowStateKey));
 }
 
 // Following "Solo" tests were originally written for BaseLayoutManager.
@@ -1203,7 +1212,7 @@ TEST_F(WorkspaceLayoutManagerBackdropTest,
   Shelf* shelf = GetPrimaryShelf();
   ShelfLayoutManager* shelf_layout_manager = shelf->shelf_layout_manager();
   ShowTopWindowBackdropForContainer(default_container(), true);
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   const gfx::Size fullscreen_size = GetPrimaryDisplay().size();
 
   std::unique_ptr<aura::Window> window(CreateTestWindow(gfx::Rect(1, 2, 3, 4)));
@@ -1305,12 +1314,12 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, BackdropTest) {
   }
 
   // Toggle overview.
-  Shell::Get()->window_selector_controller()->ToggleOverview();
-  RunAllPendingInMessageLoop();
+  Shell::Get()->overview_controller()->ToggleOverview();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(test_helper.GetBackdropWindow());
 
-  Shell::Get()->window_selector_controller()->ToggleOverview();
-  RunAllPendingInMessageLoop();
+  Shell::Get()->overview_controller()->ToggleOverview();
+  base::RunLoop().RunUntilIdle();
   backdrop = test_helper.GetBackdropWindow();
   EXPECT_TRUE(backdrop);
   {
@@ -1335,11 +1344,11 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, BackdropTest) {
   }
 
   // Toggle overview with the delegate.
-  Shell::Get()->window_selector_controller()->ToggleOverview();
-  RunAllPendingInMessageLoop();
+  Shell::Get()->overview_controller()->ToggleOverview();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(test_helper.GetBackdropWindow());
-  Shell::Get()->window_selector_controller()->ToggleOverview();
-  RunAllPendingInMessageLoop();
+  Shell::Get()->overview_controller()->ToggleOverview();
+  base::RunLoop().RunUntilIdle();
   backdrop = test_helper.GetBackdropWindow();
   {
     aura::Window::Windows children = window1->parent()->children();
@@ -1456,7 +1465,7 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackFullscreenBackground) {
 
   // Enable spoken feedback.
   controller->SetSpokenFeedbackEnabled(true, A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(controller->IsSpokenFeedbackEnabled());
+  EXPECT_TRUE(controller->spoken_feedback_enabled());
 
   generator->MoveMouseTo(300, 300);
   generator->ClickLeftButton();
@@ -1470,7 +1479,7 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackFullscreenBackground) {
 
   // Disable spoken feedback. Shadow underlay is restored.
   controller->SetSpokenFeedbackEnabled(false, A11Y_NOTIFICATION_NONE);
-  EXPECT_FALSE(controller->IsSpokenFeedbackEnabled());
+  EXPECT_FALSE(controller->spoken_feedback_enabled());
 
   generator->MoveMouseTo(300, 300);
   generator->ClickLeftButton();
@@ -1498,8 +1507,8 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, DISABLED_OpenAppListInOverviewMode) {
   EXPECT_TRUE(test_helper.GetBackdropWindow());
 
   // Toggle overview button to enter overview mode.
-  Shell::Get()->window_selector_controller()->ToggleOverview();
-  RunAllPendingInMessageLoop();
+  Shell::Get()->overview_controller()->ToggleOverview();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(test_helper.GetBackdropWindow());
 
   ui::ScopedAnimationDurationScaleMode test_duration_mode(
@@ -1519,7 +1528,7 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackForArc) {
   controller->SetClient(client.CreateInterfacePtrAndBind());
 
   controller->SetSpokenFeedbackEnabled(true, A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(controller->IsSpokenFeedbackEnabled());
+  EXPECT_TRUE(controller->spoken_feedback_enabled());
 
   aura::test::TestWindowDelegate delegate;
   std::unique_ptr<aura::Window> window_arc(CreateTestWindowInShellWithDelegate(
@@ -1728,9 +1737,6 @@ TEST_F(WorkspaceLayoutManagerKeyboardTest,
 
   // Open keyboard in non-sticky mode.
   kb_controller->ShowKeyboard(false);
-  kb_controller->GetKeyboardWindow()->SetBounds(
-      keyboard::KeyboardBoundsFromRootBounds(
-          Shell::GetPrimaryRootWindow()->bounds(), 100));
 
   // Window should not be shifted up.
   EXPECT_EQ(orig_window_bounds, window->bounds());
@@ -1740,7 +1746,7 @@ TEST_F(WorkspaceLayoutManagerKeyboardTest,
 
   // Open keyboard in sticky mode.
   kb_controller->ShowKeyboard(true);
-  kb_controller->NotifyKeyboardWindowLoaded();
+  ASSERT_TRUE(keyboard::WaitUntilShown());
 
   int shift =
       work_area.height() - kb_controller->GetKeyboardWindow()->bounds().y();
@@ -1826,6 +1832,147 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, BackdropForSplitScreenTest) {
   EXPECT_EQ(window2.get(), default_container()->children()[2]);
   EXPECT_EQ(default_container()->bounds(),
             default_container()->children()[0]->bounds());
+}
+
+namespace {
+
+class TestState : public wm::WindowState::State {
+ public:
+  TestState() = default;
+  ~TestState() override = default;
+
+  // WindowState::State overrides:
+  void OnWMEvent(wm::WindowState* window_state,
+                 const wm::WMEvent* event) override {
+    if (event->type() == wm::WM_EVENT_SYSTEM_UI_AREA_CHANGED)
+      num_system_ui_area_changes_++;
+  }
+  mojom::WindowStateType GetType() const override {
+    return mojom::WindowStateType::NORMAL;
+  }
+  void AttachState(wm::WindowState* window_state,
+                   wm::WindowState::State* previous_state) override {}
+  void DetachState(wm::WindowState* window_state) override {}
+
+  int num_system_ui_area_changes() const { return num_system_ui_area_changes_; }
+
+  void reset_num_system_ui_area_changes() { num_system_ui_area_changes_ = 0; }
+
+ private:
+  int num_system_ui_area_changes_ = 0;
+
+  DISALLOW_COPY_AND_ASSIGN(TestState);
+};
+
+}  // namespace
+
+class WorkspaceLayoutManagerSystemUiAreaTest : public AshTestBase {
+ public:
+  WorkspaceLayoutManagerSystemUiAreaTest() = default;
+  ~WorkspaceLayoutManagerSystemUiAreaTest() override = default;
+
+  // AshTestBase:
+  void SetUp() override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        keyboard::switches::kEnableVirtualKeyboard);
+    AshTestBase::SetUp();
+    SetTouchKeyboardEnabled(true);
+
+    window_ = CreateTestWindowInShellWithBounds(gfx::Rect(0, 0, 100, 100));
+    wm::WindowState* window_state = wm::GetWindowState(window_);
+    test_state_ = new TestState();
+    window_state->SetStateObject(
+        std::unique_ptr<wm::WindowState::State>(test_state_));
+  }
+
+  void TearDown() override {
+    SetTouchKeyboardEnabled(false);
+    AshTestBase::TearDown();
+  }
+
+ protected:
+  aura::Window* window() { return window_; }
+  TestState* test_state() { return test_state_; }
+
+ private:
+  aura::Window* window_ = nullptr;
+  TestState* test_state_ = nullptr;
+
+  DISALLOW_COPY_AND_ASSIGN(WorkspaceLayoutManagerSystemUiAreaTest);
+};
+
+// Expect that showing and hiding the unified system tray triggers a system ui
+// area change event.
+TEST_F(WorkspaceLayoutManagerSystemUiAreaTest,
+       SystemUiAreaChangeOnUnifiedSystemTrayVisibilityChange) {
+  auto* unified_system_tray = GetPrimaryUnifiedSystemTray();
+  EXPECT_FALSE(unified_system_tray->IsBubbleShown());
+  EXPECT_EQ(0, test_state()->num_system_ui_area_changes());
+
+  unified_system_tray->ShowBubble(/*show_by_click=*/false);
+  EXPECT_GE(test_state()->num_system_ui_area_changes(), 1);
+  test_state()->reset_num_system_ui_area_changes();
+
+  unified_system_tray->CloseBubble();
+  EXPECT_GE(test_state()->num_system_ui_area_changes(), 1);
+}
+
+// Expect that showing and hiding the keyboard triggers a system ui area
+// change event.
+TEST_F(WorkspaceLayoutManagerSystemUiAreaTest,
+       SystemUiAreaChangeOnVirtualKeyboardVisibilityChange) {
+  auto* keyboard_controller = keyboard::KeyboardController::Get();
+  EXPECT_EQ(0, test_state()->num_system_ui_area_changes());
+
+  keyboard_controller->ShowKeyboard(/*lock=*/true);
+  ASSERT_TRUE(keyboard::WaitUntilShown());
+  EXPECT_GE(test_state()->num_system_ui_area_changes(), 1);
+  test_state()->reset_num_system_ui_area_changes();
+
+  keyboard_controller->HideKeyboardExplicitlyBySystem();
+  EXPECT_GE(test_state()->num_system_ui_area_changes(), 1);
+}
+
+// Expect that changing the keyboard bounds triggers a system ui area
+// change event.
+TEST_F(WorkspaceLayoutManagerSystemUiAreaTest,
+       SystemUiAreaChangeOnVirtualKeyboardSizeChange) {
+  auto* keyboard_controller = keyboard::KeyboardController::Get();
+  EXPECT_EQ(0, test_state()->num_system_ui_area_changes());
+
+  keyboard_controller->ShowKeyboard(/*lock=*/true);
+  ASSERT_TRUE(keyboard::WaitUntilShown());
+
+  keyboard_controller->SetKeyboardWindowBounds(gfx::Rect(0, 0, 100, 50));
+  EXPECT_GE(test_state()->num_system_ui_area_changes(), 1);
+  test_state()->reset_num_system_ui_area_changes();
+
+  keyboard_controller->SetKeyboardWindowBounds(gfx::Rect(0, 0, 100, 100));
+  EXPECT_GE(test_state()->num_system_ui_area_changes(), 1);
+}
+
+// Expect that changing the keyboard container type triggers a system ui area
+// change event.
+TEST_F(WorkspaceLayoutManagerSystemUiAreaTest,
+       SystemUiAreaChangeOnVirtualKeyboardContainerTypeChange) {
+  auto* keyboard_controller = keyboard::KeyboardController::Get();
+  EXPECT_EQ(0, test_state()->num_system_ui_area_changes());
+
+  keyboard_controller->ShowKeyboard(/*lock=*/true);
+  ASSERT_TRUE(keyboard::WaitUntilShown());
+  EXPECT_GE(test_state()->num_system_ui_area_changes(), 1);
+  test_state()->reset_num_system_ui_area_changes();
+
+  keyboard_controller->SetContainerType(
+      keyboard::mojom::ContainerType::kFloating, base::nullopt,
+      base::DoNothing());
+  EXPECT_GE(test_state()->num_system_ui_area_changes(), 1);
+  test_state()->reset_num_system_ui_area_changes();
+
+  keyboard_controller->SetContainerType(
+      keyboard::mojom::ContainerType::kFullWidth, base::nullopt,
+      base::DoNothing());
+  EXPECT_GE(test_state()->num_system_ui_area_changes(), 1);
 }
 
 }  // namespace ash

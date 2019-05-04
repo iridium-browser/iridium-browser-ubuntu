@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
+#include "build/buildflag.h"
 #include "crypto/ec_private_key.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/completion_repeating_callback.h"
@@ -27,6 +28,7 @@
 #include "net/http/http_stream_request.h"
 #include "net/http/http_transaction.h"
 #include "net/log/net_log_with_source.h"
+#include "net/net_buildflags.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/socket/connection_attempts.h"
 #include "net/ssl/channel_id_service.h"
@@ -48,6 +50,16 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
     : public HttpTransaction,
       public HttpStreamRequest::Delegate {
  public:
+  // Enumeration used by Net.Proxy.RedirectDuringConnect. Exposed here for
+  // sharing by unit-tests.
+  enum TunnelRedirectHistogramValue {
+    kSubresourceByExplicitProxy = 0,
+    kMainFrameByExplicitProxy = 1,
+    kSubresourceByAutoDetectedProxy = 2,
+    kMainFrameByAutoDetectedProxy = 3,
+    kMaxValue = kMainFrameByAutoDetectedProxy
+  };
+
   HttpNetworkTransaction(RequestPriority priority,
                          HttpNetworkSession* session);
 
@@ -115,10 +127,11 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
                         HttpAuthController* auth_controller) override;
   void OnNeedsClientAuth(const SSLConfig& used_ssl_config,
                          SSLCertRequestInfo* cert_info) override;
-  void OnHttpsProxyTunnelResponse(const HttpResponseInfo& response_info,
-                                  const SSLConfig& used_ssl_config,
-                                  const ProxyInfo& used_proxy_info,
-                                  std::unique_ptr<HttpStream> stream) override;
+  void OnHttpsProxyTunnelResponseRedirect(
+      const HttpResponseInfo& response_info,
+      const SSLConfig& used_ssl_config,
+      const ProxyInfo& used_proxy_info,
+      std::unique_ptr<HttpStream> stream) override;
 
   void OnQuicBroken() override;
   void GetConnectionAttempts(ConnectionAttempts* out) const override;
@@ -201,6 +214,26 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   int DoDrainBodyForAuthRestartComplete(int result);
 
   int BuildRequestHeaders(bool using_http_proxy_without_tunnel);
+
+#if BUILDFLAG(ENABLE_REPORTING)
+  // Processes the Report-To header, if one exists. This header configures where
+  // the Reporting API (in //net/reporting) will send reports for the origin.
+  void ProcessReportToHeader();
+
+  // Processes the NEL header, if one exists. This header configures whether
+  // network errors will be reported to a specified group of endpoints using the
+  // Reporting API.
+  void ProcessNetworkErrorLoggingHeader();
+
+  // Calls GenerateNetworkErrorLoggingReport() if |rv| represents a NET_ERROR
+  // other than ERR_IO_PENDING.
+  void GenerateNetworkErrorLoggingReportIfError(int rv);
+
+  // Generates a NEL report about this request.  The NetworkErrorLoggingService
+  // will discard the report if there is no NEL policy registered for this
+  // origin.
+  void GenerateNetworkErrorLoggingReport(int rv);
+#endif
 
   // Writes a log message to help debugging in the field when we block a proxy
   // response to a CONNECT request.
@@ -287,6 +320,10 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   // "Accept-Encoding".
   bool ContentEncodingsValid() const;
 
+  // Logic for handling ERR_HTTPS_PROXY_TUNNEL_RESPONSE_REDIRECT seen during
+  // DoCreateStreamCompletedTunnel().
+  int DoCreateStreamCompletedTunnelResponseRedirect();
+
   scoped_refptr<HttpAuthController>
       auth_controllers_[HttpAuth::AUTH_NUM_TARGETS];
 
@@ -337,6 +374,18 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   SSLConfig proxy_ssl_config_;
 
   HttpRequestHeaders request_headers_;
+#if BUILDFLAG(ENABLE_REPORTING)
+  // Whether a NEL report has already been generated. Reset when restarting.
+  bool network_error_logging_report_generated_;
+  // Cache some fields from |request_| that we'll need to construct a NEL
+  // report about the request.  (NEL report construction happens after we've
+  // cleared the |request_| pointer.)
+  std::string request_method_;
+  std::string request_referrer_;
+  std::string request_user_agent_;
+  int request_reporting_upload_depth_;
+  base::TimeTicks start_timeticks_;
+#endif
 
   // The size in bytes of the buffer we use to drain the response body that
   // we want to throw away.  The response body is typically a small error

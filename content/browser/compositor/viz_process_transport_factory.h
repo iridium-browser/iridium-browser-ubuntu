@@ -47,7 +47,6 @@ namespace content {
 // instead of in the browser process. Any interaction with the display
 // compositor must happen over IPC.
 class VizProcessTransportFactory : public ui::ContextFactory,
-                                   public ui::HostContextFactoryPrivate,
                                    public ImageTransportFactory,
                                    public viz::ContextLostObserver {
  public:
@@ -66,7 +65,6 @@ class VizProcessTransportFactory : public ui::ContextFactory,
   scoped_refptr<viz::ContextProvider> SharedMainThreadContextProvider()
       override;
   void RemoveCompositor(ui::Compositor* compositor) override;
-  double GetRefreshRate() const override;
   gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
   cc::TaskGraphRunner* GetTaskGraphRunner() override;
   void AddObserver(ui::ContextFactoryObserver* observer) override;
@@ -131,6 +129,7 @@ class VizProcessTransportFactory : public ui::ContextFactory,
   // Will start and run the VizCompositorThread for using an in-process display
   // compositor.
   std::unique_ptr<viz::VizCompositorThreadRunner> viz_compositor_thread_;
+  ui::HostContextFactoryPrivate context_factory_private_;
 
   base::WeakPtrFactory<VizProcessTransportFactory> weak_ptr_factory_;
 

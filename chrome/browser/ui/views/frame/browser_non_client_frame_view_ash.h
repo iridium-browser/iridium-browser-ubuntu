@@ -29,16 +29,17 @@ namespace {
 class HostedAppNonClientFrameViewAshTest;
 }
 
-class HostedAppButtonContainer;
 class ProfileIndicatorIcon;
 class TabIconView;
 
 namespace ash {
 class AshFrameCaptionController;
-class DefaultFrameHeader;
-class FrameCaptionButton;
 class FrameCaptionButtonContainerView;
 }  // namespace ash
+
+namespace views {
+class FrameCaptionButton;
+}  // namespace views
 
 // Provides the BrowserNonClientFrameView for Chrome OS.
 class BrowserNonClientFrameViewAsh
@@ -60,20 +61,21 @@ class BrowserNonClientFrameViewAsh
   ash::mojom::SplitViewObserverPtr CreateInterfacePtrForTesting();
 
   // BrowserNonClientFrameView:
-  gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const override;
+  gfx::Rect GetBoundsForTabStrip(const views::View* tabstrip) const override;
   int GetTopInset(bool restored) const override;
   int GetThemeBackgroundXInset() const override;
   void UpdateThrobber(bool running) override;
   void UpdateMinimumSize() override;
   void OnTabsMaxXChanged() override;
   bool CanUserExitFullscreen() const override;
+  SkColor GetCaptionColor(ActiveState active_state) const override;
 
   // views::NonClientFrameView:
   gfx::Rect GetBoundsForClientView() const override;
   gfx::Rect GetWindowBoundsForClientBounds(
       const gfx::Rect& client_bounds) const override;
   int NonClientHitTest(const gfx::Point& point) override;
-  void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask) override;
+  void GetWindowMask(const gfx::Size& size, SkPath* window_mask) override;
   void ResetWindowControls() override;
   void UpdateWindowIcon() override;
   void UpdateWindowTitle() override;
@@ -89,8 +91,6 @@ class BrowserNonClientFrameViewAsh
   void OnThemeChanged() override;
   void ChildPreferredSizeChanged(views::View* child) override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
-  bool OnMouseDragged(const ui::MouseEvent& event) override;
-  void OnMouseReleased(const ui::MouseEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
 
   // BrowserFrameHeaderAsh::AppearanceProvider:
@@ -132,8 +132,6 @@ class BrowserNonClientFrameViewAsh
   void OnImmersiveRevealEnded() override;
   void OnImmersiveFullscreenExited() override;
 
-  HostedAppButtonContainer* GetHostedAppButtonContainerForTesting() const;
-
   // Returns true if the header should be painted so that it looks the same as
   // the header used for packaged apps.
   static bool UsePackagedAppHeaderStyle(const Browser* browser);
@@ -145,8 +143,7 @@ class BrowserNonClientFrameViewAsh
  private:
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
                            NonImmersiveFullscreen);
-  FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
-                           ImmersiveFullscreen);
+  FRIEND_TEST_ALL_PREFIXES(ImmersiveModeBrowserViewTest, ImmersiveFullscreen);
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
                            ToggleTabletModeRelayout);
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
@@ -173,7 +170,6 @@ class BrowserNonClientFrameViewAsh
                            HeaderHeightForSnappedBrowserInSplitView);
 
   friend class HostedAppNonClientFrameViewAshTest;
-  friend class ImmersiveModeControllerAshHostedAppBrowserTest;
 
   // Returns whether the caption buttons should be visible. They are hidden, for
   // example, in overview mode and tablet mode.
@@ -195,8 +191,7 @@ class BrowserNonClientFrameViewAsh
   std::unique_ptr<ash::FrameHeader> CreateFrameHeader();
 
   // Creates views and does other setup for a hosted app.
-  // TODO(estade): remove the parameter as it's unused in Mash.
-  void SetUpForHostedApp(ash::DefaultFrameHeader* header);
+  void SetUpForHostedApp();
 
   // Triggers the hosted app origin and icon animations, assumes the hosted
   // app UI elements exist.
@@ -221,10 +216,6 @@ class BrowserNonClientFrameViewAsh
   // Returns whether this window is currently in the overview list.
   bool IsInOverviewMode() const;
 
-  void StartWindowMove(const ui::LocatedEvent& event);
-
-  void OnWindowMoveDone(bool success);
-
   // Returns the top level aura::Window for this browser window.
   const aura::Window* GetFrameWindow() const;
   aura::Window* GetFrameWindow();
@@ -232,7 +223,7 @@ class BrowserNonClientFrameViewAsh
   // View which contains the window controls.
   ash::FrameCaptionButtonContainerView* caption_button_container_ = nullptr;
 
-  ash::FrameCaptionButton* back_button_ = nullptr;
+  views::FrameCaptionButton* back_button_ = nullptr;
 
   // For popups, the window icon.
   TabIconView* window_icon_ = nullptr;
@@ -246,10 +237,6 @@ class BrowserNonClientFrameViewAsh
   // A helper for controlling the window frame; only used in !Mash.
   std::unique_ptr<ash::AshFrameCaptionController> caption_controller_;
 
-  // Container for extra frame buttons shown for hosted app windows.
-  // Owned by views hierarchy.
-  HostedAppButtonContainer* hosted_app_button_container_ = nullptr;
-
   // Ash's mojom::SplitViewController.
   ash::mojom::SplitViewControllerPtr split_view_controller_;
 
@@ -257,8 +244,6 @@ class BrowserNonClientFrameViewAsh
   mojo::Binding<ash::mojom::SplitViewObserver> observer_binding_{this};
 
   ScopedObserver<aura::Window, aura::WindowObserver> window_observer_{this};
-
-  bool performing_window_move_ = false;
 
   // Maintains the current split view state.
   ash::mojom::SplitViewState split_view_state_ =

@@ -11,14 +11,14 @@
 
 namespace ash {
 
-class AssistantController;
 class AssistantMainStage;
+class AssistantViewDelegate;
 class CaptionBar;
 class DialogPlate;
 
 class AssistantMainView : public views::View, public AssistantUiModelObserver {
  public:
-  explicit AssistantMainView(AssistantController* assistant_controller);
+  explicit AssistantMainView(AssistantViewDelegate* delegate);
   ~AssistantMainView() override;
 
   // views::View:
@@ -31,9 +31,11 @@ class AssistantMainView : public views::View, public AssistantUiModelObserver {
   void RequestFocus() override;
 
   // AssistantUiModelObserver:
-  void OnUiVisibilityChanged(AssistantVisibility new_visibility,
-                             AssistantVisibility old_visibility,
-                             AssistantSource source) override;
+  void OnUiVisibilityChanged(
+      AssistantVisibility new_visibility,
+      AssistantVisibility old_visibility,
+      base::Optional<AssistantEntryPoint> entry_point,
+      base::Optional<AssistantExitPoint> exit_point) override;
 
   // Returns the first focusable view or nullptr to defer to views::FocusSearch.
   views::View* FindFirstFocusableView();
@@ -41,7 +43,7 @@ class AssistantMainView : public views::View, public AssistantUiModelObserver {
  private:
   void InitLayout();
 
-  AssistantController* const assistant_controller_;  // Owned by Shell.
+  AssistantViewDelegate* const delegate_;
 
   CaptionBar* caption_bar_;                         // Owned by view hierarchy.
   DialogPlate* dialog_plate_;                       // Owned by view hierarchy.

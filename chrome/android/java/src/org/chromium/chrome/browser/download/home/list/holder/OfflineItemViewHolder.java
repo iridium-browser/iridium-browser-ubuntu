@@ -4,20 +4,23 @@
 
 package org.chromium.chrome.browser.download.home.list.holder;
 
+import android.graphics.Bitmap;
+import android.graphics.Matrix;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.support.annotation.CallSuper;
 import android.view.View;
+import android.widget.ImageView;
 
 import org.chromium.chrome.browser.download.home.list.ListItem;
 import org.chromium.chrome.browser.download.home.list.ListProperties;
 import org.chromium.chrome.browser.download.home.list.view.AsyncImageView;
 import org.chromium.chrome.browser.download.home.view.SelectionView;
-import org.chromium.chrome.browser.modelutil.PropertyModel;
 import org.chromium.chrome.browser.widget.ListMenuButton;
 import org.chromium.chrome.download.R;
 import org.chromium.components.offline_items_collection.OfflineItem;
 import org.chromium.components.offline_items_collection.OfflineItemVisuals;
+import org.chromium.ui.modelutil.PropertyModel;
 
 /**
  * Helper that supports all typical actions for OfflineItems.
@@ -86,6 +89,7 @@ class OfflineItemViewHolder extends ListItemViewHolder implements ListMenuButton
 
         // Push 'thumbnail' state.
         if (mThumbnail != null) {
+            mThumbnail.setImageResizer(new BitmapResizer(mThumbnail));
             mThumbnail.setAsyncImageDrawable((consumer, width, height) -> {
                 return properties.get(ListProperties.PROVIDER_VISUALS)
                         .getVisuals(offlineItem, width, height, (id, visuals) -> {
@@ -139,5 +143,59 @@ class OfflineItemViewHolder extends ListItemViewHolder implements ListMenuButton
         return mSelectionView.isSelected() != item.selected
                 || mSelectionView.isInSelectionMode()
                 != properties.get(ListProperties.SELECTION_MODE_ACTIVE);
+    }
+
+    /**
+     * A class that sets the correct image matrix on the given {@link ImageView} depending on the
+     * size of the bitmap.
+     */
+    private static class BitmapResizer implements AsyncImageView.ImageResizer {
+        private static final float IMAGE_VIEW_MAX_SCALE_FACTOR = 4.f;
+
+        private ImageView mImageView;
+
+        /** Constructor. */
+        public BitmapResizer(ImageView imageView) {
+            mImageView = imageView;
+        }
+
+        @Override
+        public void maybeResizeImage(Drawable drawable) {
+            if (!(drawable instanceof BitmapDrawable)) return;
+
+            Matrix matrix = upscaleBitmapIfNecessary(((BitmapDrawable) drawable).getBitmap());
+            mImageView.setImageMatrix(matrix);
+            mImageView.setScaleType(
+                    matrix == null ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.MATRIX);
+        }
+
+        private Matrix upscaleBitmapIfNecessary(Bitmap bitmap) {
+            if (bitmap == null) return null;
+
+            float scale = computeScaleFactor(bitmap);
+            if (scale <= 1.f) return null;
+
+            // Compute the required matrix to scale and center the bitmap.
+            Matrix matrix = new Matrix();
+            matrix.setScale(scale, scale);
+            matrix.postTranslate((mImageView.getWidth() - scale * bitmap.getWidth()) * 0.5f,
+                    (mImageView.getHeight() - scale * bitmap.getHeight()) * 0.5f);
+            return matrix;
+        }
+
+        /**
+         * Computes a scale factor for the bitmap if the bitmap is too small compared to the view
+         * dimensions. The scaled bitmap will be centered inside the view. No scaling if the
+         * dimensions are comparable.
+         */
+        private float computeScaleFactor(Bitmap bitmap) {
+            float widthRatio = (float) mImageView.getWidth() / bitmap.getWidth();
+            float heightRatio = (float) mImageView.getHeight() / bitmap.getHeight();
+
+            if (Math.max(widthRatio, heightRatio) < IMAGE_VIEW_MAX_SCALE_FACTOR) return 1.f;
+
+            float minRequiredScale = Math.min(widthRatio, heightRatio);
+            return Math.min(minRequiredScale, IMAGE_VIEW_MAX_SCALE_FACTOR);
+        }
     }
 }

@@ -41,10 +41,10 @@ namespace net {
 
 class DhcpPacFileFetcher;
 class NetLog;
+class PacFileFetcher;
 class ProxyDelegate;
 class ProxyResolverFactory;
-class PacFileData;
-class PacFileFetcher;
+struct PacFileDataWithSource;
 
 // This class can be used to resolve the proxy server to use when loading a
 // HTTP(S) URL.  It uses the given ProxyResolver to handle the actual proxy
@@ -270,6 +270,13 @@ class NET_EXPORT ProxyResolutionService
       const std::string& pac_string,
       const NetworkTrafficAnnotationTag& traffic_annotation);
 
+  // Same as CreateFixedFromPacResult(), except the resulting ProxyInfo from
+  // resolutions will be tagged as having been auto-detected.
+  static std::unique_ptr<ProxyResolutionService>
+  CreateFixedFromAutoDetectedPacResult(
+      const std::string& pac_string,
+      const NetworkTrafficAnnotationTag& traffic_annotation);
+
   // Creates a config service appropriate for this platform that fetches the
   // system proxy settings. |main_task_runner| is the thread where the consumer
   // of the ProxyConfigService will live.
@@ -374,7 +381,7 @@ class NET_EXPORT ProxyResolutionService
   // Start the initialization skipping past the "decision" phase.
   void InitializeUsingDecidedConfig(
       int decider_result,
-      PacFileData* script_data,
+      const PacFileDataWithSource& script_data,
       const ProxyConfigWithAnnotation& effective_config);
 
   // NetworkChangeNotifier::IPAddressObserver
@@ -390,9 +397,20 @@ class NET_EXPORT ProxyResolutionService
       const ProxyConfigWithAnnotation& config,
       ProxyConfigService::ConfigAvailability availability) override;
 
+  // When using a PAC script there isn't a user-configurable ProxyBypassRules to
+  // check, as the one from manual settings doesn't apply. However we
+  // still check for matches against the implicit bypass rules, to prevent PAC
+  // scripts from being able to proxy localhost.
+  bool ApplyPacBypassRules(const GURL& url, ProxyInfo* results);
+
   std::unique_ptr<ProxyConfigService> config_service_;
   std::unique_ptr<ProxyResolverFactory> resolver_factory_;
+
+  // If non-null, the initialized ProxyResolver to use for requests, and a
+  // boolean indicating whether it was initialized using an auto-detected
+  // script.
   std::unique_ptr<ProxyResolver> resolver_;
+  bool resolver_using_auto_detected_script_;
 
   // We store the proxy configuration that was last fetched from the
   // ProxyConfigService, as well as the resulting "effective" configuration.

@@ -22,6 +22,7 @@
 #include "chrome/browser/ssl/common_name_mismatch_handler.h"
 #include "chrome/browser/ssl/ssl_error_assistant.h"
 #include "chrome/browser/ssl/ssl_error_assistant.pb.h"
+#include "chrome/browser/ssl/ssl_error_handler.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
@@ -394,25 +395,17 @@ class SSLErrorAssistantProtoTest : public ChromeRenderViewHostTestHarness {
   ~SSLErrorAssistantProtoTest() override {}
 
   void SetCaptivePortalFeatureEnabled(bool enabled) {
-    if (enabled) {
-      scoped_feature_list_.InitFromCommandLine(
-          "CaptivePortalCertificateList" /* enabled */,
-          std::string() /* disabled */);
-    } else {
-      scoped_feature_list_.InitFromCommandLine(
-          std::string(), "CaptivePortalCertificateList" /* disabled */);
-    }
+    if (enabled)
+      scoped_feature_list_.InitAndEnableFeature(kCaptivePortalCertificateList);
+    else
+      scoped_feature_list_.InitAndDisableFeature(kCaptivePortalCertificateList);
   }
 
   void SetMITMSoftwareFeatureEnabled(bool enabled) {
-    if (enabled) {
-      scoped_feature_list_.InitFromCommandLine(
-          "MITMSoftwareInterstitial" /* enabled */,
-          std::string() /* disabled */);
-    } else {
-      scoped_feature_list_.InitFromCommandLine(
-          std::string(), "MITMSoftwareInterstitial" /* disabled */);
-    }
+    if (enabled)
+      scoped_feature_list_.InitAndEnableFeature(kMITMSoftwareInterstitial);
+    else
+      scoped_feature_list_.InitAndDisableFeature(kMITMSoftwareInterstitial);
   }
 
   void ResetErrorHandlerFromString(const std::string& cert_data,
@@ -925,8 +918,7 @@ TEST_F(SSLErrorHandlerNameMismatchTest, OSReportsCaptivePortal) {
 TEST_F(SSLErrorHandlerNameMismatchTest,
        OSReportsCaptivePortal_FeatureDisabled) {
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitFromCommandLine(
-      std::string(), "CaptivePortalInterstitial" /* disabled */);
+  scoped_feature_list.InitAndDisableFeature(kCaptivePortalInterstitial);
 
   base::HistogramTester histograms;
   delegate()->set_os_reports_captive_portal();
@@ -1515,98 +1507,54 @@ TEST(SSLErrorHandlerTest, CalculateOptionsMask) {
       net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN, /* cert_error */
       false,                                     /* hard_override_disabled */
       false, /* should_ssl_errors_be_fatal */
-      false, /* is_superfish */
       false /* expired_previous_decision */);
   EXPECT_EQ(0, mask);
   mask = SSLErrorHandler::CalculateOptionsMask(
       net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN, /* cert_error */
       true,                                      /* hard_override_disabled */
       false, /* should_ssl_errors_be_fatal */
-      false, /* is_superfish */
       false /* expired_previous_decision */);
   EXPECT_EQ(security_interstitials::SSLErrorUI::HARD_OVERRIDE_DISABLED, mask);
   mask = SSLErrorHandler::CalculateOptionsMask(
       net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN, /* cert_error */
       false,                                     /* hard_override_disabled */
       true,  /* should_ssl_errors_be_fatal */
-      false, /* is_superfish */
       false /* expired_previous_decision */);
   EXPECT_EQ(security_interstitials::SSLErrorUI::STRICT_ENFORCEMENT, mask);
   mask = SSLErrorHandler::CalculateOptionsMask(
       net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN, /* cert_error */
       false,                                     /* hard_override_disabled */
       false, /* should_ssl_errors_be_fatal */
-      true,  /* is_superfish */
-      false /* expired_previous_decision */);
-  EXPECT_EQ(0, mask);
-  mask = SSLErrorHandler::CalculateOptionsMask(
-      net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN, /* cert_error */
-      false,                                     /* hard_override_disabled */
-      false, /* should_ssl_errors_be_fatal */
-      false, /* is_superfish */
       true /* expired_previous_decision */);
   EXPECT_EQ(security_interstitials::SSLErrorUI::EXPIRED_BUT_PREVIOUSLY_ALLOWED,
             mask);
-  mask = SSLErrorHandler::CalculateOptionsMask(
-      net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN, /* cert_error */
-      true,                                      /* hard_override_disabled */
-      true, /* should_ssl_errors_be_fatal */
-      true, /* is_superfish */
-      true /* expired_previous_decision */);
-  EXPECT_EQ(
-      security_interstitials::SSLErrorUI::HARD_OVERRIDE_DISABLED |
-          security_interstitials::SSLErrorUI::STRICT_ENFORCEMENT |
-          security_interstitials::SSLErrorUI::EXPIRED_BUT_PREVIOUSLY_ALLOWED,
-      mask);
 
   // Overridable cert error.
   mask = SSLErrorHandler::CalculateOptionsMask(
       net::ERR_CERT_DATE_INVALID, /* cert_error */
       false,                      /* hard_override_disabled */
       false,                      /* should_ssl_errors_be_fatal */
-      false,                      /* is_superfish */
       false /* expired_previous_decision */);
   EXPECT_EQ(security_interstitials::SSLErrorUI::SOFT_OVERRIDE_ENABLED, mask);
   mask = SSLErrorHandler::CalculateOptionsMask(
       net::ERR_CERT_DATE_INVALID, /* cert_error */
       true,                       /* hard_override_disabled */
       false,                      /* should_ssl_errors_be_fatal */
-      false,                      /* is_superfish */
       false /* expired_previous_decision */);
   EXPECT_EQ(security_interstitials::SSLErrorUI::HARD_OVERRIDE_DISABLED, mask);
   mask = SSLErrorHandler::CalculateOptionsMask(
       net::ERR_CERT_DATE_INVALID, /* cert_error */
       false,                      /* hard_override_disabled */
       true,                       /* should_ssl_errors_be_fatal */
-      false,                      /* is_superfish */
       false /* expired_previous_decision */);
   EXPECT_EQ(security_interstitials::SSLErrorUI::STRICT_ENFORCEMENT, mask);
   mask = SSLErrorHandler::CalculateOptionsMask(
       net::ERR_CERT_DATE_INVALID, /* cert_error */
       false,                      /* hard_override_disabled */
       false,                      /* should_ssl_errors_be_fatal */
-      true,                       /* is_superfish */
-      false /* expired_previous_decision */);
-  EXPECT_EQ(0, mask);
-  mask = SSLErrorHandler::CalculateOptionsMask(
-      net::ERR_CERT_DATE_INVALID, /* cert_error */
-      false,                      /* hard_override_disabled */
-      false,                      /* should_ssl_errors_be_fatal */
-      false,                      /* is_superfish */
       true /* expired_previous_decision */);
   EXPECT_EQ(
       security_interstitials::SSLErrorUI::SOFT_OVERRIDE_ENABLED |
-          security_interstitials::SSLErrorUI::EXPIRED_BUT_PREVIOUSLY_ALLOWED,
-      mask);
-  mask = SSLErrorHandler::CalculateOptionsMask(
-      net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN, /* cert_error */
-      true,                                      /* hard_override_disabled */
-      true, /* should_ssl_errors_be_fatal */
-      true, /* is_superfish */
-      true /* expired_previous_decision */);
-  EXPECT_EQ(
-      security_interstitials::SSLErrorUI::HARD_OVERRIDE_DISABLED |
-          security_interstitials::SSLErrorUI::STRICT_ENFORCEMENT |
           security_interstitials::SSLErrorUI::EXPIRED_BUT_PREVIOUSLY_ALLOWED,
       mask);
 }

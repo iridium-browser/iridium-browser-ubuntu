@@ -9,9 +9,6 @@
 
 #include <gtest/gtest.h>
 
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-
 #include "test_utils/ANGLETest.h"
 #include "test_utils/angle_test_configs.h"
 #include "test_utils/gl_raii.h"
@@ -28,10 +25,7 @@ class EGLSurfacelessContextTest : public ANGLETest
 
     void SetUp() override
     {
-        PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT =
-            reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
-                eglGetProcAddress("eglGetPlatformDisplayEXT"));
-        ASSERT_TRUE(eglGetPlatformDisplayEXT != nullptr);
+        ANGLETest::SetUp();
 
         EGLint dispattrs[] = {EGL_PLATFORM_ANGLE_TYPE_ANGLE, GetParam().getRenderer(), EGL_NONE};
         mDisplay           = eglGetPlatformDisplayEXT(
@@ -265,4 +259,8 @@ TEST_P(EGLSurfacelessContextTest, Switcheroo)
 
 }  // anonymous namespace
 
-ANGLE_INSTANTIATE_TEST(EGLSurfacelessContextTest, ES2_D3D9(), ES2_D3D11(), ES2_OPENGL());
+ANGLE_INSTANTIATE_TEST(EGLSurfacelessContextTest,
+                       ES2_D3D9(),
+                       ES2_D3D11(),
+                       ES2_OPENGL(),
+                       ES2_VULKAN());

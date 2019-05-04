@@ -14,6 +14,7 @@
 #include "base/barrier_closure.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/sync_stop_metadata_fate.h"
@@ -41,11 +42,12 @@ static const ModelType kStartOrder[] = {
     ARC_PACKAGE, READING_LIST, THEMES, SEARCH_ENGINES, SESSIONS,
     APP_NOTIFICATIONS, DICTIONARY, FAVICON_IMAGES, FAVICON_TRACKING, PRINTERS,
     USER_CONSENTS, USER_EVENTS, SUPERVISED_USER_SETTINGS,
-    SUPERVISED_USER_WHITELISTS, WIFI_CREDENTIALS, DEPRECATED_SUPERVISED_USERS,
-    MOUNTAIN_SHARES, DEPRECATED_SUPERVISED_USER_SHARED_SETTINGS,
-    DEPRECATED_ARTICLES};
+    SUPERVISED_USER_WHITELISTS, DEPRECATED_WIFI_CREDENTIALS,
+    DEPRECATED_SUPERVISED_USERS, MOUNTAIN_SHARES,
+    DEPRECATED_SUPERVISED_USER_SHARED_SETTINGS, DEPRECATED_ARTICLES,
+    SEND_TAB_TO_SELF};
 
-static_assert(arraysize(kStartOrder) ==
+static_assert(base::size(kStartOrder) ==
                   MODEL_TYPE_COUNT - FIRST_REAL_MODEL_TYPE,
               "When adding a new type, update kStartOrder.");
 
@@ -150,8 +152,8 @@ void ModelAssociationManager::Initialize(ModelTypeSet desired_types,
       // reason is that if a user temporarily disables Sync, we don't want to
       // wipe (and later redownload) all their data, just because Sync restarted
       // in transport-only mode.
-      if (storage_option_changed && configure_context_.storage_option ==
-                                        ConfigureContext::STORAGE_IN_MEMORY) {
+      if (storage_option_changed &&
+          configure_context_.storage_option == STORAGE_IN_MEMORY) {
         reason = STOP_SYNC;
       }
       types_to_stop[dtc] = reason;
@@ -178,6 +180,7 @@ void ModelAssociationManager::Initialize(ModelTypeSet desired_types,
 void ModelAssociationManager::StopDatatype(ModelType type,
                                            ShutdownReason shutdown_reason,
                                            SyncError error) {
+  DCHECK(error.IsSet());
   DataTypeController* dtc = controllers_->find(type)->second.get();
   if (dtc->state() != DataTypeController::NOT_RUNNING &&
       dtc->state() != DataTypeController::STOPPING) {
@@ -216,7 +219,7 @@ void ModelAssociationManager::LoadEnabledTypes() {
     }
   }
   // Load in kStartOrder.
-  for (size_t i = 0; i < arraysize(kStartOrder); i++) {
+  for (size_t i = 0; i < base::size(kStartOrder); i++) {
     ModelType type = kStartOrder[i];
     if (!desired_types_.Has(type))
       continue;
@@ -266,7 +269,7 @@ void ModelAssociationManager::StartAssociationAsync(
                               weak_ptr_factory_.GetWeakPtr(), INITIALIZED));
 
   // Start association of types that are loaded in specified order.
-  for (size_t i = 0; i < arraysize(kStartOrder); i++) {
+  for (size_t i = 0; i < base::size(kStartOrder); i++) {
     ModelType type = kStartOrder[i];
     if (!associating_types_.Has(type) || !loaded_types_.Has(type))
       continue;

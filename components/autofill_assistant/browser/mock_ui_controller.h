@@ -5,10 +5,12 @@
 #ifndef COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_MOCK_UI_CONTROLLER_H_
 #define COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_MOCK_UI_CONTROLLER_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
+#include "components/autofill_assistant/browser/metrics.h"
 #include "components/autofill_assistant/browser/script.h"
 #include "components/autofill_assistant/browser/ui_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -20,33 +22,26 @@ class MockUiController : public UiController {
   MockUiController();
   ~MockUiController() override;
 
-  MOCK_METHOD1(SetUiDelegate, void(UiDelegate* ui_delegate));
-  MOCK_METHOD1(ShowStatusMessage, void(const std::string& message));
-  MOCK_METHOD0(ShowOverlay, void());
-  MOCK_METHOD0(HideOverlay, void());
-  MOCK_METHOD0(Shutdown, void());
-  MOCK_METHOD1(UpdateScripts, void(const std::vector<ScriptHandle>& scripts));
-
-  void ChooseAddress(
-      base::OnceCallback<void(const std::string&)> callback) override {
-    OnChooseAddress(callback);
-  }
-  MOCK_METHOD1(OnChooseAddress,
-               void(base::OnceCallback<void(const std::string&)>& callback));
-
-  void ChooseCard(
-      base::OnceCallback<void(const std::string&)> callback) override {
-    OnChooseCard(callback);
-  }
-  MOCK_METHOD1(OnChooseCard,
-               void(base::OnceCallback<void(const std::string&)>& callback));
-  MOCK_METHOD2(
+  MOCK_METHOD1(OnStatusMessageChanged, void(const std::string& message));
+  MOCK_METHOD1(OnStateChanged, void(AutofillAssistantState));
+  MOCK_METHOD1(Shutdown, void(Metrics::DropOutReason));
+  MOCK_METHOD0(Close, void());
+  MOCK_METHOD1(SetChips, void(std::unique_ptr<std::vector<Chip>> chips));
+  MOCK_METHOD0(ClearChips, void());
+  MOCK_METHOD4(
       GetPaymentInformation,
       void(payments::mojom::PaymentOptionsPtr payment_options,
            base::OnceCallback<void(std::unique_ptr<PaymentInformation>)>
-               callback));
-  MOCK_METHOD0(HideDetails, void());
-  MOCK_METHOD1(ShowDetails, void(const DetailsProto& details));
+               callback,
+           const std::string& title,
+           const std::vector<std::string>& supported_basic_card_networks));
+  MOCK_METHOD1(OnDetailsChanged, void(const Details* details));
+  MOCK_METHOD1(ShowProgressBar, void(int progress));
+  MOCK_METHOD0(HideProgressBar, void());
+  MOCK_METHOD1(SetTouchableArea, void(const std::vector<RectF>& areas));
+  MOCK_CONST_METHOD0(Terminate, bool());
+  MOCK_METHOD0(ExpandBottomSheet, void());
+  MOCK_CONST_METHOD0(GetDropOutReason, Metrics::DropOutReason());
 };
 
 }  // namespace autofill_assistant

@@ -7,9 +7,9 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/browser/ui/views/page_action/page_action_icon_container_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_bubble_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/browser/ui/views/translate/translate_icon_view.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 
@@ -25,7 +25,8 @@ class LocationIconViewTest : public InProcessBrowserTest {
 };
 
 #if defined(OS_MACOSX)
-// Focusing or input is not completely working on Mac: http://crbug.com/824418
+// TODO(robliao): https://crbug.com/824418  Focusing or input is not completely
+// working on Mac.
 #define MAYBE_HideOnSecondClick DISABLED_HideOnSecondClick
 #else
 #define MAYBE_HideOnSecondClick HideOnSecondClick
@@ -65,7 +66,8 @@ IN_PROC_BROWSER_TEST_F(LocationIconViewTest, MAYBE_HideOnSecondClick) {
 }
 
 #if defined(OS_MACOSX)
-// Widget activation doesn't work on Mac: https://crbug.com/823543
+// TODO(robliao): https://crbug.com/823543  Widget activation doesn't work on
+// Mac.
 #define MAYBE_ActivateFirstInactiveBubbleForAccessibility \
   DISABLED_ActivateFirstInactiveBubbleForAccessibility
 #else
@@ -85,7 +87,10 @@ IN_PROC_BROWSER_TEST_F(LocationIconViewTest,
                                     translate::TRANSLATE_STEP_AFTER_TRANSLATE,
                                     translate::TranslateErrors::NONE, true);
 
-  PageActionIconView* icon_view = location_bar_view->translate_icon_view();
+  PageActionIconView* icon_view =
+      browser_view->toolbar_button_provider()
+          ->GetPageActionIconContainerView()
+          ->GetPageActionIconView(PageActionIconType::kTranslate);
   ASSERT_TRUE(icon_view);
   EXPECT_TRUE(icon_view->visible());
 

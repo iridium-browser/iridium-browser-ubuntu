@@ -66,14 +66,13 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/common/content_switches.h"
 #include "extensions/common/switches.h"
-#include "net/base/port_util.h"
 #include "printing/buildflags/buildflags.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/app_mode/app_launch_utils.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "components/user_manager/user_manager.h"
 #else
@@ -93,6 +92,7 @@
 #include "chrome/browser/metrics/jumplist_metrics_win.h"
 #include "chrome/browser/notifications/win/notification_launch_id.h"
 #include "chrome/browser/ui/webui/settings/reset_settings_handler.h"
+#include "chrome/credential_provider/common/gcp_strings.h"
 #endif
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
@@ -329,6 +329,12 @@ bool StartupBrowserCreator::LaunchBrowser(
                  << "browser session.";
   }
 
+#if defined(OS_WIN)
+  // Continue with the incognito profile if this is a credential provider logon.
+  if (command_line.HasSwitch(credential_provider::kGcpwSigninSwitch))
+    profile = profile->GetOffTheRecordProfile();
+#endif
+
   // Note: This check should have been done in ProcessCmdLineImpl()
   // before calling this function. However chromeos/login/login_utils.cc
   // calls this function directly (see comments there) so it has to be checked
@@ -463,15 +469,9 @@ void StartupBrowserCreator::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   // creation.
   registry->RegisterBooleanPref(prefs::kHasSeenWelcomePage, true);
 #if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
-  // TODO(scottchen): To make this testable early by trybots, instead of hiding
-  // behind GOOGLE_CHROME_BUILD, use a function that returns true for official
-  // builds and conditionally returns true based on a command line switch to
-  // be set by tests.
-  registry->RegisterBooleanPref(prefs::kHasSeenGoogleAppsPromoPage, true);
-  registry->RegisterBooleanPref(prefs::kHasSeenEmailPromoPage, true);
-  // This  will be set to true for newly created profiles, and is used to
-  // indicate which users went through FRE after NUX is enabled.
-  registry->RegisterBooleanPref(prefs::kOnboardDuringNUX, false);
+  // This will be set for newly created profiles, and is used to indicate which
+  // users went through onboarding with the current experiment group.
+  registry->RegisterStringPref(prefs::kNaviOnboardGroup, "");
 #endif  // defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
 }
 
@@ -586,12 +586,6 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
     silent_launch = true;
   }
 #endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
-
-  if (command_line.HasSwitch(switches::kExplicitlyAllowedPorts)) {
-    std::string allowed_ports =
-        command_line.GetSwitchValueASCII(switches::kExplicitlyAllowedPorts);
-    net::SetExplicitlyAllowedPorts(allowed_ports);
-  }
 
   if (command_line.HasSwitch(switches::kValidateCrx)) {
     if (!process_startup) {

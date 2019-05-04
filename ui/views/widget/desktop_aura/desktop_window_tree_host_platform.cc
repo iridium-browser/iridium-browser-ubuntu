@@ -4,6 +4,7 @@
 
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_platform.h"
 
+#include "base/time/time.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/client/transient_window_client.h"
 #include "ui/base/hit_test.h"
@@ -14,6 +15,7 @@
 #include "ui/platform_window/platform_window_handler/wm_move_resize_handler.h"
 #include "ui/platform_window/platform_window_init_properties.h"
 #include "ui/views/corewm/tooltip_aura.h"
+#include "ui/views/widget/desktop_aura/desktop_drag_drop_client_ozone.h"
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #include "ui/views/widget/desktop_aura/window_event_filter.h"
 #include "ui/views/widget/widget_aura_utils.h"
@@ -70,14 +72,6 @@ DesktopWindowTreeHostPlatform::~DesktopWindowTreeHostPlatform() {
   DestroyDispatcher();
 }
 
-void DesktopWindowTreeHostPlatform::SetBoundsInDIP(
-    const gfx::Rect& bounds_in_dip) {
-  DCHECK_NE(0, device_scale_factor());
-  SetBoundsInPixels(
-      gfx::ConvertRectToPixel(device_scale_factor(), bounds_in_dip),
-      viz::LocalSurfaceId());
-}
-
 void DesktopWindowTreeHostPlatform::Init(const Widget::InitParams& params) {
   ui::PlatformWindowInitProperties properties =
       ConvertWidgetInitParamsToInitProperties(params);
@@ -93,8 +87,9 @@ void DesktopWindowTreeHostPlatform::Init(const Widget::InitParams& params) {
 
 void DesktopWindowTreeHostPlatform::OnNativeWidgetCreated(
     const Widget::InitParams& params) {
-  native_widget_delegate_->OnNativeWidgetCreated(true);
+  native_widget_delegate_->OnNativeWidgetCreated();
 
+#if defined(OS_LINUX)
   // Setup a non_client_window_event_filter, which handles resize/move, double
   // click and other events.
   DCHECK(!non_client_window_event_filter_);
@@ -107,6 +102,7 @@ void DesktopWindowTreeHostPlatform::OnNativeWidgetCreated(
 
   non_client_window_event_filter_ = std::move(window_event_filter);
   window()->AddPreTargetHandler(non_client_window_event_filter_.get());
+#endif
 }
 
 void DesktopWindowTreeHostPlatform::OnWidgetInitDone() {}
@@ -121,9 +117,9 @@ DesktopWindowTreeHostPlatform::CreateTooltip() {
 std::unique_ptr<aura::client::DragDropClient>
 DesktopWindowTreeHostPlatform::CreateDragDropClient(
     DesktopNativeCursorManager* cursor_manager) {
-  // TODO: needs PlatformWindow support.
-  NOTIMPLEMENTED_LOG_ONCE();
-  return nullptr;
+  ui::WmDragHandler* drag_handler = ui::GetWmDragHandler(*(platform_window()));
+  return std::make_unique<DesktopDragDropClientOzone>(window(), cursor_manager,
+                                                      drag_handler);
 }
 
 void DesktopWindowTreeHostPlatform::Close() {
@@ -418,6 +414,12 @@ void DesktopWindowTreeHostPlatform::SetOpacity(float opacity) {
   NOTIMPLEMENTED_LOG_ONCE();
 }
 
+void DesktopWindowTreeHostPlatform::SetAspectRatio(
+    const gfx::SizeF& aspect_ratio) {
+  // TODO: needs PlatformWindow support.
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
 void DesktopWindowTreeHostPlatform::SetWindowIcons(
     const gfx::ImageSkia& window_icon,
     const gfx::ImageSkia& app_icon) {
@@ -538,11 +540,13 @@ void DesktopWindowTreeHostPlatform::Relayout() {
 }
 
 void DesktopWindowTreeHostPlatform::RemoveNonClientEventFilter() {
+#if defined(OS_LINUX)
   if (!non_client_window_event_filter_)
     return;
 
   window()->RemovePreTargetHandler(non_client_window_event_filter_.get());
   non_client_window_event_filter_.reset();
+#endif
 }
 
 Widget* DesktopWindowTreeHostPlatform::GetWidget() {

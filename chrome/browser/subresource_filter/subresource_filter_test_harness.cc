@@ -28,7 +28,7 @@
 #include "components/subresource_filter/core/common/activation_decision.h"
 #include "components/subresource_filter/core/common/activation_list.h"
 #include "components/subresource_filter/core/common/test_ruleset_creator.h"
-#include "components/subresource_filter/mojom/subresource_filter.mojom.h"
+#include "components/subresource_filter/core/mojom/subresource_filter.mojom.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/test/navigation_simulator.h"
@@ -89,15 +89,11 @@ void SubresourceFilterTestHarness::SetUp() {
   // 2. Navigation simulator uses this knowledge. It knows that
   //    |AsyncDocumentSubresourceFilter| posts core initialization tasks on
   //    blocking task runner and this it is the current thread task runner.
-  auto content_service =
-      std::make_unique<subresource_filter::ContentRulesetService>(
-          base::ThreadTaskRunnerHandle::Get());
   auto ruleset_service = std::make_unique<subresource_filter::RulesetService>(
       &pref_service_, base::ThreadTaskRunnerHandle::Get(),
-      content_service.get(), ruleset_service_dir_.GetPath());
-  content_service->SetAndInitializeRulesetService(std::move(ruleset_service));
+      ruleset_service_dir_.GetPath(), base::ThreadTaskRunnerHandle::Get());
   TestingBrowserProcess::GetGlobal()->SetRulesetService(
-      std::move(content_service));
+      std::move(ruleset_service));
 
   // Publish the test ruleset.
   subresource_filter::testing::TestRulesetCreator ruleset_creator;

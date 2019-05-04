@@ -17,8 +17,10 @@ static int node_ids = 0;
 }  // namespace
 
 UIElement::~UIElement() {
-  for (auto* child : children_)
-    delete child;
+  if (owns_children_) {
+    for (auto* child : children_)
+      delete child;
+  }
   children_.clear();
 }
 
@@ -50,6 +52,10 @@ void UIElement::AddChild(UIElement* child, UIElement* before) {
     children_.push_back(child);
   }
   delegate_->OnUIElementAdded(this, child);
+}
+
+void UIElement::ClearChildren() {
+  children_.clear();
 }
 
 void UIElement::RemoveChild(UIElement* child) {

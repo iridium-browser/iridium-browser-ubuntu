@@ -27,13 +27,15 @@ namespace ui {
 
 namespace {
 constexpr uint32_t kMaxCompositorVersion = 4;
-constexpr uint32_t kMaxLinuxDmabufVersion = 1;
+constexpr uint32_t kMaxLinuxDmabufVersion = 3;
 constexpr uint32_t kMaxSeatVersion = 4;
 constexpr uint32_t kMaxShmVersion = 1;
 constexpr uint32_t kMaxXdgShellVersion = 1;
 constexpr uint32_t kMaxDeviceManagerVersion = 3;
 constexpr uint32_t kMaxWpPresentationVersion = 1;
 constexpr uint32_t kMaxTextInputManagerVersion = 1;
+
+constexpr uint32_t kMinWlOutputVersion = 2;
 
 std::unique_ptr<WaylandDataSource> CreateWaylandDataSource(
     WaylandDataDeviceManager* data_device_manager,
@@ -98,7 +100,7 @@ bool WaylandConnection::StartProcessingEvents() {
   DCHECK(display_);
   wl_display_flush(display_.get());
 
-  DCHECK(base::MessageLoopForUI::IsCurrent());
+  DCHECK(base::MessageLoopCurrentForUI::IsSet());
   if (!base::MessageLoopCurrentForUI::Get()->WatchFileDescriptor(
           wl_display_get_fd(display_.get()), true,
           base::MessagePumpLibevent::WATCH_READ, &controller_, this))
@@ -111,7 +113,7 @@ bool WaylandConnection::StartProcessingEvents() {
 void WaylandConnection::ScheduleFlush() {
   if (scheduled_flush_ || !watching_)
     return;
-  DCHECK(base::MessageLoopForUI::IsCurrent());
+  DCHECK(base::MessageLoopCurrentForUI::IsSet());
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(&WaylandConnection::Flush, base::Unretained(this)));
@@ -176,7 +178,7 @@ void WaylandConnection::CreateZwpLinuxDmabuf(
     const std::vector<uint64_t>& modifiers,
     uint32_t planes_count,
     uint32_t buffer_id) {
-  DCHECK(base::MessageLoopForUI::IsCurrent());
+  DCHECK(base::MessageLoopCurrentForUI::IsSet());
   if (!buffer_manager_->CreateBuffer(std::move(file), width, height, strides,
                                      offsets, format, modifiers, planes_count,
                                      buffer_id)) {
@@ -185,7 +187,7 @@ void WaylandConnection::CreateZwpLinuxDmabuf(
 }
 
 void WaylandConnection::DestroyZwpLinuxDmabuf(uint32_t buffer_id) {
-  DCHECK(base::MessageLoopForUI::IsCurrent());
+  DCHECK(base::MessageLoopCurrentForUI::IsSet());
   if (!buffer_manager_->DestroyBuffer(buffer_id)) {
     TerminateGpuProcess(buffer_manager_->error_message());
   }
@@ -196,32 +198,32 @@ void WaylandConnection::ScheduleBufferSwap(
     uint32_t buffer_id,
     const gfx::Rect& damage_region,
     ScheduleBufferSwapCallback callback) {
-  DCHECK(base::MessageLoopForUI::IsCurrent());
+  DCHECK(base::MessageLoopCurrentForUI::IsSet());
   if (!buffer_manager_->ScheduleBufferSwap(widget, buffer_id, damage_region,
                                            std::move(callback))) {
     TerminateGpuProcess(buffer_manager_->error_message());
   }
 }
 
-ClipboardDelegate* WaylandConnection::GetClipboardDelegate() {
+PlatformClipboard* WaylandConnection::GetPlatformClipboard() {
   return this;
 }
 
 void WaylandConnection::OfferClipboardData(
-    const ClipboardDelegate::DataMap& data_map,
-    ClipboardDelegate::OfferDataClosure callback) {
+    const PlatformClipboard::DataMap& data_map,
+    PlatformClipboard::OfferDataClosure callback) {
   if (!data_source_) {
     data_source_ = CreateWaylandDataSource(data_device_manager_.get(), this);
     data_source_->WriteToClipboard(data_map);
   }
-  data_source_->UpdataDataMap(data_map);
+  data_source_->UpdateDataMap(data_map);
   std::move(callback).Run();
 }
 
 void WaylandConnection::RequestClipboardData(
     const std::string& mime_type,
-    ClipboardDelegate::DataMap* data_map,
-    ClipboardDelegate::RequestDataClosure callback) {
+    PlatformClipboard::DataMap* data_map,
+    PlatformClipboard::RequestDataClosure callback) {
   read_clipboard_closure_ = std::move(callback);
 
   DCHECK(data_map);
@@ -289,7 +291,7 @@ void WaylandConnection::ResetPointerFlags() {
 }
 
 void WaylandConnection::GetAvailableMimeTypes(
-    ClipboardDelegate::GetMimeTypesClosure callback) {
+    PlatformClipboard::GetMimeTypesClosure callback) {
   std::move(callback).Run(data_device_->GetAvailableMimeTypes());
 }
 
@@ -418,7 +420,15 @@ void WaylandConnection::Global(void* data,
     xdg_shell_use_unstable_version(connection->shell_.get(),
                                    XDG_SHELL_VERSION_CURRENT);
   } else if (base::EqualsCaseInsensitiveASCII(interface, "wl_output")) {
-    wl::Object<wl_output> output = wl::Bind<wl_output>(registry, name, 1);
+    if (version < kMinWlOutputVersion) {
+      LOG(ERROR)
+          << "Unable to bind to the unsupported wl_output object with version= "
+          << version << ". Minimum supported version is "
+          << kMinWlOutputVersion;
+      return;
+    }
+
+    wl::Object<wl_output> output = wl::Bind<wl_output>(registry, name, version);
     if (!output) {
       LOG(ERROR) << "Failed to bind to wl_output global";
       return;

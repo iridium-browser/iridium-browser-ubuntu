@@ -72,29 +72,39 @@ _AddRegularKey(' ', 0x20)
 
 class KeyPressAction(page_action.PageAction):
 
-  def __init__(self, dom_key, timeout=60):
-    super(KeyPressAction, self).__init__()
+  def __init__(self, dom_key, timeout=page_action.DEFAULT_TIMEOUT):
+    super(KeyPressAction, self).__init__(timeout=timeout)
+    char_code = 0 if len(dom_key) > 1 else ord(dom_key)
     self._dom_key = dom_key
-    if dom_key not in _KEY_MAP:
-      raise ValueError('No mapping for key: %s' % dom_key)
-    self._windows_virtual_key_code, self._text = _KEY_MAP[dom_key]
-    self._timeout = timeout
+    # Check that ascii chars are allowed.
+    use_key_map = len(dom_key) > 1 or char_code < 128
+    if use_key_map and dom_key not in _KEY_MAP:
+      raise ValueError('No mapping for key: %s (code=%s)' % (
+          dom_key, char_code))
+    self._windows_virtual_key_code, self._text = _KEY_MAP.get(
+        dom_key, ('', dom_key))
 
   def RunAction(self, tab):
+    # Note that this action does not handle self.timeout properly. Since each
+    # command gets the whole timeout, the PageAction can potentially
+    # take three times as long as it should.
     tab.DispatchKeyEvent(
         key_event_type='rawKeyDown',
         dom_key=self._dom_key,
         windows_virtual_key_code=self._windows_virtual_key_code,
-        timeout=self._timeout)
+        timeout=self.timeout)
     if self._text:
       tab.DispatchKeyEvent(
           key_event_type='char',
           text=self._text,
           dom_key=self._dom_key,
           windows_virtual_key_code=ord(self._text),
-          timeout=self._timeout)
+          timeout=self.timeout)
     tab.DispatchKeyEvent(
         key_event_type='keyUp',
         dom_key=self._dom_key,
         windows_virtual_key_code=self._windows_virtual_key_code,
-        timeout=self._timeout)
+        timeout=self.timeout)
+
+  def __str__(self):
+    return "%s('%s')" % (self.__class__.__name__, self._dom_key)

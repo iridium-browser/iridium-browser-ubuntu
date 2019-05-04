@@ -24,6 +24,7 @@
 #include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -63,7 +64,7 @@ class WindowTypeShelfItem : public app_list::AppListItem {
     const int kIconSize = 128;
     SkBitmap icon;
     icon.allocN32Pixels(kIconSize, kIconSize);
-    icon.eraseColor(kColors[static_cast<int>(type) % arraysize(kColors)]);
+    icon.eraseColor(kColors[static_cast<int>(type) % base::size(kColors)]);
     return gfx::ImageSkia::CreateFrom1xBitmap(icon);
   }
 
@@ -329,9 +330,9 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
     return true;
   }
 
-  ws::WindowService* GetWindowService() override {
+  void GetNavigableContentsFactory(
+      content::mojom::NavigableContentsFactoryRequest request) override {
     NOTIMPLEMENTED();
-    return nullptr;
   }
 
   std::unique_ptr<app_list::AppListModel> model_;

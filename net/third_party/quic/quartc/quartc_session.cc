@@ -105,7 +105,7 @@ class InsecureProofVerifier : public ProofVerifier {
 
 QuicConnectionId QuartcCryptoServerStreamHelper::GenerateConnectionIdForReject(
     QuicConnectionId connection_id) const {
-  return 0;
+  return EmptyQuicConnectionId();
 }
 
 bool QuartcCryptoServerStreamHelper::CanAcceptClientHello(
@@ -119,12 +119,16 @@ bool QuartcCryptoServerStreamHelper::CanAcceptClientHello(
 
 QuartcSession::QuartcSession(std::unique_ptr<QuicConnection> connection,
                              const QuicConfig& config,
+                             const ParsedQuicVersionVector& supported_versions,
                              const QuicString& unique_remote_server_id,
                              Perspective perspective,
                              QuicConnectionHelperInterface* helper,
                              const QuicClock* clock,
                              std::unique_ptr<QuartcPacketWriter> packet_writer)
-    : QuicSession(connection.get(), nullptr /*visitor*/, config),
+    : QuicSession(connection.get(),
+                  nullptr /*visitor*/,
+                  config,
+                  supported_versions),
       unique_remote_server_id_(unique_remote_server_id),
       perspective_(perspective),
       packet_writer_(std::move(packet_writer)),
@@ -138,6 +142,8 @@ QuartcSession::QuartcSession(std::unique_ptr<QuicConnection> connection,
     std::unique_ptr<ProofVerifier> proof_verifier(new InsecureProofVerifier);
     quic_crypto_client_config_ = QuicMakeUnique<QuicCryptoClientConfig>(
         std::move(proof_verifier), TlsClientHandshaker::CreateSslCtx());
+    quic_crypto_client_config_->set_pad_inchoate_hello(false);
+    quic_crypto_client_config_->set_pad_full_hello(false);
   } else {
     std::unique_ptr<ProofSource> proof_source(new DummyProofSource);
     // Generate a random source address token secret. For long-running servers
@@ -150,6 +156,29 @@ QuartcSession::QuartcSession(std::unique_ptr<QuicConnection> connection,
         QuicString(source_address_token_secret, kInputKeyingMaterialLength),
         helper_->GetRandomGenerator(), std::move(proof_source),
         KeyExchangeSource::Default(), TlsServerHandshaker::CreateSslCtx());
+
+    // Effectively disables the anti-amplification measures (we don't need
+    // them because we use ICE, and we need to disable them because we disable
+    // padding of crypto packets).
+    // This multiplier must be large enough so that the crypto handshake packet
+    // (approx. 300 bytes) multiplied by this multiplier is larger than a fully
+    // sized packet (currently 1200 bytes).
+    // 1500 is a bit extreme: if you can imagine sending a 1 byte packet, and
+    // your largest MTU would be below 1500 bytes, 1500*1 >=
+    // any_packet_that_you_can_imagine_sending.
+    // (again, we hardcode packet size to 1200, so we are not dealing with jumbo
+    // frames).
+    quic_crypto_server_config_->set_chlo_multiplier(1500);
+
+    // We are sending small client hello, we must not validate its size.
+    quic_crypto_server_config_->set_validate_chlo_size(false);
+
+    // We run QUIC over ICE, and ICE is verifying remote side with STUN pings.
+    // We disable source address token validation in order to allow for 0-rtt
+    // setup (plus source ip addresses are changing even during the connection
+    // when ICE is used).
+    quic_crypto_server_config_->set_validate_source_address_token(false);
+
     // Provide server with serialized config string to prove ownership.
     QuicCryptoServerConfig::ConfigOptions options;
     // The |message| is used to handle the return value of AddDefaultConfig
@@ -157,6 +186,8 @@ QuartcSession::QuartcSession(std::unique_ptr<QuicConnection> connection,
     std::unique_ptr<CryptoHandshakeMessage> message(
         quic_crypto_server_config_->AddDefaultConfig(
             helper_->GetRandomGenerator(), helper_->GetClock(), options));
+    quic_crypto_server_config_->set_pad_rej(false);
+    quic_crypto_server_config_->set_pad_shlo(false);
   }
 }
 
@@ -173,23 +204,105 @@ QuicCryptoStream* QuartcSession::GetMutableCryptoStream() {
 QuartcStream* QuartcSession::CreateOutgoingBidirectionalStream() {
   // Use default priority for incoming QUIC streams.
   // TODO(zhihuang): Determine if this value is correct.
-  return ActivateDataStream(CreateDataStream(GetNextOutgoingStreamId(),
-                                             QuicStream::kDefaultPriority));
+  return ActivateDataStream(CreateDataStream(
+      GetNextOutgoingBidirectionalStreamId(), QuicStream::kDefaultPriority));
 }
 
-QuartcStream* QuartcSession::CreateOutgoingUnidirectionalStream() {
-  DCHECK(false);
-  return nullptr;
+bool QuartcSession::SendOrQueueMessage(QuicString message) {
+  if (!CanSendMessage()) {
+    QUIC_LOG(ERROR) << "Quic session does not support SendMessage";
+    return false;
+  }
+
+  if (message.size() > GetLargestMessagePayload()) {
+    QUIC_LOG(ERROR) << "Message is too big, message_size=" << message.size()
+                    << ", GetLargestMessagePayload="
+                    << GetLargestMessagePayload();
+    return false;
+  }
+
+  // There may be other messages in send queue, so we have to add message
+  // to the queue and call queue processing helper.
+  send_message_queue_.emplace_back(std::move(message));
+
+  ProcessSendMessageQueue();
+
+  return true;
+}
+
+void QuartcSession::ProcessSendMessageQueue() {
+  while (!send_message_queue_.empty()) {
+    MessageResult result = SendMessage(send_message_queue_.front());
+
+    const size_t message_size = send_message_queue_.front().size();
+
+    // Handle errors.
+    switch (result.status) {
+      case MESSAGE_STATUS_SUCCESS:
+        QUIC_VLOG(1) << "Quartc message sent, message_id=" << result.message_id
+                     << ", message_size=" << message_size;
+        break;
+
+      // If connection is congestion controlled or not writable yet, stop
+      // send loop and we'll retry again when we get OnCanWrite notification.
+      case MESSAGE_STATUS_ENCRYPTION_NOT_ESTABLISHED:
+      case MESSAGE_STATUS_BLOCKED:
+        QUIC_VLOG(1) << "Quartc message not sent because connection is blocked"
+                     << ", message will be retried later, status="
+                     << result.status << ", message_size=" << message_size;
+
+        return;
+
+      // Other errors are unexpected. We do not propagate error to Quartc,
+      // because writes can be delayed.
+      case MESSAGE_STATUS_UNSUPPORTED:
+      case MESSAGE_STATUS_TOO_LARGE:
+      case MESSAGE_STATUS_INTERNAL_ERROR:
+        QUIC_DLOG(DFATAL)
+            << "Failed to send quartc message due to unexpected error"
+            << ", message will not be retried, status=" << result.status
+            << ", message_size=" << message_size;
+        break;
+    }
+
+    send_message_queue_.pop_front();
+  }
+}
+
+void QuartcSession::OnCanWrite() {
+  // TODO(b/119640244): Since we currently use messages for audio and streams
+  // for video, it makes sense to process queued messages first, then call quic
+  // core OnCanWrite, which will resend queued streams. Long term we may need
+  // better solution especially if quic connection is used for both data and
+  // media.
+
+  // Process quartc messages that were previously blocked.
+  ProcessSendMessageQueue();
+
+  QuicSession::OnCanWrite();
 }
 
 void QuartcSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
   QuicSession::OnCryptoHandshakeEvent(event);
-  if (event == HANDSHAKE_CONFIRMED) {
-    DCHECK(IsEncryptionEstablished());
-    DCHECK(IsCryptoHandshakeConfirmed());
+  switch (event) {
+    case ENCRYPTION_FIRST_ESTABLISHED:
+    case ENCRYPTION_REESTABLISHED:
+      // 1-rtt setup triggers 'ENCRYPTION_REESTABLISHED' (after REJ, when the
+      // CHLO is sent).
+      DCHECK(IsEncryptionEstablished());
+      DCHECK(session_delegate_);
+      session_delegate_->OnConnectionWritable();
+      break;
+    case HANDSHAKE_CONFIRMED:
+      // On the server, handshake confirmed is the first time when you can start
+      // writing packets.
+      DCHECK(IsEncryptionEstablished());
+      DCHECK(IsCryptoHandshakeConfirmed());
 
-    DCHECK(session_delegate_);
-    session_delegate_->OnCryptoHandshakeComplete();
+      DCHECK(session_delegate_);
+      session_delegate_->OnConnectionWritable();
+      session_delegate_->OnCryptoHandshakeComplete();
+      break;
   }
 }
 
@@ -299,6 +412,10 @@ void QuartcSession::OnTransportReceived(const char* data, size_t data_len) {
                    packet);
 }
 
+void QuartcSession::OnMessageReceived(QuicStringPiece message) {
+  session_delegate_->OnMessageReceived(message);
+}
+
 void QuartcSession::OnProofValid(
     const QuicCryptoClientConfig::CachedState& cached) {
   // TODO(zhihuang): Handle the proof verification.
@@ -309,8 +426,13 @@ void QuartcSession::OnProofVerifyDetailsAvailable(
   // TODO(zhihuang): Handle the proof verification.
 }
 
-QuicStream* QuartcSession::CreateIncomingDynamicStream(QuicStreamId id) {
+QuicStream* QuartcSession::CreateIncomingStream(QuicStreamId id) {
   return ActivateDataStream(CreateDataStream(id, QuicStream::kDefaultPriority));
+}
+
+QuicStream* QuartcSession::CreateIncomingStream(PendingStream pending) {
+  return ActivateDataStream(
+      CreateDataStream(std::move(pending), QuicStream::kDefaultPriority));
 }
 
 std::unique_ptr<QuartcStream> QuartcSession::CreateDataStream(
@@ -320,18 +442,28 @@ std::unique_ptr<QuartcStream> QuartcSession::CreateDataStream(
     // Encryption not active so no stream created
     return nullptr;
   }
-  auto stream = QuicMakeUnique<QuartcStream>(id, this);
-  if (stream) {
-    // Register the stream to the QuicWriteBlockedList. |priority| is clamped
-    // between 0 and 7, with 0 being the highest priority and 7 the lowest
-    // priority.
-    write_blocked_streams()->UpdateStreamPriority(stream->id(), priority);
+  return InitializeDataStream(QuicMakeUnique<QuartcStream>(id, this), priority);
+}
 
-    if (IsIncomingStream(id)) {
-      DCHECK(session_delegate_);
-      // Incoming streams need to be registered with the session_delegate_.
-      session_delegate_->OnIncomingStream(stream.get());
-    }
+std::unique_ptr<QuartcStream> QuartcSession::CreateDataStream(
+    PendingStream pending,
+    spdy::SpdyPriority priority) {
+  return InitializeDataStream(QuicMakeUnique<QuartcStream>(std::move(pending)),
+                              priority);
+}
+
+std::unique_ptr<QuartcStream> QuartcSession::InitializeDataStream(
+    std::unique_ptr<QuartcStream> stream,
+    spdy::SpdyPriority priority) {
+  // Register the stream to the QuicWriteBlockedList. |priority| is clamped
+  // between 0 and 7, with 0 being the highest priority and 7 the lowest
+  // priority.
+  write_blocked_streams()->UpdateStreamPriority(stream->id(), priority);
+
+  if (IsIncomingStream(stream->id())) {
+    DCHECK(session_delegate_);
+    // Incoming streams need to be registered with the session_delegate_.
+    session_delegate_->OnIncomingStream(stream.get());
   }
   return stream;
 }

@@ -304,7 +304,11 @@ LayoutObject* LayoutTreeBuilderTraversal::NextInTopLayer(
   wtf_size_t position = top_layer_elements.Find(&element);
   DCHECK_NE(position, kNotFound);
   for (wtf_size_t i = position + 1; i < top_layer_elements.size(); ++i) {
-    if (LayoutObject* layout_object = top_layer_elements[i]->GetLayoutObject())
+    LayoutObject* layout_object = top_layer_elements[i]->GetLayoutObject();
+    // If top_layer_elements[i] is not a LayoutView child, its LayoutObject is
+    // not re-attached and not in the top layer yet, thus we can not use it as a
+    // sibling LayoutObject.
+    if (layout_object && layout_object->Parent()->IsLayoutView())
       return layout_object;
   }
   return nullptr;

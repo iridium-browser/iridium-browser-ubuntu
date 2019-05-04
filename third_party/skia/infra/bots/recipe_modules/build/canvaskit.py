@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-DOCKER_IMAGE = 'gcr.io/skia-public/emsdk-release:1.38.6_jre'
+DOCKER_IMAGE = 'gcr.io/skia-public/emsdk-release:1.38.16_v1'
 INNER_BUILD_SCRIPT = '/SRC/skia/infra/canvaskit/build_canvaskit.sh'
 
 BUILD_PRODUCTS_ISOLATE_WHITELIST_WASM = [
@@ -13,6 +13,7 @@ BUILD_PRODUCTS_ISOLATE_WHITELIST_WASM = [
 def compile_fn(api, checkout_root, _ignore):
   out_dir = api.vars.cache_dir.join('docker', 'canvaskit')
   configuration = api.vars.builder_cfg.get('configuration', '')
+  extra         = api.vars.builder_cfg.get('extra_config',   '')
 
   # We want to make sure the directories exist and were created by chrome-bot,
   # because if that isn't the case, docker will make them and they will be
@@ -34,12 +35,18 @@ def compile_fn(api, checkout_root, _ignore):
   cmd = ['docker', 'run', '--rm', '-v', '%s:/SRC' % checkout_root,
          '-v', '%s:/OUT' % out_dir,
          DOCKER_IMAGE, INNER_BUILD_SCRIPT]
+  if 'CPU' in extra:
+    cmd.append('cpu') # It defaults to gpu
+
   if configuration == 'Debug':
     cmd.append('debug') # It defaults to Release
-  api.run(
-    api.step,
-    'Build CanvasKit with Docker',
-    cmd=cmd)
+  # Override DOCKER_CONFIG set by Kitchen.
+  env = {'DOCKER_CONFIG': '/home/chrome-bot/.docker'}
+  with api.env(env):
+    api.run(
+        api.step,
+        'Build CanvasKit with Docker',
+        cmd=cmd)
 
 
 def copy_extra_build_products(api, _ignore, dst):
@@ -83,4 +90,3 @@ for pattern in build_products_whitelist:
 ''' % str(BUILD_PRODUCTS_ISOLATE_WHITELIST_WASM),
       args=[out_dir, dst],
       infra_step=True)
-

@@ -11,7 +11,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_frame_request_callback.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/core/dom/pausable_object.h"
+#include "third_party/blink/renderer/core/execution_context/pausable_object.h"
 #include "third_party/blink/renderer/modules/vr/vr_display_capabilities.h"
 #include "third_party/blink/renderer/modules/vr/vr_layer_init.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/xr_frame_transport.h"
@@ -45,8 +45,13 @@ class SessionClientBinding
     : public GarbageCollectedFinalized<SessionClientBinding>,
       public device::mojom::blink::XRSessionClient {
  public:
+  enum class SessionBindingType {
+    kImmersive = 0,
+    kNonImmersive = 1,
+  };
+
   SessionClientBinding(VRDisplay* display,
-                       bool is_immersive,
+                       SessionBindingType immersive,
                        device::mojom::blink::XRSessionClientRequest request);
   ~SessionClientBinding() override;
   void Close();
@@ -77,6 +82,7 @@ class VRDisplay final : public EventTargetWithInlineData,
   USING_PRE_FINALIZER(VRDisplay, Dispose);
 
  public:
+  VRDisplay(NavigatorVR*, device::mojom::blink::XRDevicePtr);
   ~VRDisplay() override;
 
   // We hand out at most one VRDisplay, so hardcode displayId to 1.
@@ -104,10 +110,10 @@ class VRDisplay final : public EventTargetWithInlineData,
   void cancelAnimationFrame(int id);
 
   ScriptPromise requestPresent(ScriptState*,
-                               const HeapVector<VRLayerInit>& layers);
+                               const HeapVector<Member<VRLayerInit>>& layers);
   ScriptPromise exitPresent(ScriptState*);
 
-  HeapVector<VRLayerInit> getLayers();
+  HeapVector<Member<VRLayerInit>> getLayers();
 
   void submitFrame();
 
@@ -125,8 +131,7 @@ class VRDisplay final : public EventTargetWithInlineData,
   bool HasPendingActivity() const final;
 
   // PausableObject:
-  void Pause() override;
-  void Unpause() override;
+  void ContextUnpaused() override;
 
   void OnChanged(device::mojom::blink::VRDisplayInfoPtr, bool is_immersive);
   void OnExitPresent(bool is_immersive);
@@ -142,8 +147,6 @@ class VRDisplay final : public EventTargetWithInlineData,
 
  protected:
   friend class VRController;
-
-  VRDisplay(NavigatorVR*, device::mojom::blink::XRDevicePtr);
 
   void Update(const device::mojom::blink::VRDisplayInfoPtr&);
 
@@ -214,7 +217,7 @@ class VRDisplay final : public EventTargetWithInlineData,
   // VR compositor so that it knows which poses to use, when to apply bounds
   // updates, etc.
   int16_t vr_frame_id_ = -1;
-  VRLayerInit layer_;
+  Member<VRLayerInit> layer_;
   double depth_near_ = 0.01;
   double depth_far_ = 10000.0;
 

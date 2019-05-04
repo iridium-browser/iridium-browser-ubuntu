@@ -30,7 +30,7 @@
 
 #if !defined(OS_ANDROID)
 #include "chrome/app/vector_icons/vector_icons.h"
-#include "components/toolbar/vector_icons.h"  // nogncheck
+#include "components/omnibox/browser/vector_icons.h"  // nogncheck
 #endif
 
 namespace autofill {
@@ -70,6 +70,7 @@ const struct {
     {autofill::kUnionPay, IDR_AUTOFILL_CC_UNIONPAY, IDS_AUTOFILL_CC_UNION_PAY},
     {autofill::kVisaCard, IDR_AUTOFILL_CC_VISA, IDS_AUTOFILL_CC_VISA},
     {"googlePay", IDR_AUTOFILL_GOOGLE_PAY, kResourceNotFoundId},
+    {"googlePayDark", IDR_AUTOFILL_GOOGLE_PAY_DARK, kResourceNotFoundId},
 #if defined(OS_ANDROID)
     {"httpWarning", IDR_AUTOFILL_HTTP_WARNING, kResourceNotFoundId},
     {"httpsInvalid", IDR_AUTOFILL_HTTPS_INVALID_WARNING, kResourceNotFoundId},
@@ -181,6 +182,7 @@ const gfx::FontList& AutofillPopupLayoutModel::GetValueFontListForRow(
     case POPUP_ITEM_ID_ALL_SAVED_PASSWORDS_ENTRY:
     case POPUP_ITEM_ID_GENERATE_PASSWORD_ENTRY:
     case POPUP_ITEM_ID_GOOGLE_PAY_BRANDING:
+    case POPUP_ITEM_ID_SHOW_ACCOUNT_CARDS:
       return normal_font_list_;
     case POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY:
     case POPUP_ITEM_ID_DATALIST_ENTRY:
@@ -221,17 +223,21 @@ gfx::ImageSkia AutofillPopupLayoutModel::GetIconImage(size_t index) const {
   // For http warning message, get icon images from VectorIcon, which is the
   // same as security indicator icons in location bar.
   if (icon_str == base::ASCIIToUTF16("httpWarning")) {
-    return gfx::CreateVectorIcon(toolbar::kHttpIcon, kIconSize,
+    return gfx::CreateVectorIcon(omnibox::kHttpIcon, kIconSize,
                                  gfx::kChromeIconGrey);
   }
   if (icon_str == base::ASCIIToUTF16("httpsInvalid")) {
-    return gfx::CreateVectorIcon(toolbar::kHttpsInvalidIcon, kIconSize,
+    return gfx::CreateVectorIcon(omnibox::kHttpsInvalidIcon, kIconSize,
                                  gfx::kGoogleRed700);
   }
   if (icon_str == base::ASCIIToUTF16("keyIcon"))
     return gfx::CreateVectorIcon(kKeyIcon, kIconSize, gfx::kChromeIconGrey);
   if (icon_str == base::ASCIIToUTF16("globeIcon"))
     return gfx::CreateVectorIcon(kGlobeIcon, kIconSize, gfx::kChromeIconGrey);
+  if (icon_str == base::ASCIIToUTF16("google")) {
+    return gfx::CreateVectorIcon(kGoogleGLogoIcon, kIconSize,
+                                 gfx::kPlaceholderColor);
+  }
 
   // For other suggestion entries, get icon from PNG files.
   int icon_id = GetIconResourceID(icon_str);

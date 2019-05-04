@@ -8,6 +8,7 @@ import("//build/config/android/rules.gni")
 android_library("support_lib_glue_java") {
   java_files = [
     "java/src/org/chromium/support_lib_glue/IsomorphicAdapter.java",
+    "java/src/org/chromium/support_lib_glue/SupportLibProxyControllerAdapter.java",
     "java/src/org/chromium/support_lib_glue/SupportLibReflectionUtil.java",
     "java/src/org/chromium/support_lib_glue/SupportLibServiceWorkerClientAdapter.java",
     "java/src/org/chromium/support_lib_glue/SupportLibServiceWorkerControllerAdapter.java",
@@ -20,6 +21,7 @@ android_library("support_lib_glue_java") {
     "java/src/org/chromium/support_lib_glue/SupportLibWebViewChromium.java",
     "java/src/org/chromium/support_lib_glue/SupportLibWebViewChromiumFactory.java",
     "java/src/org/chromium/support_lib_glue/SupportLibWebViewRendererAdapter.java",
+    "java/src/org/chromium/support_lib_glue/SupportLibWebViewRendererClientAdapter.java",
     "java/src/org/chromium/support_lib_glue/SupportLibWebkitToCompatConverterAdapter.java",
   ]
 
@@ -28,6 +30,8 @@ android_library("support_lib_glue_java") {
     "//android_webview:android_webview_java",
     "//android_webview/glue:glue",
     "//android_webview/support_library/boundary_interfaces:boundary_interface_java",
+    "//android_webview/support_library/callback:callback_java",
     "//base:base_java",
+    "//content/public/android:content_java",
   ]
 }

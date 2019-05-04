@@ -13,8 +13,8 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "crypto/ec_private_key.h"
 #include "crypto/ec_signature_creator.h"
@@ -34,10 +34,15 @@
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
 #include "net/ssl/ssl_config_service_defaults.h"
-#include "net/third_party/spdy/core/spdy_protocol.h"
+#include "net/third_party/quiche/src/spdy/core/spdy_protocol.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_storage.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if BUILDFLAG(ENABLE_REPORTING)
+#include "net/network_error_logging/network_error_logging_service.h"
+#include "net/reporting/reporting_service.h"
+#endif
 
 class GURL;
 
@@ -57,7 +62,7 @@ class TransportSecurityState;
 // data frames.
 const char kDefaultUrl[] = "https://www.example.org/";
 const char kUploadData[] = "hello!";
-const int kUploadDataSize = arraysize(kUploadData)-1;
+const int kUploadDataSize = base::size(kUploadData) - 1;
 
 // While HTTP/2 protocol defines default SETTINGS_MAX_HEADER_LIST_SIZE_FOR_TEST
 // to be unlimited, BufferedSpdyFramer constructor requires a value.
@@ -203,6 +208,10 @@ struct SpdySessionDependencies {
   std::unique_ptr<MockClientSocketFactory> socket_factory;
   std::unique_ptr<HttpAuthHandlerFactory> http_auth_handler_factory;
   std::unique_ptr<HttpServerPropertiesImpl> http_server_properties;
+#if BUILDFLAG(ENABLE_REPORTING)
+  std::unique_ptr<ReportingService> reporting_service;
+  std::unique_ptr<NetworkErrorLoggingService> network_error_logging_service;
+#endif
   bool enable_ip_pooling;
   bool enable_ping;
   bool enable_user_alternate_protocol_ports;
@@ -520,16 +529,6 @@ namespace test {
 
 // Returns a SHA1 HashValue in which each byte has the value |label|.
 HashValue GetTestHashValue(uint8_t label);
-
-// Returns SHA1 pinning header for the of the base64 encoding of
-// GetTestHashValue(|label|).
-std::string GetTestPin(uint8_t label);
-
-// Adds a pin for |host| to |state|.
-void AddPin(TransportSecurityState* state,
-            const std::string& host,
-            uint8_t primary_label,
-            uint8_t backup_label);
 
 // A test implementation of ServerPushDelegate that caches all the pushed
 // request and provides a interface to cancel the push given url.

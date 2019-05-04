@@ -16,6 +16,7 @@
 #include "aom/aom_integer.h"
 
 #include "av1/common/blockd.h"
+#include "av1/common/onyxc_int.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,19 +25,22 @@ extern "C" {
 // Bits Per MB at different Q (Multiplied by 512)
 #define BPER_MB_NORMBITS 9
 
+// Threshold used to define if a KF group is static (e.g. a slide show).
+// Essentially, this means that no frame in the group has more than 1% of MBs
+// that are not marked as coded with 0,0 motion in the first pass.
+#define STATIC_KF_GROUP_THRESH 99
+#define STATIC_KF_GROUP_FLOAT_THRESH 0.99
+
+// The maximum duration of a GF group that is static (e.g. a slide show).
+#define MAX_STATIC_GF_GROUP_LENGTH 250
+
 #define CUSTOMIZED_GF 1
 
 #if CONFIG_FIX_GF_LENGTH
-#define FIXED_GF_LENGTH 16
+// Minimum and maximum height for the new pyramid structure.
+// (Old structure supports height = 1, but does NOT support height = 4).
+#define MIN_PYRAMID_LVL 2
 #define MAX_PYRAMID_LVL 4
-// We allow a frame to have at most two left/right descendants before changing
-// them into to a subtree, i.e., we allow the following structure:
-/*                    OUT_OF_ORDER_FRAME
-                     / /              \ \
-(two left children) F F                F F (two right children) */
-// Therefore the max gf size supported by 4 layer structure is
-// 1 (KEY/OVERLAY) + 1 + 2 + 4 + 16 (two children on both side of their parent)
-#define MAX_PYRAMID_SIZE 24
 #define USE_SYMM_MULTI_LAYER 1
 #define REDUCE_LAST_ALT_BOOST 1
 #define REDUCE_LAST_GF_LENGTH 1
@@ -55,16 +59,6 @@ extern "C" {
 #define MIN_GF_INTERVAL 4
 #define MAX_GF_INTERVAL 16
 #define FIXED_GF_INTERVAL 8  // Used in some testing modes only
-
-typedef enum {
-  INTER_NORMAL = 0,
-  INTER_LOW = 1,
-  INTER_HIGH = 2,
-  GF_ARF_LOW = 3,
-  GF_ARF_STD = 4,
-  KF_STD = 5,
-  RATE_FACTOR_LEVELS = 6
-} RATE_FACTOR_LEVEL;
 
 static const double rate_factor_deltas[RATE_FACTOR_LEVELS] = {
   1.00,  // INTER_NORMAL
@@ -93,7 +87,6 @@ typedef struct {
   int last_kf_qindex;       // Q index of the last key frame coded.
 
   int gfu_boost;
-  int last_boost;
   int kf_boost;
 
   double rate_correction_factors[RATE_FACTOR_LEVELS];
@@ -195,7 +188,12 @@ int av1_rc_get_default_min_gf_interval(int width, int height, double framerate);
 // Note av1_rc_get_default_max_gf_interval() requires the min_gf_interval to
 // be passed in to ensure that the max_gf_interval returned is at least as bis
 // as that.
-int av1_rc_get_default_max_gf_interval(double framerate, int min_frame_rate);
+int av1_rc_get_default_max_gf_interval(double framerate, int min_frame_rate,
+                                       int max_pyr_height);
+
+#if CONFIG_FIX_GF_LENGTH
+int av1_rc_get_fixed_gf_length(int max_pyr_height);
+#endif  // CONFIG_FIX_GF_LENGTH
 
 // Generally at the high level, the following flow is expected
 // to be enforced for rate control:
@@ -262,9 +260,6 @@ int av1_rc_clamp_iframe_target_size(const struct AV1_COMP *const cpi,
                                     int target);
 int av1_rc_clamp_pframe_target_size(const struct AV1_COMP *const cpi,
                                     int target);
-// Utility to set frame_target into the RATE_CONTROL structure
-// This function is called only from the av1_rc_get_..._params() functions.
-void av1_rc_set_frame_target(struct AV1_COMP *cpi, int target);
 
 // Computes a q delta (in "q index" terms) to get from a starting q value
 // to a target q value
@@ -287,6 +282,10 @@ void av1_rc_set_gf_interval_range(const struct AV1_COMP *const cpi,
 void av1_set_target_rate(struct AV1_COMP *cpi, int width, int height);
 
 int av1_resize_one_pass_cbr(struct AV1_COMP *cpi);
+
+void av1_configure_buffer_updates(struct AV1_COMP *cpi);
+
+void av1_estimate_qp_gop(struct AV1_COMP *cpi);
 
 #ifdef __cplusplus
 }  // extern "C"

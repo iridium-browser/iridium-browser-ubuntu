@@ -35,14 +35,20 @@ void PasswordFormToJSON(const PasswordForm& form,
                      form.username_element_renderer_id);
   target->SetBoolean("username_marked_by_site", form.username_marked_by_site);
   target->SetString("username_value", form.username_value);
-  target->SetString("password_elem", form.password_element);
+  target->SetString("password_element", form.password_element);
   target->SetString("password_value", form.password_value);
+  target->SetInteger("password_element_renderer_id",
+                     form.password_element_renderer_id);
   target->SetString("new_password_element", form.new_password_element);
   target->SetInteger("password_element_renderer_id",
                      form.password_element_renderer_id);
   target->SetString("new_password_value", form.new_password_value);
   target->SetBoolean("new_password_marked_by_site",
                      form.new_password_marked_by_site);
+  target->SetString("confirmation_password_element",
+                    form.confirmation_password_element);
+  target->SetInteger("confirmation_password_element_renderer_id",
+                     form.confirmation_password_element_renderer_id);
   target->SetString("other_possible_usernames",
                     ValueElementVectorToString(form.other_possible_usernames));
   target->SetString("all_possible_passwords",
@@ -69,9 +75,10 @@ void PasswordFormToJSON(const PasswordForm& form,
   std::ostringstream submission_event_string_stream;
   submission_event_string_stream << form.submission_event;
   target->SetString("submission_event", submission_event_string_stream.str());
-  target->SetBoolean("only_for_fallback_saving", form.only_for_fallback_saving);
+  target->SetBoolean("only_for_fallback", form.only_for_fallback);
   target->SetBoolean("is_gaia_with_skip_save_password_form",
                      form.is_gaia_with_skip_save_password_form);
+  target->SetBoolean("is_new_password_reliable", form.is_new_password_reliable);
 }
 
 }  // namespace
@@ -91,7 +98,7 @@ PasswordForm::PasswordForm()
       is_public_suffix_match(false),
       is_affiliation_based_match(false),
       submission_event(SubmissionIndicatorEvent::NONE),
-      only_for_fallback_saving(false),
+      only_for_fallback(false),
       is_gaia_with_skip_save_password_form(false) {}
 
 PasswordForm::PasswordForm(const PasswordForm& other) = default;
@@ -112,6 +119,12 @@ bool PasswordForm::IsPossibleChangePasswordFormWithoutUsername() const {
   return IsPossibleChangePasswordForm() && username_element.empty();
 }
 
+bool PasswordForm::HasPasswordElement() const {
+  return has_renderer_ids ? password_element_renderer_id !=
+                                FormFieldData::kNotSetFormControlRendererId
+                          : !password_element.empty();
+}
+
 bool PasswordForm::operator==(const PasswordForm& form) const {
   return scheme == form.scheme && signon_realm == form.signon_realm &&
          origin == form.origin && action == form.action &&
@@ -128,7 +141,12 @@ bool PasswordForm::operator==(const PasswordForm& form) const {
          password_element_renderer_id == form.password_element_renderer_id &&
          password_value == form.password_value &&
          new_password_element == form.new_password_element &&
+         confirmation_password_element_renderer_id ==
+             form.confirmation_password_element_renderer_id &&
          new_password_marked_by_site == form.new_password_marked_by_site &&
+         confirmation_password_element == form.confirmation_password_element &&
+         confirmation_password_element_renderer_id ==
+             form.confirmation_password_element_renderer_id &&
          new_password_value == form.new_password_value &&
          preferred == form.preferred && date_created == form.date_created &&
          date_synced == form.date_synced &&
@@ -149,9 +167,10 @@ bool PasswordForm::operator==(const PasswordForm& form) const {
          app_display_name == form.app_display_name &&
          app_icon_url == form.app_icon_url &&
          submission_event == form.submission_event &&
-         only_for_fallback_saving == form.only_for_fallback_saving &&
+         only_for_fallback == form.only_for_fallback &&
          is_gaia_with_skip_save_password_form ==
-             form.is_gaia_with_skip_save_password_form;
+             form.is_gaia_with_skip_save_password_form &&
+         is_new_password_reliable == form.is_new_password_reliable;
 }
 
 bool PasswordForm::operator!=(const PasswordForm& form) const {
@@ -199,28 +218,6 @@ base::string16 ValueElementVectorToString(
   return base::JoinString(pairs, base::ASCIIToUTF16(", "));
 }
 
-PasswordForm::SubmissionIndicatorEvent ToSubmissionIndicatorEvent(
-    SubmissionSource source) {
-  switch (source) {
-    case SubmissionSource::NONE:
-      return PasswordForm::SubmissionIndicatorEvent::NONE;
-    case SubmissionSource::SAME_DOCUMENT_NAVIGATION:
-      return PasswordForm::SubmissionIndicatorEvent::SAME_DOCUMENT_NAVIGATION;
-    case SubmissionSource::XHR_SUCCEEDED:
-      return PasswordForm::SubmissionIndicatorEvent::XHR_SUCCEEDED;
-    case SubmissionSource::FRAME_DETACHED:
-      return PasswordForm::SubmissionIndicatorEvent::FRAME_DETACHED;
-    case SubmissionSource::DOM_MUTATION_AFTER_XHR:
-      return PasswordForm::SubmissionIndicatorEvent::DOM_MUTATION_AFTER_XHR;
-    case SubmissionSource::PROBABLY_FORM_SUBMITTED:
-      return PasswordForm::SubmissionIndicatorEvent::PROBABLE_FORM_SUBMISSION;
-    case SubmissionSource::FORM_SUBMISSION:
-      return PasswordForm::SubmissionIndicatorEvent::HTML_FORM_SUBMISSION;
-  }
-  // Unittests exercise this path, so do not put NOTREACHED() here.
-  return PasswordForm::SubmissionIndicatorEvent::NONE;
-}
-
 std::ostream& operator<<(std::ostream& os, const PasswordForm& form) {
   base::DictionaryValue form_json;
   PasswordFormToJSON(form, &form_json);
@@ -247,36 +244,6 @@ std::ostream& operator<<(std::ostream& os, const PasswordForm& form) {
 
 std::ostream& operator<<(std::ostream& os, PasswordForm* form) {
   return os << "&" << *form;
-}
-
-std::ostream& operator<<(
-    std::ostream& os,
-    PasswordForm::SubmissionIndicatorEvent submission_event) {
-  switch (submission_event) {
-    case PasswordForm::SubmissionIndicatorEvent::HTML_FORM_SUBMISSION:
-      os << "HTML_FORM_SUBMISSION";
-      break;
-    case PasswordForm::SubmissionIndicatorEvent::SAME_DOCUMENT_NAVIGATION:
-      os << "SAME_DOCUMENT_NAVIGATION";
-      break;
-    case PasswordForm::SubmissionIndicatorEvent::XHR_SUCCEEDED:
-      os << "XHR_SUCCEEDED";
-      break;
-    case PasswordForm::SubmissionIndicatorEvent::FRAME_DETACHED:
-      os << "FRAME_DETACHED";
-      break;
-    case PasswordForm::SubmissionIndicatorEvent::DOM_MUTATION_AFTER_XHR:
-      os << "DOM_MUTATION_AFTER_XHR";
-      break;
-    case PasswordForm::SubmissionIndicatorEvent::
-        PROVISIONALLY_SAVED_FORM_ON_START_PROVISIONAL_LOAD:
-      os << "PROVISIONALLY_SAVED_FORM_ON_START_PROVISIONAL_LOAD";
-      break;
-    default:
-      os << "NO_SUBMISSION";
-      break;
-  }
-  return os;
 }
 
 }  // namespace autofill

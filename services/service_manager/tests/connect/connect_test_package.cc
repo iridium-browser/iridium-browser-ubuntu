@@ -11,16 +11,17 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/threading/simple_thread.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/service_manager/public/c/main.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_binding.h"
+#include "services/service_manager/public/cpp/service_executable/service_main.h"
 #include "services/service_manager/public/mojom/service_factory.mojom.h"
-#include "services/service_manager/tests/connect/connect_test.mojom.h"
+#include "services/service_manager/tests/connect/connect.test-mojom.h"
 
 // Tests that multiple services can be packaged in a single service by
 // implementing ServiceFactory; that these services can be specified by
@@ -31,9 +32,9 @@ namespace {
 
 void QuitLoop(base::RunLoop* loop,
               mojom::ConnectResult* out_result,
-              Identity* out_resolved_identity,
+              base::Optional<Identity>* out_resolved_identity,
               mojom::ConnectResult result,
-              const Identity& resolved_identity) {
+              const base::Optional<Identity>& resolved_identity) {
   loop->Quit();
   *out_result = result;
   *out_resolved_identity = resolved_identity;
@@ -46,6 +47,7 @@ using GetTitleCallback = test::mojom::ConnectTestService::GetTitleCallback;
 class ProvidedService : public Service,
                         public test::mojom::ConnectTestService,
                         public test::mojom::BlockedInterface,
+                        public test::mojom::AlwaysAllowedInterface,
                         public test::mojom::IdentityTest,
                         public base::SimpleThread {
  public:
@@ -71,6 +73,9 @@ class ProvidedService : public Service,
                    base::Unretained(this)));
     registry_.AddInterface<test::mojom::BlockedInterface>(base::Bind(
         &ProvidedService::BindBlockedInterfaceRequest, base::Unretained(this)));
+    registry_.AddInterface<test::mojom::AlwaysAllowedInterface>(
+        base::Bind(&ProvidedService::BindAlwaysAllowedInterfaceRequest,
+                   base::Unretained(this)));
     registry_.AddInterface(base::BindRepeating(
         &ProvidedService::BindIdentityTestRequest, base::Unretained(this)));
   }
@@ -93,9 +98,11 @@ class ProvidedService : public Service,
     bindings_.AddBinding(this, std::move(request));
     test::mojom::ConnectionStatePtr state(test::mojom::ConnectionState::New());
     state->connection_remote_name = source_info.identity.name();
-    state->connection_remote_userid = source_info.identity.user_id();
+    state->connection_remote_instance_group =
+        source_info.identity.instance_group();
     state->initialize_local_name = service_binding_.identity().name();
-    state->initialize_userid = service_binding_.identity().user_id();
+    state->initialize_local_instance_group =
+        service_binding_.identity().instance_group();
 
     service_binding_.GetConnector()->BindInterface(source_info.identity,
                                                    &caller_);
@@ -105,6 +112,12 @@ class ProvidedService : public Service,
   void BindBlockedInterfaceRequest(test::mojom::BlockedInterfaceRequest request,
                                    const BindSourceInfo& source_info) {
     blocked_bindings_.AddBinding(this, std::move(request));
+  }
+
+  void BindAlwaysAllowedInterfaceRequest(
+      test::mojom::AlwaysAllowedInterfaceRequest request,
+      const BindSourceInfo& source_info) {
+    always_allowed_bindings_.AddBinding(this, std::move(request));
   }
 
   void BindIdentityTestRequest(test::mojom::IdentityTestRequest request,
@@ -117,8 +130,8 @@ class ProvidedService : public Service,
     std::move(callback).Run(title_);
   }
 
-  void GetInstance(GetInstanceCallback callback) override {
-    std::move(callback).Run(service_binding_.identity().instance());
+  void GetInstanceId(GetInstanceIdCallback callback) override {
+    std::move(callback).Run(service_binding_.identity().instance_id());
   }
 
   // test::mojom::BlockedInterface:
@@ -126,20 +139,21 @@ class ProvidedService : public Service,
     std::move(callback).Run("Called Blocked Interface!");
   }
 
+  // test::mojom::AlwaysAllowedInterface:
+  void GetTitleAlwaysAllowed(GetTitleAlwaysAllowedCallback callback) override {
+    std::move(callback).Run("always_allowed");
+  }
+
   // test::mojom::IdentityTest:
-  void ConnectToClassAppWithIdentity(
-      const service_manager::Identity& target,
-      ConnectToClassAppWithIdentityCallback callback) override {
-    service_binding_.GetConnector()->StartService(target);
+  void ConnectToClassAppWithFilter(
+      const service_manager::ServiceFilter& filter,
+      ConnectToClassAppWithFilterCallback callback) override {
     mojom::ConnectResult result;
-    Identity resolved_identity;
-    {
-      base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
-      Connector::TestApi test_api(service_binding_.GetConnector());
-      test_api.SetStartServiceCallback(
-          base::BindRepeating(&QuitLoop, &loop, &result, &resolved_identity));
-      loop.Run();
-    }
+    base::Optional<Identity> resolved_identity;
+    base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
+    service_binding_.GetConnector()->WarmService(
+        filter, base::BindOnce(&QuitLoop, &loop, &result, &resolved_identity));
+    loop.Run();
     std::move(callback).Run(static_cast<int32_t>(result), resolved_identity);
   }
 
@@ -155,6 +169,7 @@ class ProvidedService : public Service,
     caller_.reset();
     bindings_.CloseAllBindings();
     blocked_bindings_.CloseAllBindings();
+    always_allowed_bindings_.CloseAllBindings();
     identity_test_bindings_.CloseAllBindings();
   }
 
@@ -174,6 +189,8 @@ class ProvidedService : public Service,
   BinderRegistryWithArgs<const BindSourceInfo&> registry_;
   mojo::BindingSet<test::mojom::ConnectTestService> bindings_;
   mojo::BindingSet<test::mojom::BlockedInterface> blocked_bindings_;
+  mojo::BindingSet<test::mojom::AlwaysAllowedInterface>
+      always_allowed_bindings_;
   mojo::BindingSet<test::mojom::IdentityTest> identity_test_bindings_;
 
   DISALLOW_COPY_AND_ASSIGN(ProvidedService);
@@ -183,10 +200,8 @@ class ConnectTestService : public Service,
                            public mojom::ServiceFactory,
                            public test::mojom::ConnectTestService {
  public:
-  ConnectTestService(service_manager::mojom::ServiceRequest request,
-                     base::OnceClosure quit_closure)
-      : service_binding_(this, std::move(request)),
-        quit_closure_(std::move(quit_closure)) {}
+  explicit ConnectTestService(service_manager::mojom::ServiceRequest request)
+      : service_binding_(this, std::move(request)) {}
   ~ConnectTestService() override = default;
 
  private:
@@ -213,7 +228,7 @@ class ConnectTestService : public Service,
 
   void OnDisconnected() override {
     provided_services_.clear();
-    std::move(quit_closure_).Run();
+    Terminate();
   }
 
   void BindServiceFactoryRequest(mojom::ServiceFactoryRequest request) {
@@ -243,8 +258,8 @@ class ConnectTestService : public Service,
     std::move(callback).Run("ROOT");
   }
 
-  void GetInstance(GetInstanceCallback callback) override {
-    std::move(callback).Run(service_binding_.identity().instance());
+  void GetInstanceId(GetInstanceIdCallback callback) override {
+    std::move(callback).Run(service_binding_.identity().instance_id());
   }
 
   void OnConnectionError() {
@@ -253,7 +268,6 @@ class ConnectTestService : public Service,
   }
 
   service_manager::ServiceBinding service_binding_;
-  base::OnceClosure quit_closure_;
   std::vector<std::unique_ptr<Service>> delegates_;
   mojo::BindingSet<mojom::ServiceFactory> service_factory_bindings_;
   BinderRegistry registry_;
@@ -265,13 +279,7 @@ class ConnectTestService : public Service,
 
 }  // namespace service_manager
 
-MojoResult ServiceMain(MojoHandle service_request_handle) {
+void ServiceMain(service_manager::mojom::ServiceRequest request) {
   base::MessageLoop message_loop;
-  base::RunLoop run_loop;
-  service_manager::ConnectTestService service(
-      service_manager::mojom::ServiceRequest(mojo::MakeScopedHandle(
-          mojo::MessagePipeHandle(service_request_handle))),
-      run_loop.QuitClosure());
-  run_loop.Run();
-  return MOJO_RESULT_OK;
+  service_manager::ConnectTestService(std::move(request)).RunUntilTermination();
 }

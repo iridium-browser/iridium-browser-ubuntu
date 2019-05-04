@@ -97,7 +97,7 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
                               int32_t line_no,
                               const base::string16& source_id) override;
   void UpdateTargetURL(content::WebContents* source, const GURL& url) override;
-  void HandleKeyboardEvent(
+  bool HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) override;
   bool TakeFocus(content::WebContents* source, bool reverse) override;
@@ -110,8 +110,6 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
   void ExitFullscreenModeForTab(content::WebContents* web_contents) override;
   bool IsFullscreenForTabOrPending(
       const content::WebContents* web_contents) const override;
-  void RequestAppBannerFromDevTools(
-      content::WebContents* web_contents) override;
   void OnDidBlockFramebust(content::WebContents* web_contents,
                            const GURL& url) override;
   int GetTopControlsHeight() const override;

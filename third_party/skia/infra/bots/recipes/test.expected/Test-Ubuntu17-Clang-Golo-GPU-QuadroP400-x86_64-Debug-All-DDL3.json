@@ -263,6 +263,7 @@
       "0",
       "--config",
       "ddl-gl",
+      "ddl2-gl",
       "--src",
       "gm",
       "skp",
@@ -287,6 +288,10 @@
       "svg",
       "_",
       "svgparse_",
+      "_",
+      "image",
+      "gen_platf",
+      "error",
       "_",
       "image",
       "_",
@@ -391,8 +396,7 @@
     "name": "symbolized dm"
   },
   {
-    "name": "$result",
-    "recipe_result": null,
-    "status_code": 0
+    "jsonResult": null,
+    "name": "$result"
   }
 ]

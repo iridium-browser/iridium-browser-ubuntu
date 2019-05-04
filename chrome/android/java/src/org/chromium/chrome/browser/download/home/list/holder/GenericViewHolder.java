@@ -20,9 +20,9 @@ import android.widget.TextView;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.browser.download.home.list.ListItem;
 import org.chromium.chrome.browser.download.home.list.UiUtils;
-import org.chromium.chrome.browser.modelutil.PropertyModel;
 import org.chromium.chrome.download.R;
 import org.chromium.components.offline_items_collection.OfflineItemVisuals;
+import org.chromium.ui.modelutil.PropertyModel;
 
 /** A {@link RecyclerView.ViewHolder} specifically meant to display a generic {@code OfflineItem}.
  */
@@ -64,7 +64,8 @@ public class GenericViewHolder extends OfflineItemViewHolder {
             mGenericIconId = iconId;
 
             Drawable drawable = DrawableCompat.wrap(
-                    ApiCompatibilityUtils.getDrawable(itemView.getResources(), iconId));
+                    org.chromium.chrome.browser.download.home.list.view.UiUtils.getDrawable(
+                            itemView.getContext(), iconId));
             DrawableCompat.setTintList(drawable,
                     AppCompatResources.getColorStateList(
                             itemView.getContext(), R.color.dark_mode_tint));

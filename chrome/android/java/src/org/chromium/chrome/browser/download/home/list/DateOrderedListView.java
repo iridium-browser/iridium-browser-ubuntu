@@ -6,8 +6,10 @@ package org.chromium.chrome.browser.download.home.list;
 
 import android.content.Context;
 import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.graphics.Rect;
 import android.support.annotation.Nullable;
+import android.support.v4.view.ViewCompat;
 import android.support.v7.widget.DefaultItemAnimator;
 import android.support.v7.widget.GridLayoutManager;
 import android.support.v7.widget.RecyclerView;
@@ -20,9 +22,11 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.download.home.DownloadManagerUiConfig;
 import org.chromium.chrome.browser.download.home.list.DateOrderedListCoordinator.DateOrderedListObserver;
 import org.chromium.chrome.browser.download.home.list.holder.ListItemViewHolder;
-import org.chromium.chrome.browser.modelutil.ForwardingListObservable;
-import org.chromium.chrome.browser.modelutil.PropertyModelChangeProcessor;
-import org.chromium.chrome.browser.modelutil.RecyclerViewAdapter;
+import org.chromium.chrome.browser.widget.displaystyle.HorizontalDisplayStyle;
+import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
+import org.chromium.ui.modelutil.ForwardingListObservable;
+import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
+import org.chromium.ui.modelutil.RecyclerViewAdapter;
 
 /**
  * The View component of a DateOrderedList.  This takes the DateOrderedListModel and creates the
@@ -37,9 +41,9 @@ class DateOrderedListView {
     private final int mPrefetchVerticalPaddingPx;
     private final int mPrefetchHorizontalPaddingPx;
     private final int mMaxWidthImageItemPx;
-    private final int mWideScreenThreshold;
 
     private final RecyclerView mView;
+    private final UiConfig mUiConfig;
 
     /** Creates an instance of a {@link DateOrderedListView} representing {@code model}. */
     public DateOrderedListView(Context context, DownloadManagerUiConfig config,
@@ -57,8 +61,6 @@ class DateOrderedListView {
                 R.dimen.download_manager_prefetch_vertical_margin);
         mMaxWidthImageItemPx = context.getResources().getDimensionPixelSize(
                 R.dimen.download_manager_max_image_item_width_wide_screen);
-        mWideScreenThreshold = context.getResources().getDimensionPixelSize(
-                R.dimen.download_manager_wide_screen_threshold);
 
         mView = new RecyclerView(context) {
             private int mScreenOrientation = Configuration.ORIENTATION_UNDEFINED;
@@ -66,6 +68,7 @@ class DateOrderedListView {
             @Override
             protected void onConfigurationChanged(Configuration newConfig) {
                 super.onConfigurationChanged(newConfig);
+                mUiConfig.updateDisplayStyle();
                 if (newConfig.orientation == mScreenOrientation) return;
 
                 mScreenOrientation = newConfig.orientation;
@@ -92,11 +95,42 @@ class DateOrderedListView {
                 dateOrderedListObserver.onListScroll(mView.canScrollVertically(-1));
             }
         });
+
+        mUiConfig = new UiConfig(mView);
+        mUiConfig.addObserver((newDisplayStyle) -> {
+            int padding = getPaddingForDisplayStyle(newDisplayStyle, context.getResources());
+            ViewCompat.setPaddingRelative(
+                    mView, padding, mView.getPaddingTop(), padding, mView.getPaddingBottom());
+        });
     }
 
     /** @return The Android {@link View} representing this widget. */
     public View getView() {
         return mView;
+    }
+
+    /**
+     * @return The start and end padding of the recycler view for the given display style.
+     */
+    private static int getPaddingForDisplayStyle(
+            UiConfig.DisplayStyle displayStyle, Resources resources) {
+        int padding = 0;
+        if (displayStyle.horizontal == HorizontalDisplayStyle.WIDE) {
+            int screenWidthDp = resources.getConfiguration().screenWidthDp;
+            padding = (int) (((screenWidthDp - UiConfig.WIDE_DISPLAY_STYLE_MIN_WIDTH_DP) / 2.f)
+                    * resources.getDisplayMetrics().density);
+            padding = (int) Math.max(
+                    resources.getDimensionPixelSize(
+                            R.dimen.download_manager_recycler_view_min_padding_wide_screen),
+                    padding);
+        }
+        return padding;
+    }
+
+    /** @return The view width available after start and end padding. */
+    private int getAvailableViewWidth() {
+        return mView.getWidth() - ViewCompat.getPaddingStart(mView)
+                - ViewCompat.getPaddingEnd(mView);
     }
 
     private class GridLayoutManagerImpl extends GridLayoutManager {
@@ -111,7 +145,7 @@ class DateOrderedListView {
         public void onLayoutChildren(Recycler recycler, State state) {
             assert getOrientation() == VERTICAL;
 
-            int availableWidth = getWidth() - mImagePaddingPx;
+            int availableWidth = getAvailableViewWidth() - mImagePaddingPx;
             int columnWidth = mIdealImageWidthPx - mImagePaddingPx;
 
             int easyFitSpan = availableWidth / columnWidth;
@@ -148,6 +182,7 @@ class DateOrderedListView {
             boolean isFullWidthMedia = false;
             switch (ListUtils.getViewTypeForItem(mModel.get(position), mConfig)) {
                 case ListUtils.ViewType.IMAGE:
+                case ListUtils.ViewType.IMAGE_FULL_WIDTH:
                 case ListUtils.ViewType.IN_PROGRESS_IMAGE:
                     outRect.left = mImagePaddingPx;
                     outRect.right = mImagePaddingPx;
@@ -171,8 +206,10 @@ class DateOrderedListView {
                     break;
             }
 
-            if (isFullWidthMedia && mView.getWidth() > mWideScreenThreshold) {
-                outRect.right += Math.max(mView.getWidth() - mMaxWidthImageItemPx, 0);
+            if (isFullWidthMedia
+                    && mUiConfig.getCurrentDisplayStyle().horizontal
+                            == HorizontalDisplayStyle.WIDE) {
+                outRect.right += Math.max(getAvailableViewWidth() - mMaxWidthImageItemPx, 0);
             }
         }
     }

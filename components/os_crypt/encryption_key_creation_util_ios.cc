@@ -10,20 +10,13 @@ EncryptionKeyCreationUtilIOS::EncryptionKeyCreationUtilIOS() = default;
 
 EncryptionKeyCreationUtilIOS::~EncryptionKeyCreationUtilIOS() = default;
 
-bool EncryptionKeyCreationUtilIOS::KeyAlreadyCreated() {
-  return false;
-}
-
-bool EncryptionKeyCreationUtilIOS::ShouldPreventOverwriting() {
-  return false;
-}
-
 void EncryptionKeyCreationUtilIOS::OnKeyWasFound() {}
 
-void EncryptionKeyCreationUtilIOS::OnKeyWasStored() {}
+void EncryptionKeyCreationUtilIOS::OnKeyNotFound(
+    const crypto::AppleKeychain& keychain) {}
 
-void EncryptionKeyCreationUtilIOS::OnOverwritingPrevented() {}
+void EncryptionKeyCreationUtilIOS::OnKeyStored(bool new_key_stored) {}
 
-void EncryptionKeyCreationUtilIOS::OnKeychainLookupFailed() {}
+void EncryptionKeyCreationUtilIOS::OnKeychainLookupFailed(int error) {}
 
 }  // namespace os_crypt

@@ -256,8 +256,8 @@ TEST(cpdf_parser, ParseStartXRefWithHeaderOffset) {
   ASSERT_TRUE(pFileAccess);
 
   std::vector<unsigned char> data(pFileAccess->GetSize() + kTestHeaderOffset);
-  ASSERT_TRUE(pFileAccess->ReadBlock(&data.front() + kTestHeaderOffset, 0,
-                                     pFileAccess->GetSize()));
+  ASSERT_TRUE(pFileAccess->ReadBlockAtOffset(&data.front() + kTestHeaderOffset,
+                                             0, pFileAccess->GetSize()));
   CPDF_TestParser parser;
   parser.InitTestFromBufferWithOffset(data, kTestHeaderOffset);
 
@@ -277,10 +277,27 @@ TEST(cpdf_parser, ParseLinearizedWithHeaderOffset) {
   ASSERT_TRUE(pFileAccess);
 
   std::vector<unsigned char> data(pFileAccess->GetSize() + kTestHeaderOffset);
-  ASSERT_TRUE(pFileAccess->ReadBlock(&data.front() + kTestHeaderOffset, 0,
-                                     pFileAccess->GetSize()));
+  ASSERT_TRUE(pFileAccess->ReadBlockAtOffset(&data.front() + kTestHeaderOffset,
+                                             0, pFileAccess->GetSize()));
   CPDF_TestParser parser;
   parser.InitTestFromBufferWithOffset(data, kTestHeaderOffset);
 
   EXPECT_TRUE(parser.ParseLinearizedHeader());
+}
+
+TEST(cpdf_parser, BadStartXrefShouldNotBuildCrossRefTable) {
+  const unsigned char kData[] =
+      "%PDF1-7 0 obj <</Size 2 /W [0 0 0]\n>>\n"
+      "stream\n"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "6\n"
+      "%%EOF\n";
+  CPDF_TestParser parser;
+  ASSERT_TRUE(parser.InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::FORMAT_ERROR, parser.StartParseInternal());
+  ASSERT_TRUE(parser.GetCrossRefTable());
+  EXPECT_EQ(0u, parser.GetCrossRefTable()->objects_info().size());
 }

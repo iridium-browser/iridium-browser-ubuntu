@@ -19,6 +19,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/animation/ink_drop.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/window/hit_test_utils.h"
@@ -28,8 +29,6 @@ HostedAppMenuButton::HostedAppMenuButton(BrowserView* browser_view)
   views::SetHitTestComponent(this, static_cast<int>(HTMENU));
 
   SetInkDropMode(InkDropMode::ON);
-  // Disable focus ring for consistency with sibling buttons and AppMenuButton.
-  SetFocusPainter(nullptr);
   SetFocusBehavior(FocusBehavior::ALWAYS);
   // Avoid the native theme border, which would crop the icon (see
   // https://crbug.com/831968).

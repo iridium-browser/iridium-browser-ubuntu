@@ -24,8 +24,7 @@ extern const uint16_t PDFDocEncoding[256];
 bool ValidateDecoderPipeline(const CPDF_Array* pDecoders);
 
 ByteString PDF_EncodeString(const ByteString& src, bool bHex);
-WideString PDF_DecodeText(const uint8_t* pData, uint32_t size);
-WideString PDF_DecodeText(const ByteString& bstr);
+WideString PDF_DecodeText(pdfium::span<const uint8_t> span);
 ByteString PDF_EncodeText(const WideString& str);
 
 std::unique_ptr<CCodec_ScanlineDecoder> CreateFaxDecoder(
@@ -43,7 +42,7 @@ std::unique_ptr<CCodec_ScanlineDecoder> CreateFlateDecoder(
     const CPDF_Dictionary* pParams);
 
 bool FlateEncode(pdfium::span<const uint8_t> src_span,
-                 uint8_t** dest_buf,
+                 std::unique_ptr<uint8_t, FxFreeDeleter>* dest_buf,
                  uint32_t* dest_size);
 
 uint32_t FlateDecode(pdfium::span<const uint8_t> src_span,
@@ -73,7 +72,7 @@ bool PDF_DataDecode(pdfium::span<const uint8_t> src_span,
                     const CPDF_Dictionary* pDict,
                     uint32_t estimated_size,
                     bool bImageAcc,
-                    uint8_t** dest_buf,
+                    std::unique_ptr<uint8_t, FxFreeDeleter>* dest_buf,
                     uint32_t* dest_size,
                     ByteString* ImageEncoding,
                     UnownedPtr<const CPDF_Dictionary>* pImageParms);

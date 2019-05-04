@@ -13,6 +13,12 @@
 #include "ui/gl/gl_fence_egl.h"
 #include "ui/gl/gl_image_ahardwarebuffer.h"
 
+namespace base {
+namespace android {
+class ScopedHardwareBufferFenceSync;
+}  // namespace android
+}  // namespace base
+
 namespace media {
 
 struct FrameAvailableEvent_ImageReader;
@@ -25,7 +31,6 @@ struct FrameAvailableEvent_ImageReader;
 // data present in the surface.
 class MEDIA_GPU_EXPORT ImageReaderGLOwner : public TextureOwner {
  public:
-  GLuint GetTextureId() const override;
   gl::GLContext* GetContext() const override;
   gl::GLSurface* GetSurface() const override;
   gl::ScopedJavaSurface CreateJavaSurface() const override;
@@ -36,15 +41,18 @@ class MEDIA_GPU_EXPORT ImageReaderGLOwner : public TextureOwner {
   void IgnorePendingRelease() override;
   bool IsExpectingFrameAvailable() override;
   void WaitForFrameAvailable() override;
-  std::unique_ptr<gl::GLImage::ScopedHardwareBuffer> GetAHardwareBuffer()
-      override;
+  std::unique_ptr<base::android::ScopedHardwareBufferFenceSync>
+  GetAHardwareBuffer() override;
+
+ protected:
+  void OnTextureDestroyed(gpu::gles2::AbstractTexture*) override;
 
  private:
   friend class TextureOwner;
 
   class ScopedHardwareBufferImpl;
 
-  ImageReaderGLOwner(GLuint texture_id);
+  ImageReaderGLOwner(std::unique_ptr<gpu::gles2::AbstractTexture> texture);
   ~ImageReaderGLOwner() override;
 
   // Deletes the current image if it has no pending refs. Returns false on
@@ -61,7 +69,6 @@ class MEDIA_GPU_EXPORT ImageReaderGLOwner : public TextureOwner {
   // image until next new image is acquired which overwrites this.
   AImage* current_image_;
   base::ScopedFD current_image_fence_;
-  GLuint texture_id_;
   std::unique_ptr<AImageReader_ImageListener> listener_;
 
   // Set to true if the current image is bound to |texture_id_|.

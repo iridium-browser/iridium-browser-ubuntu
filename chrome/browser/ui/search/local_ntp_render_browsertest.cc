@@ -17,9 +17,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
+#include "chrome/browser/search/ntp_features.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/search/local_ntp_test_utils.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/ntp_tiles/constants.h"
@@ -55,8 +55,7 @@ class LocalNTPRenderTest : public InProcessBrowserTest {
  public:
   LocalNTPRenderTest() {
     // Making sure we are running with the Local NTP.
-    feature_list_.InitWithFeatures(
-        {features::kUseGoogleLocalNtp, ntp_tiles::kNtpCustomLinks}, {});
+    feature_list_.InitWithFeatures({features::kUseGoogleLocalNtp}, {});
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {

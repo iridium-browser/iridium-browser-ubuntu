@@ -14,7 +14,7 @@ constexpr base::TimeDelta LongTaskDetector::kLongTaskThreshold;
 // static
 LongTaskDetector& LongTaskDetector::Instance() {
   DEFINE_STATIC_LOCAL(Persistent<LongTaskDetector>, long_task_detector,
-                      (new LongTaskDetector));
+                      (MakeGarbageCollected<LongTaskDetector>()));
   DCHECK(IsMainThread());
   return *long_task_detector;
 }
@@ -26,7 +26,7 @@ void LongTaskDetector::RegisterObserver(LongTaskObserver* observer) {
   DCHECK(observer);
   if (observers_.insert(observer).is_new_entry && observers_.size() == 1) {
     // Number of observers just became non-zero.
-    Platform::Current()->CurrentThread()->AddTaskTimeObserver(this);
+    Thread::Current()->AddTaskTimeObserver(this);
   }
 }
 
@@ -34,7 +34,7 @@ void LongTaskDetector::UnregisterObserver(LongTaskObserver* observer) {
   DCHECK(IsMainThread());
   observers_.erase(observer);
   if (observers_.size() == 0) {
-    Platform::Current()->CurrentThread()->RemoveTaskTimeObserver(this);
+    Thread::Current()->RemoveTaskTimeObserver(this);
   }
 }
 

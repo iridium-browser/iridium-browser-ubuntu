@@ -14,6 +14,7 @@
 #include "common/angleutils.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/ImageIndex.h"
+#include "libANGLE/Observer.h"
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/FramebufferAttachmentObjectImpl.h"
 
@@ -34,12 +35,7 @@ class FramebufferAttachmentRenderTarget : angle::NonCopyable
 };
 
 class FramebufferAttachmentObjectImpl;
-}
-
-namespace angle
-{
-class Subject;
-}  // namespace angle
+}  // namespace rx
 
 namespace gl
 {
@@ -194,11 +190,11 @@ class FramebufferAttachment final
 };
 
 // A base class for objects that FBO Attachments may point to.
-class FramebufferAttachmentObject
+class FramebufferAttachmentObject : public angle::Subject
 {
   public:
     FramebufferAttachmentObject();
-    virtual ~FramebufferAttachmentObject();
+    ~FramebufferAttachmentObject() override;
 
     virtual Extents getAttachmentSize(const ImageIndex &imageIndex) const                  = 0;
     virtual Format getAttachmentFormat(GLenum binding, const ImageIndex &imageIndex) const = 0;
@@ -221,9 +217,6 @@ class FramebufferAttachmentObject
                                             rx::FramebufferAttachmentRenderTarget **rtOut) const;
 
     angle::Result initializeContents(const Context *context, const ImageIndex &imageIndex);
-
-    void onStorageChange(const gl::Context *context) const;
-    angle::Subject *getSubject() const { return getAttachmentImpl(); }
 
   protected:
     virtual rx::FramebufferAttachmentObjectImpl *getAttachmentImpl() const = 0;

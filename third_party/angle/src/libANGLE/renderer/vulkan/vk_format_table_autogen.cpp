@@ -22,7 +22,7 @@ namespace rx
 namespace vk
 {
 
-void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &angleFormat)
+void Format::initialize(RendererVk *renderer, const angle::Format &angleFormat)
 {
     switch (angleFormat.id)
     {
@@ -175,7 +175,15 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
             break;
 
         case angle::FormatID::ASTC_12x12_SRGB_BLOCK:
-            // This format is not implemented in Vulkan.
+            internalFormat               = GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR;
+            textureFormatID              = angle::FormatID::ASTC_12x12_SRGB_BLOCK;
+            vkTextureFormat              = VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
+            textureInitializerFunction   = nullptr;
+            bufferFormatID               = angle::FormatID::ASTC_12x12_SRGB_BLOCK;
+            vkBufferFormat               = VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
+            vkBufferFormatIsPacked       = false;
+            vertexLoadFunction           = nullptr;
+            vertexLoadRequiresConversion = false;
             break;
 
         case angle::FormatID::ASTC_12x12_UNORM_BLOCK:
@@ -535,8 +543,9 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
             {
                 static constexpr TextureFormatInitInfo kInfo[] = {
                     {angle::FormatID::D24_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, nullptr},
-                    {angle::FormatID::D32_FLOAT_S8X24_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, nullptr}};
-                initTextureFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                    {angle::FormatID::D32_FLOAT_S8X24_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, nullptr},
+                    {angle::FormatID::D24_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, nullptr}};
+                initTextureFallback(renderer, kInfo, ArraySize(kInfo));
             }
             bufferFormatID               = angle::FormatID::D24_UNORM_S8_UINT;
             vkBufferFormat               = VK_FORMAT_D24_UNORM_S8_UINT;
@@ -550,8 +559,9 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
             {
                 static constexpr TextureFormatInitInfo kInfo[] = {
                     {angle::FormatID::D24_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, nullptr},
-                    {angle::FormatID::D32_FLOAT_S8X24_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, nullptr}};
-                initTextureFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                    {angle::FormatID::D32_FLOAT_S8X24_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, nullptr},
+                    {angle::FormatID::D24_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, nullptr}};
+                initTextureFallback(renderer, kInfo, ArraySize(kInfo));
             }
             bufferFormatID               = angle::FormatID::NONE;
             vkBufferFormat               = VK_FORMAT_UNDEFINED;
@@ -577,8 +587,9 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
             {
                 static constexpr TextureFormatInitInfo kInfo[] = {
                     {angle::FormatID::D32_FLOAT_S8X24_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, nullptr},
-                    {angle::FormatID::D24_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, nullptr}};
-                initTextureFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                    {angle::FormatID::D24_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, nullptr},
+                    {angle::FormatID::D32_FLOAT_S8X24_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, nullptr}};
+                initTextureFallback(renderer, kInfo, ArraySize(kInfo));
             }
             bufferFormatID               = angle::FormatID::D32_FLOAT_S8X24_UINT;
             vkBufferFormat               = VK_FORMAT_D32_SFLOAT_S8_UINT;
@@ -666,7 +677,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
             textureInitializerFunction = Initialize4ComponentData<GLubyte, 0x00, 0x00, 0x00, 0xFF>;
             bufferFormatID             = angle::FormatID::ETC2_R8G8B8A1_UNORM_BLOCK;
             vkBufferFormat             = VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK;
-            vkBufferFormatIsPacked       = false;
+            vkBufferFormatIsPacked     = false;
             vertexLoadFunction         = CopyNativeVertexData<GLubyte, 4, 4, 0>;
             vertexLoadRequiresConversion = false;
             break;
@@ -818,7 +829,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLshort, 4, 4, 0>, false},
                     {angle::FormatID::R32G32B32A32_FLOAT, VK_FORMAT_R32G32B32A32_SFLOAT, false,
                      CopyTo32FVertexData<GLshort, 4, 4, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -833,7 +844,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLshort, 4, 4, 0>, false},
                     {angle::FormatID::R32G32B32A32_FLOAT, VK_FORMAT_R32G32B32A32_SFLOAT, false,
                      CopyTo32FVertexData<GLshort, 4, 4, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -860,7 +871,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLushort, 4, 4, 0>, false},
                     {angle::FormatID::R32G32B32A32_FLOAT, VK_FORMAT_R32G32B32A32_SFLOAT, false,
                      CopyTo32FVertexData<GLushort, 4, 4, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -875,7 +886,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLushort, 4, 4, 0>, false},
                     {angle::FormatID::R32G32B32A32_FLOAT, VK_FORMAT_R32G32B32A32_SFLOAT, false,
                      CopyTo32FVertexData<GLushort, 4, 4, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -914,7 +925,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLshort, 3, 3, 0>, false},
                     {angle::FormatID::R32G32B32_FLOAT, VK_FORMAT_R32G32B32_SFLOAT, false,
                      CopyTo32FVertexData<GLshort, 3, 3, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -929,7 +940,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLshort, 3, 3, 0>, false},
                     {angle::FormatID::R32G32B32_FLOAT, VK_FORMAT_R32G32B32_SFLOAT, false,
                      CopyTo32FVertexData<GLshort, 3, 3, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -956,7 +967,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLushort, 3, 3, 0>, false},
                     {angle::FormatID::R32G32B32_FLOAT, VK_FORMAT_R32G32B32_SFLOAT, false,
                      CopyTo32FVertexData<GLushort, 3, 3, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -971,7 +982,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLushort, 3, 3, 0>, false},
                     {angle::FormatID::R32G32B32_FLOAT, VK_FORMAT_R32G32B32_SFLOAT, false,
                      CopyTo32FVertexData<GLushort, 3, 3, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1010,7 +1021,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLshort, 2, 2, 0>, false},
                     {angle::FormatID::R32G32_FLOAT, VK_FORMAT_R32G32_SFLOAT, false,
                      CopyTo32FVertexData<GLshort, 2, 2, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1025,7 +1036,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLshort, 2, 2, 0>, false},
                     {angle::FormatID::R32G32_FLOAT, VK_FORMAT_R32G32_SFLOAT, false,
                      CopyTo32FVertexData<GLshort, 2, 2, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1052,7 +1063,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLushort, 2, 2, 0>, false},
                     {angle::FormatID::R32G32_FLOAT, VK_FORMAT_R32G32_SFLOAT, false,
                      CopyTo32FVertexData<GLushort, 2, 2, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1067,7 +1078,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLushort, 2, 2, 0>, false},
                     {angle::FormatID::R32G32_FLOAT, VK_FORMAT_R32G32_SFLOAT, false,
                      CopyTo32FVertexData<GLushort, 2, 2, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1106,7 +1117,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLshort, 1, 1, 0>, false},
                     {angle::FormatID::R32_FLOAT, VK_FORMAT_R32_SFLOAT, false,
                      CopyTo32FVertexData<GLshort, 1, 1, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1121,7 +1132,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLshort, 1, 1, 0>, false},
                     {angle::FormatID::R32_FLOAT, VK_FORMAT_R32_SFLOAT, false,
                      CopyTo32FVertexData<GLshort, 1, 1, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1148,7 +1159,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLushort, 1, 1, 0>, false},
                     {angle::FormatID::R32_FLOAT, VK_FORMAT_R32_SFLOAT, false,
                      CopyTo32FVertexData<GLushort, 1, 1, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1163,7 +1174,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLushort, 1, 1, 0>, false},
                     {angle::FormatID::R32_FLOAT, VK_FORMAT_R32_SFLOAT, false,
                      CopyTo32FVertexData<GLushort, 1, 1, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1474,7 +1485,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLbyte, 4, 4, 0>, false},
                     {angle::FormatID::R32G32B32A32_FLOAT, VK_FORMAT_R32G32B32A32_SFLOAT, false,
                      CopyTo32FVertexData<GLbyte, 4, 4, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1489,7 +1500,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLbyte, 4, 4, 0>, false},
                     {angle::FormatID::R32G32B32A32_FLOAT, VK_FORMAT_R32G32B32A32_SFLOAT, false,
                      CopyTo32FVertexData<GLbyte, 4, 4, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1524,7 +1535,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLubyte, 4, 4, 0>, false},
                     {angle::FormatID::R32G32B32A32_FLOAT, VK_FORMAT_R32G32B32A32_SFLOAT, false,
                      CopyTo32FVertexData<GLubyte, 4, 4, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1543,7 +1554,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLubyte, 4, 4, 0>, false},
                     {angle::FormatID::R32G32B32A32_FLOAT, VK_FORMAT_R32G32B32A32_SFLOAT, false,
                      CopyTo32FVertexData<GLubyte, 4, 4, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1570,7 +1581,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLbyte, 3, 3, 0>, false},
                     {angle::FormatID::R32G32B32_FLOAT, VK_FORMAT_R32G32B32_SFLOAT, false,
                      CopyTo32FVertexData<GLbyte, 3, 3, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1585,7 +1596,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLbyte, 3, 3, 0>, false},
                     {angle::FormatID::R32G32B32_FLOAT, VK_FORMAT_R32G32B32_SFLOAT, false,
                      CopyTo32FVertexData<GLbyte, 3, 3, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1612,7 +1623,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLubyte, 3, 3, 0>, false},
                     {angle::FormatID::R32G32B32_FLOAT, VK_FORMAT_R32G32B32_SFLOAT, false,
                      CopyTo32FVertexData<GLubyte, 3, 3, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1631,7 +1642,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLubyte, 3, 3, 0>, false},
                     {angle::FormatID::R32G32B32_FLOAT, VK_FORMAT_R32G32B32_SFLOAT, false,
                      CopyTo32FVertexData<GLubyte, 3, 3, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1658,7 +1669,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLbyte, 2, 2, 0>, false},
                     {angle::FormatID::R32G32_FLOAT, VK_FORMAT_R32G32_SFLOAT, false,
                      CopyTo32FVertexData<GLbyte, 2, 2, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1673,7 +1684,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLbyte, 2, 2, 0>, false},
                     {angle::FormatID::R32G32_FLOAT, VK_FORMAT_R32G32_SFLOAT, false,
                      CopyTo32FVertexData<GLbyte, 2, 2, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1700,7 +1711,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLubyte, 2, 2, 0>, false},
                     {angle::FormatID::R32G32_FLOAT, VK_FORMAT_R32G32_SFLOAT, false,
                      CopyTo32FVertexData<GLubyte, 2, 2, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1715,7 +1726,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLubyte, 2, 2, 0>, false},
                     {angle::FormatID::R32G32_FLOAT, VK_FORMAT_R32G32_SFLOAT, false,
                      CopyTo32FVertexData<GLubyte, 2, 2, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1742,7 +1753,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLbyte, 1, 1, 0>, false},
                     {angle::FormatID::R32_FLOAT, VK_FORMAT_R32_SFLOAT, false,
                      CopyTo32FVertexData<GLbyte, 1, 1, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1757,7 +1768,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLbyte, 1, 1, 0>, false},
                     {angle::FormatID::R32_FLOAT, VK_FORMAT_R32_SFLOAT, false,
                      CopyTo32FVertexData<GLbyte, 1, 1, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1784,7 +1795,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLubyte, 1, 1, 0>, false},
                     {angle::FormatID::R32_FLOAT, VK_FORMAT_R32_SFLOAT, false,
                      CopyTo32FVertexData<GLubyte, 1, 1, true>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1799,7 +1810,7 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                      CopyNativeVertexData<GLubyte, 1, 1, 0>, false},
                     {angle::FormatID::R32_FLOAT, VK_FORMAT_R32_SFLOAT, false,
                      CopyTo32FVertexData<GLubyte, 1, 1, false>, true}};
-                initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                initBufferFallback(renderer, kInfo, ArraySize(kInfo));
             }
             break;
 
@@ -1813,8 +1824,9 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
                 static constexpr TextureFormatInitInfo kInfo[] = {
                     {angle::FormatID::S8_UINT, VK_FORMAT_S8_UINT, nullptr},
                     {angle::FormatID::D24_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, nullptr},
-                    {angle::FormatID::D32_FLOAT_S8X24_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, nullptr}};
-                initTextureFallback(physicalDevice, kInfo, ArraySize(kInfo));
+                    {angle::FormatID::D32_FLOAT_S8X24_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, nullptr},
+                    {angle::FormatID::S8_UINT, VK_FORMAT_S8_UINT, nullptr}};
+                initTextureFallback(renderer, kInfo, ArraySize(kInfo));
             }
             bufferFormatID               = angle::FormatID::S8_UINT;
             vkBufferFormat               = VK_FORMAT_S8_UINT;

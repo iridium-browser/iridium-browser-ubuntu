@@ -16,7 +16,7 @@
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_container.h"
 #include "ash/system/tray/tray_utils.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
@@ -67,24 +67,32 @@ bool VirtualKeyboardTray::PerformAction(const ui::Event& event) {
       LoginMetricsRecorder::TrayClickTarget::kVirtualKeyboardTray);
 
   auto* keyboard_controller = keyboard::KeyboardController::Get();
+
   // Keyboard may not always be enabled. https://crbug.com/749989
-  if (keyboard_controller->IsEnabled()) {
-    keyboard_controller->ShowKeyboardInDisplay(
-        display::Screen::GetScreen()->GetDisplayNearestWindow(
-            shelf_->GetWindow()));
-  }
+  if (!keyboard_controller->IsEnabled())
+    return true;
+
   // Normally, active status is set when virtual keyboard is shown/hidden,
   // however, showing virtual keyboard happens asynchronously and, especially
   // the first time, takes some time. We need to set active status here to
   // prevent bad things happening if user clicked the button before keyboard is
   // shown.
-  SetIsActive(true);
+  if (is_active()) {
+    keyboard_controller->HideKeyboardByUser();
+    SetIsActive(false);
+  } else {
+    keyboard_controller->ShowKeyboardInDisplay(
+        display::Screen::GetScreen()->GetDisplayNearestWindow(
+            shelf_->GetWindow()));
+    SetIsActive(true);
+  }
+
   return true;
 }
 
 void VirtualKeyboardTray::OnAccessibilityStatusChanged() {
   bool new_enabled =
-      Shell::Get()->accessibility_controller()->IsVirtualKeyboardEnabled();
+      Shell::Get()->accessibility_controller()->virtual_keyboard_enabled();
   SetVisible(new_enabled);
 }
 
@@ -104,7 +112,7 @@ void VirtualKeyboardTray::UpdateIcon() {
       icon,
       TrayIconColor(Shell::Get()->session_controller()->GetSessionState()));
   icon_->SetImage(image);
-  icon_->SetTooltipText(l10n_util::GetStringUTF16(
+  icon_->set_tooltip_text(l10n_util::GetStringUTF16(
       IDS_ASH_STATUS_TRAY_ACCESSIBILITY_VIRTUAL_KEYBOARD));
   const int vertical_padding = (kTrayItemSize - image.height()) / 2;
   const int horizontal_padding = (kTrayItemSize - image.width()) / 2;

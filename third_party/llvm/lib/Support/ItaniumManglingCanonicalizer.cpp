@@ -22,6 +22,7 @@ using namespace llvm;
 using llvm::itanium_demangle::ForwardTemplateReference;
 using llvm::itanium_demangle::Node;
 using llvm::itanium_demangle::NodeKind;
+using llvm::itanium_demangle::StringView;
 
 namespace {
 struct FoldingSetNodeIDBuilder {
@@ -221,7 +222,8 @@ struct CanonicalizerAllocator::MakeNodeImpl<
 
 // FIXME: Also expand built-in substitutions?
 
-using CanonicalizingDemangler = itanium_demangle::Db<CanonicalizerAllocator>;
+using CanonicalizingDemangler =
+    itanium_demangle::ManglingParser<CanonicalizerAllocator>;
 }
 
 struct ItaniumManglingCanonicalizer::Impl {

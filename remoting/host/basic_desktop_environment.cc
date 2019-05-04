@@ -8,10 +8,11 @@
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
+#include "remoting/host/action_executor.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/client_session_control.h"
 #include "remoting/host/desktop_capturer_proxy.h"
-#include "remoting/host/file_proxy_wrapper.h"
+#include "remoting/host/file_transfer/local_file_operations.h"
 #include "remoting/host/input_injector.h"
 #include "remoting/host/mouse_cursor_monitor_proxy.h"
 #include "remoting/host/screen_controls.h"
@@ -32,6 +33,15 @@ namespace remoting {
 
 BasicDesktopEnvironment::~BasicDesktopEnvironment() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
+}
+
+std::unique_ptr<ActionExecutor>
+BasicDesktopEnvironment::CreateActionExecutor() {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  // Connection mode derivations (It2Me/Me2Me) should override this method and
+  // return an executor instance if applicable.
+  return nullptr;
 }
 
 std::unique_ptr<AudioCapturer> BasicDesktopEnvironment::CreateAudioCapturer() {
@@ -60,9 +70,9 @@ BasicDesktopEnvironment::CreateMouseCursorMonitor() {
                                                    desktop_capture_options());
 }
 
-std::unique_ptr<FileProxyWrapper>
-BasicDesktopEnvironment::CreateFileProxyWrapper() {
-  return FileProxyWrapper::Create();
+std::unique_ptr<FileOperations>
+BasicDesktopEnvironment::CreateFileOperations() {
+  return std::make_unique<LocalFileOperations>();
 }
 
 std::string BasicDesktopEnvironment::GetCapabilities() const {

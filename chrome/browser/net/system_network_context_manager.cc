@@ -13,11 +13,13 @@
 #include "base/logging.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/process/process_handle.h"
+#include "base/sequence_checker.h"
 #include "base/strings/string_split.h"
 #include "base/task/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/component_updater/crl_set_component_installer.h"
 #include "chrome/browser/component_updater/sth_set_component_installer.h"
 #include "chrome/browser/io_thread.h"
@@ -25,7 +27,6 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ssl/ssl_config_service_manager.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -48,13 +49,14 @@
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/common/user_agent.h"
 #include "mojo/public/cpp/bindings/associated_interface_ptr.h"
-#include "net/dns/dns_util.h"
+#include "net/dns/public/util.h"
 #include "net/net_buildflags.h"
 #include "net/third_party/uri_template/uri_template.h"
 #include "services/network/network_service.h"
 #include "services/network/public/cpp/cross_thread_shared_url_loader_factory_info.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/mojom/host_resolver.mojom.h"
 #include "services/proxy_resolver/public/mojom/proxy_resolver.mojom.h"
 #include "url/gurl.h"
 
@@ -116,8 +118,9 @@ void GetStubResolverConfig(
         continue;
       }
 
-      if (!net::IsValidDoHTemplate(doh_server_list[i].GetString(),
-                                   doh_server_method_list[i].GetString())) {
+      if (!net::dns_util::IsValidDoHTemplate(
+              doh_server_list[i].GetString(),
+              doh_server_method_list[i].GetString())) {
         continue;
       }
 
@@ -233,7 +236,9 @@ class SystemNetworkContextManager::URLLoaderFactoryForSystem
     : public network::SharedURLLoaderFactory {
  public:
   explicit URLLoaderFactoryForSystem(SystemNetworkContextManager* manager)
-      : manager_(manager) {}
+      : manager_(manager) {
+    DETACH_FROM_SEQUENCE(sequence_checker_);
+  }
 
   // mojom::URLLoaderFactory implementation:
 
@@ -245,7 +250,7 @@ class SystemNetworkContextManager::URLLoaderFactoryForSystem
                             network::mojom::URLLoaderClientPtr client,
                             const net::MutableNetworkTrafficAnnotationTag&
                                 traffic_annotation) override {
-    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     if (!manager_)
       return;
     manager_->GetURLLoaderFactory()->CreateLoaderAndStart(
@@ -261,7 +266,7 @@ class SystemNetworkContextManager::URLLoaderFactoryForSystem
 
   // SharedURLLoaderFactory implementation:
   std::unique_ptr<network::SharedURLLoaderFactoryInfo> Clone() override {
-    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     return std::make_unique<network::CrossThreadSharedURLLoaderFactoryInfo>(
         this);
   }
@@ -272,6 +277,7 @@ class SystemNetworkContextManager::URLLoaderFactoryForSystem
   friend class base::RefCounted<URLLoaderFactoryForSystem>;
   ~URLLoaderFactoryForSystem() override {}
 
+  SEQUENCE_CHECKER(sequence_checker_);
   SystemNetworkContextManager* manager_;
 
   DISALLOW_COPY_AND_ASSIGN(URLLoaderFactoryForSystem);

@@ -14,6 +14,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "chrome/browser/media/router/issues_observer.h"
 #include "chrome/browser/media/router/media_router_dialog_controller.h"
@@ -110,8 +111,8 @@ class MediaRouterUIBase
   // excludes the wired display that the initiator WebContents is on.
   virtual std::vector<MediaSinkWithCastModes> GetEnabledSinks() const;
 
-  // Returns a source name that can be shown in the dialog.
-  std::string GetTruncatedPresentationRequestSourceName() const;
+  // Returns a PresentationRequest source name that can be shown in the dialog.
+  base::string16 GetPresentationRequestSourceName() const;
 
   // Calls MediaRouter to add the given issue.
   void AddIssue(const IssueInfo& issue);
@@ -124,12 +125,6 @@ class MediaRouterUIBase
 
   const std::vector<MediaRoute>& routes() const { return routes_; }
   content::WebContents* initiator() const { return initiator_; }
-
-  // Used in tests for wired display presentations.
-  void set_display_observer_for_test(
-      std::unique_ptr<WebContentsDisplayObserver> display_observer) {
-    display_observer_ = std::move(display_observer);
-  }
 
  protected:
   struct RouteRequest {
@@ -196,10 +191,13 @@ class MediaRouterUIBase
   // Creates and sends an issue if route creation timed out.
   void SendIssueForRouteTimeout(
       MediaCastMode cast_mode,
+      const MediaSink::Id& sink_id,
       const base::string16& presentation_request_source_name);
 
-  // Creates and sends an issue if casting fails for any other reason.
-  void SendIssueForUnableToCast(MediaCastMode cast_mode);
+  // Creates and sends an issue if casting fails for any reason other than
+  // timeout.
+  void SendIssueForUnableToCast(MediaCastMode cast_mode,
+                                const MediaSink::Id& sink_id);
 
   // Returns the IssueManager associated with |router_|.
   IssueManager* GetIssueManager();
@@ -218,9 +216,8 @@ class MediaRouterUIBase
     return start_presentation_context_.get();
   }
 
-  void set_start_presentation_context_for_test(
-      std::unique_ptr<StartPresentationContext> start_presentation_context) {
-    start_presentation_context_ = std::move(start_presentation_context);
+  QueryResultManager* query_result_manager() const {
+    return query_result_manager_.get();
   }
 
   void set_media_router_file_dialog_for_test(
@@ -228,15 +225,19 @@ class MediaRouterUIBase
     media_router_file_dialog_ = std::move(file_dialog);
   }
 
-  QueryResultManager* query_result_manager() const {
-    return query_result_manager_.get();
+  void set_start_presentation_context_for_test(
+      std::unique_ptr<StartPresentationContext> start_presentation_context) {
+    start_presentation_context_ = std::move(start_presentation_context);
   }
 
  private:
+  friend class MediaRouterUiForTest;
   FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest,
                            UIMediaRoutesObserverAssignsCurrentCastModes);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest,
                            UIMediaRoutesObserverSkipsUnavailableCastModes);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest,
+                           UpdateSinksWhenDialogMovesToAnotherDisplay);
 
   class WebContentsFullscreenOnLoadedObserver;
 

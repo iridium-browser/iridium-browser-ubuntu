@@ -117,20 +117,26 @@ class CC_MOJO_EMBEDDER_EXPORT AsyncLayerTreeFrameSink
   bool BindToClient(LayerTreeFrameSinkClient* client) override;
   void DetachFromClient() override;
   void SetLocalSurfaceId(const viz::LocalSurfaceId& local_surface_id) override;
-  void SubmitCompositorFrame(viz::CompositorFrame frame) override;
+  void SubmitCompositorFrame(viz::CompositorFrame frame,
+                             bool hit_test_data_changed,
+                             bool show_hit_test_borders) override;
   void DidNotProduceFrame(const viz::BeginFrameAck& ack) override;
   void DidAllocateSharedBitmap(mojo::ScopedSharedBufferHandle buffer,
                                const viz::SharedBitmapId& id) override;
   void DidDeleteSharedBitmap(const viz::SharedBitmapId& id) override;
+  void ForceAllocateNewId() override;
+
+  const viz::HitTestRegionList& get_last_hit_test_data_for_testing() const {
+    return last_hit_test_data_;
+  }
 
  private:
   // mojom::CompositorFrameSinkClient implementation:
   void DidReceiveCompositorFrameAck(
       const std::vector<viz::ReturnedResource>& resources) override;
-  void DidPresentCompositorFrame(
-      uint32_t presentation_token,
-      const gfx::PresentationFeedback& feedback) override;
-  void OnBeginFrame(const viz::BeginFrameArgs& begin_frame_args) override;
+  void OnBeginFrame(const viz::BeginFrameArgs& begin_frame_args,
+                    const base::flat_map<uint32_t, gfx::PresentationFeedback>&
+                        feedbacks) override;
   void OnBeginFramePausedChanged(bool paused) override;
   void ReclaimResources(
       const std::vector<viz::ReturnedResource>& resources) override;
@@ -164,6 +170,8 @@ class CC_MOJO_EMBEDDER_EXPORT AsyncLayerTreeFrameSink
   THREAD_CHECKER(thread_checker_);
   const bool enable_surface_synchronization_;
   const bool wants_animate_only_begin_frames_;
+
+  viz::HitTestRegionList last_hit_test_data_;
 
   viz::LocalSurfaceId last_submitted_local_surface_id_;
   float last_submitted_device_scale_factor_ = 1.f;

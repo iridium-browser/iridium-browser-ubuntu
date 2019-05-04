@@ -9,7 +9,7 @@ import android.view.ContextMenu;
 
 import org.chromium.chrome.browser.fullscreen.FullscreenOptions;
 import org.chromium.chrome.browser.tab.Tab.TabHidingType;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
+import org.chromium.chrome.browser.tabmodel.TabSelectionType;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.BrowserControlsState;
@@ -43,7 +43,7 @@ public class EmptyTabObserver implements TabObserver {
     public void onPageLoadStarted(Tab tab, String url) { }
 
     @Override
-    public void onPageLoadFinished(Tab tab) { }
+    public void onPageLoadFinished(Tab tab, String url) {}
 
     @Override
     public void onPageLoadFailed(Tab tab, int errorCode) { }
@@ -99,7 +99,11 @@ public class EmptyTabObserver implements TabObserver {
 
     @Override
     public void onDidStartNavigation(Tab tab, String url, boolean isInMainFrame,
-            boolean isSameDocument, boolean isErrorPage) {}
+            boolean isSameDocument, long navigationHandleProxy) {}
+
+    @Override
+    public void onDidRedirectNavigation(
+            Tab tab, String url, boolean isInMainFrame, long navigationHandleProxy) {}
 
     @Override
     public void onDidFinishNavigation(Tab tab, String url, boolean isInMainFrame,
@@ -134,7 +138,7 @@ public class EmptyTabObserver implements TabObserver {
     public void onInteractabilityChanged(boolean isInteractable) {}
 
     @Override
-    public void onRendererResponsiveStateChanged(boolean isResponsive) {}
+    public void onRendererResponsiveStateChanged(Tab tab, boolean isResponsive) {}
 
     @Override
     public void onNavigationEntriesDeleted(Tab tab) {}

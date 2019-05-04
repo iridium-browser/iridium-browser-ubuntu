@@ -98,6 +98,20 @@ declare_args() {
   # Set to true to disable secure flac/opus support in EME, when using
   # cast CMA media backend and supporting Widevine or Playready.
   disable_secure_flac_and_opus_decoding = false
+
+  # Set to true to enable wayland server
+  enable_cast_wayland_server = false
+
+  # Whether to build cast for Android Things N version
+  build_for_android_things_n = false
+
+  # Set to true to enable mixing in CastAudioManager. Only needed on devices
+  # that do not have a mixer in the CMA backend.
+  enable_cast_audio_manager_mixer =
+      chromecast_branding == "google" && !is_cast_audio_only && !is_android
+
+  # Set to true to enable video capture service for video input and output.
+  enable_video_capture_service = false
 }
 
 declare_args() {
@@ -109,7 +123,7 @@ declare_args() {
 
 declare_args() {
   # Use Playready CDMs for internal non-desktop builds.
-  use_playready = !is_cast_desktop_build && chromecast_branding != "public"
+  enable_playready = !is_cast_desktop_build && chromecast_branding != "public"
 }
 
 # This is the release version, which takes the form <major>.<minor>. Internal

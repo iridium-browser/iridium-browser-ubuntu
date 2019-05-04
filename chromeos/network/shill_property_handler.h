@@ -39,14 +39,14 @@ class ShillPropertyObserver;
 // (including once to set their initial state after Init() gets called).
 // It also observes Shill.Service for all services in Manager.ServiceWatchList.
 // This class must not outlive the ShillManagerClient instance.
-class CHROMEOS_EXPORT ShillPropertyHandler
+class COMPONENT_EXPORT(CHROMEOS_NETWORK) ShillPropertyHandler
     : public ShillPropertyChangedObserver,
       public base::SupportsWeakPtr<ShillPropertyHandler> {
  public:
   typedef std::map<std::string, std::unique_ptr<ShillPropertyObserver>>
       ShillPropertyObserverMap;
 
-  class CHROMEOS_EXPORT Listener {
+  class COMPONENT_EXPORT(CHROMEOS_NETWORK) Listener {
    public:
     // Called when the entries in a managed list have changed.
     virtual void UpdateManagedList(ManagedState::ManagedType type,
@@ -150,6 +150,9 @@ class CHROMEOS_EXPORT ShillPropertyHandler
   void SetNetworkThrottlingStatus(bool enabled,
                                   uint32_t upload_rate_kbits,
                                   uint32_t download_rate_kbits);
+
+  // Sets Fast Transition status.
+  void SetFastTransitionStatus(bool enabled);
 
   // Requests an immediate network scan for |type|.
   void RequestScanByType(const std::string& type) const;

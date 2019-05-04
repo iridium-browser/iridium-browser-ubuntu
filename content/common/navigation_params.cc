@@ -7,7 +7,6 @@
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "content/common/service_worker/service_worker_types.h"
-#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/url_constants.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
@@ -36,14 +35,30 @@ InitiatorCSPInfo::InitiatorCSPInfo(const InitiatorCSPInfo& other) = default;
 
 InitiatorCSPInfo::~InitiatorCSPInfo() = default;
 
+bool IsNavigationDownloadAllowed(NavigationDownloadPolicy policy) {
+  switch (policy) {
+    case NavigationDownloadPolicy::kDisallowViewSource:
+    case NavigationDownloadPolicy::kDisallowInterstitial:
+    case NavigationDownloadPolicy::kDisallowSandbox:
+      return false;
+    case NavigationDownloadPolicy::kAllow:
+    case NavigationDownloadPolicy::kAllowOpener:
+    case NavigationDownloadPolicy::kAllowOpenerNoGesture:
+    case NavigationDownloadPolicy::kAllowOpenerCrossOrigin:
+    case NavigationDownloadPolicy::kAllowOpenerCrossOriginNoGesture:
+      return true;
+  }
+}
+
 CommonNavigationParams::CommonNavigationParams() = default;
 
 CommonNavigationParams::CommonNavigationParams(
     const GURL& url,
+    const base::Optional<url::Origin>& initiator_origin,
     const Referrer& referrer,
     ui::PageTransition transition,
     FrameMsg_Navigate_Type::Value navigation_type,
-    bool allow_download,
+    NavigationDownloadPolicy download_policy,
     bool should_replace_current_entry,
     const GURL& base_url_for_data_url,
     const GURL& history_url_for_data_url,
@@ -55,12 +70,14 @@ CommonNavigationParams::CommonNavigationParams(
     bool started_from_context_menu,
     bool has_user_gesture,
     const InitiatorCSPInfo& initiator_csp_info,
+    const std::string& href_translate,
     base::TimeTicks input_start)
     : url(url),
+      initiator_origin(initiator_origin),
       referrer(referrer),
       transition(transition),
       navigation_type(navigation_type),
-      allow_download(allow_download),
+      download_policy(download_policy),
       should_replace_current_entry(should_replace_current_entry),
       base_url_for_data_url(base_url_for_data_url),
       history_url_for_data_url(history_url_for_data_url),
@@ -72,6 +89,7 @@ CommonNavigationParams::CommonNavigationParams(
       started_from_context_menu(started_from_context_menu),
       has_user_gesture(has_user_gesture),
       initiator_csp_info(initiator_csp_info),
+      href_translate(href_translate),
       input_start(input_start) {
   // |method != "POST"| should imply absence of |post_data|.
   if (method != "POST" && post_data) {
@@ -85,9 +103,10 @@ CommonNavigationParams::CommonNavigationParams(
 
 CommonNavigationParams::~CommonNavigationParams() = default;
 
-RequestNavigationParams::RequestNavigationParams() = default;
+CommitNavigationParams::CommitNavigationParams() = default;
 
-RequestNavigationParams::RequestNavigationParams(
+CommitNavigationParams::CommitNavigationParams(
+    const base::Optional<url::Origin>& origin_to_commit,
     bool is_overriding_user_agent,
     const std::vector<GURL>& redirects,
     const GURL& original_url,
@@ -103,7 +122,8 @@ RequestNavigationParams::RequestNavigationParams(
     int current_history_list_length,
     bool is_view_source,
     bool should_clear_history_list)
-    : is_overriding_user_agent(is_overriding_user_agent),
+    : origin_to_commit(origin_to_commit),
+      is_overriding_user_agent(is_overriding_user_agent),
       redirects(redirects),
       original_url(original_url),
       original_method(original_method),
@@ -119,9 +139,9 @@ RequestNavigationParams::RequestNavigationParams(
       is_view_source(is_view_source),
       should_clear_history_list(should_clear_history_list) {}
 
-RequestNavigationParams::RequestNavigationParams(
-    const RequestNavigationParams& other) = default;
+CommitNavigationParams::CommitNavigationParams(
+    const CommitNavigationParams& other) = default;
 
-RequestNavigationParams::~RequestNavigationParams() = default;
+CommitNavigationParams::~CommitNavigationParams() = default;
 
 }  // namespace content

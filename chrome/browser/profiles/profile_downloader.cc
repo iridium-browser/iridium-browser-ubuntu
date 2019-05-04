@@ -24,6 +24,7 @@
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/signin/core/browser/account_fetcher_service.h"
+#include "components/signin/core/browser/account_info.h"
 #include "components/signin/core/browser/avatar_icon_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
@@ -136,7 +137,7 @@ void ProfileDownloader::StartFetchingImage() {
 }
 
 void ProfileDownloader::StartFetchingOAuth2AccessToken() {
-  OAuth2TokenService::ScopeSet scopes;
+  identity::ScopeSet scopes;
   scopes.insert(GaiaConstants::kGoogleUserInfoProfile);
   // Required to determine if lock should be enabled.
   scopes.insert(GaiaConstants::kGoogleUserInfoEmail);
@@ -163,7 +164,7 @@ void ProfileDownloader::FetchImageData() {
     return;
   }
 
-  if (account_info_.picture_url == AccountTrackerService::kNoPictureURLFound) {
+  if (account_info_.picture_url == kNoPictureURLFound) {
     VLOG(1) << "No picture URL for account " << account_info_.email
             << ". Using the default profile picture.";
     picture_status_ = PICTURE_DEFAULT;
@@ -289,9 +290,8 @@ void ProfileDownloader::OnDecodeImageFailed() {
 }
 
 void ProfileDownloader::OnRefreshTokenUpdatedForAccount(
-    const AccountInfo& account_info,
-    bool is_valid) {
-  if (!is_valid || account_info.account_id != account_id_)
+    const AccountInfo& account_info) {
+  if (account_info.account_id != account_id_)
     return;
 
   identity_manager_observer_.Remove(identity_manager_);

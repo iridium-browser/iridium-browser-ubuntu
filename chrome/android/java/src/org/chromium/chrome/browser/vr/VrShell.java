@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.vr;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
@@ -35,8 +36,6 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.compositor.CompositorView;
-import org.chromium.chrome.browser.modaldialog.DialogDismissalCause;
-import org.chromium.chrome.browser.modaldialog.ModalDialogManager;
 import org.chromium.chrome.browser.page_info.PageInfoController;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
@@ -45,16 +44,14 @@ import org.chromium.chrome.browser.tab.TabRedirectHandler;
 import org.chromium.chrome.browser.tabmodel.ChromeTabCreator;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
+import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
-import org.chromium.chrome.browser.tabmodel.TabModelUtils;
+import org.chromium.chrome.browser.toolbar.NewTabButton;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.vr.keyboard.VrInputMethodManagerWrapper;
-import org.chromium.chrome.browser.widget.newtab.NewTabButton;
 import org.chromium.content_public.browser.ImeAdapter;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.ViewEventSink;
@@ -64,6 +61,8 @@ import org.chromium.ui.base.PermissionCallback;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.VirtualDisplayAndroid;
+import org.chromium.ui.modaldialog.DialogDismissalCause;
+import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.widget.UiWidgetFactory;
 
 import java.util.ArrayList;
@@ -135,6 +134,23 @@ public class VrShell extends GvrLayout
 
     private ArrayList<Integer> mUiOperationResults;
     private ArrayList<Runnable> mUiOperationResultCallbacks;
+
+    /**
+     * A struct-like object for registering UI operations during tests.
+     */
+    @VisibleForTesting
+    public static class UiOperationData {
+        // The UiTestOperationType of this operation.
+        public int actionType;
+        // The callback to run when the operation completes.
+        public Runnable resultCallback;
+        // The timeout of the operation.
+        public int timeoutMs;
+        // The UserFriendlyElementName to perform the operation on.
+        public int elementName;
+        // The desired visibility status of the element.
+        public boolean visibility;
+    }
 
     public VrShell(
             ChromeActivity activity, VrShellDelegate delegate, TabModelSelector tabModelSelector) {
@@ -325,10 +341,10 @@ public class VrShell extends GvrLayout
     private void injectVrHostedUiView() {
         mNonVrModalDialogManager = mActivity.getModalDialogManager();
         mNonVrModalDialogManager.dismissAllDialogs(DialogDismissalCause.UNKNOWN);
-        mVrModalPresenter = new VrModalPresenter(this);
+        mVrModalPresenter = new VrModalPresenter(mActivity, this);
         mVrModalDialogManager =
                 new ModalDialogManager(mVrModalPresenter, ModalDialogManager.ModalDialogType.APP);
-        mActivity.setModalDialogManager(mVrModalDialogManager);
+        mActivity.overrideModalDialogManager(mVrModalDialogManager);
 
         ViewGroup decor = (ViewGroup) mActivity.getWindow().getDecorView();
         mUiView = new FrameLayout(decor.getContext());
@@ -388,7 +404,7 @@ public class VrShell extends GvrLayout
             // In the case where we're still in portrait, keep the black overlay visible until the
             // GvrLayout is in the correct orientation.
         } else {
-            VrShellDelegate.removeBlackOverlayView(mActivity, false /* animate */);
+            VrModuleProvider.getDelegate().removeBlackOverlayView(mActivity, false /* animate */);
         }
         float displayWidthMeters = (dm.widthPixels / dm.xdpi) * INCHES_TO_METERS;
         float displayHeightMeters = (dm.heightPixels / dm.ydpi) * INCHES_TO_METERS;
@@ -398,13 +414,11 @@ public class VrShell extends GvrLayout
         // relatively low-res Pixel, and higher-res Pixel XL and other devices.
         boolean lowDensity = dm.densityDpi <= DisplayMetrics.DENSITY_XXHIGH;
 
-        boolean hasOrCanRequestAudioPermission =
-                mActivity.getWindowAndroid().hasPermission(android.Manifest.permission.RECORD_AUDIO)
-                || mActivity.getWindowAndroid().canRequestPermission(
-                           android.Manifest.permission.RECORD_AUDIO);
+        boolean hasOrCanRequestRecordAudioPermission =
+                hasRecordAudioPermission() || canRequestRecordAudioPermission();
         boolean supportsRecognition = FeatureUtilities.isRecognitionIntentPresent(mActivity, false);
         mNativeVrShell = nativeInit(mDelegate, forWebVr, !mVrBrowsingEnabled,
-                hasOrCanRequestAudioPermission && supportsRecognition,
+                hasOrCanRequestRecordAudioPermission && supportsRecognition,
                 getGvrApi().getNativeGvrContext(), mReprojectedRendering, displayWidthMeters,
                 displayHeightMeters, dm.widthPixels, dm.heightPixels, pauseContent, lowDensity,
                 isStandaloneVrDevice);
@@ -519,8 +533,14 @@ public class VrShell extends GvrLayout
 
     // Returns true if Chrome has permission to use audio input.
     @CalledByNative
-    public boolean hasAudioPermission() {
-        return mDelegate.hasAudioPermission();
+    public boolean hasRecordAudioPermission() {
+        return mDelegate.hasRecordAudioPermission();
+    }
+
+    // Returns true if Chrome has not been permanently denied audio input permission.
+    @CalledByNative
+    public boolean canRequestRecordAudioPermission() {
+        return mDelegate.canRequestRecordAudioPermission();
     }
 
     // Exits VR, telling the user to remove their headset, and returning to Chromium.
@@ -553,6 +573,8 @@ public class VrShell extends GvrLayout
                             @Override
                             public void run() {
                                 VrShellDelegate.enterVrIfNecessary();
+                                nativeRequestRecordAudioPermissionResult(mNativeVrShell,
+                                        grantResults[0] == PackageManager.PERMISSION_GRANTED);
                             }
                         });
                     }
@@ -610,7 +632,7 @@ public class VrShell extends GvrLayout
         // VR mode off.
         // TODO(asimjour): Focus is a bad signal. We should listen for windows being created and
         // destroyed if possible.
-        if (VrShellDelegate.bootsToVr()) {
+        if (VrModuleProvider.getDelegate().bootsToVr()) {
             if (focused) {
                 resume();
             } else {
@@ -732,7 +754,7 @@ public class VrShell extends GvrLayout
         if (mVrBrowsingEnabled) {
             if (mVrModalDialogManager != null) {
                 mVrModalDialogManager.dismissAllDialogs(DialogDismissalCause.UNKNOWN);
-                mActivity.setModalDialogManager(mNonVrModalDialogManager);
+                mActivity.overrideModalDialogManager(mNonVrModalDialogManager);
                 mVrModalDialogManager = null;
             }
             mNonVrViews.destroy();
@@ -1027,15 +1049,6 @@ public class VrShell extends GvrLayout
     }
 
     @CalledByNative
-    public void selectTab(int id, boolean incognito) {
-        TabModel tabModel = mTabModelSelector.getModel(incognito);
-        int index = TabModelUtils.getTabIndexById(tabModel, id);
-        if (index != TabModel.INVALID_TAB_INDEX) {
-            tabModel.setIndex(index, TabSelectionType.FROM_USER);
-        }
-    }
-
-    @CalledByNative
     public void openBookmarks() {
         mActivity.onMenuOrKeyboardAction(R.id.all_bookmarks_menu_id, true);
     }
@@ -1063,16 +1076,6 @@ public class VrShell extends GvrLayout
     @CalledByNative
     public void openSettings() {
         mActivity.onMenuOrKeyboardAction(R.id.preferences_id, true);
-    }
-
-    @CalledByNative
-    public void closeTab(int id, boolean incognito) {
-        TabModelUtils.closeTabById(mTabModelSelector.getModel(incognito), id);
-    }
-
-    @CalledByNative
-    public void closeAllTabs() {
-        mTabModelSelector.closeAllTabs();
     }
 
     @CalledByNative
@@ -1140,7 +1143,8 @@ public class VrShell extends GvrLayout
     @Override
     protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
-        if (width > height) VrShellDelegate.removeBlackOverlayView(mActivity, true /* animate */);
+        if (width > height)
+            VrModuleProvider.getDelegate().removeBlackOverlayView(mActivity, true /* animate */);
     }
 
     /**
@@ -1233,8 +1237,8 @@ public class VrShell extends GvrLayout
         });
     }
 
-    public void registerUiOperationCallbackForTesting(
-            int actionType, Runnable resultCallback, int timeoutMs, int elementName) {
+    public void registerUiOperationCallbackForTesting(UiOperationData operationData) {
+        int actionType = operationData.actionType;
         assert actionType < UiTestOperationType.NUM_UI_TEST_OPERATION_TYPES;
         // Fill the ArrayLists if this is the first time the method has been called.
         if (mUiOperationResults == null) {
@@ -1248,14 +1252,15 @@ public class VrShell extends GvrLayout
             }
         }
         mUiOperationResults.set(actionType, UiTestOperationResult.UNREPORTED);
-        mUiOperationResultCallbacks.set(actionType, resultCallback);
+        mUiOperationResultCallbacks.set(actionType, operationData.resultCallback);
 
         // In the case of the UI activity quiescence callback type, we need to let the native UI
         // know how long to wait before timing out.
         if (actionType == UiTestOperationType.UI_ACTIVITY_RESULT) {
-            nativeSetUiExpectingActivityForTesting(mNativeVrShell, timeoutMs);
-        } else if (actionType == UiTestOperationType.ELEMENT_VISIBILITY_CHANGE) {
-            nativeWatchElementForVisibilityChangeForTesting(mNativeVrShell, elementName, timeoutMs);
+            nativeSetUiExpectingActivityForTesting(mNativeVrShell, operationData.timeoutMs);
+        } else if (actionType == UiTestOperationType.ELEMENT_VISIBILITY_STATUS) {
+            nativeWatchElementForVisibilityStatusForTesting(mNativeVrShell,
+                    operationData.elementName, operationData.timeoutMs, operationData.visibility);
         }
     }
 
@@ -1275,7 +1280,7 @@ public class VrShell extends GvrLayout
     }
 
     private native long nativeInit(VrShellDelegate delegate, boolean forWebVR,
-            boolean browsingDisabled, boolean hasOrCanRequestAudioPermission, long gvrApi,
+            boolean browsingDisabled, boolean hasOrCanRequestRecordAudioPermission, long gvrApi,
             boolean reprojectedRendering, float displayWidthMeters, float displayHeightMeters,
             int displayWidthPixels, int displayHeightPixels, boolean pauseContent,
             boolean lowDensity, boolean isStandaloneVrDevice);
@@ -1327,8 +1332,10 @@ public class VrShell extends GvrLayout
             long nativeVrShell, int quiescenceTimeoutMs);
     private native void nativeSaveNextFrameBufferToDiskForTesting(
             long nativeVrShell, String filepathBase);
-    private native void nativeWatchElementForVisibilityChangeForTesting(
-            long nativeVrShell, int elementName, int timeoutMs);
+    private native void nativeWatchElementForVisibilityStatusForTesting(
+            long nativeVrShell, int elementName, int timeoutMs, boolean visibility);
     private native void nativeResumeContentRendering(long nativeVrShell);
     private native void nativeOnOverlayTextureEmptyChanged(long nativeVrShell, boolean empty);
+    private native void nativeRequestRecordAudioPermissionResult(
+            long nativeVrShell, boolean canRecordAudio);
 }

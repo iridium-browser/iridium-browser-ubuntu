@@ -11,14 +11,15 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/net/disk_cache_dir_policy_handler.h"
 #include "chrome/browser/policy/browsing_history_policy_handler.h"
 #include "chrome/browser/policy/developer_tools_policy_handler.h"
 #include "chrome/browser/policy/file_selection_dialogs_policy_handler.h"
+#include "chrome/browser/policy/homepage_location_policy_handler.h"
 #include "chrome/browser/policy/javascript_policy_handler.h"
 #include "chrome/browser/policy/managed_bookmarks_policy_handler.h"
 #include "chrome/browser/policy/network_prediction_policy_handler.h"
@@ -41,6 +42,7 @@
 #include "components/certificate_transparency/pref_names.h"
 #include "components/component_updater/pref_names.h"
 #include "components/content_settings/core/common/pref_names.h"
+#include "components/history/core/common/pref_names.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/network_time/network_time_pref_names.h"
@@ -79,12 +81,13 @@
 #include "chrome/browser/chromeos/accessibility/magnifier_type.h"
 #include "chrome/browser/chromeos/crostini/crostini_pref_names.h"
 #include "chrome/browser/chromeos/platform_keys/key_permissions_policy_handler.h"
+#include "chrome/browser/chromeos/plugin_vm/plugin_vm_pref_names.h"
 #include "chrome/browser/chromeos/policy/configuration_policy_handler_chromeos.h"
 #include "chrome/browser/chromeos/policy/secondary_google_account_signin_policy_handler.h"
 #include "chrome/browser/policy/default_geolocation_policy_handler.h"
 #include "chrome/browser/policy/printing_restrictions_policy_handler.h"
 #include "chrome/common/chrome_features.h"
-#include "chromeos/chromeos_pref_names.h"
+#include "chromeos/constants/chromeos_pref_names.h"
 #include "chromeos/dbus/power_policy_controller.h"
 #include "chromeos/services/multidevice_setup/public/cpp/prefs.h"
 #include "components/arc/arc_prefs.h"
@@ -102,6 +105,11 @@
 
 #if !defined(OS_CHROMEOS)
 #include "chrome/browser/policy/browser_signin_policy_handler.h"
+#endif
+
+#if defined(OS_WIN) || defined(OS_MACOSX) || \
+    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+#include "chrome/browser/browser_switcher/browser_switcher_prefs.h"
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -132,9 +140,6 @@ namespace {
 // that directly map to a single preference.
 // clang-format off
 const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
-  { key::kHomepageLocation,
-    prefs::kHomePage,
-    base::Value::Type::STRING },
   { key::kHomepageIsNewTabPage,
     prefs::kHomePageIsNewTabPage,
     base::Value::Type::BOOLEAN },
@@ -276,11 +281,11 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kMachineLevelUserCloudPolicyEnrollmentToken,
     policy_prefs::kMachineLevelUserCloudPolicyEnrollmentToken,
     base::Value::Type::STRING },
+  { key::kCloudManagementEnrollmentMandatory,
+    policy_prefs::kCloudManagementEnrollmentMandatory,
+    base::Value::Type::BOOLEAN },
   { key::kRequireOnlineRevocationChecksForLocalAnchors,
     prefs::kCertRevocationCheckingRequiredLocalAnchors,
-    base::Value::Type::BOOLEAN },
-  { key::kEnableSha1ForLocalAnchors,
-    prefs::kCertEnableSha1LocalAnchors,
     base::Value::Type::BOOLEAN },
   { key::kEnableSymantecLegacyInfrastructure,
     prefs::kCertEnableSymantecLegacyInfrastructure,
@@ -449,6 +454,11 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kComponentUpdatesEnabled,
     prefs::kComponentUpdatesEnabled,
     base::Value::Type::BOOLEAN },
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  { key::kExtensionAllowInsecureUpdates,
+    extensions::pref_names::kInsecureExtensionUpdatesEnabled,
+    base::Value::Type::BOOLEAN },
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   { key::kSpellCheckServiceEnabled,
@@ -660,8 +670,8 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kUserNativePrintersAllowed,
     prefs::kUserNativePrintersAllowed,
     base::Value::Type::BOOLEAN },
-  { key::kAllowedUILocales,
-    prefs::kAllowedUILocales,
+  { key::kAllowedLanguages,
+    prefs::kAllowedLanguages,
     base::Value::Type::LIST },
   { key::kAllowedInputMethods,
     prefs::kLanguageAllowedInputMethods,
@@ -693,6 +703,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kNTLMShareAuthenticationEnabled,
     prefs::kNTLMShareAuthenticationEnabled,
     base::Value::Type::BOOLEAN },
+  { key::kPrintingSendUsernameAndFilenameEnabled,
+    prefs::kPrintingSendUsernameAndFilenameEnabled,
+    base::Value::Type::BOOLEAN },
+  { key::kPluginVmImage,
+    plugin_vm::prefs::kPluginVmImage,
+    base::Value::Type::DICTIONARY },
 #endif  // defined(OS_CHROMEOS)
 
 // Metrics reporting is controlled by a platform specific policy for ChromeOS
@@ -718,6 +734,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::Type::BOOLEAN },
   { key::kReportUserIDData,
     extensions::enterprise_reporting::kReportUserIDData,
+    base::Value::Type::BOOLEAN },
+  { key::kReportExtensionsAndPluginsData,
+    extensions::enterprise_reporting::kReportExtensionsAndPluginsData,
+    base::Value::Type::BOOLEAN },
+  { key::kReportSafeBrowsingData,
+    extensions::enterprise_reporting::kReportSafeBrowsingData,
     base::Value::Type::BOOLEAN },
 #endif  // !defined(OS_CHROMEOS) && BUILDFLAG(ENABLE_EXTENSIONS)
 
@@ -751,6 +773,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::Type::BOOLEAN },
   { key::kCloudPolicyOverridesMachinePolicy,
     prefs::kCloudPolicyOverridesMachinePolicy,
+    base::Value::Type::BOOLEAN },
+  { key::kCloudReportingEnabled,
+    prefs::kCloudReportingEnabled,
     base::Value::Type::BOOLEAN },
 #endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 
@@ -788,6 +813,10 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::Type::BOOLEAN },
 
 #if defined(OS_CHROMEOS)
+  { key::kDeviceWiFiFastTransitionEnabled,
+    chromeos::prefs::kDeviceWiFiFastTransitionEnabled,
+    base::Value::Type::BOOLEAN },
+
   { key::kNetworkThrottlingEnabled,
     prefs::kNetworkThrottlingEnabled,
     base::Value::Type::DICTIONARY },
@@ -909,6 +938,33 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kEnterpriseHardwarePlatformAPIEnabled,
     prefs::kEnterpriseHardwarePlatformAPIEnabled,
     base::Value::Type::BOOLEAN },
+
+#if defined(OS_WIN) || defined(OS_MACOSX) || \
+    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+  { key::kAlternativeBrowserPath,
+    browser_switcher::prefs::kAlternativeBrowserPath,
+    base::Value::Type::STRING },
+  { key::kAlternativeBrowserParameters,
+    browser_switcher::prefs::kAlternativeBrowserParameters,
+    base::Value::Type::LIST },
+  { key::kBrowserSwitcherUrlList,
+    browser_switcher::prefs::kUrlList,
+    base::Value::Type::LIST },
+  { key::kBrowserSwitcherUrlGreylist,
+    browser_switcher::prefs::kUrlGreylist,
+    base::Value::Type::LIST },
+  { key::kBrowserSwitcherExternalSitelistUrl,
+    browser_switcher::prefs::kExternalSitelistUrl,
+    base::Value::Type::STRING },
+  { key::kBrowserSwitcherEnabled,
+    browser_switcher::prefs::kEnabled,
+    base::Value::Type::BOOLEAN },
+#endif
+#if defined(OS_WIN)
+  { key::kBrowserSwitcherUseIeSitelist,
+    browser_switcher::prefs::kUseIeSitelist,
+    base::Value::Type::BOOLEAN },
+#endif
 };
 // clang-format on
 
@@ -955,7 +1011,7 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
       new ConfigurationPolicyHandlerList(
           base::Bind(&PopulatePolicyHandlerParameters),
           base::Bind(&GetChromePolicyDetails)));
-  for (size_t i = 0; i < arraysize(kSimplePolicyMap); ++i) {
+  for (size_t i = 0; i < base::size(kSimplePolicyMap); ++i) {
     handlers->AddHandler(std::make_unique<SimplePolicyHandler>(
         kSimplePolicyMap[i].policy_name, kSimplePolicyMap[i].preference_path,
         kSimplePolicyMap[i].value_type));
@@ -973,6 +1029,7 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
   handlers->AddHandler(std::make_unique<GuestModePolicyHandler>());
   handlers->AddHandler(
       std::make_unique<ManagedBookmarksPolicyHandler>(chrome_schema));
+  handlers->AddHandler(std::make_unique<HomepageLocationPolicyHandler>());
   handlers->AddHandler(std::make_unique<ProxyPolicyHandler>());
   handlers->AddHandler(std::make_unique<URLBlacklistPolicyHandler>());
 
@@ -1252,6 +1309,8 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
       std::move(screen_lock_legacy_policies),
       base::WrapUnique(new ScreenLockDelayPolicyHandler(chrome_schema))));
   handlers->AddHandler(
+      std::make_unique<ScreenBrightnessPercentPolicyHandler>(chrome_schema));
+  handlers->AddHandler(
       std::make_unique<ExternalDataPolicyHandler>(key::kUserAvatarImage));
   handlers->AddHandler(
       std::make_unique<ExternalDataPolicyHandler>(key::kDeviceWallpaperImage));
@@ -1298,6 +1357,11 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
       key::kNetworkFileSharesPreconfiguredShares,
       prefs::kNetworkFileSharesPreconfiguredShares, chrome_schema,
       SCHEMA_STRICT,
+      SimpleSchemaValidatingPolicyHandler::RECOMMENDED_PROHIBITED,
+      SimpleSchemaValidatingPolicyHandler::MANDATORY_ALLOWED));
+  handlers->AddHandler(std::make_unique<SimpleSchemaValidatingPolicyHandler>(
+      key::kParentAccessCodeConfig, prefs::kParentAccessCodeConfig,
+      chrome_schema, SCHEMA_STRICT,
       SimpleSchemaValidatingPolicyHandler::RECOMMENDED_PROHIBITED,
       SimpleSchemaValidatingPolicyHandler::MANDATORY_ALLOWED));
 #endif  // defined(OS_CHROMEOS)

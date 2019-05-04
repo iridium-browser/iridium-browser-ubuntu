@@ -29,9 +29,10 @@ class AppListControllerImpl;
 // Additionally hides windows which may block the home launcher. All
 // modifications are either transitioned to their final state, or back to their
 // initial state on release event.
-class ASH_EXPORT HomeLauncherGestureHandler : aura::WindowObserver,
-                                              TabletModeObserver,
-                                              ui::ImplicitAnimationObserver {
+class ASH_EXPORT HomeLauncherGestureHandler
+    : public aura::WindowObserver,
+      public TabletModeObserver,
+      public ui::ImplicitAnimationObserver {
  public:
   // Enum which tracks which mode the current scroll process is in.
   enum class Mode {
@@ -53,7 +54,7 @@ class ASH_EXPORT HomeLauncherGestureHandler : aura::WindowObserver,
   // was not processed.
   bool OnPressEvent(Mode mode, const gfx::Point& location);
   bool OnScrollEvent(const gfx::Point& location, float scroll_y);
-  bool OnReleaseEvent(const gfx::Point& location, bool* out_dragged_down);
+  bool OnReleaseEvent(const gfx::Point& location);
 
   // Cancel a current drag and animates the items to their final state based on
   // |last_event_location_|.
@@ -65,6 +66,10 @@ class ASH_EXPORT HomeLauncherGestureHandler : aura::WindowObserver,
   // Hide home launcher and show MRU window on specified display.
   bool HideHomeLauncherForWindow(const display::Display& display,
                                  aura::Window* window);
+
+  // Returns the windows being tracked. May be null.
+  aura::Window* GetWindow1();
+  aura::Window* GetWindow2();
 
   bool IsDragInProgress() const { return last_event_location_.has_value(); }
 
@@ -80,14 +85,13 @@ class ASH_EXPORT HomeLauncherGestureHandler : aura::WindowObserver,
   void OnImplicitAnimationsCompleted() override;
 
   Mode mode() const { return mode_; }
-  aura::Window* window() { return window_; }
-  aura::Window* window2() { return window2_; }
 
  private:
+  class ScopedWindowModifier;
   FRIEND_TEST_ALL_PREFIXES(HomeLauncherModeGestureHandlerTest,
                            AnimatingToEndResetsState);
 
-  // Stores the initial and target opacities and transforms of a window.
+  // Stores the initial and target opacities and transforms of window.
   struct WindowValues {
     float initial_opacity;
     float target_opacity;
@@ -115,6 +119,9 @@ class ASH_EXPORT HomeLauncherGestureHandler : aura::WindowObserver,
   // Returns true if there's no gesture dragging and animation.
   bool IsIdle();
 
+  // Returns true if animation is running.
+  bool IsAnimating();
+
   // Returns true if home launcher should run animation to show. Otherwise,
   // returns false.
   bool IsFinalStateShow();
@@ -130,18 +137,8 @@ class ASH_EXPORT HomeLauncherGestureHandler : aura::WindowObserver,
   // The windows we are tracking. They are null if a drag is not underway, or if
   // overview without splitview is active. |window2_| is the secondary window
   // for splitview and is always null if |window1_| is null.
-  aura::Window* window_ = nullptr;
-  aura::Window* window2_ = nullptr;
-
-  // Original and target transform and opacity of |window_| and |window2_|.
-  WindowValues window_values_;
-  WindowValues window_values2_;
-
-  // Tracks the transient descendants of |window_| and their initial and target
-  // opacities and transforms.
-  std::map<aura::Window*, WindowValues> transient_descendants_values_;
-  // Transient descendants of |window2_|.
-  std::map<aura::Window*, WindowValues> transient_descendants_values2_;
+  std::unique_ptr<ScopedWindowModifier> window1_;
+  std::unique_ptr<ScopedWindowModifier> window2_;
 
   // Original and target transform and opacity of the backdrop window. Empty if
   // there is no backdrop on mouse pressed.
@@ -155,8 +152,6 @@ class ASH_EXPORT HomeLauncherGestureHandler : aura::WindowObserver,
   // hidden so the home launcher is visible when swiping up.
   std::vector<aura::Window*> hidden_windows_;
 
-  gfx::Point initial_event_location_;
-
   // Tracks the location of the last received event in screen coordinates. Empty
   // if there is currently no window being processed.
   base::Optional<gfx::Point> last_event_location_;
@@ -165,6 +160,12 @@ class ASH_EXPORT HomeLauncherGestureHandler : aura::WindowObserver,
   // |last_scroll_y_| is greater than a certain threshold, even if
   // |last_event_location_| is in a different half.
   float last_scroll_y_ = 0.f;
+
+  // Stores whether overview was actived when we first perform the swipe up
+  // gesture. This is needed in case someone enters overview while the show home
+  // launcher animation is running, overview will be active, but we do not want
+  // to toggle overview again in that case.
+  bool overview_active_on_gesture_start_ = false;
 
   ScopedObserver<TabletModeController, TabletModeObserver>
       tablet_mode_observer_{this};

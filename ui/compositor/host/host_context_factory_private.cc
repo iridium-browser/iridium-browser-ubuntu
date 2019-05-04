@@ -10,6 +10,7 @@
 #include "cc/mojo_embedder/async_layer_tree_frame_sink.h"
 #include "components/viz/client/hit_test_data_provider_draw_quad.h"
 #include "components/viz/client/local_surface_id_provider.h"
+#include "components/viz/common/features.h"
 #include "components/viz/common/switches.h"
 #include "components/viz/host/host_display_client.h"
 #include "components/viz/host/host_frame_sink_manager.h"
@@ -77,9 +78,10 @@ void HostContextFactoryPrivate::ConfigureCompositor(
 
   // Initialize ExternalBeginFrameController client if enabled.
   compositor_data.external_begin_frame_controller_client.reset();
-  if (compositor->external_begin_frames_enabled()) {
+  if (compositor->external_begin_frame_client()) {
     compositor_data.external_begin_frame_controller_client =
-        std::make_unique<ExternalBeginFrameControllerClientImpl>(compositor);
+        std::make_unique<ExternalBeginFrameControllerClientImpl>(
+            compositor->external_begin_frame_client());
     root_params->external_begin_frame_controller =
         compositor_data.external_begin_frame_controller_client
             ->GetControllerRequest();
@@ -115,12 +117,13 @@ void HostContextFactoryPrivate::ConfigureCompositor(
       compositor->context_factory()->GetGpuMemoryBufferManager();
   params.pipes.compositor_frame_sink_associated_info = std::move(sink_info);
   params.pipes.client_request = std::move(client_request);
-  params.local_surface_id_provider =
-      std::make_unique<viz::DefaultLocalSurfaceIdProvider>();
   params.enable_surface_synchronization = true;
-  params.hit_test_data_provider =
-      std::make_unique<viz::HitTestDataProviderDrawQuad>(
-          /*should_ask_for_child_region=*/false);
+  if (features::IsVizHitTestingDrawQuadEnabled()) {
+    params.hit_test_data_provider =
+        std::make_unique<viz::HitTestDataProviderDrawQuad>(
+            false /* should_ask_for_child_region */,
+            true /* root_accepts_events */);
+  }
   params.client_name = kBrowser;
   compositor->SetLayerTreeFrameSink(
       std::make_unique<cc::mojo_embedder::AsyncLayerTreeFrameSink>(
@@ -135,6 +138,14 @@ void HostContextFactoryPrivate::UnconfigureCompositor(Compositor* compositor) {
 #endif
 
   compositor_data_map_.erase(compositor);
+}
+
+base::flat_set<Compositor*> HostContextFactoryPrivate::GetAllCompositors() {
+  base::flat_set<Compositor*> all_compositors;
+  all_compositors.reserve(compositor_data_map_.size());
+  for (auto& pair : compositor_data_map_)
+    all_compositors.insert(pair.first);
+  return all_compositors;
 }
 
 std::unique_ptr<Reflector> HostContextFactoryPrivate::CreateReflector(
@@ -252,14 +263,6 @@ viz::FrameSinkManagerImpl* HostContextFactoryPrivate::GetFrameSinkManager() {
   // https://crbug.com/760181 for more context.
   NOTREACHED();
   return nullptr;
-}
-
-base::flat_set<Compositor*> HostContextFactoryPrivate::GetAllCompositors() {
-  base::flat_set<Compositor*> all_compositors;
-  all_compositors.reserve(compositor_data_map_.size());
-  for (auto& pair : compositor_data_map_)
-    all_compositors.insert(pair.first);
-  return all_compositors;
 }
 
 HostContextFactoryPrivate::CompositorData::CompositorData() = default;

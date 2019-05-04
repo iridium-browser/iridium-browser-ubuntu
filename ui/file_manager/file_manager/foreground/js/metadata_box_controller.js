@@ -105,11 +105,12 @@ MetadataBoxController.prototype.updateView_ = function() {
   this.previousEntry_ = entry;
   // Do not clear isSizeLoading and size fields when the entry is not changed.
   this.metadataBox_.clear(isSameEntry);
-  if (!entry)
+  if (!entry) {
     return;
+  }
   this.metadataModel_
       .get([entry], MetadataBoxController.GENERAL_METADATA_NAME.concat([
-        'hosted', 'externalFileUrl'
+        'alternateUrl', 'externalFileUrl', 'hosted'
       ]))
       .then(this.onGeneralMetadataLoaded_.bind(this, entry, isSameEntry));
 };
@@ -144,7 +145,7 @@ MetadataBoxController.prototype.onGeneralMetadataLoaded_ = function(
         this.fileMetadataFormatter_.formatModDate(item.modificationTime);
   }
 
-  if (item.externalFileUrl) {
+  if (item.externalFileUrl || item.alternateUrl) {
     this.metadataModel_.get([entry], ['contentMimeType']).then(function(items) {
       var item = items[0];
       this.metadataBox_.mediaMimeType = item.contentMimeType;
@@ -157,7 +158,7 @@ MetadataBoxController.prototype.onGeneralMetadataLoaded_ = function(
   }
 
   if (['image', 'video', 'audio'].includes(type)) {
-    if (item.externalFileUrl) {
+    if (item.externalFileUrl || item.alternateUrl) {
       this.metadataModel_.get([entry], ['imageHeight', 'imageWidth'])
           .then(function(items) {
             var item = items[0];
@@ -211,12 +212,14 @@ MetadataBoxController.prototype.onGeneralMetadataLoaded_ = function(
  */
 MetadataBoxController.prototype.setDirectorySize_ = function(
     entry, isSameEntry) {
-  if (!entry.isDirectory)
+  if (!entry.isDirectory) {
     return;
+  }
 
   if (this.isDirectorySizeLoading_) {
-    if (!isSameEntry)
+    if (!isSameEntry) {
       this.metadataBox_.isSizeLoading = true;
+    }
 
     // Only retain the last setDirectorySize_ request.
     this.onDirectorySizeLoaded_ = function(lastEntry) {
@@ -230,11 +233,14 @@ MetadataBoxController.prototype.setDirectorySize_ = function(
   this.isDirectorySizeLoading_ = true;
   chrome.fileManagerPrivate.getDirectorySize(entry, function(size) {
     this.isDirectorySizeLoading_ = false;
-    if (this.onDirectorySizeLoaded_)
+    if (this.onDirectorySizeLoaded_) {
       setTimeout(this.onDirectorySizeLoaded_.bind(null, entry));
+      this.onDirectorySizeLoaded_ = null;
+    }
 
-    if (this.quickViewModel_.getSelectedEntry() != entry)
+    if (this.quickViewModel_.getSelectedEntry() != entry) {
       return;
+    }
 
     if (chrome.runtime.lastError) {
       this.metadataBox_.isSizeLoading = false;

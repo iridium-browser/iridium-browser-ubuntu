@@ -20,8 +20,13 @@ using base::android::JavaParamRef;
 
 namespace cronet {
 
+namespace {
+
+base::MessageLoop* g_message_loop = nullptr;
+
+}  // namespace
+
 jint JNI_CronetTestUtil_GetLoadFlags(JNIEnv* env,
-                                     const JavaParamRef<jclass>& jcaller,
                                      const jlong jurl_request_adapter) {
   return TestUtil::GetURLRequest(jurl_request_adapter)->load_flags();
 }
@@ -71,8 +76,8 @@ net::URLRequest* TestUtil::GetURLRequest(jlong jrequest_adapter) {
 }
 
 static void PrepareNetworkThreadOnNetworkThread(jlong jcontext_adapter) {
-  (new base::MessageLoopForIO())
-      ->SetTaskRunner(TestUtil::GetTaskRunner(jcontext_adapter));
+  g_message_loop = new base::MessageLoopForIO();
+  g_message_loop->SetTaskRunner(TestUtil::GetTaskRunner(jcontext_adapter));
 }
 
 // Tests need to call into libcronet.so code on libcronet.so threads.
@@ -84,7 +89,6 @@ static void PrepareNetworkThreadOnNetworkThread(jlong jcontext_adapter) {
 // for these threads.  Called from Java CronetTestUtil class.
 void JNI_CronetTestUtil_PrepareNetworkThread(
     JNIEnv* env,
-    const JavaParamRef<jclass>& jcaller,
     jlong jcontext_adapter) {
   TestUtil::GetTaskRunner(jcontext_adapter)
       ->PostTask(FROM_HERE, base::Bind(&PrepareNetworkThreadOnNetworkThread,
@@ -92,20 +96,21 @@ void JNI_CronetTestUtil_PrepareNetworkThread(
 }
 
 static void CleanupNetworkThreadOnNetworkThread() {
-  delete base::MessageLoop::current();
+  DCHECK(g_message_loop);
+  DCHECK(g_message_loop->IsBoundToCurrentThread());
+  delete g_message_loop;
+  g_message_loop = nullptr;
 }
 
 // Called from Java CronetTestUtil class.
 void JNI_CronetTestUtil_CleanupNetworkThread(
     JNIEnv* env,
-    const JavaParamRef<jclass>& jcaller,
     jlong jcontext_adapter) {
   TestUtil::RunAfterContextInit(
       jcontext_adapter, base::Bind(&CleanupNetworkThreadOnNetworkThread));
 }
 
 jlong JNI_CronetTestUtil_GetTaggedBytes(JNIEnv* env,
-                                        const JavaParamRef<jclass>& jcaller,
                                         jint jexpected_tag) {
   return net::GetTaggedBytes(jexpected_tag);
 }

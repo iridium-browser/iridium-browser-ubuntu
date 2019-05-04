@@ -9,7 +9,6 @@
 
 // We use relative includes here to make this compatible with both the
 // Chromium OS and Chromium environment.
-#include "apmanager/dbus-constants.h"
 #include "authpolicy/dbus-constants.h"
 #include "biod/dbus-constants.h"
 #include "cecservice/dbus-constants.h"
@@ -24,6 +23,7 @@
 #include "oobe_config/dbus-constants.h"
 #include "permission_broker/dbus-constants.h"
 #include "power_manager/dbus-constants.h"
+#include "runtime_probe/dbus-constants.h"
 #include "seneschal/dbus-constants.h"
 #include "shill/dbus-constants.h"
 #include "smbprovider/dbus-constants.h"
@@ -31,6 +31,7 @@
 #include "vm_applications/dbus-constants.h"
 #include "vm_cicerone/dbus-constants.h"
 #include "vm_concierge/dbus-constants.h"
+#include "vm_plugin_dispatcher/dbus-constants.h"
 
 namespace dbus {
 const char kDBusInterface[] = "org.freedesktop.DBus";
@@ -81,6 +82,8 @@ const char kLoadDlcImage[] = "LoadDlcImage";
 // Constants
 const char kBadResult[] = "";
 const char kTerminaComponentName[] = "cros-termina";
+const char kSlotNameA[] = "Dlc-A";
+const char kSlotNameB[] = "Dlc-B";
 }  // namespace imageloader
 
 namespace dlcservice {
@@ -186,18 +189,31 @@ const char kChromeFeaturesServiceName[] = "org.chromium.ChromeFeaturesService";
 const char kChromeFeaturesServicePath[] = "/org/chromium/ChromeFeaturesService";
 const char kChromeFeaturesServiceInterface[] =
     "org.chromium.ChromeFeaturesServiceInterface";
+const char kChromeFeaturesServiceIsFeatureEnabledMethod[] =
+    "IsFeatureEnabled";
 const char kChromeFeaturesServiceIsCrostiniEnabledMethod[] =
     "IsCrostiniEnabled";
+const char kChromeFeaturesServiceIsPluginVmEnabledMethod[] =
+    "IsPluginVmEnabled";
 const char kChromeFeaturesServiceIsUsbguardEnabledMethod[] =
     "IsUsbguardEnabled";
 const char kChromeFeaturesServiceIsShillSandboxingEnabledMethod[] =
     "IsShillSandboxingEnabled";
+const char kChromeFeaturesServiceIsFsNosymfollowEnabledMethod[] =
+    "IsFsNosymfollowEnabled";
 
 const char kUrlHandlerServiceName[] = "org.chromium.UrlHandlerService";
 const char kUrlHandlerServicePath[] = "/org/chromium/UrlHandlerService";
 const char kUrlHandlerServiceInterface[] =
     "org.chromium.UrlHandlerServiceInterface";
 const char kUrlHandlerServiceOpenUrlMethod[] = "OpenUrl";
+
+const char kPluginVmServiceName[] = "org.chromium.PluginVmService";
+const char kPluginVmServicePath[] = "/org/chromium/PluginVmService";
+const char kPluginVmServiceInterface[] =
+    "org.chromium.PluginVmServiceInterface";
+const char kPluginVmServiceGetLicenseDataMethod[] =
+    "GetLicenseData";
 
 }  // namespace chromeos
 
@@ -346,6 +362,7 @@ const char kStackSyncQuittingProperty[] = "StackSyncQuitting";
 // Bluetooth Adapter errors.
 const char kErrorNotReady[] = "org.bluez.Error.NotReady";
 const char kErrorFailed[] = "org.bluez.Error.Failed";
+const char kErrorInProgress[] = "org.bluez.Error.InProgress";
 const char kErrorNotAuthorized[] = "org.bluez.Error.NotAuthorized";
 const char kErrorInvalidArguments[] = "org.bluez.Error.InvalidArguments";
 const char kErrorAlreadyExists[] = "org.bluez.Error.AlreadyExists";
@@ -441,6 +458,7 @@ const char kServiceDataProperty[] = "ServiceData";
 const char kServicesResolvedProperty[] = "ServicesResolved";
 const char kAdvertisingDataFlagsProperty[] = "AdvertisingFlags";
 const char kMTUProperty[] = "MTU";
+const char kEIRProperty[] = "EIR";
 
 // Bluetooth Device errors.
 const char kErrorNotReady[] = "org.bluez.Error.NotReady";
@@ -771,6 +789,9 @@ const char kUnregisterAdvertisement[] = "UnregisterAdvertisement";
 const char kSetAdvertisingIntervals[] = "SetAdvertisingIntervals";
 const char kResetAdvertising[] = "ResetAdvertising";
 
+// Bluetooth LE Advertising Manager properties.
+const char kIsTXPowerSupportedProperty[] = "IsTXPowerSupported";
+
 // Bluetooth LE Advertising Manager errors.
 const char kErrorAlreadyExists[] = "org.bluez.Error.AlreadyExists";
 const char kErrorDoesNotExist[] = "org.bluez.Error.DoesNotExist";
@@ -860,6 +881,7 @@ const char kGetNumberOfActiveOutputStreams[] = "GetNumberOfActiveOutputStreams";
 const char kIsAudioOutputActive[] = "IsAudioOutputActive";
 const char kSetGlobalOutputChannelRemix[] = "SetGlobalOutputChannelRemix";
 const char kGetSystemAecSupported[] = "GetSystemAecSupported";
+const char kGetSystemAecGroupId[] = "GetSystemAecGroupId";
 
 // Names of properties returned by GetNodes()
 const char kIsInputProperty[] = "IsInput";
@@ -974,6 +996,14 @@ constexpr char kRemoveHostnameIpMappingMethod[] = "RemoveHostnameIpMapping";
 }
 
 namespace arc {
+
+namespace keymaster {
+constexpr char kArcKeymasterServiceName[] = "org.chromium.ArcKeymaster";
+constexpr char kArcKeymasterServicePath[] = "/org/chromium/ArcKeymaster";
+constexpr char kArcKeymasterInterfaceName[] = "org.chromium.ArcKeymaster";
+// Methods
+constexpr char kBootstrapMojoConnectionMethod[] = "BootstrapMojoConnection";
+}  // namespace keymaster
 
 namespace obb_mounter {
 // D-Bus service constants.

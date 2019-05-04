@@ -5,14 +5,9 @@
 #ifndef SERVICES_NETWORK_PUBLIC_CPP_NETWORK_PARAM_MOJOM_TRAITS_H_
 #define SERVICES_NETWORK_PUBLIC_CPP_NETWORK_PARAM_MOJOM_TRAITS_H_
 
-#include "build/build_config.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
 #include "net/http/http_version.h"
 #include "services/network/public/mojom/network_param.mojom.h"
-
-#if defined(OS_ANDROID)
-#include "base/android/application_status_listener.h"
-#endif
 
 namespace mojo {
 
@@ -29,17 +24,6 @@ class StructTraits<network::mojom::HttpVersionDataView, net::HttpVersion> {
   static bool Read(network::mojom::HttpVersionDataView data,
                    net::HttpVersion* out);
 };
-
-#if defined(OS_ANDROID)
-template <>
-struct EnumTraits<network::mojom::ApplicationState,
-                  base::android::ApplicationState> {
-  static network::mojom::ApplicationState ToMojom(
-      base::android::ApplicationState input);
-  static bool FromMojom(network::mojom::ApplicationState input,
-                        base::android::ApplicationState* output);
-};
-#endif
 
 }  // namespace mojo
 

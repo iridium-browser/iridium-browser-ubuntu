@@ -11,6 +11,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <tuple>
 
 #include "third_party/googletest/src/include/gtest/gtest.h"
 
@@ -28,8 +29,8 @@
 
 using libvpx_test::ACMRandom;
 using libvpx_test::Buffer;
-using ::testing::make_tuple;
-using ::testing::tuple;
+using std::make_tuple;
+using std::tuple;
 
 namespace {
 typedef void (*FdctFunc)(const int16_t *in, tran_low_t *out, int stride);
@@ -210,6 +211,7 @@ class TransTestBase : public ::testing::TestWithParam<DctParam> {
     Buffer<int16_t> test_input_block =
         Buffer<int16_t>(size_, size_, 8, size_ == 4 ? 0 : 16);
     ASSERT_TRUE(test_input_block.Init());
+    ASSERT_TRUE(test_input_block.TopLeftPixel() != NULL);
     Buffer<tran_low_t> test_temp_block =
         Buffer<tran_low_t>(size_, size_, 0, 16);
     ASSERT_TRUE(test_temp_block.Init());
@@ -314,6 +316,7 @@ class TransTestBase : public ::testing::TestWithParam<DctParam> {
       } else if (i == 1) {
         input_extreme_block.Set(-max_pixel_value_);
       } else {
+        ASSERT_TRUE(input_extreme_block.TopLeftPixel() != NULL);
         for (int h = 0; h < size_; ++h) {
           for (int w = 0; w < size_; ++w) {
             input_extreme_block
@@ -328,6 +331,7 @@ class TransTestBase : public ::testing::TestWithParam<DctParam> {
 
       // The minimum quant value is 4.
       EXPECT_TRUE(output_block.CheckValues(output_ref_block));
+      ASSERT_TRUE(output_block.TopLeftPixel() != NULL);
       for (int h = 0; h < size_; ++h) {
         for (int w = 0; w < size_; ++w) {
           EXPECT_GE(
@@ -365,6 +369,7 @@ class TransTestBase : public ::testing::TestWithParam<DctParam> {
 
     for (int i = 0; i < count_test_block; ++i) {
       InitMem();
+      ASSERT_TRUE(in.TopLeftPixel() != NULL);
       // Initialize a test block with input range [-max_pixel_value_,
       // max_pixel_value_].
       for (int h = 0; h < size_; ++h) {

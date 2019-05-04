@@ -26,6 +26,7 @@ extern "C" {
 // Set maximum decode threads to be 8 due to the limit of frame buffers
 // and not enough semaphores in the emulation layer on windows.
 #define MAX_DECODE_THREADS 8
+#define MAX_NUM_THREADS 64
 
 #if CONFIG_MULTITHREAD
 
@@ -362,11 +363,11 @@ static INLINE int pthread_cond_wait(pthread_cond_t *const condition,
 #endif  // CONFIG_MULTITHREAD
 
 // State of the worker thread object
-typedef enum {
+enum {
   NOT_OK = 0,  // object is unusable
   OK,          // ready to work
   WORK         // busy finishing the current task
-} AVxWorkerStatus;
+} UENUM1BYTE(AVxWorkerStatus);
 
 // Function to be called by the worker thread. Takes two opaque pointers as
 // arguments (data1 and data2). Should return true on success and return false
@@ -380,6 +381,10 @@ typedef struct AVxWorkerImpl AVxWorkerImpl;
 typedef struct {
   AVxWorkerImpl *impl_;
   AVxWorkerStatus status_;
+  // Thread name for the debugger. If not NULL, must point to a string that
+  // outlives the worker thread. For portability, use a name <= 15 characters
+  // long (not including the terminating NUL character).
+  const char *thread_name;
   AVxWorkerHook hook;  // hook to call
   void *data1;         // first argument passed to 'hook'
   void *data2;         // second argument passed to 'hook'

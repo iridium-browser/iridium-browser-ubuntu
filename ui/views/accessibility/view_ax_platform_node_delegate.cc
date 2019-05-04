@@ -9,10 +9,13 @@
 
 #include "base/lazy_instance.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_role_properties.h"
+#include "ui/accessibility/ax_tree_data.h"
 #include "ui/accessibility/platform/ax_platform_node.h"
+#include "ui/accessibility/platform/ax_platform_node_base.h"
+#include "ui/accessibility/platform/ax_unique_id.h"
 #include "ui/events/event_utils.h"
-#include "ui/gfx/native_widget_types.h"
 #include "ui/views/accessibility/view_accessibility_utils.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/view.h"
@@ -23,11 +26,11 @@ namespace views {
 
 namespace {
 
-base::LazyInstance<std::map<int32_t, ui::AXPlatformNode*>>::Leaky
-    g_unique_id_to_ax_platform_node = LAZY_INSTANCE_INITIALIZER;
-
 // Information required to fire a delayed accessibility event.
 struct QueuedEvent {
+  QueuedEvent(ax::mojom::Event type, int32_t node_id)
+      : type(type), node_id(node_id) {}
+
   ax::mojom::Event type;
   int32_t node_id;
 };
@@ -77,12 +80,7 @@ ui::AXPlatformNode* FromNativeWindow(gfx::NativeWindow native_window) {
 ui::AXPlatformNode* PlatformNodeFromNodeID(int32_t id) {
   // Note: For Views, node IDs and unique IDs are the same - but that isn't
   // necessarily true for all AXPlatformNodes.
-  auto it = g_unique_id_to_ax_platform_node.Get().find(id);
-
-  if (it == g_unique_id_to_ax_platform_node.Get().end())
-    return nullptr;
-
-  return it->second;
+  return ui::AXPlatformNodeBase::GetFromUniqueId(id);
 }
 
 void FireEvent(QueuedEvent event) {
@@ -106,8 +104,8 @@ int ViewAXPlatformNodeDelegate::menu_depth_ = 0;
 
 ViewAXPlatformNodeDelegate::ViewAXPlatformNodeDelegate(View* view)
     : ViewAccessibility(view) {
-  ax_node_ = ui::AXPlatformNode::Create(this);
-  DCHECK(ax_node_);
+  ax_platform_node_ = ui::AXPlatformNode::Create(this);
+  DCHECK(ax_platform_node_);
 
   static bool first_time = true;
   if (first_time) {
@@ -115,30 +113,28 @@ ViewAXPlatformNodeDelegate::ViewAXPlatformNodeDelegate(View* view)
         base::BindRepeating(&FromNativeWindow));
     first_time = false;
   }
-
-  g_unique_id_to_ax_platform_node.Get()[GetUniqueId().Get()] = ax_node_;
 }
 
 ViewAXPlatformNodeDelegate::~ViewAXPlatformNodeDelegate() {
   if (ui::AXPlatformNode::GetPopupFocusOverride() == GetNativeObject())
     ui::AXPlatformNode::SetPopupFocusOverride(nullptr);
-
-  g_unique_id_to_ax_platform_node.Get().erase(GetUniqueId().Get());
-  ax_node_->Destroy();
+  ax_platform_node_->Destroy();
 }
 
 gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::GetNativeObject() {
-  return ax_node_->GetNativeViewAccessible();
+  DCHECK(ax_platform_node_);
+  return ax_platform_node_->GetNativeViewAccessible();
 }
 
 void ViewAXPlatformNodeDelegate::NotifyAccessibilityEvent(
     ax::mojom::Event event_type) {
+  DCHECK(ax_platform_node_);
   if (g_is_queueing_events) {
-    g_event_queue.Get().push_back({event_type, GetUniqueId().Get()});
+    g_event_queue.Get().emplace_back(event_type, GetUniqueId());
     return;
   }
 
-  ax_node_->NotifyAccessibilityEvent(event_type);
+  ax_platform_node_->NotifyAccessibilityEvent(event_type);
 
   // Some events have special handling.
   switch (event_type) {
@@ -169,7 +165,7 @@ void ViewAXPlatformNodeDelegate::NotifyAccessibilityEvent(
 
 #if defined(OS_MACOSX)
 void ViewAXPlatformNodeDelegate::AnnounceText(base::string16& text) {
-  ax_node_->AnnounceText(text);
+  ax_platform_node_->AnnounceText(text);
 }
 #endif
 
@@ -178,7 +174,7 @@ void ViewAXPlatformNodeDelegate::OnMenuItemActive() {
   // currently selected item as focused, even though the actual focus is in the
   // browser's currently focused textfield.
   ui::AXPlatformNode::SetPopupFocusOverride(
-      ax_node_->GetNativeViewAccessible());
+      ax_platform_node_->GetNativeViewAccessible());
 }
 
 void ViewAXPlatformNodeDelegate::OnMenuStart() {
@@ -197,7 +193,7 @@ void ViewAXPlatformNodeDelegate::OnMenuEnd() {
 // ui::AXPlatformNodeDelegate
 
 const ui::AXNodeData& ViewAXPlatformNodeDelegate::GetData() const {
-  // Clear it, then populate it.
+  // Clear the data, then populate it.
   data_ = ui::AXNodeData();
   GetAccessibleNodeData(&data_);
 
@@ -227,8 +223,11 @@ const ui::AXNodeData& ViewAXPlatformNodeDelegate::GetData() const {
 int ViewAXPlatformNodeDelegate::GetChildCount() {
   if (IsLeaf())
     return 0;
-  int child_count = view()->child_count();
 
+  if (virtual_child_count())
+    return virtual_child_count();
+
+  int child_count = view()->child_count();
   std::vector<Widget*> child_widgets;
   bool is_tab_modal_showing;
   PopulateChildWidgetVector(&child_widgets, &is_tab_modal_showing);
@@ -242,8 +241,14 @@ int ViewAXPlatformNodeDelegate::GetChildCount() {
 }
 
 gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::ChildAtIndex(int index) {
+  DCHECK_GE(index, 0) << "Child indices should be greater or equal to 0.";
+  DCHECK_LT(index, GetChildCount())
+      << "Child indices should be less than the child count.";
   if (IsLeaf())
     return nullptr;
+
+  if (virtual_child_count())
+    return virtual_child_at(index)->GetNativeObject();
 
   // If this is a root view, our widget might have child widgets. Include
   std::vector<Widget*> child_widgets;
@@ -258,7 +263,6 @@ gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::ChildAtIndex(int index) {
   }
 
   int child_widget_count = static_cast<int>(child_widgets.size());
-
   if (index < view()->child_count()) {
     return view()->child_at(index)->GetNativeViewAccessible();
   } else if (index < view()->child_count() + child_widget_count) {
@@ -269,9 +273,8 @@ gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::ChildAtIndex(int index) {
   return nullptr;
 }
 
-gfx::NativeWindow ViewAXPlatformNodeDelegate::GetTopLevelWidget() {
-  if (view()->GetWidget())
-    return view()->GetWidget()->GetTopLevelWidget()->GetNativeWindow();
+gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::GetNSWindow() {
+  NOTREACHED();
   return nullptr;
 }
 
@@ -350,7 +353,12 @@ gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::GetFocus() {
   View* focused_view =
       focus_manager ? focus_manager->GetFocusedView() : nullptr;
 
-  return focused_view ? focused_view->GetNativeViewAccessible() : nullptr;
+  if (!focused_view)
+    return nullptr;
+
+  // The accessibility focus will be either on the |focused_view| or on one of
+  // its virtual children.
+  return focused_view->GetViewAccessibility().GetFocusedDescendant();
 }
 
 ui::AXPlatformNode* ViewAXPlatformNodeDelegate::GetFromNodeID(int32_t id) {

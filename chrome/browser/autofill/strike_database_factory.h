@@ -20,11 +20,12 @@ namespace autofill {
 
 class StrikeDatabase;
 
-// Singleton that owns all StrikeDatabases and associates them with Profiles.
+// Singleton that owns all StrikeDatabases and associates them with
+// Profiles.
 class StrikeDatabaseFactory : public BrowserContextKeyedServiceFactory {
  public:
-  // Returns the StrikeDatabase for |profile|, creating it if it is not yet
-  // created.
+  // Returns the StrikeDatabase for |profile|, creating it if it is not
+  // yet created.
   static StrikeDatabase* GetForProfile(Profile* profile);
 
   static StrikeDatabaseFactory* GetInstance();

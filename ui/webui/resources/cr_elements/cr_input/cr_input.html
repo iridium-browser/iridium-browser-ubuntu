@@ -40,7 +40,7 @@
 
       /* Margin between <input> and <paper-button> in the 'suffix' slot */
       :host ::slotted(paper-button[slot=suffix]) {
-        margin-inline-start: var(--cr-button-edge-spacing);
+        margin-inline-start: var(--cr-button-edge-spacing) !important;
       }
 
       :host([invalid]) #label {
@@ -48,8 +48,7 @@
       }
 
       #input::placeholder {
-        color: var(--cr-input-placeholder-color,
-            var(--google-grey-refresh-700));
+        color: var(--cr-input-placeholder-color);
       }
 
       :host([invalid]) #input {

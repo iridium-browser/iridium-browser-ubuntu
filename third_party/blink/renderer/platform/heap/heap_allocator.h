@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_HEAP_ALLOCATOR_H_
 
 #include "build/build_config.h"
+#include "third_party/blink/renderer/platform/bindings/script_wrappable_marking_visitor.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/heap/heap_buildflags.h"
 #include "third_party/blink/renderer/platform/heap/marking_visitor.h"
@@ -132,6 +133,17 @@ class PLATFORM_EXPORT HeapAllocator {
   }
 
   static void BackingWriteBarrier(void* address) {
+    MarkingVisitor::WriteBarrier(address);
+  }
+
+  template <typename T>
+  static void BackingWriteBarrier(TraceWrapperMember<T>* address, size_t size) {
+    MarkingVisitor::WriteBarrier(address);
+    ScriptWrappableMarkingVisitor::WriteBarrier(address, size);
+  }
+
+  template <typename T>
+  static void BackingWriteBarrier(T* address, size_t size) {
     MarkingVisitor::WriteBarrier(address);
   }
 
@@ -390,7 +402,9 @@ void HeapVectorBacking<T, Traits>::Finalize(void* pointer) {
       "HeapVectorBacking doesn't support objects that cannot be cleared as "
       "unused with memset or don't have a vtable");
 
-  DCHECK(!WTF::IsTriviallyDestructible<T>::value);
+  static_assert(
+      !std::is_trivially_destructible<T>::value,
+      "Finalization of trivially destructible classes should not happen.");
   HeapObjectHeader* header = HeapObjectHeader::FromPayload(pointer);
   // Use the payload size as recorded by the heap to determine how many
   // elements to finalize.
@@ -417,7 +431,9 @@ void HeapVectorBacking<T, Traits>::Finalize(void* pointer) {
 template <typename Table>
 void HeapHashTableBacking<Table>::Finalize(void* pointer) {
   using Value = typename Table::ValueType;
-  DCHECK(!WTF::IsTriviallyDestructible<Value>::value);
+  static_assert(
+      !std::is_trivially_destructible<Value>::value,
+      "Finalization of trivially destructible classes should not happen.");
   HeapObjectHeader* header = HeapObjectHeader::FromPayload(pointer);
   // Use the payload size as recorded by the heap to determine how many
   // elements to finalize.
@@ -441,10 +457,30 @@ class HeapHashMap : public HashMap<KeyArg,
                                    MappedTraitsArg,
                                    HeapAllocator> {
   IS_GARBAGE_COLLECTED_TYPE();
+  using Base =
+      HashMap<KeyArg, MappedArg, HashArg, KeyTraitsArg, MappedTraitsArg>;
   static_assert(WTF::IsTraceable<KeyArg>::value ||
                     WTF::IsTraceable<MappedArg>::value,
                 "For hash maps without traceable elements, use HashMap<> "
                 "instead of HeapHashMap<>");
+
+ public:
+  static void* AllocateObject(size_t size, bool eagerly_sweep) {
+    return ThreadHeap::Allocate<
+        HeapHashMap<KeyArg, MappedArg, HashArg, KeyTraitsArg, MappedTraitsArg>>(
+        size, eagerly_sweep);
+  }
+
+  void* operator new(size_t size) = delete;
+  void operator delete(void* p) = delete;
+  void* operator new[](size_t size) = delete;
+  void operator delete[](void* p) = delete;
+  void* operator new(size_t size, NotNullTag null_tag, void* location) {
+    return Base::operator new(size, null_tag, location);
+  }
+  void* operator new(size_t size, void* location) {
+    return Base::operator new(size, location);
+  }
 };
 
 template <typename ValueArg,
@@ -453,9 +489,27 @@ template <typename ValueArg,
 class HeapHashSet
     : public HashSet<ValueArg, HashArg, TraitsArg, HeapAllocator> {
   IS_GARBAGE_COLLECTED_TYPE();
+  using Base = HashSet<ValueArg, HashArg, TraitsArg>;
   static_assert(WTF::IsTraceable<ValueArg>::value,
                 "For hash sets without traceable elements, use HashSet<> "
                 "instead of HeapHashSet<>");
+
+ public:
+  static void* AllocateObject(size_t size, bool eagerly_sweep) {
+    return ThreadHeap::Allocate<HeapHashSet<ValueArg, HashArg, TraitsArg>>(
+        size, eagerly_sweep);
+  }
+
+  void* operator new(size_t size) = delete;
+  void operator delete(void* p) = delete;
+  void* operator new[](size_t size) = delete;
+  void operator delete[](void* p) = delete;
+  void* operator new(size_t size, NotNullTag null_tag, void* location) {
+    return Base::operator new(size, null_tag, location);
+  }
+  void* operator new(size_t size, void* location) {
+    return Base::operator new(size, location);
+  }
 };
 
 template <typename ValueArg,
@@ -464,9 +518,27 @@ template <typename ValueArg,
 class HeapLinkedHashSet
     : public LinkedHashSet<ValueArg, HashArg, TraitsArg, HeapAllocator> {
   IS_GARBAGE_COLLECTED_TYPE();
+  using Base = LinkedHashSet<ValueArg, HashArg, TraitsArg>;
   static_assert(WTF::IsTraceable<ValueArg>::value,
                 "For sets without traceable elements, use LinkedHashSet<> "
                 "instead of HeapLinkedHashSet<>");
+
+ public:
+  static void* AllocateObject(size_t size, bool eagerly_sweep) {
+    return ThreadHeap::Allocate<
+        HeapLinkedHashSet<ValueArg, HashArg, TraitsArg>>(size, eagerly_sweep);
+  }
+
+  void* operator new(size_t size) = delete;
+  void operator delete(void* p) = delete;
+  void* operator new[](size_t size) = delete;
+  void operator delete[](void* p) = delete;
+  void* operator new(size_t size, NotNullTag null_tag, void* location) {
+    return Base::operator new(size, null_tag, location);
+  }
+  void* operator new(size_t size, void* location) {
+    return Base::operator new(size, location);
+  }
 };
 
 template <typename ValueArg,
@@ -480,9 +552,28 @@ class HeapListHashSet
                          HashArg,
                          HeapListHashSetAllocator<ValueArg, inlineCapacity>> {
   IS_GARBAGE_COLLECTED_TYPE();
+  using Base = ListHashSet<ValueArg, inlineCapacity, HashArg>;
   static_assert(WTF::IsTraceable<ValueArg>::value,
                 "For sets without traceable elements, use ListHashSet<> "
                 "instead of HeapListHashSet<>");
+
+ public:
+  static void* AllocateObject(size_t size, bool eagerly_sweep) {
+    return ThreadHeap::Allocate<
+        HeapListHashSet<ValueArg, inlineCapacity, HashArg>>(size,
+                                                            eagerly_sweep);
+  }
+
+  void* operator new(size_t size) = delete;
+  void operator delete(void* p) = delete;
+  void* operator new[](size_t size) = delete;
+  void operator delete[](void* p) = delete;
+  void* operator new(size_t size, NotNullTag null_tag, void* location) {
+    return Base::operator new(size, null_tag, location);
+  }
+  void* operator new(size_t size, void* location) {
+    return Base::operator new(size, location);
+  }
 };
 
 template <typename Value,
@@ -508,24 +599,21 @@ class HeapVector : public Vector<T, inlineCapacity, HeapAllocator> {
                   "instead of HeapVector<>");
   }
 
-  void* operator new(size_t size) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapVector<Persistent<>> should not have an inline capacity");
-    return Base::operator new(size);
+  static void* AllocateObject(size_t size, bool eagerly_sweep) {
+    // On-heap HeapVectors generally should not have inline capacity, but it is
+    // hard to avoid when using a type alias. Hence we only disallow the
+    // VectorTraits<T>::kNeedsDestruction case for now.
+    static_assert(inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
+                  "on-heap HeapVector<> should not have an inline capacity");
+    return ThreadHeap::Allocate<HeapVector<T, inlineCapacity>>(size,
+                                                               eagerly_sweep);
   }
-  void operator delete(void* p) { return Base::operator delete(p); };
-  void* operator new[](size_t size) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapVector<Persistent<>> should not have an inline capacity");
-    return Base::operator new[](size);
-  }
-  void operator delete[](void* p) { return Base::operator delete[](p); };
+
+  void* operator new(size_t size) = delete;
+  void operator delete(void* p) = delete;
+  void* operator new[](size_t size) = delete;
+  void operator delete[](void* p) = delete;
   void* operator new(size_t size, NotNullTag null_tag, void* location) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapVector<Persistent<>> should not have an inline capacity");
     return Base::operator new(size, null_tag, location);
   }
   void* operator new(size_t size, void* location) {
@@ -555,24 +643,21 @@ class HeapDeque : public Deque<T, inlineCapacity, HeapAllocator> {
                   "of HeapDeque<>");
   }
 
-  void* operator new(size_t size) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapDeque<Persistent<>> should not have an inline capacity");
-    return Base::operator new(size);
+  static void* AllocateObject(size_t size, bool eagerly_sweep) {
+    // On-heap HeapDeques generally should not have inline capacity, but it is
+    // hard to avoid when using a type alias. Hence we only disallow the
+    // VectorTraits<T>::kNeedsDestruction case for now.
+    static_assert(inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
+                  "on-heap HeapDeque<> should not have an inline capacity");
+    return ThreadHeap::Allocate<HeapVector<T, inlineCapacity>>(size,
+                                                               eagerly_sweep);
   }
-  void operator delete(void* p) { return Base::operator delete(p); };
-  void* operator new[](size_t size) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapDequer<Persistent<>> should not have an inline capacity");
-    return Base::operator new[](size);
-  }
-  void operator delete[](void* p) { return Base::operator delete[](p); };
+
+  void* operator new(size_t size) = delete;
+  void operator delete(void* p) = delete;
+  void* operator new[](size_t size) = delete;
+  void operator delete[](void* p) = delete;
   void* operator new(size_t size, NotNullTag null_tag, void* location) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapDeque<Persistent<>> should not have an inline capacity");
     return Base::operator new(size, null_tag, location);
   }
   void* operator new(size_t size, void* location) {
@@ -646,7 +731,8 @@ struct VectorTraits<blink::TraceWrapperMember<T>>
   static const bool kCanInitializeWithMemset = true;
   static const bool kCanClearUnusedSlotsWithMemset = true;
   static const bool kCanMoveWithMemcpy = true;
-  static const bool kCanSwapUsingCopyOrMove = false;
+  static const bool kCanCopyWithMemcpy = true;
+  static const bool kCanSwapUsingCopyOrMove = true;
 };
 
 template <typename T>

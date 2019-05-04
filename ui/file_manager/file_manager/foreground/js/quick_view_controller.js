@@ -104,12 +104,14 @@ function QuickViewController(
   this.listContainer_.element.addEventListener(
       'keydown', this.onKeyDownToOpen_.bind(this));
   this.listContainer_.element.addEventListener('command', function(event) {
-    if (event.command.id === 'get-info')
+    if (event.command.id === 'get-info') {
       this.display_(QuickViewUma.WayToOpen.CONTEXT_MENU);
+    }
   }.bind(this));
   selectionMenuButton.addEventListener('command', function(event) {
-    if (event.command.id === 'get-info')
+    if (event.command.id === 'get-info') {
       this.display_(QuickViewUma.WayToOpen.SELECTION_MENU);
+    }
   }.bind(this));
 }
 
@@ -177,7 +179,6 @@ QuickViewController.prototype.createQuickView_ = function() {
   return new Promise(function(resolve, reject) {
     Polymer.Base.importHref(constants.FILES_QUICK_VIEW_HTML, function() {
       var quickView = document.querySelector('#quick-view');
-      i18nTemplate.process(quickView, loadTimeData);
       resolve(quickView);
     }, reject);
   });
@@ -201,10 +202,11 @@ QuickViewController.prototype.onOpenInNewButtonTap_ = function(event) {
  * @private
  */
 QuickViewController.prototype.onKeyDownToOpen_ = function(event) {
-  if (this.entries_.length == 0)
-    return;
   if (event.key === ' ') {
     event.preventDefault();
+    if (this.entries_.length != 1) {
+      return;
+    }
     event.stopImmediatePropagation();
     this.display_(QuickViewUma.WayToOpen.SPACE_KEY);
   }
@@ -229,15 +231,17 @@ QuickViewController.prototype.onQuickViewKeyDown_ = function(event) {
       case 'ArrowRight':
       case 'ArrowDown':
         var index = this.fileListSelectionModel_.selectedIndex + 1;
-        if (index >= this.fileListSelectionModel_.length)
+        if (index >= this.fileListSelectionModel_.length) {
           index = 0;
+        }
         this.fileListSelectionModel_.selectedIndex = index;
         break;
       case 'ArrowLeft':
       case 'ArrowUp':
         var index = this.fileListSelectionModel_.selectedIndex - 1;
-        if (index < 0)
+        if (index < 0) {
           index = this.fileListSelectionModel_.length - 1;
+        }
         this.fileListSelectionModel_.selectedIndex = index;
         break;
     }
@@ -271,6 +275,9 @@ QuickViewController.prototype.onFileSelectionChanged_ = function(event) {
   if (this.quickView_ && this.quickView_.isOpened()) {
     assert(this.entries_.length > 0);
     var entry = this.entries_[0];
+    if (util.isSameEntry(entry, this.quickViewModel_.getSelectedEntry())) {
+      return;
+    }
     this.quickViewModel_.setSelectedEntry(entry);
     this.display_();
   }
@@ -461,8 +468,9 @@ QuickViewController.prototype.getQuickViewParameters_ = function(
         });
         params.browsable = browsable;
         params.contentUrl = browsable ? URL.createObjectURL(file) : '';
-        if (params.subtype == 'PDF')
+        if (params.subtype == 'PDF') {
           params.contentUrl += '#view=FitH';
+        }
         return params;
       }.bind(this))
       .catch(function(e) {

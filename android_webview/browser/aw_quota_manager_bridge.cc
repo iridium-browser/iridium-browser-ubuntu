@@ -153,8 +153,7 @@ void RunOnUIThread(base::OnceClosure task) {
 
 // static
 jlong JNI_AwQuotaManagerBridge_GetDefaultNativeAwQuotaManagerBridge(
-    JNIEnv* env,
-    const JavaParamRef<jclass>& clazz) {
+    JNIEnv* env) {
   AwBrowserContext* browser_context =
       AwContentBrowserClient::GetAwBrowserContext();
 
@@ -214,8 +213,7 @@ void AwQuotaManagerBridge::DeleteAllDataOnUiThread() {
           StoragePartition::REMOVE_DATA_MASK_LOCAL_STORAGE |
           StoragePartition::REMOVE_DATA_MASK_WEBSQL,
       StoragePartition::QUOTA_MANAGED_STORAGE_MASK_TEMPORARY, GURL(),
-      StoragePartition::OriginMatcherFunction(), base::Time(),
-      base::Time::Max(), base::DoNothing());
+      base::Time(), base::Time::Max(), base::DoNothing());
 }
 
 void AwQuotaManagerBridge::DeleteOrigin(JNIEnv* env,

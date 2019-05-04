@@ -11,10 +11,11 @@
 
 #include "base/auto_reset.h"
 #include "base/trace_event/trace_event.h"
-#include "base/trace_event/trace_event_argument.h"
+#include "base/trace_event/traced_value.h"
 #include "cc/base/devtools_instrumentation.h"
 #include "cc/benchmarks/benchmark_instrumentation.h"
 #include "cc/input/browser_controls_offset_manager.h"
+#include "cc/paint/paint_worklet_layer_painter.h"
 #include "cc/scheduler/compositor_timing_history.h"
 #include "cc/trees/layer_tree_frame_sink.h"
 #include "cc/trees/layer_tree_host.h"
@@ -40,20 +41,30 @@ unsigned int nextBeginFrameId = 0;
 
 }  // namespace
 
+// Ensures that a CompletionEvent is always signaled.
+class ScopedCompletionEvent {
+ public:
+  explicit ScopedCompletionEvent(CompletionEvent* event) : event_(event) {}
+  ~ScopedCompletionEvent() { event_->Signal(); }
+
+ private:
+  CompletionEvent* const event_;
+  DISALLOW_COPY_AND_ASSIGN(ScopedCompletionEvent);
+};
+
 ProxyImpl::ProxyImpl(base::WeakPtr<ProxyMain> proxy_main_weak_ptr,
                      LayerTreeHost* layer_tree_host,
                      TaskRunnerProvider* task_runner_provider)
     : layer_tree_host_id_(layer_tree_host->GetId()),
       commit_completion_waits_for_activation_(false),
-      commit_completion_event_(nullptr),
-      activation_completion_event_(nullptr),
       next_frame_is_newly_committed_frame_(false),
       inside_draw_(false),
       input_throttled_until_commit_(false),
       task_runner_provider_(task_runner_provider),
       smoothness_priority_expiration_notifier_(
           task_runner_provider->ImplThreadTaskRunner(),
-          base::Bind(&ProxyImpl::RenewTreePriority, base::Unretained(this)),
+          base::BindRepeating(&ProxyImpl::RenewTreePriority,
+                              base::Unretained(this)),
           base::TimeDelta::FromSecondsD(
               kSmoothnessTakesPriorityExpirationDelay)),
       rendering_stats_instrumentation_(
@@ -120,6 +131,13 @@ void ProxyImpl::InitializeMutatorOnImpl(
   host_impl_->SetLayerTreeMutator(std::move(mutator));
 }
 
+void ProxyImpl::InitializePaintWorkletLayerPainterOnImpl(
+    std::unique_ptr<PaintWorkletLayerPainter> painter) {
+  TRACE_EVENT0("cc", "ProxyImpl::InitializePaintWorkletLayerPainterOnImpl");
+  DCHECK(IsImplThread());
+  host_impl_->SetPaintWorkletLayerPainter(std::move(painter));
+}
+
 void ProxyImpl::UpdateBrowserControlsStateOnImpl(
     BrowserControlsState constraints,
     BrowserControlsState current,
@@ -154,9 +172,10 @@ void ProxyImpl::SetInputThrottledUntilCommitOnImpl(bool is_throttled) {
   RenewTreePriority();
 }
 
-void ProxyImpl::SetDeferCommitsOnImpl(bool defer_commits) const {
+void ProxyImpl::SetDeferMainFrameUpdateOnImpl(
+    bool defer_main_frame_update) const {
   DCHECK(IsImplThread());
-  scheduler_->SetDeferCommits(defer_commits);
+  scheduler_->SetDeferMainFrameUpdate(defer_main_frame_update);
 }
 
 void ProxyImpl::SetNeedsRedrawOnImpl(const gfx::Rect& damage_rect) {
@@ -260,7 +279,8 @@ void ProxyImpl::NotifyReadyToCommitOnImpl(
 
   host_impl_->ReadyToCommit();
 
-  commit_completion_event_ = completion;
+  commit_completion_event_ =
+      std::make_unique<ScopedCompletionEvent>(completion);
   commit_completion_waits_for_activation_ = hold_commit_for_activation;
 
   DCHECK(!blocked_main_commit().layer_tree_host);
@@ -425,11 +445,11 @@ void ProxyImpl::RenewTreePriority() {
                                               scroll_handler_state);
 }
 
-void ProxyImpl::PostDelayedAnimationTaskOnImplThread(const base::Closure& task,
+void ProxyImpl::PostDelayedAnimationTaskOnImplThread(base::OnceClosure task,
                                                      base::TimeDelta delay) {
   DCHECK(IsImplThread());
-  task_runner_provider_->ImplThreadTaskRunner()->PostDelayedTask(FROM_HERE,
-                                                                 task, delay);
+  task_runner_provider_->ImplThreadTaskRunner()->PostDelayedTask(
+      FROM_HERE, std::move(task), delay);
 }
 
 void ProxyImpl::DidActivateSyncTree() {
@@ -439,7 +459,6 @@ void ProxyImpl::DidActivateSyncTree() {
   if (activation_completion_event_) {
     TRACE_EVENT_INSTANT0("cc", "ReleaseCommitbyActivation",
                          TRACE_EVENT_SCOPE_THREAD);
-    activation_completion_event_->Signal();
     activation_completion_event_ = nullptr;
   }
 }
@@ -488,6 +507,13 @@ void ProxyImpl::DidPresentCompositorFrameOnImplThread(
                                 std::move(callbacks), feedback));
 }
 
+void ProxyImpl::DidGenerateLocalSurfaceIdAllocationOnImplThread(
+    const viz::LocalSurfaceIdAllocation& allocation) {
+  MainThreadTaskRunner()->PostTask(
+      FROM_HERE, base::BindOnce(&ProxyMain::DidGenerateLocalSurfaceIdAllocation,
+                                proxy_main_weak_ptr_, allocation));
+}
+
 bool ProxyImpl::WillBeginImplFrame(const viz::BeginFrameArgs& args) {
   DCHECK(IsImplThread());
   return host_impl_->WillBeginImplFrame(args);
@@ -501,6 +527,11 @@ void ProxyImpl::DidFinishImplFrame() {
 void ProxyImpl::DidNotProduceFrame(const viz::BeginFrameAck& ack) {
   DCHECK(IsImplThread());
   host_impl_->DidNotProduceFrame(ack);
+}
+
+void ProxyImpl::WillNotReceiveBeginFrame() {
+  DCHECK(IsImplThread());
+  host_impl_->DidNotNeedBeginFrame();
 }
 
 void ProxyImpl::ScheduledActionSendBeginMainFrame(
@@ -518,6 +549,7 @@ void ProxyImpl::ScheduledActionSendBeginMainFrame(
       host_impl_->EvictedUIResourcesExist();
   begin_main_frame_state->completed_image_decode_requests =
       host_impl_->TakeCompletedImageDecodeRequests();
+  host_impl_->WillSendBeginMainFrame();
   MainThreadTaskRunner()->PostTask(
       FROM_HERE,
       base::BindOnce(&ProxyMain::BeginMainFrame, proxy_main_weak_ptr_,
@@ -572,9 +604,7 @@ void ProxyImpl::ScheduledActionCommit() {
     // already activated if there was no work to be done.
     TRACE_EVENT_INSTANT0("cc", "HoldCommit", TRACE_EVENT_SCOPE_THREAD);
     commit_completion_waits_for_activation_ = false;
-    activation_completion_event_ = commit_completion_event_;
-  } else {
-    commit_completion_event_->Signal();
+    activation_completion_event_ = std::move(commit_completion_event_);
   }
   commit_completion_event_ = nullptr;
 
@@ -633,8 +663,8 @@ void ProxyImpl::ScheduledActionBeginMainFrameNotExpectedUntil(
     base::TimeTicks time) {
   DCHECK(IsImplThread());
   MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyMain::BeginMainFrameNotExpectedUntil,
-                            proxy_main_weak_ptr_, time));
+      FROM_HERE, base::BindOnce(&ProxyMain::BeginMainFrameNotExpectedUntil,
+                                proxy_main_weak_ptr_, time));
 }
 
 DrawResult ProxyImpl::DrawInternal(bool forced_draw) {

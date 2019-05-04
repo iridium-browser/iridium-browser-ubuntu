@@ -4,19 +4,20 @@
 
 #include "chrome/browser/browser_switcher/alternative_browser_driver.h"
 
-#include "base/command_line.h"
-#include "base/files/file_path.h"
-#include "base/process/launch.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/win/registry.h"
-#include "chrome/browser/browser_switcher/alternative_browser_launcher.h"
-#include "url/gurl.h"
+#include <windows.h>
 
 #include <ddeml.h>
 #include <shellapi.h>
 #include <shlobj.h>
-#include <windows.h>
 #include <wininet.h>
+
+#include "base/files/file_path.h"
+#include "base/process/launch.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/win/registry.h"
+#include "chrome/browser/browser_switcher/browser_switcher_prefs.h"
+#include "url/gurl.h"
 
 namespace browser_switcher {
 
@@ -47,13 +48,10 @@ const wchar_t kSafariVarName[] = L"${safari}";
 const struct {
   const wchar_t* var_name;
   const wchar_t* registry_key;
-  const wchar_t* dde_host;
 } kBrowserVarMappings[] = {
-    {kChromeVarName, kChromeKey, L""},
-    {kIEVarName, kIExploreKey, kIExploreDdeHost},
-    {kFirefoxVarName, kFirefoxKey, L""},
-    {kOperaVarName, kOperaKey, L""},
-    {kSafariVarName, kSafariKey, L""},
+    {kChromeVarName, kChromeKey},   {kIEVarName, kIExploreKey},
+    {kFirefoxVarName, kFirefoxKey}, {kOperaVarName, kOperaKey},
+    {kSafariVarName, kSafariKey},
 };
 
 // DDE Callback function which is not used in our case at all.
@@ -91,6 +89,19 @@ std::wstring GetBrowserLocation(const wchar_t* regkey_name) {
   return location;
 }
 
+void ExpandPresetBrowsers(std::wstring* str) {
+  if (str->empty()) {
+    *str = GetBrowserLocation(kIExploreKey);
+    return;
+  }
+  for (const auto& mapping : kBrowserVarMappings) {
+    if (!str->compare(mapping.var_name)) {
+      *str = GetBrowserLocation(mapping.registry_key);
+      return;
+    }
+  }
+}
+
 bool ExpandUrlVarName(std::wstring* arg, const std::wstring& url_spec) {
   size_t url_index = arg->find(kUrlVarName);
   if (url_index == std::wstring::npos)
@@ -113,49 +124,47 @@ void ExpandEnvironmentVariables(std::wstring* arg) {
     *arg = out.get();
 }
 
+void AppendCommandLineArguments(base::CommandLine* cmd_line,
+                                const std::vector<std::string>& raw_args,
+                                const GURL& url) {
+  std::wstring url_spec = base::UTF8ToWide(url.spec());
+  std::vector<std::wstring> command_line;
+  bool contains_url = false;
+  for (const auto& arg : raw_args) {
+    std::wstring expanded_arg = base::UTF8ToWide(arg);
+    ExpandEnvironmentVariables(&expanded_arg);
+    if (ExpandUrlVarName(&expanded_arg, url_spec))
+      contains_url = true;
+    cmd_line->AppendArgNative(expanded_arg);
+  }
+  if (!contains_url)
+    cmd_line->AppendArgNative(url_spec);
+}
+
+bool IsInternetExplorer(base::StringPiece path) {
+  // TODO(nicolaso): Check if the path looks like the default IEXPLORE.exe path.
+  return (path.empty() || base::EqualsASCII(kIExploreKey, path));
+}
+
 }  // namespace
 
 AlternativeBrowserDriver::~AlternativeBrowserDriver() {}
 
-AlternativeBrowserDriverImpl::AlternativeBrowserDriverImpl() {}
+AlternativeBrowserDriverImpl::AlternativeBrowserDriverImpl(
+    const BrowserSwitcherPrefs* prefs)
+    : prefs_(prefs) {}
+
 AlternativeBrowserDriverImpl::~AlternativeBrowserDriverImpl() {}
-
-void AlternativeBrowserDriverImpl::SetBrowserPath(base::StringPiece path) {
-  browser_path_ = base::UTF8ToWide(path);
-  dde_host_ = std::wstring();
-  if (browser_path_.empty()) {
-    browser_path_ = GetBrowserLocation(kIExploreKey);
-    dde_host_ = kIExploreDdeHost;
-    return;
-  }
-  for (const auto& mapping : kBrowserVarMappings) {
-    if (!browser_path_.compare(mapping.var_name)) {
-      browser_path_ = GetBrowserLocation(mapping.registry_key);
-      dde_host_ = mapping.dde_host;
-    }
-  }
-}
-
-void AlternativeBrowserDriverImpl::SetBrowserParameters(
-    const base::ListValue* parameters) {
-  browser_params_.clear();
-  browser_params_.reserve(parameters->GetList().size());
-  for (const auto& param : *parameters) {
-    DCHECK(param.is_string());
-    browser_params_.push_back(base::UTF8ToUTF16(param.GetString()));
-  }
-}
 
 bool AlternativeBrowserDriverImpl::TryLaunch(const GURL& url) {
   VLOG(2) << "Launching alternative browser...";
-  VLOG(2) << "  path = " << browser_path_;
-  VLOG(2) << "  dde_host = " << dde_host_;
+  VLOG(2) << "  path = " << prefs_->GetAlternativeBrowserPath();
   VLOG(2) << "  url = " << url.spec();
   return (TryLaunchWithDde(url) || TryLaunchWithExec(url));
 }
 
 bool AlternativeBrowserDriverImpl::TryLaunchWithDde(const GURL& url) {
-  if (dde_host_.empty())
+  if (!IsInternetExplorer(prefs_->GetAlternativeBrowserPath()))
     return false;
 
   DWORD dde_instance = 0;
@@ -169,7 +178,7 @@ bool AlternativeBrowserDriverImpl::TryLaunchWithDde(const GURL& url) {
   HCONV activate_service_instance;
   {
     HSZ service =
-        DdeCreateStringHandle(dde_instance, dde_host_.c_str(), CP_WINUNICODE);
+        DdeCreateStringHandle(dde_instance, kIExploreDdeHost, CP_WINUNICODE);
     HSZ openurl_topic =
         DdeCreateStringHandle(dde_instance, L"WWW_OpenURL", CP_WINUNICODE);
     HSZ activate_topic =
@@ -212,22 +221,10 @@ bool AlternativeBrowserDriverImpl::TryLaunchWithDde(const GURL& url) {
 }
 
 bool AlternativeBrowserDriverImpl::TryLaunchWithExec(const GURL& url) {
-  if (browser_path_.empty())
-    return false;
-
   CHECK(url.SchemeIsHTTPOrHTTPS() || url.SchemeIsFile());
 
-  // We know that there will be at most browser_params_.size() arguments, plus
-  // one for the executable, and possibly one for the URL.
-  const int max_num_args = browser_params_.size() + 2;
-  std::vector<std::wstring> argv;
-  argv.reserve(max_num_args);
-  std::wstring path = browser_path_;
-  ExpandEnvironmentVariables(&path);
-  argv.push_back(path);
-  AppendCommandLineArguments(&argv, browser_params_, url);
+  auto cmd_line = CreateCommandLine(url);
 
-  base::CommandLine cmd_line = base::CommandLine(argv);
   base::LaunchOptions options;
   if (!base::LaunchProcess(cmd_line, options).IsValid()) {
     LOG(ERROR) << "Could not start the alternative browser! Error: "
@@ -237,23 +234,17 @@ bool AlternativeBrowserDriverImpl::TryLaunchWithExec(const GURL& url) {
   return true;
 }
 
-void AlternativeBrowserDriverImpl::AppendCommandLineArguments(
-    std::vector<std::wstring>* argv,
-    const std::vector<std::wstring>& raw_args,
+base::CommandLine AlternativeBrowserDriverImpl::CreateCommandLine(
     const GURL& url) {
-  // TODO(crbug/882520): Do environment variable expansion.
-  std::wstring url_spec = base::UTF8ToWide(url.spec());
-  std::vector<std::wstring> command_line;
-  bool contains_url = false;
-  for (const auto& arg : raw_args) {
-    std::wstring expanded_arg = arg;
-    ExpandEnvironmentVariables(&expanded_arg);
-    if (ExpandUrlVarName(&expanded_arg, url_spec))
-      contains_url = true;
-    argv->push_back(expanded_arg);
-  }
-  if (!contains_url)
-    argv->push_back(url_spec);
+  std::wstring path = base::UTF8ToWide(prefs_->GetAlternativeBrowserPath());
+  ExpandPresetBrowsers(&path);
+  ExpandEnvironmentVariables(&path);
+  base::CommandLine cmd_line(std::vector<std::wstring>{path});
+
+  AppendCommandLineArguments(&cmd_line,
+                             prefs_->GetAlternativeBrowserParameters(), url);
+
+  return cmd_line;
 }
 
 }  // namespace browser_switcher

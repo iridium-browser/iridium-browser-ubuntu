@@ -25,26 +25,23 @@ class WebWidgetTestClient : public blink::WebWidgetClient {
  public:
   // Caller has to ensure that all arguments (i.e. |test_runner| and |delegate|)
   // live longer than |this|.
-  WebWidgetTestClient(WebWidgetTestProxyBase* web_widget_test_proxy_base);
+  explicit WebWidgetTestClient(
+      WebWidgetTestProxyBase* web_widget_test_proxy_base);
 
   ~WebWidgetTestClient() override;
 
   // WebWidgetClient overrides needed by WebWidgetTestProxy.
-  blink::WebScreenInfo GetScreenInfo() override;
   void ScheduleAnimation() override;
   bool RequestPointerLock() override;
   void RequestPointerUnlock() override;
   bool IsPointerLocked() override;
   void SetToolTipText(const blink::WebString& text,
                       blink::WebTextDirection direction) override;
-  void StartDragging(blink::WebReferrerPolicy policy,
+  void StartDragging(network::mojom::ReferrerPolicy policy,
                      const blink::WebDragData& data,
                      blink::WebDragOperationsMask mask,
                      const SkBitmap& drag_image,
-                     const blink::WebPoint& image_offset) override;
-
-  // WebWidgetClient overrides that are not used.
-  bool AllowsBrokenNullLayerTreeView() const override;
+                     const gfx::Point& image_offset) override;
 
  private:
   void AnimateNow();

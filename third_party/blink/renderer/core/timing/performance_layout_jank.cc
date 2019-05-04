@@ -12,7 +12,7 @@ namespace blink {
 
 // static
 PerformanceLayoutJank* PerformanceLayoutJank::Create(double fraction) {
-  return new PerformanceLayoutJank(fraction);
+  return MakeGarbageCollected<PerformanceLayoutJank>(fraction);
 }
 
 PerformanceLayoutJank::PerformanceLayoutJank(double fraction)
@@ -21,7 +21,7 @@ PerformanceLayoutJank::PerformanceLayoutJank(double fraction)
 PerformanceLayoutJank::~PerformanceLayoutJank() = default;
 
 AtomicString PerformanceLayoutJank::entryType() const {
-  return PerformanceEntryNames::layoutJank;
+  return performance_entry_names::kLayoutJank;
 }
 
 PerformanceEntryType PerformanceLayoutJank::EntryTypeEnum() const {

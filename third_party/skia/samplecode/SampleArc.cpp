@@ -20,6 +20,7 @@
 #include "SkRegion.h"
 #include "SkShader.h"
 #include "SkString.h"
+#include "SkTextUtils.h"
 #include "SkUTF.h"
 #include "Sk1DPathEffect.h"
 
@@ -83,19 +84,7 @@ public:
     sk_sp<MyDrawable> fAnimatingDrawable;
     sk_sp<SkDrawable> fRootDrawable;
 
-    ArcsView() {
-        testparse();
-        fSweep = SkIntToScalar(100);
-        this->setBGColor(0xFFDDDDDD);
-
-        fRect.set(0, 0, SkIntToScalar(200), SkIntToScalar(200));
-        fRect.offset(SkIntToScalar(20), SkIntToScalar(20));
-        fAnimatingDrawable = sk_make_sp<MyDrawable>(fRect);
-
-        SkPictureRecorder recorder;
-        this->drawRoot(recorder.beginRecording(SkRect::MakeWH(800, 500)));
-        fRootDrawable = recorder.finishRecordingAsDrawable();
-    }
+    ArcsView() { }
 
 protected:
     bool onQuery(Sample::Event* evt) override {
@@ -115,18 +104,14 @@ protected:
     }
 
     static void DrawLabel(SkCanvas* canvas, const SkRect& rect, SkScalar start, SkScalar sweep) {
-        SkPaint paint;
-
-        paint.setAntiAlias(true);
-        paint.setTextAlign(SkPaint::kCenter_Align);
-
+        SkFont font;
         SkString    str;
-
         str.appendScalar(start);
         str.append(", ");
         str.appendScalar(sweep);
-        canvas->drawString(str, rect.centerX(),
-                         rect.fBottom + paint.getTextSize() * 5/4, paint);
+        SkTextUtils::DrawString(canvas, str.c_str(), rect.centerX(),
+                         rect.fBottom + font.getSize() * 5/4, font, SkPaint(),
+                                SkTextUtils::kCenter_Align);
     }
 
     static void DrawArcs(SkCanvas* canvas) {
@@ -182,6 +167,20 @@ protected:
         canvas->drawDrawable(fAnimatingDrawable.get());
 
         DrawArcs(canvas);
+    }
+
+    void onOnceBeforeDraw() override {
+        testparse();
+        fSweep = SkIntToScalar(100);
+        this->setBGColor(0xFFDDDDDD);
+
+        fRect.set(0, 0, SkIntToScalar(200), SkIntToScalar(200));
+        fRect.offset(SkIntToScalar(20), SkIntToScalar(20));
+        fAnimatingDrawable = sk_make_sp<MyDrawable>(fRect);
+
+        SkPictureRecorder recorder;
+        this->drawRoot(recorder.beginRecording(SkRect::MakeWH(800, 500)));
+        fRootDrawable = recorder.finishRecordingAsDrawable();
     }
 
     void onDrawContent(SkCanvas* canvas) override {

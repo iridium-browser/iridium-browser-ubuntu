@@ -16,7 +16,7 @@
 #import "components/autofill/ios/browser/js_suggestion_manager.h"
 #include "google_apis/google_api_keys.h"
 #include "ios/web/public/favicon_url.h"
-#include "ios/web/public/load_committed_details.h"
+#import "ios/web/public/navigation_item.h"
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/referrer.h"
 #include "ios/web/public/reload_type.h"
@@ -29,13 +29,14 @@
 #import "ios/web/public/web_state/web_state.h"
 #import "ios/web/public/web_state/web_state_delegate_bridge.h"
 #import "ios/web/public/web_state/web_state_observer_bridge.h"
-#include "ios/web_view/cwv_web_view_features.h"
+#include "ios/web_view/cwv_web_view_buildflags.h"
 #import "ios/web_view/internal/autofill/cwv_autofill_controller_internal.h"
 #import "ios/web_view/internal/cwv_favicon_internal.h"
 #import "ios/web_view/internal/cwv_html_element_internal.h"
 #import "ios/web_view/internal/cwv_navigation_action_internal.h"
 #import "ios/web_view/internal/cwv_script_command_internal.h"
 #import "ios/web_view/internal/cwv_scroll_view_internal.h"
+#import "ios/web_view/internal/cwv_ssl_status_internal.h"
 #import "ios/web_view/internal/cwv_web_view_configuration_internal.h"
 #import "ios/web_view/internal/translate/cwv_translation_controller_internal.h"
 #import "ios/web_view/internal/translate/web_view_translate_client.h"
@@ -76,6 +77,17 @@ NSDictionary* NSDictionaryFromDictionaryValue(
   DCHECK(ns_dictionary) << "Failed to convert JSON to NSDictionary";
   return ns_dictionary;
 }
+
+// A WebStateUserData to hold a reference to a corresponding CWVWebView.
+class WebViewHolder : public web::WebStateUserData<WebViewHolder> {
+ public:
+  explicit WebViewHolder(web::WebState* web_state) {}
+  CWVWebView* web_view() const { return web_view_; }
+  void set_web_view(CWVWebView* web_view) { web_view_ = web_view; }
+
+ private:
+  __weak CWVWebView* web_view_ = nil;
+};
 }  // namespace
 
 @interface CWVWebView ()<CRWWebStateDelegate, CRWWebStateObserver> {
@@ -102,6 +114,7 @@ NSDictionary* NSDictionaryFromDictionaryValue(
 @property(nonatomic, readwrite) BOOL loading;
 @property(nonatomic, readwrite, copy) NSString* title;
 @property(nonatomic, readwrite) NSURL* visibleURL;
+@property(nonatomic, readwrite) CWVSSLStatus* visibleSSLStatus;
 #if BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 @property(nonatomic, readonly) CWVAutofillController* autofillController;
 #endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
@@ -143,6 +156,7 @@ static NSString* gUserAgentProduct = nil;
 @synthesize UIDelegate = _UIDelegate;
 @synthesize scrollView = _scrollView;
 @synthesize visibleURL = _visibleURL;
+@synthesize visibleSSLStatus = _visibleSSLStatus;
 
 + (void)initialize {
   if (self != [CWVWebView class]) {
@@ -175,6 +189,13 @@ static NSString* gUserAgentProduct = nil;
   }
 }
 
++ (CWVWebView*)webViewForWebState:(web::WebState*)webState {
+  WebViewHolder* holder = WebViewHolder::FromWebState(webState);
+  CWVWebView* webView = holder->web_view();
+  DCHECK(webView);
+  return webView;
+}
+
 - (instancetype)initWithFrame:(CGRect)frame
                 configuration:(CWVWebViewConfiguration*)configuration {
   self = [super initWithFrame:frame];
@@ -198,9 +219,12 @@ static NSString* gUserAgentProduct = nil;
 }
 
 - (void)dealloc {
-  if (_webState && _webStateObserver) {
-    _webState->RemoveObserver(_webStateObserver.get());
-    _webStateObserver.reset();
+  if (_webState) {
+    if (_webStateObserver) {
+      _webState->RemoveObserver(_webStateObserver.get());
+      _webStateObserver.reset();
+    }
+    WebViewHolder::RemoveFromWebState(_webState.get());
   }
 }
 
@@ -283,22 +307,18 @@ static NSString* gUserAgentProduct = nil;
 }
 
 - (void)webState:(web::WebState*)webState
-    didCommitNavigationWithDetails:(const web::LoadCommittedDetails&)details {
-  if (details.is_in_page) {
-    // Do not call webViewDidCommitNavigation: for fragment navigations.
-    return;
-  }
-
-  if ([_navigationDelegate
-          respondsToSelector:@selector(webViewDidCommitNavigation:)]) {
-    [_navigationDelegate webViewDidCommitNavigation:self];
-  }
-}
-
-- (void)webState:(web::WebState*)webState
     didFinishNavigation:(web::NavigationContext*)navigation {
   [self updateNavigationAvailability];
   [self updateCurrentURLs];
+
+  // TODO(crbug.com/898357): Remove this once crbug.com/898357 is fixed.
+  [self updateVisibleSSLStatus];
+
+  if (navigation->HasCommitted() &&
+      [_navigationDelegate
+          respondsToSelector:@selector(webViewDidCommitNavigation:)]) {
+    [_navigationDelegate webViewDidCommitNavigation:self];
+  }
 
   NSError* error = navigation->GetError();
   SEL selector = @selector(webView:didFailNavigationWithError:);
@@ -324,6 +344,10 @@ static NSString* gUserAgentProduct = nil;
   self.estimatedProgress = progress;
 }
 
+- (void)webStateDidChangeBackForwardState:(web::WebState*)webState {
+  [self updateNavigationAvailability];
+}
+
 - (void)webStateDidStopLoading:(web::WebState*)webState {
   self.loading = _webState->IsLoading();
 }
@@ -334,6 +358,10 @@ static NSString* gUserAgentProduct = nil;
 
 - (void)webStateDidChangeTitle:(web::WebState*)webState {
   [self updateTitle];
+}
+
+- (void)webStateDidChangeVisibleSecurityState:(web::WebState*)webState {
+  [self updateVisibleSSLStatus];
 }
 
 - (void)renderProcessGoneForWebState:(web::WebState*)webState {
@@ -550,18 +578,20 @@ static NSString* gUserAgentProduct = nil;
 // The WebState is restored from |sessionStorage| if provided.
 - (void)resetWebStateWithSessionStorage:
     (nullable CRWSessionStorage*)sessionStorage {
-  if (_webState && _webState->GetView().superview == self) {
+  if (_webState) {
     if (_webStateObserver) {
       _webState->RemoveObserver(_webStateObserver.get());
     }
     for (const auto& pair : _scriptCommandCallbacks) {
       _webState->RemoveScriptCommandCallback(pair.first);
     }
-
-    // The web view provided by the old |_webState| has been added as a subview.
-    // It must be removed and replaced with a new |_webState|'s web view, which
-    // is added later.
-    [_webState->GetView() removeFromSuperview];
+    WebViewHolder::RemoveFromWebState(_webState.get());
+    if (_webState->GetView().superview == self) {
+      // The web view provided by the old |_webState| has been added as a
+      // subview. It must be removed and replaced with a new |_webState|'s web
+      // view, which is added later.
+      [_webState->GetView() removeFromSuperview];
+    }
   }
 
   BOOL allowsBackForwardNavigationGestures =
@@ -575,6 +605,9 @@ static NSString* gUserAgentProduct = nil;
   } else {
     _webState = web::WebState::Create(webStateCreateParams);
   }
+
+  WebViewHolder::CreateForWebState(_webState.get());
+  WebViewHolder::FromWebState(_webState.get())->set_web_view(self);
 
   if (!_webStateObserver) {
     _webStateObserver = std::make_unique<web::WebStateObserverBridge>(self);
@@ -624,6 +657,7 @@ static NSString* gUserAgentProduct = nil;
   [self updateNavigationAvailability];
   [self updateCurrentURLs];
   [self updateTitle];
+  [self updateVisibleSSLStatus];
   self.loading = NO;
   self.estimatedProgress = 0.0;
 }
@@ -653,6 +687,17 @@ static NSString* gUserAgentProduct = nil;
 
 - (void)updateTitle {
   self.title = base::SysUTF16ToNSString(_webState->GetTitle());
+}
+
+- (void)updateVisibleSSLStatus {
+  web::NavigationItem* visibleItem =
+      _webState->GetNavigationManager()->GetVisibleItem();
+  if (visibleItem) {
+    self.visibleSSLStatus =
+        [[CWVSSLStatus alloc] initWithInternalStatus:visibleItem->GetSSL()];
+  } else {
+    self.visibleSSLStatus = nil;
+  }
 }
 
 #pragma mark - Internal Methods

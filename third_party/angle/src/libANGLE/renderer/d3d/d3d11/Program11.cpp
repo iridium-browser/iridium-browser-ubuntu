@@ -16,8 +16,7 @@ namespace rx
 {
 Program11::Program11(const gl::ProgramState &programState, Renderer11 *renderer)
     : ProgramD3D(programState, renderer)
-{
-}
+{}
 
 Program11::~Program11() = default;
 
@@ -30,6 +29,6 @@ angle::Result Program11::syncState(const gl::Context *context,
     // This single flag should be replace by individual dirtyness.
     stateManager->invalidateProgramUniformBuffers();
 
-    return angle::Result::Continue();
+    return angle::Result::Continue;
 }
 }  // namespace rx

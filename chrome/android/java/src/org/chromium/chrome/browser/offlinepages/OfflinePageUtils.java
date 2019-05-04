@@ -32,7 +32,7 @@ import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.SadTab;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabModel;
+import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabModelObserver;
 import org.chromium.chrome.browser.util.ChromeFileProvider;
@@ -354,8 +354,10 @@ public class OfflinePageUtils {
      * @param result The result for publishing file.
      */
     public static void recordPublishPageResult(int result) {
+        // TODO(https://crbug.com/894714): Find a safer way to define the boundary value when
+        // using MAX_VALUE.
         RecordHistogram.recordEnumeratedHistogram("OfflinePages.Sharing.PublishInternalPageResult",
-                result, SavePageResult.RESULT_COUNT);
+                result, SavePageResult.MAX_VALUE + 1);
     }
 
     /**
@@ -723,7 +725,7 @@ public class OfflinePageUtils {
         }
 
         @Override
-        public void didAddTab(Tab tab, @TabModel.TabLaunchType int type) {
+        public void didAddTab(Tab tab, @TabLaunchType int type) {
             tab.addObserver(sTabRestoreTracker);
         }
 
@@ -792,7 +794,7 @@ public class OfflinePageUtils {
          * contents.
          */
         @Override
-        public void onPageLoadFinished(Tab tab) {
+        public void onPageLoadFinished(Tab tab, String url) {
             if (!tab.isBeingRestored()) return;
 
             // We first compute the bitwise tab restore context.

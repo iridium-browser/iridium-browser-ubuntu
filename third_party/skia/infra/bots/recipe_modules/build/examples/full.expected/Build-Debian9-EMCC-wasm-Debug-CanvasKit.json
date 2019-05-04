@@ -23,12 +23,13 @@
       "[START_DIR]/cache/work:/SRC",
       "-v",
       "[START_DIR]/cache/docker/canvaskit:/OUT",
-      "gcr.io/skia-public/emsdk-release:1.38.6_jre",
+      "gcr.io/skia-public/emsdk-release:1.38.16_v1",
       "/SRC/skia/infra/canvaskit/build_canvaskit.sh",
       "debug"
     ],
     "env": {
       "CHROME_HEADLESS": "1",
+      "DOCKER_CONFIG": "/home/chrome-bot/.docker",
       "PATH": "<PATH>:RECIPE_PACKAGE_REPO[depot_tools]"
     },
     "name": "Build CanvasKit with Docker"
@@ -113,8 +114,7 @@
     ]
   },
   {
-    "name": "$result",
-    "recipe_result": null,
-    "status_code": 0
+    "jsonResult": null,
+    "name": "$result"
   }
 ]

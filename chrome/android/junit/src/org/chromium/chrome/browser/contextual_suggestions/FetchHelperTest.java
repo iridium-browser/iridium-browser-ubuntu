@@ -35,11 +35,11 @@ import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.contextual_suggestions.FetchHelper.Delegate;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
+import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tabmodel.TabSelectionType;
 import org.chromium.chrome.browser.util.test.ShadowUrlUtilities;
 import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.WebContents;
@@ -188,19 +188,20 @@ public final class FetchHelperTest {
 
     @Test
     public void tabObserver_onPageLoadFinished() {
-        delayFetchExecutionTest((tabObserver) -> tabObserver.onPageLoadFinished(mTab));
+        delayFetchExecutionTest(
+                (tabObserver) -> tabObserver.onPageLoadFinished(mTab, STARTING_URL));
     }
 
     @Test
     public void tabObserver_onPageLoadFinished_pageLoadStarted_toSame() {
         delayFetchExecutionTest_pageLoadStarted_toSame(
-                (tabObserver) -> tabObserver.onPageLoadFinished(mTab));
+                (tabObserver) -> tabObserver.onPageLoadFinished(mTab, STARTING_URL));
     }
 
     @Test
     public void tabObserver_onPageLoadFinished_pageLoadStarted_toDifferent() {
         delayFetchExecutionTest_pageLoadStarted_toDifferent(
-                (tabObserver) -> tabObserver.onPageLoadFinished(mTab));
+                (tabObserver) -> tabObserver.onPageLoadFinished(mTab, STARTING_URL));
     }
 
     @Test
@@ -224,7 +225,7 @@ public final class FetchHelperTest {
     public void tabObserver_multipleSignals_triggersOnce() {
         delayFetchExecutionTest((tabObserver) -> {
             tabObserver.didFirstVisuallyNonEmptyPaint(mTab);
-            tabObserver.onPageLoadFinished(mTab);
+            tabObserver.onPageLoadFinished(mTab, STARTING_URL);
             tabObserver.onLoadStopped(mTab, false);
         });
     }
@@ -367,7 +368,7 @@ public final class FetchHelperTest {
         addTab(mTab2);
 
         // First tab finishes load in the background.
-        getTabObserver().onPageLoadFinished(mTab);
+        getTabObserver().onPageLoadFinished(mTab, STARTING_URL);
         verify(mDelegate, times(1)).reportFetchDelayed(eq(mWebContents));
 
         // Switching tabs, therefore the pending fetch is on a background tab.
@@ -404,7 +405,7 @@ public final class FetchHelperTest {
                 .getCanonicalUrlForSharing(any());
         FetchHelper helper = createFetchHelper();
 
-        getTabObserver().onPageLoadFinished(mTab);
+        getTabObserver().onPageLoadFinished(mTab, STARTING_URL);
         verify(mFrameHost, times(0)).getCanonicalUrlForSharing(any());
         runUntilFetchPossible();
         verify(mFrameHost, times(1)).getCanonicalUrlForSharing(any());
@@ -432,7 +433,7 @@ public final class FetchHelperTest {
         })
                 .when(mFrameHost)
                 .getCanonicalUrlForSharing(any());
-        getTabObserver().onPageLoadFinished(mTab);
+        getTabObserver().onPageLoadFinished(mTab, STARTING_URL);
         runUntilFetchPossible();
         verify(mDelegate, times(0)).requestSuggestions(DIFFERENT_URL);
     }

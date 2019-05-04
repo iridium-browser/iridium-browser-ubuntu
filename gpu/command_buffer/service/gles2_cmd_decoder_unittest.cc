@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "base/command_line.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
@@ -299,7 +300,7 @@ TEST_P(GLES2DecoderTest, CreateAbstractTexture) {
                                           GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_EQ(abstract_texture->GetTextureBase()->target(), target);
   EXPECT_EQ(abstract_texture->service_id(), service_id);
-  Texture* texture = static_cast<Texture*>(abstract_texture->GetTextureBase());
+  Texture* texture = Texture::CheckedCast(abstract_texture->GetTextureBase());
   EXPECT_EQ(texture->SafeToRenderFrom(), false);
 
   // Set some parameters, and verify that we set them.
@@ -443,7 +444,7 @@ TEST_P(GLES2DecoderTest, TestAbstractTextureSetClearedWorks) {
                                           1,                    /* depth */
                                           0,                    /* border */
                                           GL_RGBA, GL_UNSIGNED_BYTE);
-  Texture* texture = static_cast<Texture*>(abstract_texture->GetTextureBase());
+  Texture* texture = Texture::CheckedCast(abstract_texture->GetTextureBase());
 
   // Texture should start off unrenderable.
   EXPECT_EQ(texture->SafeToRenderFrom(), false);
@@ -925,7 +926,7 @@ static void CheckBeginEndQueryBadMemoryFails(GLES2DecoderTestBase* test,
 }
 
 TEST_P(GLES2DecoderManualInitTest, BeginEndQueryEXTBadMemoryIdFails) {
-  for (size_t i = 0; i < arraysize(kQueryTypes); ++i) {
+  for (size_t i = 0; i < base::size(kQueryTypes); ++i) {
     CheckBeginEndQueryBadMemoryFails(this, kNewClientId, kQueryTypes[i],
                                      kInvalidSharedMemoryId,
                                      kSharedMemoryOffset);
@@ -933,7 +934,7 @@ TEST_P(GLES2DecoderManualInitTest, BeginEndQueryEXTBadMemoryIdFails) {
 }
 
 TEST_P(GLES2DecoderManualInitTest, BeginEndQueryEXTBadMemoryOffsetFails) {
-  for (size_t i = 0; i < arraysize(kQueryTypes); ++i) {
+  for (size_t i = 0; i < base::size(kQueryTypes); ++i) {
     // Out-of-bounds.
     CheckBeginEndQueryBadMemoryFails(this, kNewClientId, kQueryTypes[i],
                                      shared_memory_id_,
@@ -945,7 +946,7 @@ TEST_P(GLES2DecoderManualInitTest, BeginEndQueryEXTBadMemoryOffsetFails) {
 }
 
 TEST_P(GLES2DecoderManualInitTest, QueryReuseTest) {
-  for (size_t i = 0; i < arraysize(kQueryTypes); ++i) {
+  for (size_t i = 0; i < base::size(kQueryTypes); ++i) {
     const QueryType& query_type = kQueryTypes[i];
 
     GLES2DecoderTestBase::InitState init;
@@ -1256,7 +1257,7 @@ TEST_P(GLES2DecoderTest, IsEnabledReturnsCachedValue) {
   static const GLenum kStates[] = {
       GL_DEPTH_TEST, GL_STENCIL_TEST,
   };
-  for (size_t ii = 0; ii < arraysize(kStates); ++ii) {
+  for (size_t ii = 0; ii < base::size(kStates); ++ii) {
     Enable enable_cmd;
     GLenum state = kStates[ii];
     enable_cmd.Init(state);

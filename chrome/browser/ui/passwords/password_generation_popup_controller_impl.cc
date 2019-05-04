@@ -223,10 +223,6 @@ void PasswordGenerationPopupControllerImpl::ViewDestroyed() {
   Hide();
 }
 
-void PasswordGenerationPopupControllerImpl::OnSavedPasswordsLinkClicked() {
-  NOTREACHED();
-}
-
 void PasswordGenerationPopupControllerImpl::SetSelectionAtPoint(
     const gfx::Point& point) {
   PasswordSelected(view_->IsPointInPasswordBounds(point));
@@ -305,8 +301,4 @@ base::string16 PasswordGenerationPopupControllerImpl::SuggestedText() {
 
 const base::string16& PasswordGenerationPopupControllerImpl::HelpText() {
   return help_text_;
-}
-
-gfx::Range PasswordGenerationPopupControllerImpl::HelpTextLinkRange() {
-  return gfx::Range();
 }

@@ -18,7 +18,6 @@
 #include "core/fpdfapi/render/cpdf_rendercontext.h"
 #include "core/fpdfapi/render/cpdf_renderoptions.h"
 #include "core/fpdfdoc/cpvt_generateap.h"
-#include "core/fxcrt/fx_memory.h"
 #include "core/fxge/cfx_graphstatedata.h"
 #include "core/fxge/cfx_pathdata.h"
 #include "core/fxge/cfx_renderdevice.h"
@@ -211,7 +210,7 @@ CPDF_Form* CPDF_Annot::GetAPForm(const CPDF_Page* pPage, AppearanceMode mode) {
 CFX_FloatRect CPDF_Annot::RectFromQuadPointsArray(const CPDF_Array* pArray,
                                                   size_t nIndex) {
   ASSERT(pArray);
-  ASSERT(nIndex < pArray->GetCount() / 8);
+  ASSERT(nIndex < pArray->size() / 8);
 
   // QuadPoints are defined with 4 pairs of numbers
   // ([ pair0, pair1, pair2, pair3 ]), where
@@ -234,11 +233,11 @@ CFX_FloatRect CPDF_Annot::BoundingRectFromQuadPoints(
     const CPDF_Dictionary* pAnnotDict) {
   CFX_FloatRect ret;
   const CPDF_Array* pArray = pAnnotDict->GetArrayFor("QuadPoints");
-  if (!pArray)
+  size_t nQuadPointCount = pArray ? QuadPointCount(pArray) : 0;
+  if (nQuadPointCount == 0)
     return ret;
 
   ret = RectFromQuadPointsArray(pArray, 0);
-  size_t nQuadPointCount = QuadPointCount(pArray);
   for (size_t i = 1; i < nQuadPointCount; ++i) {
     CFX_FloatRect rect = RectFromQuadPointsArray(pArray, i);
     ret.Union(rect);
@@ -247,10 +246,11 @@ CFX_FloatRect CPDF_Annot::BoundingRectFromQuadPoints(
 }
 
 // static
-CFX_FloatRect CPDF_Annot::RectFromQuadPoints(CPDF_Dictionary* pAnnotDict,
+CFX_FloatRect CPDF_Annot::RectFromQuadPoints(const CPDF_Dictionary* pAnnotDict,
                                              size_t nIndex) {
-  CPDF_Array* pArray = pAnnotDict->GetArrayFor("QuadPoints");
-  if (!pArray)
+  const CPDF_Array* pArray = pAnnotDict->GetArrayFor("QuadPoints");
+  size_t nQuadPointCount = pArray ? QuadPointCount(pArray) : 0;
+  if (nIndex >= nQuadPointCount)
     return CFX_FloatRect();
   return RectFromQuadPointsArray(pArray, nIndex);
 }
@@ -376,12 +376,12 @@ ByteString CPDF_Annot::AnnotSubtypeToString(CPDF_Annot::Subtype nSubtype) {
     return "RichMedia";
   if (nSubtype == CPDF_Annot::Subtype::XFAWIDGET)
     return "XFAWidget";
-  return "";
+  return ByteString();
 }
 
 // static
 size_t CPDF_Annot::QuadPointCount(const CPDF_Array* pArray) {
-  return pArray->GetCount() / 8;
+  return pArray->size() / 8;
 }
 
 bool CPDF_Annot::DrawAppearance(CPDF_Page* pPage,
@@ -444,7 +444,7 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
     return;
   }
   bool bPrinting = pDevice->GetDeviceClass() == FXDC_PRINTER ||
-                   (pOptions && (pOptions->HasFlag(RENDER_PRINTPREVIEW)));
+                   (pOptions && pOptions->GetOptions().bPrintPreview);
   if (bPrinting && (annot_flags & ANNOTFLAG_PRINT) == 0) {
     return;
   }
@@ -460,12 +460,12 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
     style_char = 'S';
     if (pBorderArray) {
       width = pBorderArray->GetNumberAt(2);
-      if (pBorderArray->GetCount() == 4) {
+      if (pBorderArray->size() == 4) {
         pDashArray = pBorderArray->GetArrayAt(3);
         if (!pDashArray) {
           return;
         }
-        size_t nLen = pDashArray->GetCount();
+        size_t nLen = pDashArray->size();
         size_t i = 0;
         for (; i < nLen; ++i) {
           CPDF_Object* pObj = pDashArray->GetDirectObjectAt(i);
@@ -502,13 +502,13 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
   graph_state.m_LineWidth = width;
   if (style_char == 'D') {
     if (pDashArray) {
-      size_t dash_count = pDashArray->GetCount();
+      size_t dash_count = pDashArray->size();
       if (dash_count % 2) {
         dash_count++;
       }
       graph_state.m_DashArray.resize(dash_count);
       size_t i;
-      for (i = 0; i < pDashArray->GetCount(); ++i) {
+      for (i = 0; i < pDashArray->size(); ++i) {
         graph_state.m_DashArray[i] = pDashArray->GetNumberAt(i);
       }
       if (i < dash_count) {
@@ -525,7 +525,7 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
   path.AppendRect(rect);
 
   int fill_type = 0;
-  if (pOptions && (pOptions->HasFlag(RENDER_NOPATHSMOOTH)))
+  if (pOptions && pOptions->GetOptions().bNoPathSmooth)
     fill_type |= FXFILL_NOPATHSMOOTH;
 
   pDevice->DrawPath(&path, pUser2Device, &graph_state, argb, argb, fill_type);

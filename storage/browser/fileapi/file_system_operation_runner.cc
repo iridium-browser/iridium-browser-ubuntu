@@ -103,8 +103,8 @@ OperationID FileSystemOperationRunner::Copy(
       src_url, dest_url, option, error_behavior,
       progress_callback.is_null()
           ? CopyProgressCallback()
-          : base::Bind(&FileSystemOperationRunner::OnCopyProgress, weak_ptr_,
-                       id, progress_callback),
+          : base::BindRepeating(&FileSystemOperationRunner::OnCopyProgress,
+                                weak_ptr_, id, progress_callback),
       base::BindOnce(&FileSystemOperationRunner::DidFinish, weak_ptr_, id,
                      std::move(callback)));
   return id;
@@ -689,11 +689,8 @@ OperationID FileSystemOperationRunner::BeginOperation(
     std::unique_ptr<FileSystemOperation> operation) {
   OperationID id = next_operation_id_++;
 
-  // TODO(https://crbug.com/864351): Diagnostic to determine whether OperationID
-  // wrap-around is occurring in the wild.
   DCHECK(operations_.find(id) == operations_.end());
-
-  operations_.emplace(id, std::move(operation));
+  operations_[id] = std::move(operation);
   return id;
 }
 

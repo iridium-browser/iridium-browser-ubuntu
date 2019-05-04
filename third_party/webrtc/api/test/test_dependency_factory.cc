@@ -11,7 +11,9 @@
 #include <memory>
 #include <utility>
 
+#include "absl/memory/memory.h"
 #include "api/test/test_dependency_factory.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/thread_checker.h"
 
 namespace webrtc {

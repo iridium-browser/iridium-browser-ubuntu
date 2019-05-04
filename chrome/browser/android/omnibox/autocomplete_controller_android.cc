@@ -39,6 +39,7 @@
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
+#include "components/omnibox/browser/location_bar_model.h"
 #include "components/omnibox/browser/omnibox_event_global_tracker.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/omnibox_log.h"
@@ -46,7 +47,6 @@
 #include "components/open_from_clipboard/clipboard_recent_content.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
-#include "components/toolbar/toolbar_model.h"
 #include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
@@ -257,7 +257,7 @@ void AutocompleteControllerAndroid::OnSuggestionSelected(
       content::WebContents::FromJavaWebContents(j_web_contents);
 
   if (autocomplete_controller_->result().match_at(selected_index).type ==
-      AutocompleteMatchType::CLIPBOARD) {
+      AutocompleteMatchType::CLIPBOARD_URL) {
     UMA_HISTOGRAM_LONG_TIMES_100(
         "MobileOmnibox.PressedClipboardSuggestionAge",
         ClipboardRecentContent::GetInstance()->GetClipboardContentAge());
@@ -268,6 +268,8 @@ void AutocompleteControllerAndroid::OnSuggestionSelected(
       input_.from_omnibox_focus() ? base::string16() : input_.text(),
       false, /* don't know */
       input_.type(),
+      false, /* not keyword mode */
+      OmniboxEventProto::INVALID,
       true,
       selected_index,
       WindowOpenDisposition::CURRENT_TAB,
@@ -542,10 +544,9 @@ AutocompleteControllerAndroid::BuildOmniboxSuggestion(
     description_class_styles.push_back(description_class.style);
   }
 
-  ScopedJavaLocalRef<jstring> answer_contents =
-      ConvertUTF16ToJavaString(env, match.answer_contents);
-  ScopedJavaLocalRef<jstring> answer_type =
-      ConvertUTF16ToJavaString(env, match.answer_type);
+  ScopedJavaLocalRef<jobject> janswer;
+  if (match.answer)
+    janswer = match.answer->CreateJavaObject();
   ScopedJavaLocalRef<jstring> fill_into_edit =
       ConvertUTF16ToJavaString(env, match.fill_into_edit);
   ScopedJavaLocalRef<jstring> destination_url =
@@ -558,8 +559,8 @@ AutocompleteControllerAndroid::BuildOmniboxSuggestion(
       ToJavaIntArray(env, contents_class_offsets),
       ToJavaIntArray(env, contents_class_styles), description,
       ToJavaIntArray(env, description_class_offsets),
-      ToJavaIntArray(env, description_class_styles), answer_contents,
-      answer_type, fill_into_edit, destination_url,
+      ToJavaIntArray(env, description_class_styles), janswer, fill_into_edit,
+      destination_url,
       bookmark_model && bookmark_model->IsBookmarked(match.destination_url),
       match.SupportsDeletion());
 }
@@ -626,7 +627,6 @@ static jlong JNI_AutocompleteController_Init(
 static ScopedJavaLocalRef<jstring>
 JNI_AutocompleteController_QualifyPartialURLQuery(
     JNIEnv* env,
-    const JavaParamRef<jclass>& clazz,
     const JavaParamRef<jstring>& jquery) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
   if (!profile)
@@ -653,9 +653,7 @@ JNI_AutocompleteController_QualifyPartialURLQuery(
   return ConvertUTF8ToJavaString(env, match.destination_url.spec());
 }
 
-static void JNI_AutocompleteController_PrefetchZeroSuggestResults(
-    JNIEnv* env,
-    const JavaParamRef<jclass>& clazz) {
+static void JNI_AutocompleteController_PrefetchZeroSuggestResults(JNIEnv* env) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
   if (!profile)
     return;

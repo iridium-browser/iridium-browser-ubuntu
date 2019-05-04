@@ -21,8 +21,10 @@
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/CodeGen/WasmEHFuncInfo.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/Function.h"
@@ -35,12 +37,6 @@ using namespace llvm;
 
 #define DEBUG_TYPE "wasm-lower"
 
-// Emit proposed instructions that may not have been implemented in engines
-cl::opt<bool> EnableUnimplementedWasmSIMDInstrs(
-    "wasm-enable-unimplemented-simd",
-    cl::desc("Emit potentially-unimplemented WebAssembly SIMD instructions"),
-    cl::init(false));
-
 WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     const TargetMachine &TM, const WebAssemblySubtarget &STI)
     : TargetLowering(TM), Subtarget(&STI) {
@@ -48,6 +44,8 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
 
   // Booleans always contain 0 or 1.
   setBooleanContents(ZeroOrOneBooleanContent);
+  // Except in SIMD vectors
+  setBooleanVectorContents(ZeroOrNegativeOneBooleanContent);
   // WebAssembly does not produce floating-point exceptions on normal floating
   // point operations.
   setHasFloatingPointExceptions(false);
@@ -66,7 +64,7 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     addRegisterClass(MVT::v8i16, &WebAssembly::V128RegClass);
     addRegisterClass(MVT::v4i32, &WebAssembly::V128RegClass);
     addRegisterClass(MVT::v4f32, &WebAssembly::V128RegClass);
-    if (EnableUnimplementedWasmSIMDInstrs) {
+    if (Subtarget->hasUnimplementedSIMD128()) {
       addRegisterClass(MVT::v2i64, &WebAssembly::V128RegClass);
       addRegisterClass(MVT::v2f64, &WebAssembly::V128RegClass);
     }
@@ -103,9 +101,9 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     for (auto Op :
          {ISD::FCEIL, ISD::FFLOOR, ISD::FTRUNC, ISD::FNEARBYINT, ISD::FRINT})
       setOperationAction(Op, T, Legal);
-    // Support minnan and maxnan, which otherwise default to expand.
-    setOperationAction(ISD::FMINNAN, T, Legal);
-    setOperationAction(ISD::FMAXNAN, T, Legal);
+    // Support minimum and maximum, which otherwise default to expand.
+    setOperationAction(ISD::FMINIMUM, T, Legal);
+    setOperationAction(ISD::FMAXIMUM, T, Legal);
     // WebAssembly currently has no builtin f16 support.
     setOperationAction(ISD::FP16_TO_FP, T, Expand);
     setOperationAction(ISD::FP_TO_FP16, T, Expand);
@@ -113,13 +111,27 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     setTruncStoreAction(T, MVT::f16, Expand);
   }
 
-  for (auto T : {MVT::i32, MVT::i64}) {
-    // Expand unavailable integer operations.
-    for (auto Op :
-         {ISD::BSWAP, ISD::SMUL_LOHI, ISD::UMUL_LOHI, ISD::MULHS, ISD::MULHU,
-          ISD::SDIVREM, ISD::UDIVREM, ISD::SHL_PARTS, ISD::SRA_PARTS,
-          ISD::SRL_PARTS, ISD::ADDC, ISD::ADDE, ISD::SUBC, ISD::SUBE}) {
+  // Support saturating add for i8x16 and i16x8
+  if (Subtarget->hasSIMD128())
+    for (auto T : {MVT::v16i8, MVT::v8i16})
+      for (auto Op : {ISD::SADDSAT, ISD::UADDSAT})
+        setOperationAction(Op, T, Legal);
+
+  // Expand unavailable integer operations.
+  for (auto Op :
+       {ISD::BSWAP, ISD::SMUL_LOHI, ISD::UMUL_LOHI, ISD::MULHS, ISD::MULHU,
+        ISD::SDIVREM, ISD::UDIVREM, ISD::SHL_PARTS, ISD::SRA_PARTS,
+        ISD::SRL_PARTS, ISD::ADDC, ISD::ADDE, ISD::SUBC, ISD::SUBE}) {
+    for (auto T : {MVT::i32, MVT::i64}) {
       setOperationAction(Op, T, Expand);
+    }
+    if (Subtarget->hasSIMD128()) {
+      for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32}) {
+        setOperationAction(Op, T, Expand);
+      }
+      if (Subtarget->hasUnimplementedSIMD128()) {
+        setOperationAction(Op, MVT::v2i64, Expand);
+      }
     }
   }
 
@@ -131,19 +143,43 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32, MVT::v4f32}) {
       setOperationAction(ISD::VECTOR_SHUFFLE, T, Custom);
     }
-    if (EnableUnimplementedWasmSIMDInstrs) {
+    if (Subtarget->hasUnimplementedSIMD128()) {
       setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v2i64, Custom);
       setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v2f64, Custom);
     }
   }
 
+  // Custom lowering since wasm shifts must have a scalar shift amount
+  if (Subtarget->hasSIMD128()) {
+    for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32})
+      for (auto Op : {ISD::SHL, ISD::SRA, ISD::SRL})
+        setOperationAction(Op, T, Custom);
+    if (Subtarget->hasUnimplementedSIMD128())
+      for (auto Op : {ISD::SHL, ISD::SRA, ISD::SRL})
+        setOperationAction(Op, MVT::v2i64, Custom);
+  }
+
+  // There are no select instructions for vectors
+  if (Subtarget->hasSIMD128())
+    for (auto Op : {ISD::VSELECT, ISD::SELECT_CC, ISD::SELECT}) {
+      for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32, MVT::v4f32})
+        setOperationAction(Op, T, Expand);
+      if (Subtarget->hasUnimplementedSIMD128())
+        for (auto T : {MVT::v2i64, MVT::v2f64})
+          setOperationAction(Op, T, Expand);
+    }
+
   // As a special case, these operators use the type to mean the type to
   // sign-extend from.
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
   if (!Subtarget->hasSignExt()) {
+    // Sign extends are legal only when extending a vector extract
+    auto Action = Subtarget->hasSIMD128() ? Custom : Expand;
     for (auto T : {MVT::i8, MVT::i16, MVT::i32})
-      setOperationAction(ISD::SIGN_EXTEND_INREG, T, Expand);
+      setOperationAction(ISD::SIGN_EXTEND_INREG, T, Action);
   }
+  for (auto T : MVT::integer_vector_valuetypes())
+    setOperationAction(ISD::SIGN_EXTEND_INREG, T, Expand);
 
   // Dynamic stack allocation: use the default expansion.
   setOperationAction(ISD::STACKSAVE, MVT::Other, Expand);
@@ -165,17 +201,51 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
   //  - Floating-point extending loads.
   //  - Floating-point truncating stores.
   //  - i1 extending loads.
+  //  - extending/truncating SIMD loads/stores
   setLoadExtAction(ISD::EXTLOAD, MVT::f64, MVT::f32, Expand);
   setTruncStoreAction(MVT::f64, MVT::f32, Expand);
   for (auto T : MVT::integer_valuetypes())
     for (auto Ext : {ISD::EXTLOAD, ISD::ZEXTLOAD, ISD::SEXTLOAD})
       setLoadExtAction(Ext, T, MVT::i1, Promote);
+  if (Subtarget->hasSIMD128()) {
+    for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32, MVT::v2i64, MVT::v4f32,
+                   MVT::v2f64}) {
+      for (auto MemT : MVT::vector_valuetypes()) {
+        if (MVT(T) != MemT) {
+          setTruncStoreAction(T, MemT, Expand);
+          for (auto Ext : {ISD::EXTLOAD, ISD::ZEXTLOAD, ISD::SEXTLOAD})
+            setLoadExtAction(Ext, T, MemT, Expand);
+        }
+      }
+    }
+  }
+
+  // Expand additional SIMD ops that V8 hasn't implemented yet
+  if (Subtarget->hasSIMD128() && !Subtarget->hasUnimplementedSIMD128()) {
+    setOperationAction(ISD::FSQRT, MVT::v4f32, Expand);
+    setOperationAction(ISD::FDIV, MVT::v4f32, Expand);
+  }
+
+  // Custom lower lane accesses to expand out variable indices
+  if (Subtarget->hasSIMD128()) {
+    for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32, MVT::v4f32}) {
+      setOperationAction(ISD::EXTRACT_VECTOR_ELT, T, Custom);
+      setOperationAction(ISD::INSERT_VECTOR_ELT, T, Custom);
+    }
+    if (Subtarget->hasUnimplementedSIMD128()) {
+      for (auto T : {MVT::v2i64, MVT::v2f64}) {
+        setOperationAction(ISD::EXTRACT_VECTOR_ELT, T, Custom);
+        setOperationAction(ISD::INSERT_VECTOR_ELT, T, Custom);
+      }
+    }
+  }
 
   // Trap lowers to wasm unreachable
   setOperationAction(ISD::TRAP, MVT::Other, Legal);
 
   // Exception handling intrinsics
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
+  setOperationAction(ISD::INTRINSIC_VOID, MVT::Other, Custom);
 
   setMaxAtomicSizeInBitsSupported(64);
 }
@@ -821,8 +891,19 @@ SDValue WebAssemblyTargetLowering::LowerOperation(SDValue Op,
     return LowerCopyToReg(Op, DAG);
   case ISD::INTRINSIC_WO_CHAIN:
     return LowerINTRINSIC_WO_CHAIN(Op, DAG);
+  case ISD::EXTRACT_VECTOR_ELT:
+  case ISD::INSERT_VECTOR_ELT:
+    return LowerAccessVectorElement(Op, DAG);
+  case ISD::INTRINSIC_VOID:
+    return LowerINTRINSIC_VOID(Op, DAG);
+  case ISD::SIGN_EXTEND_INREG:
+    return LowerSIGN_EXTEND_INREG(Op, DAG);
   case ISD::VECTOR_SHUFFLE:
     return LowerVECTOR_SHUFFLE(Op, DAG);
+  case ISD::SHL:
+  case ISD::SRA:
+  case ISD::SRL:
+    return LowerShift(Op, DAG);
   }
 }
 
@@ -834,7 +915,7 @@ SDValue WebAssemblyTargetLowering::LowerCopyToReg(SDValue Op,
     // the FI to some LEA-like instruction, but since we don't have that, we
     // need to insert some kind of instruction that can take an FI operand and
     // produces a value usable by CopyToReg (i.e. in a vreg). So insert a dummy
-    // copy_local between Op and its FI operand.
+    // local.copy between Op and its FI operand.
     SDValue Chain = Op.getOperand(0);
     SDLoc DL(Op);
     unsigned Reg = cast<RegisterSDNode>(Op.getOperand(1))->getReg();
@@ -966,48 +1047,72 @@ WebAssemblyTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
   default:
     return {}; // Don't custom lower most intrinsics.
 
-  case Intrinsic::wasm_add_saturate_signed:
-  case Intrinsic::wasm_add_saturate_unsigned:
-  case Intrinsic::wasm_sub_saturate_signed:
-  case Intrinsic::wasm_sub_saturate_unsigned: {
-    unsigned OpCode;
-    switch (IntNo) {
-    case Intrinsic::wasm_add_saturate_signed:
-      OpCode = WebAssemblyISD::ADD_SAT_S;
-      break;
-    case Intrinsic::wasm_add_saturate_unsigned:
-      OpCode = WebAssemblyISD::ADD_SAT_U;
-      break;
-    case Intrinsic::wasm_sub_saturate_signed:
-      OpCode = WebAssemblyISD::SUB_SAT_S;
-      break;
-    case Intrinsic::wasm_sub_saturate_unsigned:
-      OpCode = WebAssemblyISD::SUB_SAT_U;
-      break;
-    default:
-      llvm_unreachable("unexpected intrinsic id");
-      break;
+  case Intrinsic::wasm_lsda: {
+    MachineFunction &MF = DAG.getMachineFunction();
+    EVT VT = Op.getValueType();
+    const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+    MVT PtrVT = TLI.getPointerTy(DAG.getDataLayout());
+    auto &Context = MF.getMMI().getContext();
+    MCSymbol *S = Context.getOrCreateSymbol(Twine("GCC_except_table") +
+                                            Twine(MF.getFunctionNumber()));
+    return DAG.getNode(WebAssemblyISD::Wrapper, DL, VT,
+                       DAG.getMCSymbol(S, PtrVT));
+  }
+  }
+}
+
+SDValue
+WebAssemblyTargetLowering::LowerINTRINSIC_VOID(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  unsigned IntNo = cast<ConstantSDNode>(Op.getOperand(1))->getZExtValue();
+  SDLoc DL(Op);
+
+  switch (IntNo) {
+  default:
+    return {}; // Don't custom lower most intrinsics.
+
+  case Intrinsic::wasm_throw: {
+    int Tag = cast<ConstantSDNode>(Op.getOperand(2).getNode())->getZExtValue();
+    switch (Tag) {
+    case CPP_EXCEPTION: {
+      const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+      MVT PtrVT = TLI.getPointerTy(DAG.getDataLayout());
+      const char *SymName = MF.createExternalSymbolName("__cpp_exception");
+      SDValue SymNode =
+          DAG.getNode(WebAssemblyISD::Wrapper, DL, PtrVT,
+                      DAG.getTargetExternalSymbol(
+                          SymName, PtrVT, WebAssemblyII::MO_SYMBOL_EVENT));
+      return DAG.getNode(WebAssemblyISD::THROW, DL,
+                         MVT::Other, // outchain type
+                         {
+                             Op.getOperand(0), // inchain
+                             SymNode,          // exception symbol
+                             Op.getOperand(3)  // thrown value
+                         });
     }
-    return DAG.getNode(OpCode, DL, Op.getValueType(), Op.getOperand(1),
-                       Op.getOperand(2));
+    default:
+      llvm_unreachable("Invalid tag!");
+    }
+    break;
   }
-
-  case Intrinsic::wasm_bitselect:
-    return DAG.getNode(WebAssemblyISD::BITSELECT, DL, Op.getValueType(),
-                       Op.getOperand(1), Op.getOperand(2), Op.getOperand(3));
-
-  case Intrinsic::wasm_anytrue:
-  case Intrinsic::wasm_alltrue: {
-    unsigned OpCode = IntNo == Intrinsic::wasm_anytrue
-                          ? WebAssemblyISD::ANYTRUE
-                          : WebAssemblyISD::ALLTRUE;
-    return DAG.getNode(OpCode, DL, Op.getValueType(), Op.getOperand(1));
   }
+}
 
-  case Intrinsic::wasm_lsda:
-    // TODO For now, just return 0 not to crash
-    return DAG.getConstant(0, DL, Op.getValueType());
-  }
+SDValue
+WebAssemblyTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
+                                                  SelectionDAG &DAG) const {
+  // If sign extension operations are disabled, allow sext_inreg only if operand
+  // is a vector extract. SIMD does not depend on sign extension operations, but
+  // allowing sext_inreg in this context lets us have simple patterns to select
+  // extract_lane_s instructions. Expanding sext_inreg everywhere would be
+  // simpler in this file, but would necessitate large and brittle patterns to
+  // undo the expansion and select extract_lane_s instructions.
+  assert(!Subtarget->hasSignExt() && Subtarget->hasSIMD128());
+  if (Op.getOperand(0).getOpcode() == ISD::EXTRACT_VECTOR_ELT)
+    return Op;
+  // Otherwise expand
+  return SDValue();
 }
 
 SDValue
@@ -1028,12 +1133,95 @@ WebAssemblyTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
   // Expand mask indices to byte indices and materialize them as operands
   for (size_t I = 0, Lanes = Mask.size(); I < Lanes; ++I) {
     for (size_t J = 0; J < LaneBytes; ++J) {
-      Ops[OpIdx++] =
-          DAG.getConstant((uint64_t)Mask[I] * LaneBytes + J, DL, MVT::i32);
+      // Lower undefs (represented by -1 in mask) to zero
+      uint64_t ByteIndex =
+          Mask[I] == -1 ? 0 : (uint64_t)Mask[I] * LaneBytes + J;
+      Ops[OpIdx++] = DAG.getConstant(ByteIndex, DL, MVT::i32);
     }
   }
 
-  return DAG.getNode(WebAssemblyISD::SHUFFLE, DL, MVT::v16i8, Ops);
+  return DAG.getNode(WebAssemblyISD::SHUFFLE, DL, Op.getValueType(), Ops);
+}
+
+SDValue
+WebAssemblyTargetLowering::LowerAccessVectorElement(SDValue Op,
+                                                    SelectionDAG &DAG) const {
+  // Allow constant lane indices, expand variable lane indices
+  SDNode *IdxNode = Op.getOperand(Op.getNumOperands() - 1).getNode();
+  if (isa<ConstantSDNode>(IdxNode) || IdxNode->isUndef())
+    return Op;
+  else
+    // Perform default expansion
+    return SDValue();
+}
+
+static SDValue UnrollVectorShift(SDValue Op, SelectionDAG &DAG) {
+  EVT LaneT = Op.getSimpleValueType().getVectorElementType();
+  // 32-bit and 64-bit unrolled shifts will have proper semantics
+  if (LaneT.bitsGE(MVT::i32))
+    return DAG.UnrollVectorOp(Op.getNode());
+  // Otherwise mask the shift value to get proper semantics from 32-bit shift
+  SDLoc DL(Op);
+  SDValue ShiftVal = Op.getOperand(1);
+  uint64_t MaskVal = LaneT.getSizeInBits() - 1;
+  SDValue MaskedShiftVal = DAG.getNode(
+      ISD::AND,                    // mask opcode
+      DL, ShiftVal.getValueType(), // masked value type
+      ShiftVal,                    // original shift value operand
+      DAG.getConstant(MaskVal, DL, ShiftVal.getValueType()) // mask operand
+  );
+
+  return DAG.UnrollVectorOp(
+      DAG.getNode(Op.getOpcode(),        // original shift opcode
+                  DL, Op.getValueType(), // original return type
+                  Op.getOperand(0),      // original vector operand,
+                  MaskedShiftVal         // new masked shift value operand
+                  )
+          .getNode());
+}
+
+SDValue WebAssemblyTargetLowering::LowerShift(SDValue Op,
+                                              SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+
+  // Only manually lower vector shifts
+  assert(Op.getSimpleValueType().isVector());
+
+  // Expand all vector shifts until V8 fixes its implementation
+  // TODO: remove this once V8 is fixed
+  if (!Subtarget->hasUnimplementedSIMD128())
+    return UnrollVectorShift(Op, DAG);
+
+  // Unroll non-splat vector shifts
+  BuildVectorSDNode *ShiftVec;
+  SDValue SplatVal;
+  if (!(ShiftVec = dyn_cast<BuildVectorSDNode>(Op.getOperand(1).getNode())) ||
+      !(SplatVal = ShiftVec->getSplatValue()))
+    return UnrollVectorShift(Op, DAG);
+
+  // All splats except i64x2 const splats are handled by patterns
+  ConstantSDNode *SplatConst = dyn_cast<ConstantSDNode>(SplatVal);
+  if (!SplatConst || Op.getSimpleValueType() != MVT::v2i64)
+    return Op;
+
+  // i64x2 const splats are custom lowered to avoid unnecessary wraps
+  unsigned Opcode;
+  switch (Op.getOpcode()) {
+  case ISD::SHL:
+    Opcode = WebAssemblyISD::VEC_SHL;
+    break;
+  case ISD::SRA:
+    Opcode = WebAssemblyISD::VEC_SHR_S;
+    break;
+  case ISD::SRL:
+    Opcode = WebAssemblyISD::VEC_SHR_U;
+    break;
+  default:
+    llvm_unreachable("unexpected opcode");
+  }
+  APInt Shift = SplatConst->getAPIntValue().zextOrTrunc(32);
+  return DAG.getNode(Opcode, DL, Op.getValueType(), Op.getOperand(0),
+                     DAG.getConstant(Shift, DL, MVT::i32));
 }
 
 //===----------------------------------------------------------------------===//

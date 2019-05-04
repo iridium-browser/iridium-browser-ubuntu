@@ -40,7 +40,7 @@
 #include <memory>
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
-#include "third_party/blink/renderer/platform/instrumentation/platform_instrumentation.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
 extern "C" {
 #include <stdio.h>  // jpeglib.h needs stdio FILE.
@@ -920,18 +920,27 @@ bool JPEGImageDecoder::ShouldGenerateAllSizes() const {
 }
 
 bool JPEGImageDecoder::CanDecodeToYUV() {
+  // TODO(crbug.com/919627): Re-enable the code below once JPEG YUV decoding is
+  // finished.
+  // Returning false here is a bit deceptive because the JPEG decoder does
+  // support YUV. But the rest of the infrastructure at levels above the decoder
+  // is not quite there yet to handle the resulting JPEG YUV data,
+  // so for now we disable that path.
+  return false;
   // Calling IsSizeAvailable() ensures the reader is created and the output
   // color space is set.
-  return IsSizeAvailable() && reader_->Info()->out_color_space == JCS_YCbCr;
+  // return IsSizeAvailable() && reader_->Info()->out_color_space == JCS_YCbCr;
 }
 
 bool JPEGImageDecoder::DecodeToYUV() {
   if (!HasImagePlanes())
     return false;
 
-  PlatformInstrumentation::WillDecodeImage("JPEG");
-  Decode(false);
-  PlatformInstrumentation::DidDecodeImage();
+  {
+    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "Decode Image",
+                 "imageType", "JPEG");
+    Decode(false);
+  }
   return !Failed();
 }
 

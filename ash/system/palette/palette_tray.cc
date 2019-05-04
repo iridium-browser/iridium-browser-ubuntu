@@ -45,7 +45,6 @@
 #include "ui/views/controls/separator.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/fill_layout.h"
-#include "ui/views/pointer_watcher.h"
 
 namespace ash {
 
@@ -174,7 +173,8 @@ PaletteTray::PaletteTray(Shelf* shelf)
   SetInkDropMode(InkDropMode::ON);
   SetLayoutManager(std::make_unique<views::FillLayout>());
   icon_ = new views::ImageView();
-  icon_->SetTooltipText(l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE));
+  icon_->set_tooltip_text(
+      l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE));
   UpdateTrayIcon();
 
   tray_container()->SetMargin(kTrayIconMainAxisInset, kTrayIconCrossAxisInset);
@@ -314,8 +314,11 @@ void PaletteTray::HideBubbleWithView(const TrayBubbleView* bubble_view) {
     HidePalette();
 }
 
-void PaletteTray::OnTouchscreenDeviceConfigurationChanged() {
-  UpdateIconVisibility();
+void PaletteTray::OnInputDeviceConfigurationChanged(
+    uint8_t input_device_types) {
+  if (input_device_types & ui::InputDeviceEventObserver::kTouchscreen) {
+    UpdateIconVisibility();
+  }
 }
 
 void PaletteTray::OnStylusStateChanged(ui::StylusState stylus_state) {
@@ -364,7 +367,7 @@ base::string16 PaletteTray::GetAccessibleNameForBubble() {
 }
 
 bool PaletteTray::ShouldEnableExtraKeyboardAccessibility() {
-  return Shell::Get()->accessibility_controller()->IsSpokenFeedbackEnabled();
+  return Shell::Get()->accessibility_controller()->spoken_feedback_enabled();
 }
 
 void PaletteTray::HideBubble(const TrayBubbleView* bubble_view) {
@@ -430,10 +433,8 @@ aura::Window* PaletteTray::GetWindow() {
 }
 
 void PaletteTray::AnchorUpdated() {
-  if (bubble_) {
-    UpdateClippingWindowBounds();
+  if (bubble_)
     bubble_->bubble_view()->UpdateBubble();
-  }
 }
 
 void PaletteTray::Initialize() {

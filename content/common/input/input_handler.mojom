@@ -156,10 +156,9 @@ struct TouchActionOptional {
 // contained in here are state changes that the renderer has taken
 // that the browser must be aware of.
 interface WidgetInputHandlerHost {
-  // Cancel the active touch timeout. Occurs when the renderer
-  // has processed a touch-action: none but not yet dispatched
-  // the event to javascript.
-  CancelTouchTimeout();
+  // When the renderer's main thread computes the touch action, send this to the
+  // browser.
+  SetTouchActionFromMain(TouchAction touch_action);
 
   // The whitelisted touch action and the associated unique touch event id
   // for a new touch point sent by the compositor. The unique touch event id is
@@ -260,6 +259,13 @@ interface WidgetInputHandler {
   // of this API is the same as DispatchEvent just that there is no callback
   // after the event is processed.
   DispatchNonBlockingEvent(Event event);
+
+  // Forces input to be flushed and resolves the callback only once the input
+  // has been fully processed, meaning its effects are visible to the full
+  // system. In practice, this will force a redraw and wait until the new
+  // CompositorFrame (containing all changes caused by prior input) has been
+  // displayed.
+  WaitForInputProcessed() => ();
 
   // Attach the synchronous compositor interface. This method only
   // should be called for Android WebView.

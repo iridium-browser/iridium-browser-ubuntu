@@ -8,6 +8,7 @@
 #ifndef GrDrawingManager_DEFINED
 #define GrDrawingManager_DEFINED
 
+#include "GrDeferredUpload.h"
 #include "GrPathRenderer.h"
 #include "GrPathRendererChain.h"
 #include "GrResourceCache.h"
@@ -17,6 +18,7 @@
 class GrContext;
 class GrCoverageCountingPathRenderer;
 class GrOnFlushCallbackObject;
+class GrOpFlushState;
 class GrRenderTargetContext;
 class GrRenderTargetProxy;
 class GrSingleOWner;
@@ -138,7 +140,7 @@ private:
     void cleanup();
 
     // return true if any opLists were actually executed; false otherwise
-    bool executeOpLists(int startIndex, int stopIndex, GrOpFlushState*);
+    bool executeOpLists(int startIndex, int stopIndex, GrOpFlushState*, int* numOpListsExecuted);
 
     GrSemaphoresSubmitted flush(GrSurfaceProxy* proxy,
                                 int numSemaphores = 0,
@@ -157,6 +159,8 @@ private:
     GrPathRendererChain::Options      fOptionsForPathRendererChain;
     GrTextContext::Options            fOptionsForTextContext;
 
+    std::unique_ptr<char[]>           fVertexBufferSpace;
+    std::unique_ptr<char[]>           fIndexBufferSpace;
     // In debug builds we guard against improper thread handling
     GrSingleOwner*                    fSingleOwner;
 

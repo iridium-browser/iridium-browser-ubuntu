@@ -15,7 +15,6 @@
 #include "base/win/scoped_process_information.h"
 #include "chrome/credential_provider/gaiacp/gaia_credential_provider_i.h"
 #include "chrome/credential_provider/gaiacp/gcp_utils.h"
-#include "chrome/credential_provider/gaiacp/grit/gaia_resources.h"
 #include "chrome/credential_provider/gaiacp/scoped_handle.h"
 
 namespace base {
@@ -30,6 +29,7 @@ class OSUserManager;
 
 enum FIELDID {
   FID_DESCRIPTION,
+  FID_CURRENT_PASSWORD_FIELD,
   FID_SUBMIT,
   FID_PROVIDER_LOGO,
   FID_PROVIDER_LABEL,
@@ -45,7 +45,7 @@ class ATL_NO_VTABLE CGaiaCredentialBase
  public:
   // Size in wchar_t of string buffer to pass account information to background
   // process to save that information into the registry.
-  const static int kAccountInfoBufferSize = 1024;
+  static const int kAccountInfoBufferSize = 2048;
 
   // Called when the DLL is registered or unregistered.
   static HRESULT OnDllRegisterServer();
@@ -88,18 +88,34 @@ class ATL_NO_VTABLE CGaiaCredentialBase
   // Members to access user credentials.
   const CComBSTR& get_username() const { return username_; }
   const CComBSTR& get_password() const { return password_; }
-  const CComBSTR& get_sid() const { return sid_; }
+  const CComBSTR& get_sid() const { return user_sid_; }
+  const CComBSTR& get_current_windows_password() const {
+    return current_windows_password_;
+  }
+  void set_username(BSTR username) { username_ = username; }
+  void set_user_sid(BSTR sid) { user_sid_ = sid; }
+  void set_current_windows_password(BSTR password) {
+    current_windows_password_ = password;
+  }
   bool AreCredentialsValid() const;
+  bool AreWindowsCredentialsAvailable() const;
+  HRESULT AreWindowsCredentialsValid(BSTR password) const;
+
+  // IGaiaCredential
+  IFACEMETHODIMP Initialize(IGaiaCredentialProvider* provider) override;
+  IFACEMETHODIMP Terminate() override;
+  IFACEMETHODIMP OnUserAuthenticated(BSTR authentication_info,
+                                     BSTR* status_text) override;
+  IFACEMETHODIMP ReportError(LONG status,
+                             LONG substatus,
+                             BSTR status_text) override;
 
   // Gets the string value for the given credential UI field.
   HRESULT GetStringValueImpl(DWORD field_id, wchar_t** value);
 
-  // Called from derived classes when implementing OnUserAuthenticated().
-  HRESULT FinishOnUserAuthenticated(BSTR username, BSTR password, BSTR sid);
-
- private:
-   static HRESULT GetAppNameAndCommandline(const wchar_t* email,
-                                           base::CommandLine* command_line);
+  // Derived classes should implement this function to return an email address
+  // only when reauthenticating the user.
+  virtual HRESULT GetEmailForReauth(wchar_t* email, size_t length);
 
   // Resets the state of the credential, forgetting any username or password
   // that may have been set previously.  Derived classes may override to
@@ -107,9 +123,18 @@ class ATL_NO_VTABLE CGaiaCredentialBase
   // class method.
   virtual void ResetInternalState();
 
-  // Derived classes should implement this function to return an email address
-  // only when reauthenticating the user.
-  virtual HRESULT GetEmailForReauth(wchar_t* email, size_t length);
+ private:
+  // Gets the base portion of the command line to run the Gaia Logon stub.
+  // This portion of the command line would only include the executable and
+  // any executable specific arguments needed to correctly start the GLS.
+  virtual HRESULT GetBaseGlsCommandline(base::CommandLine* command_line);
+  // Gets the full command line to run the Gaia Logon stub (GLS). This
+  // function calls GetBaseGlsCommandline.
+  HRESULT GetGlsCommandline(const wchar_t* email,
+                            base::CommandLine* command_line);
+
+  // Display error message to the user.  Virtual so that tests can override.
+  virtual void DisplayErrorInUI(LONG status, LONG substatus, BSTR status_text);
 
   // Called from GetSerialization() to handle auto-logon.  If the credential
   // has enough information in internal state to auto-logon, the two arguments
@@ -129,8 +154,7 @@ class ATL_NO_VTABLE CGaiaCredentialBase
   // Creates a restricted token for the Gaia account that can be used to run
   // the logon stub.  The returned SID is a logon SID and not the SID of the
   // Gaia account.
-  static HRESULT CreateGaiaLogonToken(OSProcessManager* manager,
-                                      base::win::ScopedHandle* token,
+  static HRESULT CreateGaiaLogonToken(base::win::ScopedHandle* token,
                                       PSID* sid);
 
   // Forks the logon stub process and waits for it to start.
@@ -146,13 +170,9 @@ class ATL_NO_VTABLE CGaiaCredentialBase
   // The param is a pointer to a UIProcessInfo struct.  This function must
   // release the memory for this structure using delete operator.
   static unsigned __stdcall WaitForLoginUI(void* param);
-  static HRESULT WaitForLoginUIImpl(
-      UIProcessInfo* uiprocinfo,
-      std::unique_ptr<base::DictionaryValue>* properties,
-      BSTR* status_text);
 
   // ICredentialProviderCredential2
-  IFACEMETHODIMP Advise(ICredentialProviderCredentialEvents* pcpce) override;
+  IFACEMETHODIMP Advise(ICredentialProviderCredentialEvents* cpce) override;
   IFACEMETHODIMP UnAdvise(void) override;
   IFACEMETHODIMP SetSelected(BOOL* auto_login) override;
   IFACEMETHODIMP SetDeselected(void) override;
@@ -179,10 +199,10 @@ class ATL_NO_VTABLE CGaiaCredentialBase
                                           DWORD dwSelectedItem) override;
   IFACEMETHODIMP CommandLinkClicked(DWORD field_id) override;
   IFACEMETHODIMP GetSerialization(
-      CREDENTIAL_PROVIDER_GET_SERIALIZATION_RESPONSE* pcpgsr,
-      CREDENTIAL_PROVIDER_CREDENTIAL_SERIALIZATION* pcpcs,
-      wchar_t** ppszOptionalStatusText,
-      CREDENTIAL_PROVIDER_STATUS_ICON* pcpsiOptionalStatusIcon) override;
+      CREDENTIAL_PROVIDER_GET_SERIALIZATION_RESPONSE* cpgsr,
+      CREDENTIAL_PROVIDER_CREDENTIAL_SERIALIZATION* cpcs,
+      wchar_t** status_text,
+      CREDENTIAL_PROVIDER_STATUS_ICON* status_icon) override;
   IFACEMETHODIMP ReportResult(
       NTSTATUS ntsStatus,
       NTSTATUS ntsSubstatus,
@@ -190,20 +210,25 @@ class ATL_NO_VTABLE CGaiaCredentialBase
       CREDENTIAL_PROVIDER_STATUS_ICON* pcpsiOptionalStatusIcon) override;
   IFACEMETHODIMP GetUserSid(wchar_t** sid) override;
 
-  // IGaiaCredential
-  IFACEMETHODIMP Initialize(IGaiaCredentialProvider* provider) override;
-  IFACEMETHODIMP Terminate() override;
-  IFACEMETHODIMP FinishAuthentication(BSTR username,
-                                      BSTR password,
-                                      BSTR fullname,
-                                      BSTR* sid,
-                                      BSTR* error_text) override;
-  IFACEMETHODIMP OnUserAuthenticated(BSTR username,
-                                     BSTR password,
-                                     BSTR sid) override;
-  IFACEMETHODIMP ReportError(LONG status,
-                             LONG substatus,
-                             BSTR status_text) override;
+  void TerminateLogonProcess();
+
+  // Checks if the information for the given |username| is valid and creates it
+  // if it does not exist.
+  // Returns S_OK if the user exists and the given |password| is a valid windows
+  // login password for the user or if the user does not exist and it was
+  // created successfully.
+  // Returns S_FALSE if the user exists but the given |password| is not the
+  // right password to signin to the Windows account. Otherwise an error result
+  // depending on the failure. On failure |error_text| will be allocated and
+  // filled with an error message. The caller must take ownership of this
+  // memory. On success (S_OK or S_FALSE) |sid| will be allocated and filled
+  // with the sid of the created or existing user. The caller must take
+  // ownership of this memory.
+  HRESULT ValidateOrCreateUser(BSTR username,
+                               BSTR password,
+                               BSTR fullname,
+                               BSTR* sid,
+                               BSTR* error_text);
 
   CComPtr<ICredentialProviderCredentialEvents> events_;
 
@@ -215,8 +240,13 @@ class ATL_NO_VTABLE CGaiaCredentialBase
   // Information about the just created or re-auth-ed user.
   CComBSTR username_;
   CComBSTR password_;
-  CComBSTR sid_;
+  CComBSTR user_sid_;
 
+  // The password entered into the FID_CURRENT_PASSWORD_FIELD to update the
+  // Windows password with the gaia password.
+  CComBSTR current_windows_password_;
+
+  std::unique_ptr<base::DictionaryValue> authentication_results_;
   // Whether success or failure, these members hold information about result.
   NTSTATUS result_status_;
   NTSTATUS result_substatus_;

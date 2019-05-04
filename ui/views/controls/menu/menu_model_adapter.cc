@@ -83,6 +83,9 @@ MenuItemView* MenuModelAdapter::AddMenuItemFromModelAt(ui::MenuModel* model,
     case ui::MenuModel::TYPE_ACTIONABLE_SUBMENU:
       type = MenuItemView::ACTIONABLE_SUBMENU;
       break;
+    case ui::MenuModel::TYPE_HIGHLIGHTED:
+      type = MenuItemView::HIGHLIGHTED;
+      break;
   }
 
   if (*type == MenuItemView::SEPARATOR) {
@@ -215,22 +218,6 @@ bool MenuModelAdapter::IsItemChecked(int id) const {
 
   NOTREACHED();
   return false;
-}
-
-void MenuModelAdapter::SelectionChanged(MenuItemView* menu) {
-  // Ignore selection of the root menu.
-  if (menu == menu->GetRootMenuItem())
-    return;
-
-  const int id = menu->GetCommand();
-  ui::MenuModel* model = menu_model_;
-  int index = 0;
-  if (ui::MenuModel::GetModelAndIndexForCommandId(id, &model, &index)) {
-    model->HighlightChangedTo(index);
-    return;
-  }
-
-  NOTREACHED();
 }
 
 void MenuModelAdapter::WillShowMenu(MenuItemView* menu) {

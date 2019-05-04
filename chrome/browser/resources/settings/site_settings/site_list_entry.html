@@ -2,14 +2,14 @@
 
 <link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_pref_indicator.html">
+<link rel="import" href="chrome://resources/html/cr/ui/focus_row_behavior.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/neon-animation/web-animations.html">
-<link rel="import" href="../focus_row_behavior.html">
 <link rel="import" href="../i18n_setup.html">
 <link rel="import" href="../icons.html">
 <link rel="import" href="../route.html">
 <link rel="import" href="../settings_shared_css.html">
+<link rel="import" href="../site_favicon.html">
 <link rel="import" href="constants.html">
 <link rel="import" href="site_settings_behavior.html">
 <link rel="import" href="site_settings_prefs_browser_proxy.html">
@@ -35,9 +35,7 @@
     <div class="list-item" focus-row-container>
       <div class="settings-row"
           actionable$="[[enableSiteSettings_]]" on-click="onOriginTap_">
-        <div class="favicon-image"
-            style$="[[computeSiteIcon(model.origin)]]">
-        </div>
+        <site-favicon url="[[model.origin]]"></site-favicon>
         <div class="middle no-min-width">
           <div class="text-elide">
             <span class="url-directionality">[[model.displayName]]</span>

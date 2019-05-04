@@ -340,6 +340,16 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
     return unacked_packets_;
   }
 
+  // Sets the send algorithm to the given congestion control type and points the
+  // pacing sender at |send_algorithm_|. Can be called any number of times.
+  void SetSendAlgorithm(CongestionControlType congestion_control_type);
+
+  // Sets the send algorithm to |send_algorithm| and points the pacing sender at
+  // |send_algorithm_|. Takes ownership of |send_algorithm|. Can be called any
+  // number of times.
+  // Setting the send algorithm once the connection is underway is dangerous.
+  void SetSendAlgorithm(SendAlgorithmInterface* send_algorithm);
+
  private:
   friend class test::QuicConnectionPeer;
   friend class test::QuicSentPacketManagerPeer;
@@ -458,15 +468,6 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
   void RecordSpuriousRetransmissions(const QuicTransmissionInfo& info,
                                      QuicPacketNumber acked_packet_number);
 
-  // Sets the send algorithm to the given congestion control type and points the
-  // pacing sender at |send_algorithm_|. Can be called any number of times.
-  void SetSendAlgorithm(CongestionControlType congestion_control_type);
-
-  // Sets the send algorithm to |send_algorithm| and points the pacing sender at
-  // |send_algorithm_|. Takes ownership of |send_algorithm|. Can be called any
-  // number of times.
-  void SetSendAlgorithm(SendAlgorithmInterface* send_algorithm);
-
   // Sets the initial RTT of the connection.
   void SetInitialRtt(QuicTime::Delta rtt);
 
@@ -570,11 +571,10 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
   // OnAckRangeStart, and gradually moves in OnAckRange..
   PacketNumberQueue::const_reverse_iterator acked_packets_iter_;
 
-  // Latched value of quic_reloadable_flag_quic_aggregate_acked_stream_frames_2.
+  // Latched value of quic_aggregate_acked_stream_frames_2 flag.
   const bool aggregate_acked_stream_frames_;
 
-  // Latched value of
-  // quic_reloadable_flag_quic_fix_mark_for_loss_retransmission.
+  // Latched value of quic_fix_mark_for_loss_retransmission flag.
   const bool fix_mark_for_loss_retransmission_;
 };
 

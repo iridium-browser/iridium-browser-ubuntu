@@ -18,9 +18,10 @@
 #include "modules/audio_processing/audio_buffer.h"
 #include "modules/audio_processing/include/aec_dump.h"
 #include "modules/audio_processing/include/audio_processing.h"
+#include "modules/audio_processing/include/audio_processing_statistics.h"
 #include "modules/audio_processing/render_queue_item_verifier.h"
 #include "modules/audio_processing/rms_level.h"
-#include "rtc_base/criticalsection.h"
+#include "rtc_base/critical_section.h"
 #include "rtc_base/function_view.h"
 #include "rtc_base/gtest_prod_util.h"
 #include "rtc_base/ignore_wundef.h"
@@ -109,7 +110,6 @@ class AudioProcessingImpl : public AudioProcessing {
   bool was_stream_delay_set() const override
       RTC_EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
 
-  AudioProcessingStatistics GetStatistics() const override;
   AudioProcessingStats GetStatistics(bool has_remote_tracks) const override;
 
   // Methods returning pointers to APM submodules.
@@ -118,8 +118,6 @@ class AudioProcessingImpl : public AudioProcessing {
   // created only once in a single-treaded manner
   // during APM creation).
   GainControl* gain_control() const override;
-  // TODO(peah): Deprecate this API call.
-  HighPassFilter* high_pass_filter() const override;
   LevelEstimator* level_estimator() const override;
   NoiseSuppression* noise_suppression() const override;
   VoiceDetection* voice_detection() const override;
@@ -164,9 +162,6 @@ class AudioProcessingImpl : public AudioProcessing {
   RuntimeSettingEnqueuer capture_runtime_settings_enqueuer_;
   RuntimeSettingEnqueuer render_runtime_settings_enqueuer_;
 
-  // Submodule interface implementations.
-  std::unique_ptr<HighPassFilter> high_pass_filter_impl_;
-
   // EchoControl factory.
   std::unique_ptr<EchoControlFactory> echo_control_factory_;
 
@@ -186,6 +181,7 @@ class AudioProcessingImpl : public AudioProcessing {
                 bool pre_amplifier_enabled,
                 bool echo_controller_enabled,
                 bool voice_activity_detector_enabled,
+                bool private_voice_detector_enabled,
                 bool level_estimator_enabled,
                 bool transient_suppressor_enabled);
     bool CaptureMultiBandSubModulesActive() const;
@@ -212,6 +208,7 @@ class AudioProcessingImpl : public AudioProcessing {
     bool echo_controller_enabled_ = false;
     bool level_estimator_enabled_ = false;
     bool voice_activity_detector_enabled_ = false;
+    bool private_voice_detector_enabled_ = false;
     bool transient_suppressor_enabled_ = false;
     bool first_update_ = true;
   };
@@ -396,6 +393,7 @@ class AudioProcessingImpl : public AudioProcessing {
     bool echo_path_gain_change;
     int prev_analog_mic_level;
     float prev_pre_amp_gain;
+    AudioProcessingStats stats;
   } capture_ RTC_GUARDED_BY(crit_capture_);
 
   struct ApmCaptureNonLockedState {

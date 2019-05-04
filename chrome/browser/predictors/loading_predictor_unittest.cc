@@ -145,38 +145,6 @@ void LoadingPredictorPreconnectTest::SetPreference() {
       chrome_browser_net::NETWORK_PREDICTION_ALWAYS);
 }
 
-TEST_F(LoadingPredictorTest, TestPrefetchingDurationHistogram) {
-  base::HistogramTester histogram_tester;
-  const GURL url = GURL(kUrl);
-  const GURL url2 = GURL(kUrl2);
-  const GURL url3 = GURL(kUrl3);
-
-  predictor_->PrepareForPageLoad(url, HintOrigin::NAVIGATION);
-  predictor_->CancelPageLoadHint(url);
-  histogram_tester.ExpectTotalCount(
-      internal::kResourcePrefetchPredictorPrefetchingDurationHistogram, 1);
-
-  // Mismatched start / end.
-  predictor_->PrepareForPageLoad(url, HintOrigin::NAVIGATION);
-  predictor_->CancelPageLoadHint(url2);
-  // No increment.
-  histogram_tester.ExpectTotalCount(
-      internal::kResourcePrefetchPredictorPrefetchingDurationHistogram, 1);
-
-  // Can track a navigation (url2) while one is still in progress (url).
-  predictor_->PrepareForPageLoad(url2, HintOrigin::NAVIGATION);
-  predictor_->CancelPageLoadHint(url2);
-  histogram_tester.ExpectTotalCount(
-      internal::kResourcePrefetchPredictorPrefetchingDurationHistogram, 2);
-
-  // Do not track non-prefetchable URLs.
-  predictor_->PrepareForPageLoad(url3, HintOrigin::NAVIGATION);
-  predictor_->CancelPageLoadHint(url3);
-  // No increment.
-  histogram_tester.ExpectTotalCount(
-      internal::kResourcePrefetchPredictorPrefetchingDurationHistogram, 2);
-}
-
 TEST_F(LoadingPredictorTest, TestMainFrameResponseCancelsHint) {
   const GURL url = GURL(kUrl);
   predictor_->PrepareForPageLoad(url, HintOrigin::EXTERNAL);
@@ -258,6 +226,64 @@ TEST_F(LoadingPredictorTest, TestMainFrameRequestDoesntCancelExternalHint) {
   EXPECT_NE(active_navigations.find(navigation_id), active_navigations.end());
   it = active_hints.find(url);
   EXPECT_NE(it, active_hints.end());
+  EXPECT_EQ(start_time, it->second);
+}
+
+TEST_F(LoadingPredictorTest, TestDuplicateHintAfterPreconnectCompleteCalled) {
+  const GURL url = GURL(kUrl);
+  const auto& active_navigations = predictor_->active_navigations_;
+  auto& active_hints = predictor_->active_hints_;
+
+  predictor_->PrepareForPageLoad(url, HintOrigin::EXTERNAL);
+  auto it = active_hints.find(url);
+  EXPECT_NE(it, active_hints.end());
+  EXPECT_TRUE(active_navigations.empty());
+
+  // To check that the hint is replaced, set the start time in the past,
+  // and check later that it changed.
+  base::TimeTicks start_time = it->second - base::TimeDelta::FromSeconds(10);
+  it->second = start_time;
+
+  std::unique_ptr<PreconnectStats> preconnect_stats =
+      std::make_unique<PreconnectStats>(url);
+  predictor_->PreconnectFinished(std::move(preconnect_stats));
+
+  predictor_->PrepareForPageLoad(url, HintOrigin::NAVIGATION_PREDICTOR);
+  it = active_hints.find(url);
+  EXPECT_NE(it, active_hints.end());
+  EXPECT_TRUE(active_navigations.empty());
+
+  // Calling PreconnectFinished() must have cleared the hint, and duplicate
+  // PrepareForPageLoad() call should be honored.
+  EXPECT_LT(start_time, it->second);
+}
+
+TEST_F(LoadingPredictorTest,
+       TestDuplicateHintAfterPreconnectCompleteNotCalled) {
+  const GURL url = GURL(kUrl);
+  const auto& active_navigations = predictor_->active_navigations_;
+  auto& active_hints = predictor_->active_hints_;
+
+  predictor_->PrepareForPageLoad(url, HintOrigin::EXTERNAL);
+  auto it = active_hints.find(url);
+  EXPECT_NE(it, active_hints.end());
+  EXPECT_TRUE(active_navigations.empty());
+
+  content::RunAllTasksUntilIdle();
+  it = active_hints.find(url);
+  EXPECT_NE(it, active_hints.end());
+
+  // To check that the hint is not replaced, set the start time in the recent
+  // past, and check later that it didn't change.
+  base::TimeTicks start_time = it->second - base::TimeDelta::FromSeconds(10);
+  it->second = start_time;
+
+  predictor_->PrepareForPageLoad(url, HintOrigin::NAVIGATION_PREDICTOR);
+  it = active_hints.find(url);
+  EXPECT_NE(it, active_hints.end());
+  EXPECT_TRUE(active_navigations.empty());
+
+  // Duplicate PrepareForPageLoad() call should not be honored.
   EXPECT_EQ(start_time, it->second);
 }
 

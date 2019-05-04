@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_replaced.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
@@ -16,6 +17,7 @@
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/graphics/paint/geometry_mapper.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -31,7 +33,7 @@ ImageElementTiming& ImageElementTiming::From(LocalDOMWindow& window) {
   ImageElementTiming* timing =
       Supplement<LocalDOMWindow>::From<ImageElementTiming>(window);
   if (!timing) {
-    timing = new ImageElementTiming(window);
+    timing = MakeGarbageCollected<ImageElementTiming>(window);
     ProvideTo(window, timing);
   }
   return *timing;
@@ -39,7 +41,7 @@ ImageElementTiming& ImageElementTiming::From(LocalDOMWindow& window) {
 
 ImageElementTiming::ImageElementTiming(LocalDOMWindow& window)
     : Supplement<LocalDOMWindow>(window) {
-  DCHECK(RuntimeEnabledFeatures::ElementTimingEnabled());
+  DCHECK(origin_trials::ElementTimingEnabled(GetSupplementable()->document()));
 }
 
 void ImageElementTiming::NotifyImagePainted(const HTMLImageElement* element,
@@ -50,12 +52,24 @@ void ImageElementTiming::NotifyImagePainted(const HTMLImageElement* element,
 
   images_notified_.insert(layout_image);
 
-  // Compute the viewport rect.
   LocalFrame* frame = GetSupplementable()->GetFrame();
   DCHECK(frame == layout_image->GetDocument().GetFrame());
   if (!frame)
     return;
 
+  // Skip the computations below if the element is not same origin.
+  if (!layout_image->CachedImage())
+    return;
+
+  DCHECK(GetSupplementable()->document() == &layout_image->GetDocument());
+  DCHECK(layout_image->GetDocument().GetSecurityOrigin());
+  if (!Performance::PassesTimingAllowCheck(
+          layout_image->CachedImage()->GetResponse(),
+          *layout_image->GetDocument().GetSecurityOrigin(), AtomicString(),
+          &layout_image->GetDocument()))
+    return;
+
+  // Compute the viewport rect.
   WebLayerTreeView* layerTreeView =
       frame->GetChromeClient().GetWebLayerTreeView(frame);
   if (!layerTreeView)
@@ -81,7 +95,7 @@ void ImageElementTiming::NotifyImagePainted(const HTMLImageElement* element,
   visible_new_visual_rect.Intersect(viewport);
 
   const AtomicString attr =
-      element->FastGetAttribute(HTMLNames::elementtimingAttr);
+      element->FastGetAttribute(html_names::kElementtimingAttr);
   // Do not create an entry if 'elementtiming' is not present or the image is
   // below a certain size threshold.
   if (attr.IsEmpty() &&
@@ -94,7 +108,7 @@ void ImageElementTiming::NotifyImagePainted(const HTMLImageElement* element,
   // empty, use the ID. If empty, use 'img'.
   AtomicString name = attr;
   if (name.IsEmpty())
-    name = element->FastGetAttribute(HTMLNames::idAttr);
+    name = element->FastGetAttribute(html_names::kIdAttr);
   if (name.IsEmpty())
     name = "img";
   element_timings_.emplace_back(name, visible_new_visual_rect);
@@ -112,12 +126,12 @@ void ImageElementTiming::ReportImagePaintSwapTime(WebLayerTreeView::SwapResult,
                                                   base::TimeTicks timestamp) {
   WindowPerformance* performance =
       DOMWindowPerformance::performance(*GetSupplementable());
-  if (!performance || !performance->HasObserverFor(PerformanceEntry::kElement))
-    return;
-
-  for (const auto& element_timing : element_timings_) {
-    performance->AddElementTiming(element_timing.name, element_timing.rect,
-                                  timestamp);
+  if (performance && (performance->HasObserverFor(PerformanceEntry::kElement) ||
+                      performance->ShouldBufferEntries())) {
+    for (const auto& element_timing : element_timings_) {
+      performance->AddElementTiming(element_timing.name, element_timing.rect,
+                                    timestamp);
+    }
   }
   element_timings_.clear();
 }

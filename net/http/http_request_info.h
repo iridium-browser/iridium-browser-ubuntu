@@ -7,12 +7,14 @@
 
 #include <string>
 
+#include "base/optional.h"
 #include "net/base/net_export.h"
 #include "net/base/privacy_mode.h"
 #include "net/http/http_request_headers.h"
 #include "net/socket/socket_tag.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace net {
 
@@ -28,6 +30,9 @@ struct NET_EXPORT HttpRequestInfo {
 
   // The method to use (GET, POST, etc.).
   std::string method;
+
+  // The URL of the top frame of the request (if applicable)
+  base::Optional<url::Origin> top_frame_origin;
 
   // Any extra request headers (including User-Agent).
   HttpRequestHeaders extra_headers;
@@ -47,6 +52,14 @@ struct NET_EXPORT HttpRequestInfo {
 
   // Network traffic annotation received from URL request.
   net::MutableNetworkTrafficAnnotationTag traffic_annotation;
+
+  // Reporting upload nesting depth of this request.
+  //
+  // If the request is not a Reporting upload, the depth is 0.
+  //
+  // If the request is a Reporting upload, the depth is the max of the depth
+  // of the requests reported within it plus 1.
+  int reporting_upload_depth;
 };
 
 }  // namespace net

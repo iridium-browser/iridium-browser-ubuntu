@@ -31,18 +31,18 @@ class PolicyTest : public testing::Test {
         "https://example.com https://example.net");
   }
 
-  Policy* GetPolicy() const { return policy_; }
+  DOMFeaturePolicy* GetPolicy() const { return policy_; }
 
  protected:
   Persistent<Document> document_;
-  Persistent<Policy> policy_;
+  Persistent<DOMFeaturePolicy> policy_;
 };
 
 class DocumentPolicyTest : public PolicyTest {
  public:
   void SetUp() override {
     PolicyTest::SetUp();
-    policy_ = new DocumentPolicy(document_);
+    policy_ = MakeGarbageCollected<DocumentPolicy>(document_);
   }
 };
 
@@ -50,8 +50,9 @@ class IFramePolicyTest : public PolicyTest {
  public:
   void SetUp() override {
     PolicyTest::SetUp();
-    policy_ = new IFramePolicy(document_, {},
-                               SecurityOrigin::CreateFromString(kSelfOrigin));
+    policy_ = MakeGarbageCollected<IFramePolicy>(
+        document_, ParsedFeaturePolicy(),
+        SecurityOrigin::CreateFromString(kSelfOrigin));
   }
 };
 

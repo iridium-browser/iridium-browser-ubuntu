@@ -12,6 +12,7 @@ import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.PanelState;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.components.sync.AndroidSyncSettings;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -27,6 +28,7 @@ public class ContextualSearchUma {
     // Constants to use for the original selection gesture
     private static final boolean LONG_PRESS = false;
     private static final boolean TAP = true;
+    private static final int MILLIS_IN_A_DAY = 1000 * 60 * 60 * 24;
 
     // Constants used to log UMA "enum" histograms about the Contextual Search's preference state.
     @IntDef({Preference.UNINITIALIZED, Preference.ENABLED, Preference.DISABLED})
@@ -824,12 +826,19 @@ public class ContextualSearchUma {
     }
 
     /**
-     * Logs whether search results were seen for a Tap gesture.  Recorded for all users.
+     * Logs whether search results were seen for a Tap gesture, for all users and sync-enabled
+     * users. For sync-enabled users we log to a separate histogram for that sub-population in order
+     * to help validate the Ranker Tap Suppression model results (since they are trained on UKM data
+     * which approximately reflects this sync-enabled population).
      * @param wasPanelSeen Whether the panel was seen.
      */
     public static void logTapResultsSeen(boolean wasPanelSeen) {
         RecordHistogram.recordBooleanHistogram(
                 "Search.ContextualSearch.Tap.ResultsSeen", wasPanelSeen);
+        if (AndroidSyncSettings.get().isSyncEnabled()) {
+            RecordHistogram.recordBooleanHistogram(
+                    "Search.ContextualSearch.Tap.SyncEnabled.ResultsSeen", wasPanelSeen);
+        }
     }
 
     /**
@@ -885,10 +894,10 @@ public class ContextualSearchUma {
      */
     public static void logSelectionLengthResultsSeen(boolean wasPanelSeen, int selectionLength) {
         if (wasPanelSeen) {
-            RecordHistogram.recordSparseSlowlyHistogram(
+            RecordHistogram.recordSparseHistogram(
                     "Search.ContextualSearchSelectionLengthSeen", selectionLength);
         } else {
-            RecordHistogram.recordSparseSlowlyHistogram(
+            RecordHistogram.recordSparseHistogram(
                     "Search.ContextualSearchSelectionLengthNotSeen", selectionLength);
         }
     }
@@ -1297,6 +1306,17 @@ public class ContextualSearchUma {
                 "Search.ContextualSearchPrevious28DayImpressions", previous28DayImpressions);
         RecordHistogram.recordPercentageHistogram(
                 "Search.ContextualSearchPrevious28DayCtr", previous28DayCtr);
+    }
+
+    /**
+     * Logs a duration since the outcomes (and associated timestamp) were saved in persistent
+     * storage.
+     * @param durationMs The duration to log, in milliseconds.
+     */
+    public static void logOutcomesTimestamp(long durationMs) {
+        int durationInDays = (int) (durationMs / MILLIS_IN_A_DAY);
+        RecordHistogram.recordCount100Histogram(
+                "Search.ContextualSearch.OutcomesDuration", durationInDays);
     }
 
     /**

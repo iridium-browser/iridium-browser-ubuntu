@@ -115,14 +115,15 @@ class AXContentNodeDataSparseAttributeAdapter
       case WebAXObjectAttribute::kAriaActiveDescendant:
         // TODO(dmazzoni): WebAXObject::ActiveDescendant currently returns
         // more information than the sparse interface does.
+        // ******** Why is this a TODO? ********
         break;
       case WebAXObjectAttribute::kAriaDetails:
         dst_->AddIntAttribute(ax::mojom::IntAttribute::kDetailsId,
                               value.AxID());
         break;
       case WebAXObjectAttribute::kAriaErrorMessage:
-        dst_->AddIntAttribute(ax::mojom::IntAttribute::kErrormessageId,
-                              value.AxID());
+        // Use WebAXObject::ErrorMessage(), which provides both ARIA error
+        // messages as well as built-in HTML form validation messages.
         break;
       default:
         NOTREACHED();
@@ -449,7 +450,7 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
   bool clips_children = false;
   src.GetRelativeBounds(offset_container, bounds_in_container,
                         container_transform, &clips_children);
-  dst->location = bounds_in_container;
+  dst->relative_bounds.bounds = bounds_in_container;
 #if !defined(OS_ANDROID) && !defined(OS_MACOSX)
   if (src.Equals(root())) {
     WebView* web_view = render_frame_->GetRenderView()->GetWebView();
@@ -461,15 +462,17 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
         gfx::Vector2dF(-web_view->VisualViewportOffset().x,
                        -web_view->VisualViewportOffset().y));
     if (!container_transform_gfx->IsIdentity())
-      dst->transform = std::move(container_transform_gfx);
+      dst->relative_bounds.transform = std::move(container_transform_gfx);
   } else if (!container_transform.isIdentity())
-    dst->transform = base::WrapUnique(new gfx::Transform(container_transform));
+    dst->relative_bounds.transform =
+        base::WrapUnique(new gfx::Transform(container_transform));
 #else
   if (!container_transform.isIdentity())
-    dst->transform = base::WrapUnique(new gfx::Transform(container_transform));
+    dst->relative_bounds.transform =
+        base::WrapUnique(new gfx::Transform(container_transform));
 #endif  // !defined(OS_ANDROID) && !defined(OS_MACOSX)
   if (!offset_container.IsDetached())
-    dst->offset_container_id = offset_container.AxID();
+    dst->relative_bounds.offset_container_id = offset_container.AxID();
   if (clips_children)
     dst->AddBoolAttribute(ax::mojom::BoolAttribute::kClipsChildren, true);
 
@@ -481,8 +484,11 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
   blink::WebString web_name = src.GetName(nameFrom, nameObjects);
   if ((!web_name.IsEmpty() && !web_name.IsNull()) ||
       nameFrom == ax::mojom::NameFrom::kAttributeExplicitlyEmpty) {
+    int max_length = dst->role == ax::mojom::Role::kStaticText
+                         ? kMaxStaticTextLength
+                         : kMaxStringAttributeLength;
     TruncateAndAddStringAttribute(dst, ax::mojom::StringAttribute::kName,
-                                  web_name.Utf8());
+                                  web_name.Utf8(), max_length);
     dst->SetNameFrom(nameFrom);
     AddIntListAttributeFromWebObjects(
         ax::mojom::IntListAttribute::kLabelledbyIds, nameObjects, dst);
@@ -609,9 +615,8 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
     }
 
     if (src.TextStyle()) {
-      dst->AddIntAttribute(
-          ax::mojom::IntAttribute::kTextStyle,
-          static_cast<int32_t>(AXTextStyleFromBlink(src.TextStyle())));
+      dst->AddIntAttribute(ax::mojom::IntAttribute::kTextStyle,
+                           src.TextStyle());
     }
 
     if (dst->role == ax::mojom::Role::kInlineTextBox) {
@@ -687,6 +692,11 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
     if (!src.AriaActiveDescendant().IsDetached()) {
       dst->AddIntAttribute(ax::mojom::IntAttribute::kActivedescendantId,
                            src.AriaActiveDescendant().AxID());
+    }
+
+    if (!src.ErrorMessage().IsDetached()) {
+      dst->AddIntAttribute(ax::mojom::IntAttribute::kErrormessageId,
+                           src.ErrorMessage().AxID());
     }
 
     if (ui::IsHeading(dst->role) && src.HeadingLevel()) {
@@ -805,7 +815,7 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
       TruncateAndAddStringAttribute(dst, ax::mojom::StringAttribute::kHtmlTag,
                                     "#document");
 
-    const bool is_table_like_role = ui::IsTableLikeRole(dst->role);
+    const bool is_table_like_role = ui::IsTableLike(dst->role);
     if (is_table_like_role) {
       int column_count = src.ColumnCount();
       int row_count = src.RowCount();
@@ -827,7 +837,7 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
                              aria_rowcount);
     }
 
-    if (ui::IsTableRowRole(dst->role)) {
+    if (ui::IsTableRow(dst->role)) {
       dst->AddIntAttribute(ax::mojom::IntAttribute::kTableRowIndex,
                            src.RowIndex());
       WebAXObject header = src.RowHeader();
@@ -836,7 +846,7 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
                              header.AxID());
     }
 
-    if (ui::IsCellOrTableHeaderRole(dst->role)) {
+    if (ui::IsCellOrTableHeader(dst->role)) {
       dst->AddIntAttribute(ax::mojom::IntAttribute::kTableCellColumnIndex,
                            src.CellColumnIndex());
       dst->AddIntAttribute(ax::mojom::IntAttribute::kTableCellColumnSpan,
@@ -845,6 +855,15 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
                            src.CellRowIndex());
       dst->AddIntAttribute(ax::mojom::IntAttribute::kTableCellRowSpan,
                            src.CellRowSpan());
+    }
+
+    if (ui::IsCellOrTableHeader(dst->role) || ui::IsTableRow(dst->role)) {
+      // aria-rowindex and aria-colindex are supported on cells, headers and
+      // rows.
+      int aria_rowindex = src.AriaRowIndex();
+      if (aria_rowindex)
+        dst->AddIntAttribute(ax::mojom::IntAttribute::kAriaCellRowIndex,
+                             aria_rowindex);
 
       int aria_colindex = src.AriaColumnIndex();
       if (aria_colindex) {
@@ -853,16 +872,7 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
       }
     }
 
-    if (ui::IsCellOrTableHeaderRole(dst->role) ||
-        ui::IsTableRowRole(dst->role)) {
-      // aria-rowindex is supported on cells, headers and rows.
-      int aria_rowindex = src.AriaRowIndex();
-      if (aria_rowindex)
-        dst->AddIntAttribute(ax::mojom::IntAttribute::kAriaCellRowIndex,
-                             aria_rowindex);
-    }
-
-    if (ui::IsTableHeaderRole(dst->role) &&
+    if (ui::IsTableHeader(dst->role) &&
         src.SortDirection() != ax::mojom::SortDirection::kNone) {
       dst->AddIntAttribute(ax::mojom::IntAttribute::kSortDirection,
                            static_cast<int32_t>(src.SortDirection()));
@@ -962,6 +972,7 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
   }
 
   if (src.IsScrollableContainer()) {
+    dst->AddBoolAttribute(ax::mojom::BoolAttribute::kScrollable, true);
     const gfx::Point& scroll_offset = src.GetScrollOffset();
     dst->AddIntAttribute(ax::mojom::IntAttribute::kScrollX, scroll_offset.x());
     dst->AddIntAttribute(ax::mojom::IntAttribute::kScrollY, scroll_offset.y());
@@ -1010,11 +1021,11 @@ WebAXObject BlinkAXTreeSource::ComputeRoot() const {
 void BlinkAXTreeSource::TruncateAndAddStringAttribute(
     AXContentNodeData* dst,
     ax::mojom::StringAttribute attribute,
-    const std::string& value) const {
-  if (value.size() > BlinkAXTreeSource::kMaxStringAttributeLength) {
+    const std::string& value,
+    uint32_t max_len) const {
+  if (value.size() > max_len) {
     std::string truncated;
-    base::TruncateUTF8ToByteSize(
-        value, BlinkAXTreeSource::kMaxStringAttributeLength, &truncated);
+    base::TruncateUTF8ToByteSize(value, max_len, &truncated);
     dst->AddStringAttribute(attribute, truncated);
   } else {
     dst->AddStringAttribute(attribute, value);

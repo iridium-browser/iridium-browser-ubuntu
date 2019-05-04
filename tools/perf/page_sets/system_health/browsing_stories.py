@@ -15,6 +15,7 @@ from page_sets.system_health import system_health_story
 
 from page_sets.login_helpers import facebook_login
 from page_sets.login_helpers import pinterest_login
+from page_sets.login_helpers import tumblr_login
 
 from telemetry.util import js_template
 
@@ -285,6 +286,15 @@ class TwitterDesktopStory(_ArticleBrowsingStory):
   TAGS = [story_tags.YEAR_2016]
 
 
+class TwitterDesktopStory2018(_ArticleBrowsingStory):
+  NAME = 'browse:social:twitter:2018'
+  URL = 'https://www.twitter.com/nasa'
+  IS_SINGLE_PAGE_APP = True
+  ITEM_SELECTOR = '.tweet-text'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
+  TAGS = [story_tags.YEAR_2018]
+
+
 class WashingtonPostMobileStory(_ArticleBrowsingStory):
   """Progressive website"""
   NAME = 'browse:news:washingtonpost'
@@ -363,6 +373,30 @@ class GoogleDesktopStory(_ArticleBrowsingStory):
     action_runner.ClickElement(selector=self._SEARCH_PAGE_2_SELECTOR)
     action_runner.Wait(2)
     action_runner.ScrollPage()
+
+class GoogleAmpStory2018(_ArticleBrowsingStory):
+  """ Story for Google's Accelerated Mobile Pages (AMP).
+
+    The main thing we care about measuring here is load, so just query for
+    news articles and then load the first amp link.
+  """
+  NAME = 'browse:search:amp:2018'
+  URL = 'https://www.google.com/search?q=news&hl=en'
+  # Need to find the first card in the news section that has an amp
+  # indicator on it
+  ITEM_SELECTOR = '.sm62ie > a[class*="amp_r"]'
+  SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
+  TAGS = [story_tags.YEAR_2018]
+
+  def _DidLoadDocument(self, action_runner):
+    # Click on the amp news link and then just wait for it to load.
+    element_function = js_template.Render(
+        'document.querySelectorAll({{ selector }})[{{ index }}]',
+        selector=self.ITEM_SELECTOR, index=0)
+    action_runner.WaitForElement(element_function=element_function)
+    action_runner.ClickElement(element_function=element_function)
+    action_runner.Wait(2)
+
 
 class GoogleDesktopStory2018(_ArticleBrowsingStory):
   """
@@ -463,6 +497,45 @@ class GoogleIndiaDesktopStory(_ArticleBrowsingStory):
     action_runner.ScrollPage()
 
 
+class GoogleIndiaDesktopStory2018(_ArticleBrowsingStory):
+  """
+  A typical google search story in India:
+    1. Start at self.URL
+    2. Scroll down the page.
+    3. Refine the query & click search box
+    4. Scroll down the page.
+    5. Click the next page result
+    6. Scroll the search result page.
+
+  """
+  NAME = 'browse:search:google_india:2018'
+  URL = 'https://www.google.co.in/search?q=%E0%A4%AB%E0%A5%82%E0%A4%B2&hl=hi'
+  _SEARCH_BOX_SELECTOR = 'input[name="q"]'
+  _SEARCH_BUTTON_SELECTOR = 'button[name="btnG"]'
+  _SEARCH_PAGE_2_SELECTOR = 'a[aria-label="Page 2"]'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
+  TAGS = [story_tags.INTERNATIONAL, story_tags.YEAR_2018]
+
+  def _DidLoadDocument(self, action_runner):
+    # Refine search query in the search box.
+    action_runner.WaitForElement(self._SEARCH_BOX_SELECTOR)
+    action_runner.ExecuteJavaScript(
+        'document.querySelector({{ selector }}).select()',
+        selector=self._SEARCH_BOX_SELECTOR)
+    action_runner.Wait(1)
+    action_runner.EnterText(u'वितरण', character_delay_ms=250)
+    action_runner.Wait(2)
+    action_runner.ClickElement(selector=self._SEARCH_BUTTON_SELECTOR)
+
+    # Scroll down & click next search result page.
+    action_runner.Wait(2)
+    action_runner.ScrollPageToElement(selector=self._SEARCH_PAGE_2_SELECTOR)
+    action_runner.Wait(2)
+    action_runner.ClickElement(selector=self._SEARCH_PAGE_2_SELECTOR)
+    action_runner.Wait(2)
+    action_runner.ScrollPage()
+
+
 ##############################################################################
 # Media browsing stories.
 ##############################################################################
@@ -547,6 +620,31 @@ class YouTubeDesktopStory(_MediaBrowsingStory):
   TAGS = [story_tags.JAVASCRIPT_HEAVY, story_tags.YEAR_2016]
 
 
+class YouTubeDesktopStory2018(_MediaBrowsingStory):
+  """Load a typical YouTube video then navigate to a next few videos. Stop and
+  watch each video for a few seconds.
+  """
+  NAME = 'browse:media:youtube:2018'
+  URL = 'https://www.youtube.com/watch?v=QGfhS1hfTWw&autoplay=0'
+  ITEM_SELECTOR = 'ytd-compact-video-renderer.ytd-watch-next-secondary-results-renderer a'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
+  IS_SINGLE_PAGE_APP = True
+  # A longer view time allows videos to load and play.
+  ITEM_VIEW_TIME_IN_SECONDS = 5
+  ITEMS_TO_VISIT = 8
+  ITEM_SELECTOR_INDEX = 3
+  PLATFORM_SPECIFIC = True
+  TAGS = [story_tags.JAVASCRIPT_HEAVY, story_tags.YEAR_2018]
+
+  # TODO(yoichio): Remove this flags when YouTube finish V0 migration.
+  # crbug.com/911943.
+  def __init__(self, story_set, take_memory_measurement):
+    super(YouTubeDesktopStory2018, self).__init__(
+        story_set, take_memory_measurement,
+        extra_browser_args=[
+          '--enable-blink-features=HTMLImports,CustomElementsV0'])
+
+
 class FacebookPhotosMobileStory(_MediaBrowsingStory):
   """Load a photo page from Rihanna's facebook page then navigate a few next
   photos.
@@ -592,6 +690,29 @@ class TumblrDesktopStory(_MediaBrowsingStory):
     action_runner.MouseClick(selector='#tumblr_lightbox_center_image')
     action_runner.Wait(1)  # To make browsing more realistic.
 
+
+class TumblrDesktopStory2018(_MediaBrowsingStory):
+  NAME = 'browse:media:tumblr:2018'
+  URL = 'https://tumblr.com/search/gifs'
+  ITEM_SELECTOR = '.post_media'
+  IS_SINGLE_PAGE_APP = True
+  ITEMS_TO_VISIT = 8
+  INCREMENT_INDEX_AFTER_EACH_ITEM = True
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
+  TAGS = [story_tags.YEAR_2018]
+
+  def _Login(self, action_runner):
+    tumblr_login.LoginDesktopAccount(action_runner, 'tumblr')
+    action_runner.Wait(3)
+
+  def _ViewMediaItem(self, action_runner, index):
+    super(TumblrDesktopStory2018, self)._ViewMediaItem(action_runner, index)
+    action_runner.WaitForElement(selector='#tumblr_lightbox')
+    action_runner.MouseClick(selector='#tumblr_lightbox')
+    action_runner.Wait(1)  # To make browsing more realistic.
+
+
+
 class PinterestDesktopStory(_MediaBrowsingStory):
   NAME = 'browse:media:pinterest'
   URL = 'https://pinterest.com'
@@ -628,6 +749,98 @@ class PinterestDesktopStory(_MediaBrowsingStory):
                           '".Button.borderless.close.visible")')
     action_runner.ClickElement(element_function=x_element_function)
     action_runner.Wait(1)  # Wait to make navigation realistic.
+
+
+class PinterestDesktopStory2018(_MediaBrowsingStory):
+  NAME = 'browse:media:pinterest:2018'
+  URL = 'https://pinterest.com'
+  ITEM_SELECTOR = '.pinWrapper a[data-force-refresh="1"]'
+  ITEM_VIEW_TIME = 5
+  IS_SINGLE_PAGE_APP = True
+  ITEMS_TO_VISIT = 8
+  INCREMENT_INDEX_AFTER_EACH_ITEM = True
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
+  TAGS = [story_tags.YEAR_2018]
+  # SKIP_LOGIN = False
+
+  def _Login(self, action_runner):
+    pinterest_login.LoginDesktopAccount(action_runner, 'googletest')
+
+  def _ViewMediaItem(self, action_runner, index):
+    super(PinterestDesktopStory2018, self)._ViewMediaItem(action_runner, index)
+    # 1. click on item
+    # 2. pin every other item
+    # 3. go back to the main page
+    action_runner.Wait(1)  # Wait to make navigation realistic.
+    if index % 2 == 0:
+      if not self.SKIP_LOGIN:
+        action_runner.Wait(2)
+      action_runner.WaitForElement(selector='.SaveButton')
+      action_runner.ClickElement(selector='.SaveButton')
+      if not self.SKIP_LOGIN:
+        action_runner.Wait(2)
+      action_runner.Wait(2.5)
+      action_runner.WaitForElement(
+                  selector='div[data-test-id=BoardPickerSaveButton]')
+      action_runner.ClickElement(
+                  selector='div[data-test-id=BoardPickerSaveButton]')
+      action_runner.Wait(1.5)
+    action_runner.Wait(1)
+    if not self.SKIP_LOGIN:
+      action_runner.Wait(2)
+    action_runner.NavigateBack()
+
+    action_runner.WaitForElement(selector='input[name=searchBoxInput]')
+    action_runner.Wait(1)
+    if not self.SKIP_LOGIN:
+      action_runner.Wait(2)
+
+class GooglePlayStoreMobileStory(_MediaBrowsingStory):
+  """ Navigate to the movies page of Google Play Store, scroll to the bottom,
+  and click "see more" of a middle category (last before second scroll).
+  """
+  NAME = 'browse:media:googleplaystore:2019'
+  URL = 'https://play.google.com/store/movies'
+  ITEM_SELECTOR = ''
+  SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
+  IS_SINGLE_PAGE_APP = True
+  TAGS = [story_tags.EMERGING_MARKET, story_tags.YEAR_2019, story_tags.IMAGES]
+  # intends to select the last category of movies and its "see more" button
+  _SEE_MORE_SELECTOR = ('div[class*="cluster-container"]:last-of-type '
+                        'a[class*="see-more"]')
+
+  def _DidLoadDocument(self, action_runner):
+    action_runner.ScrollPage()
+    action_runner.Wait(2)
+    action_runner.ScrollPage()
+    action_runner.Wait(2)
+    action_runner.MouseClick(self._SEE_MORE_SELECTOR)
+    action_runner.Wait(2)
+    action_runner.ScrollPage()
+
+
+class GooglePlayStoreDesktopStory(_MediaBrowsingStory):
+  """ Navigate to the movies page of Google Play Store, scroll to the bottom,
+  and click "see more" of a middle category (last before second scroll).
+  """
+  NAME = 'browse:media:googleplaystore:2018'
+  URL = 'https://play.google.com/store/movies'
+  ITEM_SELECTOR = ''
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
+  IS_SINGLE_PAGE_APP = True
+  TAGS = [story_tags.YEAR_2018, story_tags.IMAGES]
+  # intends to select the last category of movies and its "see more" button
+  _SEE_MORE_SELECTOR = ('div[class*="cluster-container"]:last-of-type '
+                        'a[class*="see-more"]')
+
+  def _DidLoadDocument(self, action_runner):
+    action_runner.ScrollPage()
+    action_runner.Wait(2)
+    action_runner.ScrollPage()
+    action_runner.Wait(2)
+    action_runner.MouseClick(self._SEE_MORE_SELECTOR)
+    action_runner.Wait(2)
+    action_runner.ScrollPage()
 
 
 ##############################################################################
@@ -1098,6 +1311,19 @@ class TumblrStory(_InfiniteScrollStory):
   TAGS = [story_tags.INFINITE_SCROLL, story_tags.JAVASCRIPT_HEAVY,
           story_tags.YEAR_2016]
 
+class TumblrStory2018(_InfiniteScrollStory):
+  NAME = 'browse:social:tumblr_infinite_scroll:2018'
+  URL = 'https://techcrunch.tumblr.com/'
+  SCROLL_DISTANCE = 20000
+  TAGS = [story_tags.INFINITE_SCROLL, story_tags.JAVASCRIPT_HEAVY,
+          story_tags.YEAR_2018]
+
+  def _Login(self, action_runner):
+    tumblr_login.LoginDesktopAccount(action_runner, 'tumblr')
+    action_runner.Wait(5)
+    # Without this page reload the mobile version does not correctly
+    # go to the https://techcrunch.tumblr.com
+    action_runner.ReloadPage()
 
 class TwitterScrollDesktopStory(_InfiniteScrollStory):
   NAME = 'browse:social:twitter_infinite_scroll'

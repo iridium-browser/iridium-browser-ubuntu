@@ -22,6 +22,7 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/button/menu_button_event_handler.h"
 #include "ui/views/controls/menu/menu_config.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 #include "ui/views/widget/widget_observer.h"
@@ -84,16 +85,16 @@ class VIEWS_EXPORT MenuController
   // If a menu is currently active, this returns the controller for it.
   static MenuController* GetActiveInstance();
 
-  // Runs the menu at the specified location. If the menu was configured to
-  // block, the selected item is returned. If the menu does not block this
-  // returns NULL immediately.
+  // Runs the menu at the specified location. Menu items with commands in
+  // |alerted_commands| will be rendered differently to draw attention to them.
   void Run(Widget* parent,
            MenuButton* button,
            MenuItemView* root,
            const gfx::Rect& bounds,
            MenuAnchorPosition position,
            bool context_menu,
-           bool is_nested_drag);
+           bool is_nested_drag,
+           base::flat_set<int> alerted_commands = base::flat_set<int>());
 
   bool for_drop() const { return for_drop_; }
 
@@ -163,7 +164,7 @@ class VIEWS_EXPORT MenuController
 
   bool GetDropFormats(SubmenuView* source,
                       int* formats,
-                      std::set<ui::Clipboard::FormatType>* format_types);
+                      std::set<ui::ClipboardFormatType>* format_types);
   bool AreDropTypesRequired(SubmenuView* source);
   bool CanDrop(SubmenuView* source, const ui::OSExchangeData& data);
   void OnDragEntered(SubmenuView* source, const ui::DropTargetEvent& event);
@@ -486,6 +487,10 @@ class VIEWS_EXPORT MenuController
   // Selects the next or previous (depending on |direction|) menu item.
   void IncrementSelection(SelectionIncrementDirectionType direction);
 
+  // Selects the first or last (depending on |direction|) menu item.
+  void MoveSelectionToFirstOrLastItem(
+      SelectionIncrementDirectionType direction);
+
   // Returns the first (|direction| == NAVIGATE_SELECTION_DOWN) or the last
   // (|direction| == INCREMENT_SELECTION_UP) selectable child menu item of
   // |parent|. If there are no selectable items returns NULL.
@@ -623,7 +628,7 @@ class VIEWS_EXPORT MenuController
   // Run, the current state (state_) is pushed onto menu_stack_. This allows
   // MenuController to restore the state when the nested run returns.
   using NestedState =
-      std::pair<State, std::unique_ptr<MenuButton::PressedLock>>;
+      std::pair<State, std::unique_ptr<MenuButtonEventHandler::PressedLock>>;
   std::list<NestedState> menu_stack_;
 
   // When Run is invoked during an active Run, it may be called from a separate
@@ -677,7 +682,7 @@ class VIEWS_EXPORT MenuController
   std::unique_ptr<MenuScrollTask> scroll_task_;
 
   // The lock to keep the menu button pressed while a menu is visible.
-  std::unique_ptr<MenuButton::PressedLock> pressed_lock_;
+  std::unique_ptr<MenuButtonEventHandler::PressedLock> pressed_lock_;
 
   // ViewTracker used to store the View mouse drag events are forwarded to. See
   // UpdateActiveMouseView() for details.
@@ -735,6 +740,9 @@ class VIEWS_EXPORT MenuController
 #endif
 
   std::unique_ptr<MenuPreTargetHandler> menu_pre_target_handler_;
+
+  // Set of menu commands that should be displayed with an alert.
+  base::flat_set<int> alerted_commands_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuController);
 };

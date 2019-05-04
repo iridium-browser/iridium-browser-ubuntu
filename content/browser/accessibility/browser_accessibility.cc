@@ -4,7 +4,7 @@
 
 #include "content/browser/accessibility/browser_accessibility.h"
 
-#include <stddef.h>
+#include <cstddef>
 
 #include <algorithm>
 #include <iterator>
@@ -17,7 +17,6 @@
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/common/accessibility_messages.h"
 #include "ui/accessibility/ax_role_properties.h"
-#include "ui/accessibility/ax_table_info.h"
 #include "ui/accessibility/ax_text_utils.h"
 #include "ui/accessibility/platform/ax_unique_id.h"
 #include "ui/gfx/geometry/rect_conversions.h"
@@ -72,6 +71,11 @@ bool BrowserAccessibility::PlatformIsLeaf() const {
     default:
       return false;
   }
+}
+
+bool BrowserAccessibility::CanFireEvents() const {
+  // Allow events unless this object would be trimmed away.
+  return !PlatformIsChildOfLeaf();
 }
 
 uint32_t BrowserAccessibility::PlatformChildCount() const {
@@ -321,7 +325,7 @@ int32_t BrowserAccessibility::GetId() const {
 }
 
 gfx::RectF BrowserAccessibility::GetLocation() const {
-  return GetData().location;
+  return GetData().relative_bounds.bounds;
 }
 
 ax::mojom::Role BrowserAccessibility::GetRole() const {
@@ -777,7 +781,7 @@ bool BrowserAccessibility::IsWebAreaForPresentationalIframe() const {
 }
 
 bool BrowserAccessibility::IsClickable() const {
-  return ui::IsRoleClickable(GetRole());
+  return ui::IsClickable(GetRole());
 }
 
 bool BrowserAccessibility::IsPlainTextField() const {
@@ -953,7 +957,7 @@ const ui::AXTreeData& BrowserAccessibility::GetTreeData() const {
     return *empty_data;
 }
 
-gfx::NativeWindow BrowserAccessibility::GetTopLevelWidget() {
+gfx::NativeViewAccessible BrowserAccessibility::GetNSWindow() {
   NOTREACHED();
   return nullptr;
 }
@@ -1041,109 +1045,110 @@ BrowserAccessibility::GetTargetForNativeAccessibilityEvent() {
   return root_delegate->AccessibilityGetAcceleratedWidget();
 }
 
-int BrowserAccessibility::GetTableRowCount() const {
-  ui::AXTableInfo* table_info = manager()->ax_tree()->GetTableInfo(node());
-  if (!table_info)
-    return 0;
-
-  return table_info->row_count;
+bool BrowserAccessibility::IsTable() const {
+  return node()->IsTable();
 }
 
-int BrowserAccessibility::GetTableColCount() const {
-  ui::AXTableInfo* table_info = manager()->ax_tree()->GetTableInfo(node());
-  if (!table_info)
-    return 0;
-
-  return table_info->col_count;
+int32_t BrowserAccessibility::GetTableRowCount() const {
+  return node()->GetTableRowCount();
 }
 
-std::vector<int32_t> BrowserAccessibility::GetColHeaderNodeIds() const {
-  ui::AXTableInfo* table_info = manager()->ax_tree()->GetTableInfo(node());
-  if (!table_info)
-    return {};
-
-  std::vector<std::vector<int32_t>> headers = table_info->col_headers;
-  std::vector<int32_t> all_ids;
-  for (const auto& col_ids : headers) {
-    all_ids.insert(all_ids.end(), col_ids.begin(), col_ids.end());
-  }
-
-  return all_ids;
+int32_t BrowserAccessibility::GetTableColCount() const {
+  return node()->GetTableColCount();
 }
 
-std::vector<int32_t> BrowserAccessibility::GetColHeaderNodeIds(
+int32_t BrowserAccessibility::GetTableAriaColCount() const {
+  return node()->GetTableAriaColCount();
+}
+
+int32_t BrowserAccessibility::GetTableAriaRowCount() const {
+  return node()->GetTableAriaRowCount();
+}
+
+int32_t BrowserAccessibility::GetTableCellCount() const {
+  return node()->GetTableCellCount();
+}
+
+const std::vector<int32_t> BrowserAccessibility::GetColHeaderNodeIds() const {
+  std::vector<int32_t> result;
+  node()->GetTableCellColHeaderNodeIds(&result);
+  return result;
+}
+
+const std::vector<int32_t> BrowserAccessibility::GetColHeaderNodeIds(
     int32_t col_index) const {
-  ui::AXTableInfo* table_info = manager()->ax_tree()->GetTableInfo(node());
-  if (!table_info)
-    return {};
-
-  if (col_index < 0 || col_index >= table_info->col_count)
-    return {};
-
-  return table_info->col_headers[col_index];
+  std::vector<int32_t> result;
+  node()->GetTableColHeaderNodeIds(col_index, &result);
+  return result;
 }
 
-std::vector<int32_t> BrowserAccessibility::GetRowHeaderNodeIds() const {
-  ui::AXTableInfo* table_info = manager()->ax_tree()->GetTableInfo(node());
-  if (!table_info)
-    return {};
-
-  std::vector<std::vector<int32_t>> headers = table_info->row_headers;
-  std::vector<int32_t> all_ids;
-  for (const auto& col_ids : headers) {
-    all_ids.insert(all_ids.end(), col_ids.begin(), col_ids.end());
-  }
-
-  return all_ids;
+const std::vector<int32_t> BrowserAccessibility::GetRowHeaderNodeIds() const {
+  std::vector<int32_t> result;
+  node()->GetTableCellRowHeaderNodeIds(&result);
+  return result;
 }
 
-std::vector<int32_t> BrowserAccessibility::GetRowHeaderNodeIds(
+const std::vector<int32_t> BrowserAccessibility::GetRowHeaderNodeIds(
     int32_t row_index) const {
-  ui::AXTableInfo* table_info = manager()->ax_tree()->GetTableInfo(node());
-  if (!table_info)
-    return {};
+  std::vector<int32_t> result;
+  node()->GetTableRowHeaderNodeIds(row_index, &result);
+  return result;
+}
 
-  if (row_index < 0 || row_index >= table_info->row_count)
-    return {};
+bool BrowserAccessibility::IsTableRow() const {
+  return node()->IsTableRow();
+}
 
-  return table_info->row_headers[row_index];
+int32_t BrowserAccessibility::GetTableRowRowIndex() const {
+  return node()->GetTableRowRowIndex();
+}
+
+bool BrowserAccessibility::IsTableCellOrHeader() const {
+  return node()->IsTableCellOrHeader();
+}
+
+int32_t BrowserAccessibility::GetTableCellColIndex() const {
+  return node()->GetTableCellColIndex();
+}
+
+int32_t BrowserAccessibility::GetTableCellRowIndex() const {
+  return node()->GetTableCellRowIndex();
+}
+
+int32_t BrowserAccessibility::GetTableCellColSpan() const {
+  return node()->GetTableCellColSpan();
+}
+
+int32_t BrowserAccessibility::GetTableCellRowSpan() const {
+  return node()->GetTableCellRowSpan();
+}
+
+int32_t BrowserAccessibility::GetTableCellAriaColIndex() const {
+  return node()->GetTableCellAriaColIndex();
+}
+
+int32_t BrowserAccessibility::GetTableCellAriaRowIndex() const {
+  return node()->GetTableCellAriaRowIndex();
 }
 
 int32_t BrowserAccessibility::GetCellId(int32_t row_index,
                                         int32_t col_index) const {
-  ui::AXTableInfo* table_info = manager()->ax_tree()->GetTableInfo(node());
-  if (!table_info)
-    return -1;
-
-  if (row_index < 0 || row_index >= table_info->row_count || col_index < 0 ||
-      col_index >= table_info->col_count)
-    return -1;
-
-  return table_info->cell_ids[row_index][col_index];
-}
-
-int32_t BrowserAccessibility::CellIdToIndex(int32_t cell_id) const {
-  ui::AXTableInfo* table_info = manager()->ax_tree()->GetTableInfo(node());
-  if (!table_info)
-    return -1;
-
-  const auto& iter = table_info->cell_id_to_index.find(cell_id);
-  if (iter != table_info->cell_id_to_index.end())
-    return iter->second;
+  ui::AXNode* cell = node()->GetTableCellFromCoords(row_index, col_index);
+  if (cell)
+    return cell->id();
 
   return -1;
 }
 
+int32_t BrowserAccessibility::GetTableCellIndex() const {
+  return node()->GetTableCellIndex();
+}
+
 int32_t BrowserAccessibility::CellIndexToId(int32_t cell_index) const {
-  ui::AXTableInfo* table_info = manager()->ax_tree()->GetTableInfo(node());
-  if (!table_info)
-    return -1;
-
-  if (cell_index < 0 ||
-      cell_index >= static_cast<int32_t>(table_info->unique_cell_ids.size()))
-    return -1;
-
-  return table_info->unique_cell_ids[cell_index];
+  ui::AXNode* cell = node()->GetTableCellFromIndex(cell_index);
+  if (cell)
+    return cell->id();
+  return -1;
 }
 
 bool BrowserAccessibility::AccessibilityPerformAction(
@@ -1180,6 +1185,22 @@ bool BrowserAccessibility::ShouldIgnoreHoveredStateForTesting() {
   BrowserAccessibilityStateImpl* accessibility_state =
       BrowserAccessibilityStateImpl::GetInstance();
   return accessibility_state->disable_hot_tracking_for_testing();
+}
+
+bool BrowserAccessibility::IsOrderedSetItem() const {
+  return node()->IsOrderedSetItem();
+}
+
+bool BrowserAccessibility::IsOrderedSet() const {
+  return node()->IsOrderedSet();
+}
+
+int32_t BrowserAccessibility::GetPosInSet() const {
+  return node()->GetPosInSet();
+}
+
+int32_t BrowserAccessibility::GetSetSize() const {
+  return node()->GetSetSize();
 }
 
 }  // namespace content

@@ -29,7 +29,7 @@
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chromeos/chromeos_paths.h"
+#include "chromeos/constants/chromeos_paths.h"
 #include "chromeos/dbus/power_policy_controller.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
@@ -793,12 +793,6 @@ void DeviceLocalAccountPolicyProviderTest::SetUp() {
   provider_->AddObserver(&provider_observer_);
 
   // Values implicitly enforced for public accounts.
-  expected_policy_map_.Set(
-      key::kLidCloseAction, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
-      POLICY_SOURCE_PUBLIC_SESSION_OVERRIDE,
-      std::make_unique<base::Value>(
-          chromeos::PowerPolicyController::ACTION_STOP_SESSION),
-      nullptr);
   expected_policy_map_.Set(key::kShelfAutoHideBehavior, POLICY_LEVEL_MANDATORY,
                            POLICY_SCOPE_MACHINE,
                            POLICY_SOURCE_PUBLIC_SESSION_OVERRIDE,

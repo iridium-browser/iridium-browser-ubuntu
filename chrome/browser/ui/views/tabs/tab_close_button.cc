@@ -39,21 +39,20 @@ TabCloseButton::TabCloseButton(views::ButtonListener* listener,
       mouse_event_callback_(std::move(mouse_event_callback)) {
   SetEventTargeter(std::make_unique<views::ViewTargeter>(this));
   SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
+  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
   // Disable animation so that the red danger sign shows up immediately
   // to help avoid mis-clicks.
   SetAnimationDuration(0);
 
-  if (focus_ring())
-    SetFocusPainter(nullptr);
+  SetInstallFocusRingOnFocus(true);
 }
 
 TabCloseButton::~TabCloseButton() {}
 
 // static
 int TabCloseButton::GetWidth() {
-  return ui::MaterialDesignController::IsTouchOptimizedUiEnabled()
-             ? kTouchGlyphWidth
-             : kGlyphWidth;
+  return ui::MaterialDesignController::touch_ui() ? kTouchGlyphWidth
+                                                  : kGlyphWidth;
 }
 
 void TabCloseButton::SetIconColors(SkColor icon_color,
@@ -160,14 +159,14 @@ views::View* TabCloseButton::TargetForRect(views::View* root,
   return contents_bounds.Intersects(rect) ? this : parent();
 }
 
-bool TabCloseButton::GetHitTestMask(gfx::Path* mask) const {
+bool TabCloseButton::GetHitTestMask(SkPath* mask) const {
   // We need to define this so hit-testing won't include the border region.
   mask->addRect(gfx::RectToSkRect(GetMirroredRect(GetContentsBounds())));
   return true;
 }
 
 void TabCloseButton::DrawHighlight(gfx::Canvas* canvas, ButtonState state) {
-  gfx::Path path;
+  SkPath path;
   gfx::Point center = GetContentsBounds().CenterPoint();
   path.setFillType(SkPath::kEvenOdd_FillType);
   path.addCircle(center.x(), center.y(), GetWidth() / 2);

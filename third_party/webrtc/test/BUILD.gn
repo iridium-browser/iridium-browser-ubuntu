@@ -6,8 +6,8 @@
 # in the file PATENTS.  All contributing project authors may
 # be found in the AUTHORS file in the root of the source tree.
 
-import("../webrtc.gni")
 import("//build/config/ui.gni")
+import("../webrtc.gni")
 if (is_android) {
   import("//build/config/android/rules.gni")
 }
@@ -16,11 +16,14 @@ group("test") {
   testonly = true
 
   deps = [
+    ":copy_to_file_audio_capturer",
     ":rtp_test_utils",
     ":test_common",
     ":test_renderer",
     ":test_support",
     ":video_test_common",
+    "pc/e2e",
+    "pc/e2e/api:peer_connection_quality_test_fixture_api",
   ]
 
   if (rtc_include_tests) {
@@ -70,6 +73,7 @@ rtc_source_set("video_test_common") {
     "../rtc_base:checks",
     "../rtc_base:rtc_base",
     "../rtc_base:rtc_task_queue",
+    "../rtc_base/task_utils:repeating_task",
     "../system_wrappers",
     "//third_party/abseil-cpp/absl/memory",
     "//third_party/abseil-cpp/absl/types:optional",
@@ -137,6 +141,8 @@ if (is_ios) {
     testonly = true
     visibility = [ ":test_support" ]
     sources = [
+      "ios/coverage_util_ios.h",
+      "ios/coverage_util_ios.mm",
       "ios/test_support.h",
       "ios/test_support.mm",
     ]
@@ -144,6 +150,15 @@ if (is_ios) {
       ":perf_test",
       "../sdk:helpers_objc",
     ]
+    configs += [ ":test_support_objc_config" ]
+  }
+
+  config("test_support_objc_config") {
+    defines = []
+
+    if (use_clang_coverage) {
+      defines += [ "WEBRTC_IOS_ENABLE_COVERAGE" ]
+    }
   }
 }
 
@@ -196,6 +211,33 @@ rtc_source_set("test_support") {
 }
 
 if (rtc_include_tests) {
+  rtc_source_set("test_main_lib") {
+    visibility = [ "*" ]
+    testonly = true
+    sources = [
+      "test_main_lib.cc",
+      "test_main_lib.h",
+    ]
+
+    deps = [
+      ":field_trial",
+      ":perf_test",
+      ":test_support",
+      "../rtc_base:checks",
+      "../rtc_base:rtc_base",
+      "../system_wrappers:field_trial",
+      "../system_wrappers:metrics",
+      "//testing/gtest",
+      "//third_party/abseil-cpp/absl/memory",
+
+      # TODO(bugs.webrtc.org/9792): This is needed for downstream projects on
+      # Android, where it's replaced by an internal version of fileutils that
+      # has a certain flag. Remove this once the internal fileutils has been
+      # eliminated.
+      "../test:fileutils",
+    ]
+  }
+
   rtc_source_set("test_main") {
     visibility = [ "*" ]
     testonly = true
@@ -203,22 +245,8 @@ if (rtc_include_tests) {
       "test_main.cc",
     ]
 
-    public_deps = [
-      ":test_support",
-    ]
     deps = [
-      ":field_trial",
-      ":perf_test",
-      "../rtc_base:rtc_base",
-      "../system_wrappers:field_trial",
-      "../system_wrappers:metrics",
-      "//testing/gtest",
-
-      # TODO(bugs.webrtc.org/9792): This is needed for downstream projects on
-      # Android, where it's replaced by an internal version of fileutils that
-      # has a certain flag. Remove this once the internal fileutils has been
-      # eliminated.
-      "../test:fileutils",
+      ":test_main_lib",
     ]
   }
 
@@ -229,6 +257,9 @@ if (rtc_include_tests) {
       "testsupport/frame_reader.h",
       "testsupport/frame_writer.h",
       "testsupport/mock/mock_frame_reader.h",
+      "testsupport/video_frame_writer.cc",
+      "testsupport/video_frame_writer.h",
+      "testsupport/y4m_frame_reader.cc",
       "testsupport/y4m_frame_writer.cc",
       "testsupport/yuv_frame_reader.cc",
       "testsupport/yuv_frame_writer.cc",
@@ -239,13 +270,14 @@ if (rtc_include_tests) {
       ":test_support",
       ":video_test_common",
       "..:webrtc_common",
+      "../api:scoped_refptr",
       "../api/video:video_frame",
       "../api/video:video_frame_i420",
       "../common_video",
       "../rtc_base:checks",
       "../rtc_base:rtc_base_approved",
       "../system_wrappers",
-      "//testing/gtest",
+      "//third_party/abseil-cpp/absl/memory:memory",
       "//third_party/libyuv",
     ]
 
@@ -300,6 +332,8 @@ if (rtc_include_tests) {
 
   rtc_test("test_support_unittests") {
     deps = [
+      ":call_config_utils",
+      ":copy_to_file_audio_capturer_unittest",
       ":direct_transport",
       ":fake_video_codecs",
       ":fileutils",
@@ -314,18 +348,25 @@ if (rtc_include_tests) {
       ":video_test_support",
       "../api:create_simulcast_test_fixture_api",
       "../api:simulcast_test_fixture_api",
+      "../api/test/video:function_video_factory",
+      "../api/video:builtin_video_bitrate_allocator_factory",
+      "../api/video:video_frame",
       "../api/video:video_frame_i420",
+      "../call:video_stream_api",
       "../modules/rtp_rtcp:rtp_rtcp",
       "../modules/video_capture",
       "../modules/video_coding:simulcast_test_fixture_impl",
       "../rtc_base:rtc_base_approved",
       "../test:single_threaded_task_queue",
+      "pc/e2e:e2e_unittests",
       "scenario:scenario_unittests",
       "//testing/gmock",
       "//testing/gtest",
       "//third_party/abseil-cpp/absl/memory",
+      "//third_party/abseil-cpp/absl/strings",
     ]
     sources = [
+      "call_config_utils_unittest.cc",
       "direct_transport_unittest.cc",
       "fake_vp8_encoder_unittest.cc",
       "frame_generator_unittest.cc",
@@ -335,6 +376,8 @@ if (rtc_include_tests) {
       "testsupport/always_passing_unittest.cc",
       "testsupport/perf_test_unittest.cc",
       "testsupport/test_artifacts_unittest.cc",
+      "testsupport/video_frame_writer_unittest.cc",
+      "testsupport/y4m_frame_reader_unittest.cc",
       "testsupport/y4m_frame_writer_unittest.cc",
       "testsupport/yuv_frame_reader_unittest.cc",
       "testsupport/yuv_frame_writer_unittest.cc",
@@ -365,10 +408,14 @@ if (rtc_include_tests) {
 
 if (is_ios) {
   rtc_source_set("fileutils_ios_objc") {
-    visibility = [ ":fileutils" ]
+    visibility = [
+      ":fileutils",
+      ":fileutils_override_impl",
+    ]
     sources = [
+      "testsupport/ios_file_utils.h",
+      "testsupport/ios_file_utils.mm",
       "testsupport/iosfileutils.h",
-      "testsupport/iosfileutils.mm",
     ]
     deps = [
       "..:webrtc_common",
@@ -381,10 +428,14 @@ if (is_ios) {
 
 if (is_mac) {
   rtc_source_set("fileutils_mac_objc") {
-    visibility = [ ":fileutils" ]
+    visibility = [
+      ":fileutils",
+      ":fileutils_override_impl",
+    ]
     sources = [
+      "testsupport/mac_file_utils.h",
+      "testsupport/mac_file_utils.mm",
       "testsupport/macfileutils.h",
-      "testsupport/macfileutils.mm",
     ]
     deps = [
       "../rtc_base:checks",
@@ -396,10 +447,48 @@ rtc_source_set("fileutils") {
   testonly = true
   visibility = [ "*" ]
   sources = [
-    "testsupport/fileutils.cc",
+    "testsupport/file_utils.cc",
+    "testsupport/file_utils.h",
     "testsupport/fileutils.h",
   ]
   deps = [
+    ":fileutils_override_api",
+    ":fileutils_override_impl",
+    "..:webrtc_common",
+    "../rtc_base:checks",
+    "../rtc_base:rtc_base_approved",
+    "../rtc_base/system:arch",
+    "//third_party/abseil-cpp/absl/types:optional",
+  ]
+  if (is_ios) {
+    deps += [ ":fileutils_ios_objc" ]
+  }
+  if (is_mac) {
+    deps += [ ":fileutils_mac_objc" ]
+  }
+  if (is_win) {
+    deps += [ "../rtc_base:rtc_base" ]
+  }
+}
+
+# We separate header into own target to make it possible for downstream
+# projects to override implementation.
+rtc_source_set("fileutils_override_api") {
+  testonly = true
+  sources = [
+    "testsupport/file_utils_override.h",
+    "testsupport/fileutils_override.h",
+  ]
+}
+
+rtc_source_set("fileutils_override_impl") {
+  testonly = true
+  visibility = [ ":fileutils" ]
+  sources = [
+    "testsupport/file_utils_override.cc",
+  ]
+  deps = [
+    ":fileutils_override_api",
     "..:webrtc_common",
     "../rtc_base:checks",
     "../rtc_base:rtc_base_approved",
@@ -464,7 +553,7 @@ rtc_source_set("fileutils_unittests") {
   testonly = true
   visibility = [ ":*" ]  # Only targets in this file can depend on this.
   sources = [
-    "testsupport/fileutils_unittest.cc",
+    "testsupport/file_utils_unittest.cc",
   ]
   deps = [
     ":fileutils",
@@ -519,7 +608,7 @@ rtc_source_set("single_threaded_task_queue") {
 }
 
 rtc_source_set("fake_video_codecs") {
-  testonly = true
+  allow_poison = [ "software_video_codecs" ]
   visibility = [ "*" ]
   sources = [
     "configurable_frame_size_encoder.cc",
@@ -540,9 +629,14 @@ rtc_source_set("fake_video_codecs") {
   deps = [
     "..:webrtc_common",
     "../api/video:encoded_image",
+    "../api/video:video_bitrate_allocation",
+    "../api/video:video_frame",
     "../api/video:video_frame_i420",
+    "../api/video_codecs:create_vp8_temporal_layers",
     "../api/video_codecs:video_codecs_api",
     "../common_video:common_video",
+    "../modules:module_api",
+    "../modules/video_coding:codec_globals_headers",
     "../modules/video_coding:video_codec_interface",
     "../modules/video_coding:video_coding_utility",
     "../modules/video_coding:webrtc_h264",
@@ -553,6 +647,7 @@ rtc_source_set("fake_video_codecs") {
     "../rtc_base:rtc_task_queue",
     "../rtc_base:sequenced_task_checker",
     "../system_wrappers",
+    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
@@ -568,8 +663,6 @@ rtc_source_set("test_common") {
     "encoder_settings.cc",
     "encoder_settings.h",
     "fake_videorenderer.h",
-    "function_video_decoder_factory.h",
-    "function_video_encoder_factory.h",
     "layer_filtering_transport.cc",
     "layer_filtering_transport.h",
     "mock_transport.cc",
@@ -581,9 +674,15 @@ rtc_source_set("test_common") {
     "statistics.h",
     "video_decoder_proxy_factory.h",
     "video_encoder_proxy_factory.h",
-    "win/run_loop_win.cc",
   ]
-  if (!is_win) {
+  if (current_os != "winuwp") {
+    # The filtering of *_win.cc is not done for WinUWP (intentionally) as
+    # most _win.cc files are compatible with WinUWP. However, the
+    # peek/dispatch Win32 runloops are entirely WinUWP incompatible thus
+    # WinUWP uses the generic runloop as defined for non-Windows targets.
+    sources += [ "win/run_loop_win.cc" ]
+  }
+  if (!is_win || current_os == "winuwp") {
     sources += [
       "run_loop.cc",
       "run_loop.h",
@@ -602,17 +701,22 @@ rtc_source_set("test_common") {
     ":rtp_test_utils",
     ":test_support",
     ":video_test_common",
+    "../:webrtc_common",
     "../api:libjingle_peerconnection_api",
     "../api:simulated_network_api",
     "../api:transport_api",
     "../api/audio_codecs:builtin_audio_decoder_factory",
     "../api/audio_codecs:builtin_audio_encoder_factory",
+    "../api/test/video:function_video_factory",
+    "../api/video:builtin_video_bitrate_allocator_factory",
+    "../api/video:video_bitrate_allocator_factory",
     "../api/video:video_frame",
     "../api/video_codecs:video_codecs_api",
     "../audio",
     "../call",
     "../call:call_interfaces",
     "../call:fake_network",
+    "../call:rtp_interfaces",
     "../call:rtp_sender",
     "../call:simulated_network",
     "../call:simulated_packet_receiver",
@@ -626,10 +730,11 @@ rtc_source_set("test_common") {
     "../modules/audio_device:mock_audio_device",
     "../modules/audio_mixer:audio_mixer_impl",
     "../modules/audio_processing",
-    "../modules/congestion_controller/bbr",
     "../modules/rtp_rtcp",
     "../modules/rtp_rtcp:mock_rtp_rtcp",
     "../modules/rtp_rtcp:rtp_rtcp_format",
+    "../modules/rtp_rtcp:rtp_video_header",
+    "../modules/video_coding:codec_globals_headers",
     "../modules/video_coding:video_coding_utility",
     "../modules/video_coding:webrtc_h264",
     "../modules/video_coding:webrtc_multiplex",
@@ -637,7 +742,6 @@ rtc_source_set("test_common") {
     "../modules/video_coding:webrtc_vp9",
     "../rtc_base:checks",
     "../rtc_base:rtc_base_approved",
-    "../rtc_base/experiments:congestion_controller_experiment",
     "../system_wrappers",
     "../system_wrappers:field_trial",
     "../video",
@@ -744,6 +848,10 @@ rtc_source_set("test_renderer_generic") {
 rtc_source_set("audio_codec_mocks") {
   testonly = true
   sources = [
+    # TODO(nisse): Move these factories to their own target, to avoid
+    # unnecessary dependencies on gmock and gtest.
+    "audio_decoder_proxy_factory.h",
+    "function_audio_decoder_factory.h",
     "mock_audio_decoder.cc",
     "mock_audio_decoder.h",
     "mock_audio_decoder_factory.h",
@@ -757,7 +865,39 @@ rtc_source_set("audio_codec_mocks") {
     "../api:array_view",
     "../api/audio_codecs:audio_codecs_api",
     "../api/audio_codecs:builtin_audio_decoder_factory",
+    "../rtc_base:checks",
     "../rtc_base:rtc_base_approved",
+    "//third_party/abseil-cpp/absl/memory",
+  ]
+}
+
+rtc_source_set("copy_to_file_audio_capturer") {
+  testonly = true
+  sources = [
+    "testsupport/copy_to_file_audio_capturer.cc",
+    "testsupport/copy_to_file_audio_capturer.h",
+  ]
+  deps = [
+    "../api:array_view",
+    "../common_audio:common_audio",
+    "../modules/audio_device:audio_device_impl",
+    "../rtc_base:rtc_base_approved",
+    "//third_party/abseil-cpp/absl/memory",
+    "//third_party/abseil-cpp/absl/types:optional",
+  ]
+}
+
+rtc_source_set("copy_to_file_audio_capturer_unittest") {
+  testonly = true
+  sources = [
+    "testsupport/copy_to_file_audio_capturer_unittest.cc",
+  ]
+  deps = [
+    ":copy_to_file_audio_capturer",
+    ":fileutils",
+    ":test_support",
+    "../modules/audio_device:audio_device_impl",
+    "//third_party/abseil-cpp/absl/memory",
   ]
 }
 
@@ -773,4 +913,16 @@ if (!build_with_chromium && is_android) {
       "//testing/android/native_test:native_test_java",
     ]
   }
+}
+
+rtc_source_set("call_config_utils") {
+  sources = [
+    "call_config_utils.cc",
+    "call_config_utils.h",
+  ]
+  deps = [
+    "../call:call_interfaces",
+    "../call:video_stream_api",
+    "../rtc_base:rtc_json",
+  ]
 }

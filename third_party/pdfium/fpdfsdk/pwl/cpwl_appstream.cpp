@@ -683,10 +683,11 @@ ByteString GenerateIconAppStream(CPDF_IconFit& fit,
   if (rcIcon.IsEmpty() || !pIconStream)
     return ByteString();
 
-  CPWL_Icon icon;
   CPWL_Wnd::CreateParams cp;
   cp.dwFlags = PWS_VISIBLE;
-  icon.Create(cp);
+
+  CPWL_Icon icon(cp, nullptr);
+  icon.Realize();
   icon.SetIconFit(&fit);
   icon.SetPDFStream(pIconStream);
   if (!icon.Move(rcIcon, false, false))
@@ -1247,7 +1248,7 @@ void CPWL_AppStream::SetAsPushButton() {
                              &font_map, pNormalIcon, iconFit, csNormalCaption,
                              crText, fFontSize, nLayout);
 
-  Write("N", csAP, "");
+  Write("N", csAP, ByteString());
   if (pNormalIcon)
     AddImage("N", pNormalIcon);
 
@@ -1268,7 +1269,7 @@ void CPWL_AppStream::SetAsPushButton() {
                                &font_map, pRolloverIcon, iconFit,
                                csRolloverCaption, crText, fFontSize, nLayout);
 
-    Write("R", csAP, "");
+    Write("R", csAP, ByteString());
     if (pRolloverIcon)
       AddImage("R", pRolloverIcon);
 
@@ -1303,7 +1304,7 @@ void CPWL_AppStream::SetAsPushButton() {
                                &font_map, pDownIcon, iconFit, csDownCaption,
                                crText, fFontSize, nLayout);
 
-    Write("D", csAP, "");
+    Write("D", csAP, ByteString());
     if (pDownIcon)
       AddImage("D", pDownIcon);
   } else {
@@ -1648,7 +1649,7 @@ void CPWL_AppStream::SetAsComboBox(Optional<WideString> sValue) {
   sBody << GetDropButtonAppStream(rcButton);
   Write("N",
         GetBackgroundAppStream() + GetBorderAppStream() + ByteString(sBody),
-        "");
+        ByteString());
 }
 
 void CPWL_AppStream::SetAsListBox() {
@@ -1733,7 +1734,7 @@ void CPWL_AppStream::SetAsListBox() {
   }
   Write("N",
         GetBackgroundAppStream() + GetBorderAppStream() + ByteString(sBody),
-        "");
+        ByteString());
 }
 
 void CPWL_AppStream::SetAsTextField(Optional<WideString> sValue) {
@@ -1883,7 +1884,7 @@ void CPWL_AppStream::SetAsTextField(Optional<WideString> sValue) {
   Write("N",
         GetBackgroundAppStream() + GetBorderAppStream() + ByteString(sLines) +
             ByteString(sBody),
-        "");
+        ByteString());
 }
 
 void CPWL_AppStream::AddImage(const ByteString& sAPType, CPDF_Stream* pImage) {
@@ -1932,8 +1933,8 @@ void CPWL_AppStream::Write(const ByteString& sAPType,
 
   CPDF_Dictionary* pStreamDict = pStream->GetDict();
   if (!pStreamDict) {
-    auto pNewDict = pdfium::MakeUnique<CPDF_Dictionary>(
-        widget_->GetPDFAnnot()->GetDocument()->GetByteStringPool());
+    auto pNewDict =
+        widget_->GetPDFAnnot()->GetDocument()->New<CPDF_Dictionary>();
     pStreamDict = pNewDict.get();
     pStreamDict->SetNewFor<CPDF_Name>("Type", "XObject");
     pStreamDict->SetNewFor<CPDF_Name>("Subtype", "Form");

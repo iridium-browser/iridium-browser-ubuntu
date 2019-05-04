@@ -39,12 +39,11 @@ class Node;
 class AXObjectCacheImpl;
 
 class AXInlineTextBox final : public AXObject {
- private:
-  AXInlineTextBox(scoped_refptr<AbstractInlineTextBox>, AXObjectCacheImpl&);
-
  public:
   static AXInlineTextBox* Create(scoped_refptr<AbstractInlineTextBox>,
                                  AXObjectCacheImpl&);
+
+  AXInlineTextBox(scoped_refptr<AbstractInlineTextBox>, AXObjectCacheImpl&);
 
  protected:
   void Init() override;
@@ -59,7 +58,8 @@ class AXInlineTextBox final : public AXObject {
   String GetName(ax::mojom::NameFrom&,
                  AXObject::AXObjectVector* name_objects) const override;
   void TextCharacterOffsets(Vector<int>&) const override;
-  void GetWordBoundaries(Vector<AXRange>&) const override;
+  void GetWordBoundaries(Vector<int>& word_starts,
+                         Vector<int>& word_ends) const override;
   void GetRelativeBounds(AXObject** out_container,
                          FloatRect& out_bounds_in_container,
                          SkMatrix44& out_container_transform,

@@ -9,11 +9,18 @@
  */
 
 #include "modules/video_coding/codecs/vp8/default_temporal_layers.h"
+
+#include <cstdint>
+
+#include "api/video/video_bitrate_allocation.h"
+#include "api/video_codecs/video_codec.h"
+#include "common_types.h"  // NOLINT(build/include)
 #include "modules/video_coding/codecs/vp8/libvpx_vp8_encoder.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/utility/simulcast_rate_allocator.h"
 #include "test/field_trial.h"
 #include "test/gtest.h"
+#include "vpx/vp8cx.h"
 
 namespace webrtc {
 namespace test {
@@ -74,7 +81,7 @@ constexpr int kDefaultBytesPerFrame =
 constexpr int kDefaultQp = 2;
 }  // namespace
 
-using BufferFlags = TemporalLayers::BufferFlags;
+using BufferFlags = Vp8TemporalLayers::BufferFlags;
 
 TEST(TemporalLayersTest, 2Layers) {
   constexpr int kNumLayers = 2;
@@ -114,7 +121,7 @@ TEST(TemporalLayersTest, 2Layers) {
 
   uint32_t timestamp = 0;
   for (int i = 0; i < 16; ++i) {
-    TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+    Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
     EXPECT_EQ(expected_flags[i], LibvpxVp8Encoder::EncodeFlags(tl_config)) << i;
     tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, i == 0, kDefaultQp,
                     &vp8_info);
@@ -166,7 +173,7 @@ TEST(TemporalLayersTest, 3Layers) {
 
   unsigned int timestamp = 0;
   for (int i = 0; i < 16; ++i) {
-    TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+    Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
     EXPECT_EQ(expected_flags[i], LibvpxVp8Encoder::EncodeFlags(tl_config)) << i;
     tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, i == 0, kDefaultQp,
                     &vp8_info);
@@ -207,7 +214,7 @@ TEST(TemporalLayersTest, Alternative3Layers) {
 
   unsigned int timestamp = 0;
   for (int i = 0; i < 8; ++i) {
-    TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+    Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
     EXPECT_EQ(expected_flags[i], LibvpxVp8Encoder::EncodeFlags(tl_config)) << i;
     tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, i == 0, kDefaultQp,
                     &vp8_info);
@@ -238,7 +245,7 @@ TEST(TemporalLayersTest, SearchOrder) {
 
   // Start with a key-frame. tl_config flags can be ignored.
   uint32_t timestamp = 0;
-  TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+  Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
   tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, true, kDefaultQp,
                   &vp8_info);
 
@@ -282,7 +289,7 @@ TEST(TemporalLayersTest, SearchOrderWithDrop) {
 
   // Start with a key-frame. tl_config flags can be ignored.
   uint32_t timestamp = 0;
-  TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+  Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
   tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, true, kDefaultQp,
                   &vp8_info);
 
@@ -343,7 +350,7 @@ TEST(TemporalLayersTest, 4Layers) {
 
   uint32_t timestamp = 0;
   for (int i = 0; i < 16; ++i) {
-    TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+    Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
     EXPECT_EQ(expected_flags[i], LibvpxVp8Encoder::EncodeFlags(tl_config)) << i;
     tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, i == 0, kDefaultQp,
                     &vp8_info);
@@ -373,7 +380,7 @@ TEST(TemporalLayersTest, DoesNotReferenceDroppedFrames) {
 
   // Start with a keyframe.
   uint32_t timestamp = 0;
-  TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+  Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
   tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, true, kDefaultQp,
                   &vp8_info);
 
@@ -460,7 +467,7 @@ TEST(TemporalLayersTest, DoesNotReferenceUnlessGuaranteedToExist) {
 
   // Start with a keyframe.
   uint32_t timestamp = 0;
-  TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+  Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
   tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, true, kDefaultQp,
                   &vp8_info);
 
@@ -530,7 +537,7 @@ TEST(TemporalLayersTest, DoesNotReferenceUnlessGuaranteedToExistLongDelay) {
 
   // Start with a keyframe.
   uint32_t timestamp = 0;
-  TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+  Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
   tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, true, kDefaultQp,
                   &vp8_info);
 
@@ -610,7 +617,8 @@ TEST(TemporalLayersTest, KeyFrame) {
     for (int j = 1; j <= i; ++j) {
       // Since last frame was always a keyframe and thus index 0 in the pattern,
       // this loop starts at index 1.
-      TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+      Vp8TemporalLayers::FrameConfig tl_config =
+          tl.UpdateLayerConfig(timestamp);
       EXPECT_EQ(expected_flags[j], LibvpxVp8Encoder::EncodeFlags(tl_config))
           << j;
       tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, false, kDefaultQp,
@@ -622,7 +630,7 @@ TEST(TemporalLayersTest, KeyFrame) {
       timestamp += 3000;
     }
 
-    TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
+    Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp);
     tl.OnEncodeDone(timestamp, kDefaultBytesPerFrame, true, kDefaultQp,
                     &vp8_info);
     EXPECT_TRUE(vp8_info.layerSync) << "Key frame should be marked layer sync.";
@@ -652,9 +660,9 @@ class TemporalLayersReferenceTest : public ::testing::TestWithParam<int> {
     bool sync;
   };
 
-  bool UpdateSyncRefState(const TemporalLayers::BufferFlags& flags,
+  bool UpdateSyncRefState(const Vp8TemporalLayers::BufferFlags& flags,
                           BufferState* buffer_state) {
-    if (flags & TemporalLayers::kReference) {
+    if (flags & Vp8TemporalLayers::kReference) {
       if (buffer_state->temporal_idx == -1)
         return true;  // References key-frame.
       if (buffer_state->temporal_idx == 0) {
@@ -668,10 +676,10 @@ class TemporalLayersReferenceTest : public ::testing::TestWithParam<int> {
     return true;  // No reference, does not affect sync frame status.
   }
 
-  void ValidateReference(const TemporalLayers::BufferFlags& flags,
+  void ValidateReference(const Vp8TemporalLayers::BufferFlags& flags,
                          const BufferState& buffer_state,
                          int temporal_layer) {
-    if (flags & TemporalLayers::kReference) {
+    if (flags & Vp8TemporalLayers::kReference) {
       if (temporal_layer > 0 && buffer_state.timestamp > 0) {
         // Check that high layer reference does not go past last sync frame.
         EXPECT_GE(buffer_state.timestamp, last_sync_timestamp_);
@@ -709,9 +717,9 @@ TEST_P(TemporalLayersReferenceTest, ValidFrameConfigs) {
   // (any). If a given buffer is never updated, it is legal to reference it
   // even for sync frames. In order to be general, don't assume TL0 always
   // updates |last|.
-  std::vector<TemporalLayers::FrameConfig> tl_configs(kMaxPatternLength);
+  std::vector<Vp8TemporalLayers::FrameConfig> tl_configs(kMaxPatternLength);
   for (int i = 0; i < kMaxPatternLength; ++i) {
-    TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp_);
+    Vp8TemporalLayers::FrameConfig tl_config = tl.UpdateLayerConfig(timestamp_);
     tl.OnEncodeDone(timestamp_, kDefaultBytesPerFrame, i == 0, kDefaultQp,
                     &vp8_specifics);
     ++timestamp_;
@@ -752,11 +760,11 @@ TEST_P(TemporalLayersReferenceTest, ValidFrameConfigs) {
 
     // Update the current layer state.
     BufferState state = {temporal_idx, timestamp_, is_sync_frame};
-    if (tl_config.last_buffer_flags & TemporalLayers::kUpdate)
+    if (tl_config.last_buffer_flags & Vp8TemporalLayers::kUpdate)
       last_state = state;
-    if (tl_config.golden_buffer_flags & TemporalLayers::kUpdate)
+    if (tl_config.golden_buffer_flags & Vp8TemporalLayers::kUpdate)
       golden_state = state;
-    if (tl_config.arf_buffer_flags & TemporalLayers::kUpdate)
+    if (tl_config.arf_buffer_flags & Vp8TemporalLayers::kUpdate)
       altref_state = state;
   }
 }

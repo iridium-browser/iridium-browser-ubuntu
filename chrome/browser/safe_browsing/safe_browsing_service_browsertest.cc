@@ -101,7 +101,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #endif
 
 #if !defined(SAFE_BROWSING_DB_LOCAL)
@@ -290,9 +290,8 @@ std::string JsRequestTestNavigateAndWaitForTitle(Browser* browser,
 
 class FakeSafeBrowsingUIManager : public TestSafeBrowsingUIManager {
  public:
-  void MaybeReportSafeBrowsingHit(
-      const safe_browsing::HitReport& hit_report,
-      const content::WebContents* web_contents) override {
+  void MaybeReportSafeBrowsingHit(const safe_browsing::HitReport& hit_report,
+                                  content::WebContents* web_contents) override {
     EXPECT_FALSE(got_hit_report_);
     got_hit_report_ = true;
     hit_report_ = hit_report;

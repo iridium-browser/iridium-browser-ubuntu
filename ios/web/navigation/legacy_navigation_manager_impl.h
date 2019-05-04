@@ -36,7 +36,7 @@ class LegacyNavigationManagerImpl : public NavigationManagerImpl {
   void SetSessionController(CRWSessionController* session_controller) override;
   void InitializeSession() override;
   void OnNavigationItemsPruned(size_t pruned_item_count) override;
-  void OnNavigationItemChanged() override;
+  void OnRendererInitiatedNavigationStarted(const GURL& url) override;
   void OnNavigationItemCommitted() override;
   CRWSessionController* GetSessionController() const override;
   void AddTransientItem(const GURL& url) override;
@@ -53,6 +53,8 @@ class LegacyNavigationManagerImpl : public NavigationManagerImpl {
   void AddPushStateItemIfNecessary(const GURL& url,
                                    NSString* state_object,
                                    ui::PageTransition transition) override;
+  bool IsRestoreSessionInProgress() const override;
+  void SetPendingItemIndex(int index) override;
 
   // NavigationManager:
   BrowserState* GetBrowserState() const override;
@@ -63,7 +65,7 @@ class LegacyNavigationManagerImpl : public NavigationManagerImpl {
   NavigationItem* GetItemAtIndex(size_t index) const override;
   int GetIndexOfItem(const NavigationItem* item) const override;
   int GetPendingItemIndex() const override;
-  int GetLastCommittedItemIndex() const override;
+  int GetLastCommittedItemIndexInCurrentOrRestoredSession() const override;
   bool RemoveItemAtIndex(int index) override;
   bool CanGoBack() const override;
   bool CanGoForward() const override;
@@ -84,8 +86,9 @@ class LegacyNavigationManagerImpl : public NavigationManagerImpl {
 
   // NavigationManagerImpl:
   NavigationItemImpl* GetNavigationItemImplAtIndex(size_t index) const override;
-  NavigationItemImpl* GetLastCommittedItemImpl() const override;
-  NavigationItemImpl* GetPendingItemImpl() const override;
+  NavigationItemImpl* GetLastCommittedItemInCurrentOrRestoredSession()
+      const override;
+  NavigationItemImpl* GetPendingItemInCurrentOrRestoredSession() const override;
   NavigationItemImpl* GetTransientItemImpl() const override;
   void FinishGoToIndex(int index,
                        NavigationInitiationType type,

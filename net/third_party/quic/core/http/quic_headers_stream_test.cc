@@ -26,10 +26,10 @@
 #include "net/third_party/quic/test_tools/quic_spdy_session_peer.h"
 #include "net/third_party/quic/test_tools/quic_stream_peer.h"
 #include "net/third_party/quic/test_tools/quic_test_utils.h"
-#include "net/third_party/spdy/core/http2_frame_decoder_adapter.h"
-#include "net/third_party/spdy/core/spdy_alt_svc_wire_format.h"
-#include "net/third_party/spdy/core/spdy_protocol.h"
-#include "net/third_party/spdy/core/spdy_test_utils.h"
+#include "net/third_party/quiche/src/spdy/core/http2_frame_decoder_adapter.h"
+#include "net/third_party/quiche/src/spdy/core/spdy_alt_svc_wire_format.h"
+#include "net/third_party/quiche/src/spdy/core/spdy_protocol.h"
+#include "net/third_party/quiche/src/spdy/core/spdy_test_utils.h"
 
 using spdy::ERROR_CODE_PROTOCOL_ERROR;
 using spdy::SETTINGS_ENABLE_PUSH;
@@ -176,7 +176,11 @@ class QuicHeadersStreamTest : public QuicTestWithParam<TestParams> {
                                                        GetVersion())),
         session_(connection_),
         body_("hello world"),
-        stream_frame_(kHeadersStreamId, /*fin=*/false, /*offset=*/0, ""),
+        stream_frame_(
+            QuicUtils::GetHeadersStreamId(connection_->transport_version()),
+            /*fin=*/false,
+            /*offset=*/0,
+            ""),
         next_promised_stream_id_(2) {
     session_.Initialize();
     headers_stream_ = QuicSpdySessionPeer::GetHeadersStream(&session_);
@@ -192,16 +196,20 @@ class QuicHeadersStreamTest : public QuicTestWithParam<TestParams> {
     EXPECT_TRUE(headers_stream_ != nullptr);
     connection_->AdvanceTime(QuicTime::Delta::FromMilliseconds(1));
     client_id_1_ =
-        QuicSpdySessionPeer::GetNthClientInitiatedStreamId(session_, 0);
+        QuicSpdySessionPeer::GetNthClientInitiatedBidirectionalStreamId(
+            session_, 0);
     client_id_2_ =
-        QuicSpdySessionPeer::GetNthClientInitiatedStreamId(session_, 1);
+        QuicSpdySessionPeer::GetNthClientInitiatedBidirectionalStreamId(
+            session_, 1);
     client_id_3_ =
-        QuicSpdySessionPeer::GetNthClientInitiatedStreamId(session_, 2);
-    next_stream_id_ = QuicSpdySessionPeer::NextStreamId(session_);
+        QuicSpdySessionPeer::GetNthClientInitiatedBidirectionalStreamId(
+            session_, 2);
+    next_stream_id_ = QuicSpdySessionPeer::StreamIdDelta(session_);
   }
 
   QuicStreamId GetNthClientInitiatedId(int n) {
-    return QuicSpdySessionPeer::GetNthClientInitiatedStreamId(session_, n);
+    return QuicSpdySessionPeer::GetNthClientInitiatedBidirectionalStreamId(
+        session_, n);
   }
 
   QuicConsumedData SaveIov(size_t write_length) {
@@ -265,8 +273,10 @@ class QuicHeadersStreamTest : public QuicTestWithParam<TestParams> {
                                 SpdyPriority priority,
                                 bool is_request) {
     // Write the headers and capture the outgoing data
-    EXPECT_CALL(session_,
-                WritevData(headers_stream_, kHeadersStreamId, _, _, NO_FIN))
+    EXPECT_CALL(session_, WritevData(headers_stream_,
+                                     QuicUtils::GetHeadersStreamId(
+                                         connection_->transport_version()),
+                                     _, _, NO_FIN))
         .WillOnce(WithArgs<2>(Invoke(this, &QuicHeadersStreamTest::SaveIov)));
     QuicSpdySessionPeer::WriteHeadersImpl(
         &session_, stream_id, headers_.Clone(), fin,
@@ -358,7 +368,8 @@ INSTANTIATE_TEST_CASE_P(Tests,
                         ::testing::ValuesIn(GetTestParams()));
 
 TEST_P(QuicHeadersStreamTest, StreamId) {
-  EXPECT_EQ(3u, headers_stream_->id());
+  EXPECT_EQ(QuicUtils::GetHeadersStreamId(connection_->transport_version()),
+            headers_stream_->id());
 }
 
 TEST_P(QuicHeadersStreamTest, WriteHeaders) {
@@ -383,8 +394,10 @@ TEST_P(QuicHeadersStreamTest, WritePushPromises) {
     QuicStreamId promised_stream_id = NextPromisedStreamId();
     if (perspective() == Perspective::IS_SERVER) {
       // Write the headers and capture the outgoing data
-      EXPECT_CALL(session_,
-                  WritevData(headers_stream_, kHeadersStreamId, _, _, NO_FIN))
+      EXPECT_CALL(session_, WritevData(headers_stream_,
+                                       QuicUtils::GetHeadersStreamId(
+                                           connection_->transport_version()),
+                                       _, _, NO_FIN))
           .WillOnce(WithArgs<2>(Invoke(this, &QuicHeadersStreamTest::SaveIov)));
       session_.WritePushPromise(stream_id, promised_stream_id,
                                 headers_.Clone());
@@ -788,8 +801,10 @@ TEST_P(QuicHeadersStreamTest, HpackEncoderDebugVisitor) {
 }
 
 TEST_P(QuicHeadersStreamTest, AckSentData) {
-  EXPECT_CALL(session_,
-              WritevData(headers_stream_, kHeadersStreamId, _, _, NO_FIN))
+  EXPECT_CALL(session_, WritevData(headers_stream_,
+                                   QuicUtils::GetHeadersStreamId(
+                                       connection_->transport_version()),
+                                   _, _, NO_FIN))
       .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
   InSequence s;
   QuicReferenceCountedPointer<MockAckListener> ack_listener1(
@@ -843,8 +858,10 @@ TEST_P(QuicHeadersStreamTest, AckSentData) {
 
 TEST_P(QuicHeadersStreamTest, FrameContainsMultipleHeaders) {
   // In this test, a stream frame can contain multiple headers.
-  EXPECT_CALL(session_,
-              WritevData(headers_stream_, kHeadersStreamId, _, _, NO_FIN))
+  EXPECT_CALL(session_, WritevData(headers_stream_,
+                                   QuicUtils::GetHeadersStreamId(
+                                       connection_->transport_version()),
+                                   _, _, NO_FIN))
       .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
   InSequence s;
   QuicReferenceCountedPointer<MockAckListener> ack_listener1(
@@ -885,8 +902,10 @@ TEST_P(QuicHeadersStreamTest, FrameContainsMultipleHeaders) {
 }
 
 TEST_P(QuicHeadersStreamTest, HeadersGetAckedMultipleTimes) {
-  EXPECT_CALL(session_,
-              WritevData(headers_stream_, kHeadersStreamId, _, _, NO_FIN))
+  EXPECT_CALL(session_, WritevData(headers_stream_,
+                                   QuicUtils::GetHeadersStreamId(
+                                       connection_->transport_version()),
+                                   _, _, NO_FIN))
       .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
   InSequence s;
   QuicReferenceCountedPointer<MockAckListener> ack_listener1(

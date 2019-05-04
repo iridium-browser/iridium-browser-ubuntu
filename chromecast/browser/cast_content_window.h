@@ -21,6 +21,7 @@ namespace chromecast {
 namespace shell {
 
 // Describes visual context of the window within the UI.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chromecast.shell
 enum class VisibilityType {
   // Unknown visibility state.
   UNKNOWN = 0,
@@ -43,6 +44,7 @@ enum class VisibilityType {
 // 2. Whether the window should become immediately visible
 // 3. How much screen space the window should occupy
 // 4. What state to return to when the activity is completed
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chromecast.shell
 enum class VisibilityPriority {
   // Default priority. It is up to system to decide how to show the activity.
   DEFAULT = 0,
@@ -72,6 +74,7 @@ enum class VisibilityPriority {
   HIDDEN_STICKY = 6,
 };
 
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chromecast.shell
 enum class GestureType {
   NO_GESTURE = 0,
   GO_BACK = 1,
@@ -138,11 +141,14 @@ class CastContentWindow {
     // True if this app should turn on the screen.
     bool turn_on_screen = true;
 
+    // application or acitivity's session ID
+    std::string session_id = "";
+
     // Gesture priority for when the window is visible.
     CastGestureHandler::Priority gesture_priority =
         CastGestureHandler::Priority::NONE;
 
-    CreateParams() = default;
+    CreateParams();
   };
 
   class Observer : public base::CheckedObserver {

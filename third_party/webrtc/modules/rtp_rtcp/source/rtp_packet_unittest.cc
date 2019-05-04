@@ -10,6 +10,7 @@
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
 
+#include "common_video/test/utilities.h"
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "rtc_base/random.h"
@@ -185,6 +186,23 @@ constexpr uint8_t kPacketWithLegacyTimingExtension[] = {
     0x04, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00};
 // clang-format on
+
+void TestCreateAndParseColorSpaceExtension(bool with_hdr_metadata) {
+  // Create packet with extension.
+  RtpPacket::ExtensionManager extensions(/*extmap-allow-mixed=*/true);
+  extensions.Register<ColorSpaceExtension>(1);
+  RtpPacket packet(&extensions);
+  const ColorSpace kColorSpace = CreateTestColorSpace(with_hdr_metadata);
+  EXPECT_TRUE(packet.SetExtension<ColorSpaceExtension>(kColorSpace));
+  packet.SetPayloadSize(42);
+
+  // Read packet with the extension.
+  RtpPacketReceived parsed(&extensions);
+  EXPECT_TRUE(parsed.Parse(packet.Buffer()));
+  ColorSpace parsed_color_space;
+  EXPECT_TRUE(parsed.GetExtension<ColorSpaceExtension>(&parsed_color_space));
+  EXPECT_EQ(kColorSpace, parsed_color_space);
+}
 }  // namespace
 
 TEST(RtpPacketTest, CreateMinimum) {
@@ -226,8 +244,7 @@ TEST(RtpPacketTest, CreateWith2Extensions) {
 }
 
 TEST(RtpPacketTest, CreateWithTwoByteHeaderExtensionFirst) {
-  RtpPacketToSend::ExtensionManager extensions;
-  extensions.SetMixedOneTwoByteHeaderSupported(true);
+  RtpPacketToSend::ExtensionManager extensions(true);
   extensions.Register(kRtpExtensionTransmissionTimeOffset,
                       kTransmissionOffsetExtensionId);
   extensions.Register(kRtpExtensionAudioLevel, kAudioLevelExtensionId);
@@ -248,8 +265,7 @@ TEST(RtpPacketTest, CreateWithTwoByteHeaderExtensionFirst) {
 
 TEST(RtpPacketTest, CreateWithTwoByteHeaderExtensionLast) {
   // This test will trigger RtpPacket::PromoteToTwoByteHeaderExtension().
-  RtpPacketToSend::ExtensionManager extensions;
-  extensions.SetMixedOneTwoByteHeaderSupported(true);
+  RtpPacketToSend::ExtensionManager extensions(true);
   extensions.Register(kRtpExtensionTransmissionTimeOffset,
                       kTransmissionOffsetExtensionId);
   extensions.Register(kRtpExtensionAudioLevel, kAudioLevelExtensionId);
@@ -466,6 +482,23 @@ TEST(RtpPacketTest, ParseWithExtension) {
   EXPECT_EQ(kTimeOffset, time_offset);
   EXPECT_EQ(0u, packet.payload_size());
   EXPECT_EQ(0u, packet.padding_size());
+}
+
+TEST(RtpPacketTest, GetExtensionWithoutParametersReturnsOptionalValue) {
+  RtpPacket::ExtensionManager extensions;
+  extensions.Register<TransmissionOffset>(kTransmissionOffsetExtensionId);
+  extensions.Register<RtpStreamId>(kRtpStreamIdExtensionId);
+
+  RtpPacketReceived packet(&extensions);
+  EXPECT_TRUE(packet.Parse(kPacketWithTO, sizeof(kPacketWithTO)));
+
+  auto time_offset = packet.GetExtension<TransmissionOffset>();
+  static_assert(
+      std::is_same<decltype(time_offset),
+                   absl::optional<TransmissionOffset::value_type>>::value,
+      "");
+  EXPECT_EQ(time_offset, kTimeOffset);
+  EXPECT_FALSE(packet.GetExtension<RtpStreamId>().has_value());
 }
 
 TEST(RtpPacketTest, GetRawExtensionWhenPresent) {
@@ -784,6 +817,14 @@ TEST(RtpPacketTest, ParseLegacyTimingFrameExtension) {
   EXPECT_EQ(receivied_timing.encode_start_delta_ms, 1);
   EXPECT_EQ(receivied_timing.pacer_exit_delta_ms, 4);
   EXPECT_EQ(receivied_timing.flags, 0);
+}
+
+TEST(RtpPacketTest, CreateAndParseColorSpaceExtension) {
+  TestCreateAndParseColorSpaceExtension(/*with_hdr_metadata=*/true);
+}
+
+TEST(RtpPacketTest, CreateAndParseColorSpaceExtensionWithoutHdrMetadata) {
+  TestCreateAndParseColorSpaceExtension(/*with_hdr_metadata=*/false);
 }
 
 }  // namespace webrtc

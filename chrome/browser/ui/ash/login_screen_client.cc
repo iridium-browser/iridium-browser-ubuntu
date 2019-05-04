@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "ash/public/interfaces/constants.mojom.h"
+#include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/login_auth_recorder.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
 #include "components/user_manager/remove_user_delegate.h"
+#include "components/user_manager/user_names.h"
 #include "content/public/common/service_manager_connection.h"
 #include "services/service_manager/public/cpp/connector.h"
 
@@ -63,6 +65,16 @@ void LoginScreenClient::SetDelegate(Delegate* delegate) {
   delegate_ = delegate;
 }
 
+void LoginScreenClient::AddSystemTrayFocusObserver(
+    ash::SystemTrayFocusObserver* observer) {
+  system_tray_focus_observers_.AddObserver(observer);
+}
+
+void LoginScreenClient::RemoveSystemTrayFocusObserver(
+    ash::SystemTrayFocusObserver* observer) {
+  system_tray_focus_observers_.RemoveObserver(observer);
+}
+
 ash::mojom::LoginScreenPtr& LoginScreenClient::login_screen() {
   return login_screen_;
 }
@@ -91,15 +103,24 @@ void LoginScreenClient::AuthenticateUserWithPasswordOrPin(
 void LoginScreenClient::AuthenticateUserWithExternalBinary(
     const AccountId& account_id,
     AuthenticateUserWithExternalBinaryCallback callback) {
-  if (delegate_) {
-    delegate_->HandleAuthenticateUserWithExternalBinary(account_id,
-                                                        std::move(callback));
-    // TODO(jdufault): Record auth method attempt here
-    NOTIMPLEMENTED() << "Missing UMA recording for external binary auth";
-  } else {
-    LOG(ERROR) << "Failed AuthenticateUserWithExternalBinary; no delegate";
-    std::move(callback).Run(false);
-  }
+  if (!delegate_)
+    LOG(FATAL) << "Failed AuthenticateUserWithExternalBinary; no delegate";
+
+  delegate_->HandleAuthenticateUserWithExternalBinary(account_id,
+                                                      std::move(callback));
+  // TODO: Record auth method attempt here
+  NOTIMPLEMENTED() << "Missing UMA recording for external binary auth";
+}
+
+void LoginScreenClient::EnrollUserWithExternalBinary(
+    EnrollUserWithExternalBinaryCallback callback) {
+  if (!delegate_)
+    LOG(FATAL) << "Failed EnrollUserWithExternalBinary; no delegate";
+
+  delegate_->HandleEnrollUserWithExternalBinary(std::move(callback));
+
+  // TODO: Record enrollment attempt here
+  NOTIMPLEMENTED() << "Missing UMA recording for external binary enrollment";
 }
 
 void LoginScreenClient::AuthenticateUserWithEasyUnlock(
@@ -114,11 +135,6 @@ void LoginScreenClient::AuthenticateUserWithEasyUnlock(
 void LoginScreenClient::HardlockPod(const AccountId& account_id) {
   if (delegate_)
     delegate_->HandleHardlockPod(account_id);
-}
-
-void LoginScreenClient::RecordClickOnLockIcon(const AccountId& account_id) {
-  if (delegate_)
-    delegate_->HandleRecordClickOnLockIcon(account_id);
 }
 
 void LoginScreenClient::OnFocusPod(const AccountId& account_id) {
@@ -207,6 +223,11 @@ void LoginScreenClient::ShowAccountAccessHelpApp() {
       ->ShowHelpTopic(chromeos::HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
 }
 
+void LoginScreenClient::OnFocusLeavingSystemTray(bool reverse) {
+  for (ash::SystemTrayFocusObserver& observer : system_tray_focus_observers_)
+    observer.OnFocusLeavingSystemTray(reverse);
+}
+
 void LoginScreenClient::LoadWallpaper(const AccountId& account_id) {
   WallpaperControllerClient::Get()->ShowUserWallpaper(account_id);
 }
@@ -220,8 +241,14 @@ void LoginScreenClient::CancelAddUser() {
 }
 
 void LoginScreenClient::LoginAsGuest() {
-  if (delegate_)
-    delegate_->HandleLoginAsGuest();
+  DCHECK(!chromeos::ScreenLocker::default_screen_locker());
+  if (chromeos::LoginDisplayHost::default_host()) {
+    chromeos::LoginDisplayHost::default_host()
+        ->GetExistingUserController()
+        ->Login(chromeos::UserContext(user_manager::USER_TYPE_GUEST,
+                                      user_manager::GuestAccountId()),
+                chromeos::SigninSpecifics());
+  }
 }
 
 void LoginScreenClient::OnMaxIncorrectPasswordAttempted(

@@ -3,16 +3,13 @@
 <link rel="import" href="chrome://resources/cr_elements/hidden_style_css.html">
 <link rel="import" href="chrome://resources/cr_elements/paper_button_style_css.html">
 <link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
-<link rel="import" href="chrome://resources/html/action_link_css.html">
 <link rel="import" href="chrome://resources/html/cr.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
 <link rel="import" href="chrome://resources/html/util.html">
 <link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
 <link rel="import" href="../native_layer.html">
-<link rel="import" href="../print_preview_utils.html">
 <link rel="import" href="../data/coordinate2d.html">
 <link rel="import" href="../data/destination.html">
-<link rel="import" href="../data/document_info.html">
 <link rel="import" href="../data/margins.html">
 <link rel="import" href="../data/printable_area.html">
 <link rel="import" href="../data/size.html">
@@ -26,7 +23,7 @@
 
 <dom-module id="print-preview-preview-area">
   <template>
-    <style include="print-preview-shared action-link cr-hidden-style">
+    <style include="print-preview-shared cr-hidden-style">
       @keyframes dancing-dots-jump {
         0% { top: 0; }
         55% { top: 0; }
@@ -119,9 +116,9 @@
               hidden$="[[!isPreviewLoading_(previewState)]]">
               <span>.</span><span>.</span><span>.</span>
           </span>
-          <a is="action-link" class="learn-more-link"
-              hidden$="[[!shouldShowLearnMoreLink_(previewState)]]"
-              on-click="onGcpErrorLearnMoreClick_">
+          <a href="$i18n{gcpCertificateErrorLearnMoreURL}"
+              target="_blank" class="learn-more-link"
+              hidden$="[[!shouldShowLearnMoreLink_(previewState)]]">
             $i18n{learnMore}
           </a>
         </div>
@@ -133,10 +130,11 @@
           data="chrome://print/dummy.pdf"></object>
     </div>
     <print-preview-margin-control-container id="marginControlContainer"
-        page-size="[[documentInfo.pageSize]]" settings="{{settings}}"
-        document-margins="[[documentInfo.margins]]"
+        page-size="[[pageSize]]" settings="{{settings}}"
+        document-margins="[[margins]]"
         measurement-system="[[measurementSystem]]" state="[[state]]"
         preview-loaded="[[previewLoaded_]]"
+        on-text-focus-position="onTextFocusPosition_"
         on-margin-drag-changed="onMarginDragChanged_">
     </print-preview-margin-control-container>
   </template>

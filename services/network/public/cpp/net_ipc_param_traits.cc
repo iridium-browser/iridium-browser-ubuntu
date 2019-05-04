@@ -324,8 +324,8 @@ void ParamTraits<net::SSLInfo>::Write(base::Pickle* m, const param_type& p) {
   WriteParam(m, p.cert);
   WriteParam(m, p.unverified_cert);
   WriteParam(m, p.cert_status);
-  WriteParam(m, p.security_bits);
   WriteParam(m, p.key_exchange_group);
+  WriteParam(m, p.peer_signature_algorithm);
   WriteParam(m, p.connection_status);
   WriteParam(m, p.is_issued_by_known_root);
   WriteParam(m, p.pkp_bypassed);
@@ -351,8 +351,8 @@ bool ParamTraits<net::SSLInfo>::Read(const base::Pickle* m,
   return ReadParam(m, iter, &r->cert) &&
          ReadParam(m, iter, &r->unverified_cert) &&
          ReadParam(m, iter, &r->cert_status) &&
-         ReadParam(m, iter, &r->security_bits) &&
          ReadParam(m, iter, &r->key_exchange_group) &&
+         ReadParam(m, iter, &r->peer_signature_algorithm) &&
          ReadParam(m, iter, &r->connection_status) &&
          ReadParam(m, iter, &r->is_issued_by_known_root) &&
          ReadParam(m, iter, &r->pkp_bypassed) &&
@@ -449,6 +449,7 @@ void ParamTraits<net::LoadTimingInfo>::Write(base::Pickle* m,
   WriteParam(m, p.connect_timing.ssl_end);
   WriteParam(m, p.send_start);
   WriteParam(m, p.send_end);
+  WriteParam(m, p.receive_headers_start);
   WriteParam(m, p.receive_headers_end);
   WriteParam(m, p.push_start);
   WriteParam(m, p.push_end);
@@ -478,6 +479,7 @@ bool ParamTraits<net::LoadTimingInfo>::Read(const base::Pickle* m,
          ReadParam(m, iter, &r->connect_timing.ssl_end) &&
          ReadParam(m, iter, &r->send_start) &&
          ReadParam(m, iter, &r->send_end) &&
+         ReadParam(m, iter, &r->receive_headers_start) &&
          ReadParam(m, iter, &r->receive_headers_end) &&
          ReadParam(m, iter, &r->push_start) && ReadParam(m, iter, &r->push_end);
 }
@@ -512,6 +514,8 @@ void ParamTraits<net::LoadTimingInfo>::Log(const param_type& p,
   LogParam(p.send_start, l);
   l->append(", ");
   LogParam(p.send_end, l);
+  l->append(", ");
+  LogParam(p.receive_headers_start, l);
   l->append(", ");
   LogParam(p.receive_headers_end, l);
   l->append(", ");
@@ -564,11 +568,6 @@ void ParamTraits<url::Origin>::Log(const url::Origin& p, std::string* l) {
 // Generate constructors.
 #undef SERVICES_NETWORK_PUBLIC_CPP_NET_IPC_PARAM_TRAITS_H_
 #include "ipc/struct_constructor_macros.h"
-#include "net_ipc_param_traits.h"
-
-// Generate destructors.
-#undef SERVICES_NETWORK_PUBLIC_CPP_NET_IPC_PARAM_TRAITS_H_
-#include "ipc/struct_destructor_macros.h"
 #include "net_ipc_param_traits.h"
 
 // Generate param traits write methods.

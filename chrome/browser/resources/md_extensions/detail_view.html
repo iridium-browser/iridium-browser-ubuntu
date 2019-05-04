@@ -20,16 +20,19 @@
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
 <link rel="import" href="item_behavior.html">
 <link rel="import" href="item_util.html">
+<link rel="import" href="host_permissions_toggle_list.html">
 <link rel="import" href="navigation_helper.html">
 <link rel="import" href="runtime_host_permissions.html">
+<link rel="import" href="shared_style.html">
+<link rel="import" href="shared_vars.html">
 <link rel="import" href="strings.html">
 <link rel="import" href="toggle_row.html">
 
 <dom-module id="extensions-detail-view">
   <template>
-    <style include="iron-flex cr-shared-style cr-icons action-link paper-button-style">
+    <style include="iron-flex cr-shared-style cr-icons action-link paper-button-style shared-style">
       :host {
-        --iron-icon-fill-color: var(--google-grey-refresh-700);
+        --iron-icon-fill-color: var(--cr-secondary-text-color);
         display: block;
         height: 100%;
       }
@@ -51,26 +54,8 @@
         color: var(--google-blue-500);
       }
 
-      #container {
-        height: 100%;
-        overflow: overlay;
-      }
-
-      #main {
-        @apply --cr-card-elevation;
-        background-color: white;
-        margin: auto;
-        min-height: 100%;
-        padding-bottom: 64px;
-        width: var(--cr-toolbar-field-width);
-      }
-
-      #top-bar {
-        align-items: center;
-        display: flex;
-        height: 40px;
-        margin-bottom: 12px;
-        padding: 8px 12px 0;
+      :host-context([dark]) #enable-section .enabled-text {
+        color: var(--google-blue-refresh-300);
       }
 
       #icon {
@@ -85,23 +70,15 @@
         @apply --cr-title-text;
       }
 
-      #learn-more-link {
-        color: var(--google-blue-700);
-        text-decoration: none;
-      }
-
-      .three-line {
-        min-height: var(--cr-section-three-line-min-height);
-      }
-
       .section {
         @apply --cr-section;
       }
 
       .section.block {
+        box-sizing: border-box;
         display: block;
-        padding-bottom: 16px;
-        padding-top: 16px;
+        padding-bottom: var(--cr-section-vertical-padding);
+        padding-top: var(--cr-section-vertical-padding);
       }
 
       .section.continuation {
@@ -116,10 +93,6 @@
         border: none;
       }
 
-      .section-title {
-        margin-bottom: 12px;
-      }
-
       .section-content {
         color: var(--cr-secondary-text-color);
       }
@@ -129,27 +102,26 @@
       }
 
       .inspectable-view {
-        color: var(--google-blue-700);
         height: 20px;
         width: auto;  /* override the default button size of 24x24 */
       }
 
-      .warning .action-button {
+      :host-context(html:not([dark])) .warning .action-button {
         background: white;
         color: var(--google-blue-500);
       }
 
-      #reload-button {
+      :host-context(html:not([dark])) #reload-button {
         color: var(--google-blue-500);
       }
 
       .warning span {
-        color: var(--google-red-700);
+        color: var(--error-color);
         flex: 1;
       }
 
       .warning-icon {
-        --iron-icon-fill-color: var(--google-red-700);
+        --iron-icon-fill-color: var(--error-color);
         flex-shrink: 0;
         height: 18px;
         margin-inline-end: 8px;
@@ -163,6 +135,16 @@
 
       #options-section .control-line:first-child {
         border-top: var(--cr-separator-line);
+      }
+
+      extensions-toggle-row {
+        @apply --cr-section;
+        box-sizing: border-box;
+        padding-bottom: var(--cr-section-vertical-padding);
+        padding-inline-end: 0;
+        padding-inline-start: 0;
+        padding-top: var(--cr-section-vertical-padding);
+        --toggle-row-label-padding: var(--cr-section-padding);
       }
 
       #load-path {
@@ -182,9 +164,9 @@
         @apply --cr-icon-height-width;
       }
     </style>
-    <div id="container">
-      <div id="main">
-        <div id="top-bar">
+    <div class="page-container" id="container">
+      <div class="page-content">
+        <div class="page-header">
           <paper-icon-button-light class="icon-arrow-back no-overlap">
             <button id="closeButton" aria-label="$i18n{back}"
                 on-click="onCloseButtonTap_"></button>
@@ -197,7 +179,7 @@
           <span id="name">[[data.name]]</span>
         </div>
         <div class="section continuation control-line" id="enable-section">
-          <span class$="{{computeEnabledStyle_(data.state)}}">
+          <span class$="[[computeEnabledStyle_(data.state)]]">
             [[computeEnabledText_(data.state, '$i18nPolymer{itemOn}',
                 '$i18nPolymer{itemOff}')]]
           </span>
@@ -239,8 +221,7 @@
             <iron-icon class="warning-icon" icon="cr:warning"></iron-icon>
             <span>
               $i18n{itemSuspiciousInstall}
-              <a target="_blank" id="learn-more-link"
-                  href="$i18n{suspiciousInstallHelpUrl}">
+              <a target="_blank" href="$i18n{suspiciousInstallHelpUrl}">
                 $i18n{learnMore}
               </a>
             </span>
@@ -328,12 +309,30 @@
                 </li>
               </template>
             </ul>
-            <template is="dom-if" if="[[showRuntimeHostPermissions_(data.*)]]">
+          </div>
+        </div>
+        <div class="section block">
+          <div class="section-title">$i18n{itemSiteAccess}</div>
+          <div class="section-content">
+            <span id="no-site-access"
+                hidden$="[[showSiteAccessContent_(data.*)]]">
+              $i18n{itemSiteAccessEmpty}
+            </span>
+            <template is="dom-if"
+                if="[[showFreeformRuntimeHostPermissions_(data.*)]]">
               <extensions-runtime-host-permissions
-                  permissions="[[data.permissions]]"
+                  permissions="[[data.permissions.runtimeHostPermissions]]"
                   delegate="[[delegate]]"
                   item-id="[[data.id]]">
               </extensions-runtime-host-permissions>
+            </template>
+            <template is="dom-if"
+                if="[[showHostPermissionsToggleList_(data.*)]]">
+              <extensions-host-permissions-toggle-list
+                  permissions="[[data.permissions.runtimeHostPermissions]]"
+                  delegate="[[delegate]]"
+                  item-id="[[data.id]]">
+              </extensions-host-permissions-toggle-list>
             </template>
           </div>
         </div>
@@ -355,7 +354,7 @@
             <template is="dom-if"
               if="[[shouldShowIncognitoOption_(
                   data.incognitoAccess.isEnabled, incognitoAvailable)]]">
-              <extensions-toggle-row id="allow-incognito" class="three-line"
+              <extensions-toggle-row id="allow-incognito"
                   checked="[[data.incognitoAccess.isActive]]"
                   on-change="onAllowIncognitoChange_">
                 <div>
@@ -380,11 +379,15 @@
             </template>
           </div>
         </template>
-        <cr-link-row class="hr" is="" id="extensions-options"
+        <cr-link-row class="hr" id="extensions-options"
             disabled="[[!isEnabled_(data.state)]]"
             hidden="[[!shouldShowOptionsLink_(data.*)]]"
             icon-class="icon-external" label="$i18n{itemOptions}"
             on-click="onExtensionOptionsTap_">
+        </cr-link-row>
+        <cr-link-row class="hr" icon-class="subpage-arrow"
+            id="extensionsActivityLogLink" hidden$="[[!showActivityLog]]"
+            label="$i18n{viewActivityLog}" on-click="onActivityLogTap_">
         </cr-link-row>
         <cr-link-row class="hr" hidden="[[!data.manifestHomePageUrl.length]]"
             icon-class="icon-external" id="extensionWebsite"

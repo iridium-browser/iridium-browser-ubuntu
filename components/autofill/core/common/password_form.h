@@ -13,6 +13,7 @@
 
 #include "base/time/time.h"
 #include "components/autofill/core/common/form_data.h"
+#include "components/autofill/core/common/submission_indicator_event.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -71,25 +72,6 @@ struct PasswordForm {
 
     SCHEME_LAST = SCHEME_USERNAME_ONLY
   } scheme;
-
-  // Events observed by the Password Manager that indicate either that a form is
-  // potentially being submitted, or that a form has already been successfully
-  // submitted. Recorded into a UMA histogram, so order of enumerators should
-  // not be changed.
-  enum class SubmissionIndicatorEvent {
-    NONE,
-    HTML_FORM_SUBMISSION,
-    SAME_DOCUMENT_NAVIGATION,
-    XHR_SUCCEEDED,
-    FRAME_DETACHED,
-    DEPRECATED_MANUAL_SAVE,  // obsolete
-    DOM_MUTATION_AFTER_XHR,
-    PROVISIONALLY_SAVED_FORM_ON_START_PROVISIONAL_LOAD,
-    DEPRECATED_FILLED_FORM_ON_START_PROVISIONAL_LOAD,            // unused
-    DEPRECATED_FILLED_INPUT_ELEMENTS_ON_START_PROVISIONAL_LOAD,  // unused
-    PROBABLE_FORM_SUBMISSION,
-    SUBMISSION_INDICATOR_EVENT_COUNT
-  };
 
   // The "Realm" for the sign-on. This is scheme, host, port for SCHEME_HTML.
   // Dialog based forms also contain the HTTP realm. Android based forms will
@@ -218,9 +200,19 @@ struct PasswordForm {
   // element corresponding to the new password. Optional, and not persisted.
   base::string16 new_password_element;
 
+  // The renderer id of the new password input element. It is set during the new
+  // form parsing and not persisted.
+  uint32_t new_password_element_renderer_id =
+      FormFieldData::kNotSetFormControlRendererId;
+
   // The confirmation password element. Optional, only set on form parsing, and
   // not persisted.
   base::string16 confirmation_password_element;
+
+  // The renderer id of the confirmation password input element. It is set
+  // during the new form parsing and not persisted.
+  uint32_t confirmation_password_element_renderer_id =
+      FormFieldData::kNotSetFormControlRendererId;
 
   // The new password. Optional, and not persisted.
   base::string16 new_password_value;
@@ -320,12 +312,18 @@ struct PasswordForm {
   // out only for submitted forms.
   SubmissionIndicatorEvent submission_event;
 
-  // True iff heuristics declined this form for saving (e.g. only credit card
-  // fields were found). But this form can be saved only with the fallback.
-  bool only_for_fallback_saving;
+  // True iff heuristics declined this form for normal saving or filling (e.g.
+  // only credit card fields were found). But this form can be saved or filled
+  // only with the fallback.
+  bool only_for_fallback;
 
   // True iff this is Gaia form which should be skipped on saving.
   bool is_gaia_with_skip_save_password_form;
+
+  // True iff the new password field was found with server hints or autocomplete
+  // attributes. Only set on form parsing for filling, and not persisted. Used
+  // as signal for password generation eligibility.
+  bool is_new_password_reliable = false;
 
   // Return true if we consider this form to be a change password form.
   // We use only client heuristics, so it could include signup forms.
@@ -335,6 +333,9 @@ struct PasswordForm {
   // without username field. We use only client heuristics, so it could
   // include signup forms.
   bool IsPossibleChangePasswordFormWithoutUsername() const;
+
+  // Returns true if current password element is set.
+  bool HasPasswordElement() const;
 
   // Equality operators for testing.
   bool operator==(const PasswordForm& form) const;
@@ -364,15 +365,9 @@ struct LessThanUniqueKey {
 base::string16 ValueElementVectorToString(
     const ValueElementVector& value_element_pairs);
 
-PasswordForm::SubmissionIndicatorEvent ToSubmissionIndicatorEvent(
-    SubmissionSource source);
-
 // For testing.
 std::ostream& operator<<(std::ostream& os, const PasswordForm& form);
 std::ostream& operator<<(std::ostream& os, PasswordForm* form);
-std::ostream& operator<<(
-    std::ostream& os,
-    PasswordForm::SubmissionIndicatorEvent submission_event);
 
 }  // namespace autofill
 

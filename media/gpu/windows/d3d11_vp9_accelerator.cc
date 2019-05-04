@@ -9,41 +9,59 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "media/cdm/cdm_proxy_context.h"
 #include "media/gpu/windows/d3d11_vp9_picture.h"
 
 namespace media {
 
-#define RECORD_FAILURE(expr_name, expr_value)           \
-  do {                                                  \
-    media_log_->AddEvent(media_log_->CreateStringEvent( \
-        MediaLogEvent::MEDIA_ERROR_LOG_ENTRY, "error",  \
-        std::string("DX11VP9Failure(") + expr_name +    \
-            ")=" + std::to_string(expr_value)));        \
+#define RETURN_ON_HR_FAILURE(expr_name, expr)                                  \
+  do {                                                                         \
+    HRESULT expr_value = (expr);                                               \
+    if (FAILED(expr_value)) {                                                  \
+      RecordFailure(#expr_name, logging::SystemErrorCodeToString(expr_value)); \
+      return false;                                                            \
+    }                                                                          \
   } while (0)
 
-#define RETURN_ON_HR_FAILURE(expr_name, expr) \
-  do {                                        \
-    HRESULT expr_value = (expr);              \
-    if (FAILED(expr_value)) {                 \
-      RECORD_FAILURE(#expr_name, expr_value); \
-      return false;                           \
-    }                                         \
-  } while (0)
+std::vector<D3D11_VIDEO_DECODER_SUB_SAMPLE_MAPPING_BLOCK>
+CreateSubsampleMappingBlock(const std::vector<SubsampleEntry>& from) {
+  std::vector<D3D11_VIDEO_DECODER_SUB_SAMPLE_MAPPING_BLOCK> to(from.size());
+  for (const auto& entry : from) {
+    D3D11_VIDEO_DECODER_SUB_SAMPLE_MAPPING_BLOCK subsample = {
+        .ClearSize = entry.clear_bytes, .EncryptedSize = entry.cypher_bytes};
+    to.push_back(subsample);
+  }
+  return to;
+}
 
 D3D11VP9Accelerator::D3D11VP9Accelerator(
     D3D11VideoDecoderClient* client,
     MediaLog* media_log,
+    CdmProxyContext* cdm_proxy_context,
     Microsoft::WRL::ComPtr<ID3D11VideoDecoder> video_decoder,
     Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_device,
-    Microsoft::WRL::ComPtr<ID3D11VideoContext> video_context)
+    std::unique_ptr<VideoContextWrapper> video_context)
     : client_(client),
       media_log_(media_log),
+      cdm_proxy_context_(cdm_proxy_context),
       status_feedback_(0),
       video_decoder_(std::move(video_decoder)),
       video_device_(std::move(video_device)),
-      video_context_(std::move(video_context)) {}
+      video_context_(std::move(video_context)) {
+  DCHECK(client);
+  DCHECK(media_log_);
+  // |cdm_proxy_context_| is non-null for encrypted content but can be null for
+  // clear content.
+}
 
 D3D11VP9Accelerator::~D3D11VP9Accelerator() {}
+
+void D3D11VP9Accelerator::RecordFailure(const std::string& fail_type,
+                                        const std::string& reason) {
+  media_log_->AddEvent(media_log_->CreateStringEvent(
+      MediaLogEvent::MEDIA_ERROR_LOG_ENTRY, "error",
+      std::string("DX11VP9Failure(") + fail_type + ")=" + reason));
+}
 
 scoped_refptr<VP9Picture> D3D11VP9Accelerator::CreateVP9Picture() {
   D3D11PictureBuffer* picture_buffer = client_->GetPicture();
@@ -63,15 +81,37 @@ bool D3D11VP9Accelerator::BeginFrame(D3D11VP9Picture* pic) {
                        video_device_->CreateVideoDecoderOutputView(
                            pic->picture_buffer()->texture().Get(), &view_desc,
                            output_view.GetAddressOf()));
+  // This |decrypt_context| has to be outside the if block because pKeyInfo in
+  // D3D11_VIDEO_DECODER_BEGIN_FRAME_CRYPTO_SESSION is a pointer (to a GUID).
+  base::Optional<CdmProxyContext::D3D11DecryptContext> decrypt_context;
+  std::unique_ptr<D3D11_VIDEO_DECODER_BEGIN_FRAME_CRYPTO_SESSION> content_key;
+  if (const DecryptConfig* config = pic->decrypt_config()) {
+    DCHECK(cdm_proxy_context_) << "No CdmProxyContext but picture is encrypted";
+    decrypt_context = cdm_proxy_context_->GetD3D11DecryptContext(
+        CdmProxy::KeyType::kDecryptAndDecode, config->key_id());
+    if (!decrypt_context) {
+      RecordFailure("crypto_config",
+                    "Cannot find the decrypt context for the frame.");
+      return false;  // TODO(crbug.com/894573): support kTryAgain.
+    }
+
+    content_key =
+        std::make_unique<D3D11_VIDEO_DECODER_BEGIN_FRAME_CRYPTO_SESSION>();
+    content_key->pCryptoSession = decrypt_context->crypto_session;
+    content_key->pBlob = const_cast<void*>(decrypt_context->key_blob);
+    content_key->BlobSize = decrypt_context->key_blob_size;
+    content_key->pKeyInfoId = &decrypt_context->key_info_guid;
+  }
 
   HRESULT hr;
   do {
-    hr = video_context_->DecoderBeginFrame(video_decoder_.Get(),
-                                           output_view.Get(), 0, nullptr);
+    hr = video_context_->DecoderBeginFrame(
+        video_decoder_.Get(), output_view.Get(),
+        content_key ? sizeof(*content_key) : 0, content_key.get());
   } while (hr == E_PENDING || hr == D3DERR_WASSTILLDRAWING);
 
   if (FAILED(hr)) {
-    RECORD_FAILURE("DecoderBeginFrame", hr);
+    RecordFailure("DecoderBeginFrame", logging::SystemErrorCodeToString(hr));
     return false;
   }
 
@@ -91,6 +131,7 @@ void D3D11VP9Accelerator::CopyFrameParams(
   COPY_PARAM(frame_parallel_decoding_mode);
   COPY_PARAM(intra_only);
   COPY_PARAM(frame_context_idx);
+  COPY_PARAM(reset_frame_context);
   COPY_PARAM(allow_high_precision_mv);
   COPY_PARAM(refresh_frame_context);
   COPY_PARAM(frame_parallel_decoding_mode);
@@ -103,8 +144,8 @@ void D3D11VP9Accelerator::CopyFrameParams(
 
   pic_params->CurrPic.Index7Bits = pic->level();
   pic_params->frame_type = !pic->frame_hdr->IsKeyframe();
-  pic_params->subsampling_x = pic->frame_hdr->subsampling_x == 1;
-  pic_params->subsampling_y = pic->frame_hdr->subsampling_y == 1;
+  pic_params->subsampling_x = pic->frame_hdr->subsampling_x;
+  pic_params->subsampling_y = pic->frame_hdr->subsampling_y;
 
   SET_PARAM(width, frame_width);
   SET_PARAM(height, frame_height);
@@ -226,7 +267,8 @@ void D3D11VP9Accelerator::CopyHeaderSizeAndID(
   pic_params->first_partition_size =
       static_cast<USHORT>(pic->frame_hdr->header_size_in_bytes);
 
-  pic_params->StatusReportFeedbackNumber = status_feedback_++;
+  // StatusReportFeedbackNumber "should not be equal to 0".
+  pic_params->StatusReportFeedbackNumber = ++status_feedback_;
 }
 
 bool D3D11VP9Accelerator::SubmitDecoderBuffer(
@@ -281,7 +323,7 @@ bool D3D11VP9Accelerator::SubmitDecoderBuffer(
     RELEASE_BUFFER(D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL);
 
     constexpr int buffers_count = 3;
-    D3D11_VIDEO_DECODER_BUFFER_DESC buffers[buffers_count] = {};
+    VideoContextWrapper::VideoBufferWrapper buffers[buffers_count] = {};
     buffers[0].BufferType = D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS;
     buffers[0].DataOffset = 0;
     buffers[0].DataSize = sizeof(pic_params);
@@ -291,6 +333,18 @@ bool D3D11VP9Accelerator::SubmitDecoderBuffer(
     buffers[2].BufferType = D3D11_VIDEO_DECODER_BUFFER_BITSTREAM;
     buffers[2].DataOffset = 0;
     buffers[2].DataSize = copy_size;
+
+    const DecryptConfig* config = pic->decrypt_config();
+    if (config) {
+      buffers[2].pIV = const_cast<char*>(config->iv().data());
+      buffers[2].IVSize = config->iv().size();
+      // Subsamples matter iff there is IV, for decryption.
+      if (!config->subsamples().empty()) {
+        buffers[2].pSubSampleMappingBlock =
+            CreateSubsampleMappingBlock(config->subsamples()).data();
+        buffers[2].SubSampleMappingCount = config->subsamples().size();
+      }
+    }
 
     RETURN_ON_HR_FAILURE(SubmitDecoderBuffers,
                          video_context_->SubmitDecoderBuffers(

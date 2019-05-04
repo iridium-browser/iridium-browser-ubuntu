@@ -11,11 +11,11 @@
 #include "base/task/sequence_manager/task_time_observer.h"
 #include "components/scheduling_metrics/task_duration_metric_reporter.h"
 #include "third_party/blink/public/platform/web_thread_type.h"
-#include "third_party/blink/renderer/platform/scheduler/common/idle_canceled_delayed_task_sweeper.h"
 #include "third_party/blink/renderer/platform/scheduler/common/idle_helper.h"
+#include "third_party/blink/renderer/platform/scheduler/common/idle_memory_reclaimer.h"
+#include "third_party/blink/renderer/platform/scheduler/common/thread_load_tracker.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
-#include "third_party/blink/renderer/platform/scheduler/renderer/frame_status.h"
-#include "third_party/blink/renderer/platform/scheduler/util/thread_load_tracker.h"
+#include "third_party/blink/renderer/platform/scheduler/public/frame_status.h"
 #include "third_party/blink/renderer/platform/scheduler/worker/non_main_thread_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/worker/worker_metrics_helper.h"
 
@@ -54,7 +54,6 @@ class PLATFORM_EXPORT WorkerThreadScheduler
   ~WorkerThreadScheduler() override;
 
   // WebThreadScheduler implementation:
-  scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> V8TaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> IPCTaskRunner() override;
@@ -65,6 +64,9 @@ class PLATFORM_EXPORT WorkerThreadScheduler
       base::MessageLoop::TaskObserver* task_observer) override;
   void AddRAILModeObserver(WebRAILModeObserver*) override {}
   void Shutdown() override;
+
+  // ThreadSchedulerImpl implementation:
+  scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner() override;
 
   // NonMainThreadSchedulerImpl implementation:
   scoped_refptr<NonMainThreadTaskQueue> DefaultTaskQueue() override;
@@ -138,7 +140,7 @@ class PLATFORM_EXPORT WorkerThreadScheduler
 
   const WebThreadType thread_type_;
   IdleHelper idle_helper_;
-  IdleCanceledDelayedTaskSweeper idle_canceled_delayed_task_sweeper_;
+  IdleMemoryReclaimer idle_memory_reclaimer_;
   ThreadLoadTracker load_tracker_;
   bool initialized_;
   base::TimeTicks thread_start_time_;

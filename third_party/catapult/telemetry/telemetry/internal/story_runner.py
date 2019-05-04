@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import contextlib
+import itertools
 import logging
 import optparse
 import os
@@ -25,7 +26,6 @@ from telemetry.page import legacy_page_test
 from telemetry import story as story_module
 from telemetry.util import wpr_modes
 from telemetry.web_perf import story_test
-from tracing.value import histogram
 from tracing.value.diagnostics import generic_set
 from tracing.value.diagnostics import reserved_infos
 
@@ -33,6 +33,12 @@ from tracing.value.diagnostics import reserved_infos
 # Allowed stages to pause for user interaction at.
 _PAUSE_STAGES = ('before-start-browser', 'after-start-browser',
                  'before-run-story', 'after-run-story')
+
+_UNHANDLEABLE_ERRORS = (
+    SystemExit,
+    KeyboardInterrupt,
+    ImportError,
+    MemoryError)
 
 
 class ArchiveError(Exception):
@@ -45,10 +51,17 @@ def AddCommandLineArgs(parser):
 
   # Page set options
   group = optparse.OptionGroup(parser, 'Page set repeat options')
+  # Note that the default for pageset-repeat is 1 unless the benchmark
+  # specifies a different default by adding
+  # `options = {'pageset_repeat': X}` in their benchmark. Defaults are always
+  # overridden by passed in commandline arguments.
   group.add_option('--pageset-repeat', default=1, type='int',
-                   help='Number of times to repeat the entire pageset.')
-  group.add_option('--smoke-test-mode', action='store_true',
-                   help='run this test in smoke test mode so do not repeat.')
+                   help='Number of times to repeat the entire pageset. ')
+  # TODO(crbug.com/910809): Add flag to reduce iterations to 1.
+  # (An iteration is a repeat of the benchmark without restarting Chrome. It
+  # must be supported in benchmark-specific code.) This supports the smoke
+  # test use case since we don't want to waste time with iterations in smoke
+  # tests.
   group.add_option('--max-failures', default=None, type='int',
                    help='Maximum number of test failures before aborting '
                    'the run. Defaults to the number specified by the '
@@ -70,22 +83,16 @@ def AddCommandLineArgs(parser):
   parser.add_option('-d', '--also-run-disabled-tests',
                     dest='run_disabled_tests',
                     action='store_true', default=False,
-                    help='Ignore @Disabled and @Enabled restrictions.')
+                    help='Ignore expectations.config disabling.')
+  parser.add_option('-p', '--print-only', dest='print_only',
+                    choices=['stories', 'tags', 'both'], default=None)
 
 def ProcessCommandLineArgs(parser, args):
   story_module.StoryFilter.ProcessCommandLineArgs(parser, args)
-  results_options.ProcessCommandLineArgs(parser, args)
+  results_options.ProcessCommandLineArgs(args)
 
   if args.pageset_repeat < 1:
     parser.error('--pageset-repeat must be a positive integer.')
-
-
-def _GenerateTagMapFromStorySet(stories):
-  tagmap = histogram.TagMap({})
-  for s in stories:
-    for t in s.tags:
-      tagmap.AddTagAndStoryDisplayName(t, s.name)
-  return tagmap
 
 
 @contextlib.contextmanager
@@ -126,20 +133,20 @@ def _RunStoryAndProcessErrorIfNeeded(story, results, state, test):
       state.RunStory(results)
       if isinstance(test, story_test.StoryTest):
         test.Measure(state.platform, results)
+    except page_action.PageActionNotSupported as exc:
+      results.Skip('Unsupported page action: %s' % exc)
     except (legacy_page_test.Failure, exceptions.TimeoutException,
             exceptions.LoginException, py_utils.TimeoutException) as exc:
       ProcessError(exc, log_message='Handleable error')
-    except exceptions.Error as exc:
-      ProcessError(
-          exc, log_message='Handleable error. Will try to restart shared state')
-      # The caller (|Run| function) will catch this exception, destory and
-      # create a new shared state.
-      raise
-    except page_action.PageActionNotSupported as exc:
-      results.Skip('Unsupported page action: %s' % exc)
-    except Exception as exc:
+    except _UNHANDLEABLE_ERRORS as exc:
       ProcessError(exc, log_message=('Unhandleable error. '
                                      'Benchmark run will be interrupted'))
+      raise
+    except Exception as exc:  # pylint: disable=broad-except
+      ProcessError(exc, log_message=('Possibly handleable error. '
+                                     'Will try to restart shared state'))
+      # The caller (|Run| function) will catch this exception, destory and
+      # create a new shared state.
       raise
     finally:
       has_existing_exception = (sys.exc_info() != (None, None, None))
@@ -155,7 +162,7 @@ def _RunStoryAndProcessErrorIfNeeded(story, results, state, test):
           test.DidRunPage(state.platform)
         # And the following normally causes the browser to be closed.
         state.DidRunStory(results)
-      except Exception: # pylint: disable=broad-except
+      except Exception:  # pylint: disable=broad-except
         if not has_existing_exception:
           state.DumpStateUponFailure(story, results)
           raise
@@ -177,6 +184,20 @@ def Run(test, story_set, finder_options, results, max_failures=None,
 
   # Filter page set based on options.
   stories = story_module.StoryFilter.FilterStorySet(story_set)
+
+  if finder_options.print_only:
+    if finder_options.print_only == 'tags':
+      tags = set(itertools.chain.from_iterable(s.tags for s in stories))
+      print 'List of tags:\n%s' % '\n'.join(tags)
+      return
+    include_tags = finder_options.print_only == 'both'
+    if include_tags:
+      format_string = '  %%-%ds %%s' % max(len(s.name) for s in stories)
+    else:
+      format_string = '%s%s'
+    for s in stories:
+      print format_string % (s.name, ','.join(s.tags) if include_tags else '')
+    return
 
   if (not finder_options.use_live_sites and
       finder_options.browser_options.wpr_mode != wpr_modes.WPR_RECORD):
@@ -208,9 +229,7 @@ def Run(test, story_set, finder_options, results, max_failures=None,
   # TODO(crbug.com/866458): unwind the nested blocks
   # pylint: disable=too-many-nested-blocks
   try:
-    pageset_repeat = _GetPageSetRepeat(finder_options)
-    if finder_options.smoke_test_mode:
-      pageset_repeat = 1
+    pageset_repeat = finder_options.pageset_repeat
     for storyset_repeat_counter in xrange(pageset_repeat):
       for story in stories:
         start_timestamp = time.time()
@@ -247,10 +266,13 @@ def Run(test, story_set, finder_options, results, max_failures=None,
             results.Fail(msg)
 
           device_info_diags = _MakeDeviceInfoDiagnostics(state)
-        except exceptions.Error:
-          # Catch all Telemetry errors to give the story a chance to retry.
-          # The retry is enabled by tearing down the state and creating
-          # a new state instance in the next iteration.
+        except _UNHANDLEABLE_ERRORS:
+          # Nothing else we should do for these. Re-raise the error.
+          raise
+        except Exception:  # pylint: disable=broad-except
+          # For all other errors, try to give the rest of stories a chance
+          # to run by tearing down the state and creating a new state instance
+          # in the next iteration.
           try:
             # If TearDownState raises, do not catch the exception.
             # (The Error was saved as a failure value.)
@@ -265,7 +287,7 @@ def Run(test, story_set, finder_options, results, max_failures=None,
               _CheckThermalThrottling(state.platform)
             results.DidRunPage(story)
             story_run.SetDuration(time.time() - start_timestamp)
-          except Exception: # pylint: disable=broad-except
+          except Exception:  # pylint: disable=broad-except
             if not has_existing_exception:
               raise
             # Print current exception and propagate existing exception.
@@ -279,12 +301,7 @@ def Run(test, story_set, finder_options, results, max_failures=None,
     results.PopulateHistogramSet()
 
     for name, diag in device_info_diags.iteritems():
-      results.AddSharedDiagnostic(name, diag)
-
-    tagmap = _GenerateTagMapFromStorySet(stories)
-    if tagmap.tags_to_story_names:
-      results.AddSharedDiagnostic(
-          reserved_infos.TAG_MAP.name, tagmap)
+      results.AddSharedDiagnosticToAllHistograms(name, diag)
 
     if state:
       has_existing_exception = sys.exc_info() != (None, None, None)
@@ -323,37 +340,39 @@ def RunBenchmark(benchmark, finder_options):
   else:
     target_platform = platform_module.GetHostPlatform()
 
-  can_run_on_platform = benchmark._CanRunOnPlatform(
-      target_platform, finder_options)
+  if not hasattr(finder_options, 'print_only') or not finder_options.print_only:
+    can_run_on_platform = benchmark._CanRunOnPlatform(
+        target_platform, finder_options)
 
-  expectations_disabled = False
-  # For now, test expectations are only applicable in the cases where the
-  # testing target involves a browser.
-  if possible_browser:
-    expectations_disabled = expectations.IsBenchmarkDisabled(
-        possible_browser.platform, finder_options)
+    expectations_disabled = False
+    # For now, test expectations are only applicable in the cases where the
+    # testing target involves a browser.
+    if possible_browser:
+      expectations_disabled = expectations.IsBenchmarkDisabled(
+          possible_browser.platform, finder_options)
 
-  if expectations_disabled or not can_run_on_platform:
-    print '%s is disabled on the selected browser' % benchmark.Name()
-    if finder_options.run_disabled_tests and can_run_on_platform:
-      print 'Running benchmark anyway due to: --also-run-disabled-tests'
-    else:
-      if can_run_on_platform:
-        print 'Try --also-run-disabled-tests to force the benchmark to run.'
+    if expectations_disabled or not can_run_on_platform:
+      print '%s is disabled on the selected browser' % benchmark.Name()
+      if finder_options.run_disabled_tests and can_run_on_platform:
+        print 'Running benchmark anyway due to: --also-run-disabled-tests'
       else:
-        print ("This platform is not supported for this benchmark. If this is "
-               "in error please add it to the benchmark's supported platforms.")
-      # If chartjson is specified, this will print a dict indicating the
-      # benchmark name and disabled state.
-      with results_options.CreateResults(
-          benchmark_metadata, finder_options,
-          should_add_value=benchmark.ShouldAddValue,
-          benchmark_enabled=False
-          ) as results:
-        results.PrintSummary()
-      # When a disabled benchmark is run we now want to return success since
-      # we are no longer filtering these out in the buildbot recipes.
-      return 0
+        if can_run_on_platform:
+          print 'Try --also-run-disabled-tests to force the benchmark to run.'
+        else:
+          print ("This platform is not supported for this benchmark. If this "
+                 "is in error please add it to the benchmark's supported "
+                 "platforms.")
+        # If chartjson is specified, this will print a dict indicating the
+        # benchmark name and disabled state.
+        with results_options.CreateResults(
+            benchmark_metadata, finder_options,
+            should_add_value=benchmark.ShouldAddValue,
+            benchmark_enabled=False
+            ) as results:
+          results.PrintSummary()
+        # When a disabled benchmark is run we now want to return success since
+        # we are no longer filtering these out in the buildbot recipes.
+        return 0
 
   pt = benchmark.CreatePageTest(finder_options)
   pt.__name__ = benchmark.__class__.__name__
@@ -385,7 +404,7 @@ def RunBenchmark(benchmark, finder_options):
 
       filtered_stories = story_module.StoryFilter.FilterStorySet(stories)
       results.InterruptBenchmark(
-          filtered_stories, _GetPageSetRepeat(finder_options))
+          filtered_stories, finder_options.pageset_repeat)
       exception_formatter.PrintFormattedException()
       return_code = 2
 
@@ -394,15 +413,15 @@ def RunBenchmark(benchmark, finder_options):
     benchmark_documentation_url = benchmark.GetDocumentationLink()
 
     if benchmark_owners:
-      results.AddSharedDiagnostic(
+      results.AddSharedDiagnosticToAllHistograms(
           reserved_infos.OWNERS.name, benchmark_owners)
 
     if benchmark_component:
-      results.AddSharedDiagnostic(
+      results.AddSharedDiagnosticToAllHistograms(
           reserved_infos.BUG_COMPONENTS.name, benchmark_component)
 
     if benchmark_documentation_url:
-      results.AddSharedDiagnostic(
+      results.AddSharedDiagnosticToAllHistograms(
           reserved_infos.DOCUMENTATION_URLS.name, benchmark_documentation_url)
 
     try:
@@ -413,11 +432,6 @@ def RunBenchmark(benchmark, finder_options):
       memory_debug.LogHostMemoryUsage()
       results.PrintSummary()
   return return_code
-
-def _GetPageSetRepeat(finder_options):
-  if finder_options.smoke_test_mode:
-    return 1
-  return finder_options.pageset_repeat
 
 def _UpdateAndCheckArchives(archive_data_file, wpr_archive_info,
                             filtered_stories):

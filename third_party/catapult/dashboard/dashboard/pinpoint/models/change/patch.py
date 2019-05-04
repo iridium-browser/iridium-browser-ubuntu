@@ -3,8 +3,11 @@
 # found in the LICENSE file.
 
 import collections
+import datetime
+import re
 import urlparse
 
+from dashboard.pinpoint.models.change import commit_cache
 from dashboard.services import gerrit_service
 
 
@@ -41,22 +44,40 @@ class GerritPatch(collections.namedtuple(
     }
 
   def AsDict(self):
-    patch_info = gerrit_service.GetChange(
-        self.server, self.change, fields=('ALL_REVISIONS', 'DETAILED_ACCOUNTS'))
-    # TODO: Cache this stuff in memcache.
-    revision_info = patch_info['revisions'][self.revision]
-    return {
+    d = {
         'server': self.server,
         'change': self.change,
         'revision': self.revision,
-
-        'url': '%s/c/%s/+/%d/%d' % (
-            self.server, patch_info['project'],
-            patch_info['_number'], revision_info['_number']),
-        'subject': patch_info['subject'],
-        'time': revision_info['created'],
-        'author': revision_info['uploader']['email'],
     }
+
+    try:
+      d.update(commit_cache.Get(self.id_string))
+      d['created'] = d['created'].isoformat()
+    except KeyError:
+      patch_info = gerrit_service.GetChange(
+          self.server, self.change,
+          fields=('ALL_REVISIONS', 'DETAILED_ACCOUNTS', 'COMMIT_FOOTERS'))
+      revision_info = patch_info['revisions'][self.revision]
+      url = '%s/c/%s/+/%d/%d' % (
+          self.server, patch_info['project'],
+          patch_info['_number'], revision_info['_number'])
+      author = revision_info['uploader']['email']
+      created = datetime.datetime.strptime(
+          revision_info['created'], '%Y-%m-%d %H:%M:%S.%f000')
+      subject = patch_info['subject']
+      current_revision = patch_info['current_revision']
+      message = patch_info['revisions'][current_revision]['commit_with_footers']
+
+      d.update({
+          'url': url,
+          'author': author,
+          'created': created.isoformat(),
+          'subject': subject,
+          'message': message,
+      })
+      commit_cache.Put(self.id_string, url, author, created, subject, message)
+
+    return d
 
   @classmethod
   def FromData(cls, data):
@@ -101,23 +122,21 @@ class GerritPatch(collections.namedtuple(
     server = urlparse.urlunsplit(
         (url_parts.scheme, url_parts.netloc, '', '', ''))
 
-    path_parts = iter(url.split('/'))
-    for path_part in path_parts:
-      if path_part == '+':
-        break
+    change_rev_match = re.match(r'^.*\/\+\/(\d+)(?:\/(\d+))?\/?$', url)
+    change_match = re.match(r'^\/(\d+)\/?$', url_parts.path)
+    if change_rev_match:
+      change = change_rev_match.group(1)
+      revision = change_rev_match.group(2)
+    elif change_match:  # support URLs returned by the 'git cl issue' command
+      change = change_match.group(1)
+      revision = None
     else:
       raise ValueError('Unknown patch URL format: ' + url)
 
-    change = path_parts.next()
-    try:
-      revision = int(path_parts.next())
-    except StopIteration:
-      revision = None
-
     return cls.FromDict({
         'server': server,
-        'change': change,
-        'revision': revision,
+        'change': int(change),
+        'revision': int(revision) if revision else None,
     })
 
   @classmethod

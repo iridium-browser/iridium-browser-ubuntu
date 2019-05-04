@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "ash/app_list/app_list_controller_observer.h"
 #include "ash/app_list/app_list_presenter_delegate_impl.h"
 #include "ash/app_list/home_launcher_gesture_handler.h"
 #include "ash/app_list/model/app_list_folder_item.h"
@@ -17,37 +18,41 @@
 #include "ash/app_list/views/search_box_view.h"
 #include "ash/assistant/assistant_controller.h"
 #include "ash/assistant/assistant_ui_controller.h"
-#include "ash/public/cpp/app_list/answer_card_contents_registry.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/session/session_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/voice_interaction/voice_interaction_controller.h"
 #include "ash/wallpaper/wallpaper_controller.h"
-#include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/mru_window_tracker.h"
+#include "ash/wm/overview/overview_controller.h"
+#include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "ash/wm/window_state.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "extensions/common/constants.h"
 #include "ui/base/ui_base_features.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 
 namespace ash {
 
-AppListControllerImpl::AppListControllerImpl(ws::WindowService* window_service)
-    : window_service_(window_service),
-      presenter_(std::make_unique<AppListPresenterDelegateImpl>(this)),
-      is_home_launcher_enabled_(app_list_features::IsHomeLauncherEnabled()),
-      voice_interaction_binding_(this) {
-  model_.AddObserver(this);
+namespace {
 
-  // Create only for non-mash. Mash uses window tree embed API to get a
-  // token to map answer card contents.
-  if (!::features::IsUsingWindowService()) {
-    answer_card_contents_registry_ =
-        std::make_unique<app_list::AnswerCardContentsRegistry>();
-  }
+bool IsTabletMode() {
+  return Shell::Get()
+      ->tablet_mode_controller()
+      ->IsTabletModeWindowManagerEnabled();
+}
+
+}  // namespace
+
+AppListControllerImpl::AppListControllerImpl()
+    : presenter_(std::make_unique<AppListPresenterDelegateImpl>(this)) {
+  model_.AddObserver(this);
 
   SessionController* session_controller = Shell::Get()->session_controller();
   session_controller->AddObserver(this);
@@ -62,23 +67,23 @@ AppListControllerImpl::AppListControllerImpl(ws::WindowService* window_service)
   Shell::Get()->AddShellObserver(this);
   keyboard::KeyboardController::Get()->AddObserver(this);
 
-  if (is_home_launcher_enabled_ &&
-      app_list_features::IsHomeLauncherGesturesEnabled()) {
+  if (app_list_features::IsHomeLauncherGesturesEnabled()) {
     home_launcher_gesture_handler_ =
         std::make_unique<HomeLauncherGestureHandler>(this);
   }
 
-  mojom::VoiceInteractionObserverPtr ptr;
-  voice_interaction_binding_.Bind(mojo::MakeRequest(&ptr));
-  Shell::Get()->voice_interaction_controller()->AddObserver(std::move(ptr));
+  Shell::Get()->voice_interaction_controller()->AddLocalObserver(this);
+  Shell::Get()->window_tree_host_manager()->AddObserver(this);
 }
 
 AppListControllerImpl::~AppListControllerImpl() {
+  Shell::Get()->window_tree_host_manager()->RemoveObserver(this);
   keyboard::KeyboardController::Get()->RemoveObserver(this);
   Shell::Get()->RemoveShellObserver(this);
   Shell::Get()->wallpaper_controller()->RemoveObserver(this);
   Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
   Shell::Get()->session_controller()->RemoveObserver(this);
+  Shell::Get()->voice_interaction_controller()->RemoveLocalObserver(this);
   model_.RemoveObserver(this);
 }
 
@@ -377,7 +382,7 @@ void AppListControllerImpl::OnAppListItemAdded(app_list::AppListItem* item) {
 
 void AppListControllerImpl::OnActiveUserPrefServiceChanged(
     PrefService* /* pref_service */) {
-  if (!IsHomeLauncherEnabledInTabletMode()) {
+  if (!IsTabletMode()) {
     DismissAppList();
     return;
   }
@@ -440,7 +445,7 @@ void AppListControllerImpl::UpdateYPositionAndOpacity(
     int y_position_in_screen,
     float background_opacity) {
   // Avoid changing app list opacity and position when homecher is enabled.
-  if (IsHomeLauncherEnabledInTabletMode())
+  if (IsTabletMode())
     return;
   presenter_.UpdateYPositionAndOpacity(y_position_in_screen,
                                        background_opacity);
@@ -449,17 +454,17 @@ void AppListControllerImpl::UpdateYPositionAndOpacity(
 void AppListControllerImpl::EndDragFromShelf(
     app_list::AppListViewState app_list_state) {
   // Avoid dragging app list when homecher is enabled.
-  if (IsHomeLauncherEnabledInTabletMode())
+  if (IsTabletMode())
     return;
   presenter_.EndDragFromShelf(app_list_state);
 }
 
 void AppListControllerImpl::ProcessMouseWheelEvent(
     const ui::MouseWheelEvent& event) {
-  presenter_.ProcessMouseWheelOffset(event.offset().y());
+  presenter_.ProcessMouseWheelOffset(event.offset());
 }
 
-void AppListControllerImpl::ToggleAppList(
+ash::ShelfAction AppListControllerImpl::ToggleAppList(
     int64_t display_id,
     app_list::AppListShowSource show_source,
     base::TimeTicks event_time_stamp) {
@@ -467,7 +472,7 @@ void AppListControllerImpl::ToggleAppList(
     UMA_HISTOGRAM_ENUMERATION(app_list::kAppListToggleMethodHistogram,
                               show_source, app_list::kMaxAppListToggleMethod);
   }
-  presenter_.ToggleAppList(display_id, event_time_stamp);
+  return presenter_.ToggleAppList(display_id, event_time_stamp);
 }
 
 app_list::AppListViewState AppListControllerImpl::GetAppListViewState() {
@@ -489,7 +494,7 @@ void AppListControllerImpl::FlushForTesting() {
 }
 
 void AppListControllerImpl::OnOverviewModeStarting() {
-  if (!IsHomeLauncherEnabledInTabletMode()) {
+  if (!IsTabletMode()) {
     DismissAppList();
     return;
   }
@@ -498,36 +503,34 @@ void AppListControllerImpl::OnOverviewModeStarting() {
   presenter_.ScheduleOverviewModeAnimation(
       /*start=*/true,
       Shell::Get()
-              ->window_selector_controller()
-              ->window_selector()
+              ->overview_controller()
+              ->overview_session()
               ->enter_exit_overview_type() ==
-          WindowSelector::EnterExitOverviewType::kWindowsMinimized);
+          OverviewSession::EnterExitOverviewType::kWindowsMinimized);
 }
 
-void AppListControllerImpl::OnOverviewModeEnding() {
-  if (!IsHomeLauncherEnabledInTabletMode())
+void AppListControllerImpl::OnOverviewModeEnding(
+    OverviewSession* overview_session) {
+  if (!IsTabletMode())
     return;
 
   // Animate the launcher if overview mode is sliding out. Let
   // OnOverviewModeEndingAnimationComplete handle showing the launcher after
-  // overview mode finishes animating. WindowSelector however is nullptr by the
+  // overview mode finishes animating. Overview however is nullptr by the
   // time the animations are finished, so we need to check the animation type
   // here.
-  use_slide_to_exit_overview_mode_ =
-      Shell::Get()
-          ->window_selector_controller()
-          ->window_selector()
-          ->enter_exit_overview_type() ==
-      WindowSelector::EnterExitOverviewType::kWindowsMinimized;
+  use_slide_to_exit_overview_ =
+      overview_session->enter_exit_overview_type() ==
+      OverviewSession::EnterExitOverviewType::kWindowsMinimized;
 }
 
 void AppListControllerImpl::OnOverviewModeEndingAnimationComplete(
     bool canceled) {
-  if (!IsHomeLauncherEnabledInTabletMode() || canceled)
+  if (!IsTabletMode() || canceled)
     return;
 
   presenter_.ScheduleOverviewModeAnimation(/*start=*/false,
-                                           use_slide_to_exit_overview_mode_);
+                                           use_slide_to_exit_overview_);
 }
 
 void AppListControllerImpl::OnTabletModeStarted() {
@@ -536,26 +539,14 @@ void AppListControllerImpl::OnTabletModeStarted() {
     presenter_.GetView()->OnTabletModeChanged(true);
   }
 
-  if (!is_home_launcher_enabled_)
-    return;
-
-  SessionController const* session_controller =
-      Shell::Get()->session_controller();
-  if (session_controller && !session_controller->IsActiveUserSessionStarted())
-    return;
-
   // Show the app list if the tablet mode starts.
-  Show(GetDisplayIdToShowAppListOn(), app_list::kTabletMode, base::TimeTicks());
-  UpdateHomeLauncherVisibility();
-  Shelf::ForWindow(presenter_.GetWindow())->MaybeUpdateShelfBackground();
+  ShowHomeLauncher();
 }
 
 void AppListControllerImpl::OnTabletModeEnded() {
   if (IsVisible())
     presenter_.GetView()->OnTabletModeChanged(false);
 
-  if (!is_home_launcher_enabled_)
-    return;
   // Dismiss the app list if the tablet mode ends.
   DismissAppList();
 }
@@ -592,25 +583,93 @@ void AppListControllerImpl::OnAssistantFeatureAllowedChanged(
   UpdateAssistantVisibility();
 }
 
-bool AppListControllerImpl::IsHomeLauncherEnabledInTabletMode() const {
-  return is_home_launcher_enabled_ && Shell::Get()
-                                          ->tablet_mode_controller()
-                                          ->IsTabletModeWindowManagerEnabled();
+void AppListControllerImpl::OnDisplayConfigurationChanged() {
+  // Entering tablet mode triggers a display configuration change when we
+  // automatically switch to mirror mode. Switching to mirror mode happens
+  // asynchronously (see DisplayConfigurationObserver::OnTabletModeStarted()).
+  // This may result in the removal of a window tree host, as in the example of
+  // switching to tablet mode while Unified Desktop mode is on; the Unified host
+  // will be destroyed and the Home Launcher (which was created earlier when we
+  // entered tablet mode) will be dismissed.
+  // To avoid crashes, we must ensure that the Home Launcher shown status is as
+  // expected if it's enabled and we're still in tablet mode.
+  // https://crbug.com/900956.
+  const bool should_be_shown = IsTabletMode();
+  if (should_be_shown == GetTargetVisibility())
+    return;
+
+  if (should_be_shown)
+    ShowHomeLauncher();
 }
 
 void AppListControllerImpl::Back() {
   presenter_.GetView()->Back();
 }
 
+ash::ShelfAction AppListControllerImpl::OnAppListButtonPressed(
+    int64_t display_id,
+    app_list::AppListShowSource show_source,
+    base::TimeTicks event_time_stamp) {
+  if (!IsTabletMode())
+    return ToggleAppList(display_id, show_source, event_time_stamp);
+
+  // Whether the this action is handled.
+  bool handled = false;
+
+  if (home_launcher_gesture_handler_) {
+    handled = home_launcher_gesture_handler_->ShowHomeLauncher(
+        Shell::Get()->display_manager()->GetDisplayForId(display_id));
+  }
+
+  if (!handled) {
+    if (Shell::Get()->overview_controller()->IsSelecting()) {
+      // End overview mode.
+      Shell::Get()->overview_controller()->ToggleOverview(
+          OverviewSession::EnterExitOverviewType::kWindowsMinimized);
+      handled = true;
+    }
+    if (Shell::Get()->split_view_controller()->IsSplitViewModeActive()) {
+      // End split view mode.
+      Shell::Get()->split_view_controller()->EndSplitView(
+          SplitViewController::EndReason::kHomeLauncherPressed);
+      handled = true;
+    }
+  }
+
+  if (!handled) {
+    // Minimize all windows that aren't the app list in reverse order to
+    // preserve the mru ordering.
+    aura::Window* app_list_container =
+        Shell::Get()->GetPrimaryRootWindow()->GetChildById(
+            kShellWindowId_AppListTabletModeContainer);
+    aura::Window::Windows windows =
+        Shell::Get()->mru_window_tracker()->BuildWindowForCycleList();
+    std::reverse(windows.begin(), windows.end());
+    for (auto* window : windows) {
+      if (!app_list_container->Contains(window) &&
+          !wm::GetWindowState(window)->IsMinimized()) {
+        wm::GetWindowState(window)->Minimize();
+        handled = true;
+      }
+    }
+  }
+
+  // Perform the "back" action for the app list.
+  if (!handled)
+    Back();
+
+  return ash::SHELF_ACTION_APP_LIST_SHOWN;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Methods of |client_|:
 
 void AppListControllerImpl::StartAssistant() {
-  if (!IsHomeLauncherEnabledInTabletMode())
+  if (!IsTabletMode())
     DismissAppList();
 
   ash::Shell::Get()->assistant_controller()->ui_controller()->ShowUi(
-      ash::AssistantSource::kLauncherSearchBox);
+      ash::AssistantEntryPoint::kLauncherSearchBox);
 }
 
 void AppListControllerImpl::StartSearch(const base::string16& raw_query) {
@@ -649,7 +708,7 @@ void AppListControllerImpl::OpenSearchResult(const std::string& result_id,
   if (client_)
     client_->OpenSearchResult(result_id, event_flags);
 
-  if (IsHomeLauncherEnabledInTabletMode() && presenter_.IsVisible())
+  if (IsTabletMode() && presenter_.IsVisible())
     presenter_.GetView()->CloseOpenedPage();
 }
 
@@ -705,7 +764,7 @@ void AppListControllerImpl::ActivateItem(const std::string& id,
   if (client_)
     client_->ActivateItem(id, event_flags);
 
-  if (IsHomeLauncherEnabledInTabletMode() && presenter_.IsVisible())
+  if (IsTabletMode() && presenter_.IsVisible())
     presenter_.GetView()->CloseOpenedPage();
 }
 
@@ -744,8 +803,7 @@ bool AppListControllerImpl::ProcessHomeLauncherGesture(
       return home_launcher_gesture_handler_->OnScrollEvent(
           screen_location, event->details().scroll_y());
     case ui::ET_GESTURE_END:
-      return home_launcher_gesture_handler_->OnReleaseEvent(
-          screen_location, /*out_dragged_down=*/nullptr);
+      return home_launcher_gesture_handler_->OnReleaseEvent(screen_location);
     default:
       break;
   }
@@ -757,10 +815,9 @@ bool AppListControllerImpl::ProcessHomeLauncherGesture(
 bool AppListControllerImpl::CanProcessEventsOnApplistViews() {
   // Do not allow processing events during overview or while overview is
   // finished but still animating out.
-  WindowSelectorController* window_selector_controller =
-      Shell::Get()->window_selector_controller();
-  if (window_selector_controller->IsSelecting() ||
-      window_selector_controller->IsCompletingShutdownAnimations()) {
+  OverviewController* overview_controller = Shell::Get()->overview_controller();
+  if (overview_controller->IsSelecting() ||
+      overview_controller->IsCompletingShutdownAnimations()) {
     return false;
   }
 
@@ -771,28 +828,49 @@ bool AppListControllerImpl::CanProcessEventsOnApplistViews() {
          HomeLauncherGestureHandler::Mode::kSlideUpToShow;
 }
 
-ws::WindowService* AppListControllerImpl::GetWindowService() {
-  return window_service_;
+void AppListControllerImpl::GetNavigableContentsFactory(
+    content::mojom::NavigableContentsFactoryRequest request) {
+  if (client_)
+    client_->GetNavigableContentsFactory(std::move(request));
 }
 
-void AppListControllerImpl::OnVisibilityChanged(bool visible) {
+void AppListControllerImpl::AddObserver(AppListControllerObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void AppListControllerImpl::RemoveObserver(
+    AppListControllerObserver* observer) {
+  observers_.RemoveObserver(observer);
+}
+
+void AppListControllerImpl::NotifyAppListVisibilityChanged(bool visible,
+                                                           int64_t display_id) {
+  // Notify chrome of visibility changes.
   if (client_)
     client_->OnAppListVisibilityChanged(visible);
+
+  for (auto& observer : observers_)
+    observer.OnAppListVisibilityChanged(visible, display_id);
 }
 
-void AppListControllerImpl::OnTargetVisibilityChanged(bool visible) {
+void AppListControllerImpl::NotifyAppListTargetVisibilityChanged(bool visible) {
+  // Notify chrome of target visibility changes.
   if (client_)
     client_->OnAppListTargetVisibilityChanged(visible);
 }
 
-void AppListControllerImpl::StartVoiceInteractionSession() {
-  if (client_)
-    client_->StartVoiceInteractionSession();
+void AppListControllerImpl::NotifyHomeLauncherTargetPositionChanged(
+    bool showing,
+    int64_t display_id) {
+  for (auto& observer : observers_)
+    observer.OnHomeLauncherTargetPositionChanged(showing, display_id);
 }
 
-void AppListControllerImpl::ToggleVoiceInteractionSession() {
-  if (client_)
-    client_->ToggleVoiceInteractionSession();
+void AppListControllerImpl::NotifyHomeLauncherAnimationComplete(
+    bool shown,
+    int64_t display_id) {
+  for (auto& observer : observers_)
+    observer.OnHomeLauncherAnimationComplete(shown, display_id);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -858,11 +936,10 @@ app_list::AppListFolderItem* AppListControllerImpl::FindFolderItem(
 }
 
 void AppListControllerImpl::UpdateHomeLauncherVisibility() {
-  if (!IsHomeLauncherEnabledInTabletMode() || !presenter_.GetWindow())
+  if (!IsTabletMode() || !presenter_.GetWindow())
     return;
 
-  const bool in_overview =
-      Shell::Get()->window_selector_controller()->IsSelecting();
+  const bool in_overview = Shell::Get()->overview_controller()->IsSelecting();
   if (in_wallpaper_preview_ || in_overview || in_window_dragging_)
     presenter_.GetWindow()->Hide();
   else
@@ -875,12 +952,12 @@ void AppListControllerImpl::UpdateAssistantVisibility() {
 
   auto* controller = Shell::Get()->voice_interaction_controller();
   GetSearchModel()->search_box()->SetShowAssistantButton(
-      controller->settings_enabled() &&
+      controller->settings_enabled().value_or(false) &&
       controller->allowed_state() == mojom::AssistantAllowedState::ALLOWED);
 }
 
 int64_t AppListControllerImpl::GetDisplayIdToShowAppListOn() {
-  if (IsHomeLauncherEnabledInTabletMode()) {
+  if (IsTabletMode() && !Shell::Get()->display_manager()->IsInUnifiedMode()) {
     return display::Display::HasInternalDisplay()
                ? display::Display::InternalDisplayId()
                : display::Screen::GetScreen()->GetPrimaryDisplay().id();
@@ -889,6 +966,17 @@ int64_t AppListControllerImpl::GetDisplayIdToShowAppListOn() {
   return display::Screen::GetScreen()
       ->GetDisplayNearestWindow(ash::Shell::GetRootWindowForNewWindows())
       .id();
+}
+
+void AppListControllerImpl::ShowHomeLauncher() {
+  DCHECK(IsTabletMode());
+
+  if (!Shell::Get()->session_controller()->IsActiveUserSessionStarted())
+    return;
+
+  Show(GetDisplayIdToShowAppListOn(), app_list::kTabletMode, base::TimeTicks());
+  UpdateHomeLauncherVisibility();
+  Shelf::ForWindow(presenter_.GetWindow())->MaybeUpdateShelfBackground();
 }
 
 }  // namespace ash

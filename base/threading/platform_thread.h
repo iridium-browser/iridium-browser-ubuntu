@@ -145,7 +145,10 @@ class BASE_EXPORT PlatformThread {
   // Yield the current thread so another thread can be scheduled.
   static void YieldCurrentThread();
 
-  // Sleeps for the specified duration.
+  // Sleeps for the specified duration. Note: The sleep duration may be in
+  // base::Time or base::TimeTicks, depending on platform. If you're looking to
+  // use this in unit tests testing delayed tasks, this will be unreliable -
+  // instead, use base::test::ScopedTaskEnvironment with MOCK_TIME mode.
   static void Sleep(base::TimeDelta duration);
 
   // Sets the thread name visible to debuggers/tools. This will try to
@@ -231,9 +234,24 @@ class BASE_EXPORT PlatformThread {
                                 ThreadPriority priority);
 #endif
 
+  // Returns the default thread stack size set by chrome. If we do not
+  // explicitly set default size then returns 0.
+  static size_t GetDefaultThreadStackSize();
+
  private:
+  static void SetCurrentThreadPriorityImpl(ThreadPriority priority);
+
   DISALLOW_IMPLICIT_CONSTRUCTORS(PlatformThread);
 };
+
+namespace internal {
+
+// Initializes the "ThreadPriorities" feature. The feature state is only taken
+// into account after this initialization. This initialization must be
+// synchronized with calls to PlatformThread::SetCurrentThreadPriority().
+void InitializeThreadPrioritiesFeature();
+
+}  // namespace internal
 
 }  // namespace base
 

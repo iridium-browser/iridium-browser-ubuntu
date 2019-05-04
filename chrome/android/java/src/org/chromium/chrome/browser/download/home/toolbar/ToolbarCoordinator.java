@@ -11,13 +11,12 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.download.home.UmaUtils;
 import org.chromium.chrome.browser.download.home.list.ListItem;
+import org.chromium.chrome.browser.download.home.metrics.UmaUtils;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.widget.FadingShadow;
 import org.chromium.chrome.browser.widget.FadingShadowView;
-import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
 import org.chromium.chrome.browser.widget.selection.SelectableListToolbar;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate.SelectionObserver;
@@ -35,13 +34,15 @@ public class ToolbarCoordinator implements SelectionObserver<ListItem> {
     public interface ToolbarListActionDelegate {
         /**
          * Invoked when user taps on the delete button to delete the currently selected items.
+         * @return The number of items that were deleted.
          */
-        void deleteSelectedItems();
+        int deleteSelectedItems();
 
         /**
          * Invoked when user taps on the share button to share the currently selected items.
+         * @return The number of items that were shared.
          */
-        void shareSelectedItems();
+        int shareSelectedItems();
 
         /**
          * Invoked when user starts a search on download home.
@@ -69,7 +70,6 @@ public class ToolbarCoordinator implements SelectionObserver<ListItem> {
     private final ToolbarListActionDelegate mListActionDelegate;
     private final ToolbarActionDelegate mDelegate;
 
-    private final UiConfig mUiConfig;
     private final ViewGroup mView;
     private final DownloadHomeToolbar mToolbar;
     private final FadingShadowView mShadow;
@@ -92,7 +92,8 @@ public class ToolbarCoordinator implements SelectionObserver<ListItem> {
 
     public ToolbarCoordinator(Context context, ToolbarActionDelegate delegate,
             ToolbarListActionDelegate listActionDelegate,
-            SelectionDelegate<ListItem> selectionDelegate, boolean hasCloseButton) {
+            SelectionDelegate<ListItem> selectionDelegate, boolean hasCloseButton,
+            Profile profile) {
         mDelegate = delegate;
         mListActionDelegate = listActionDelegate;
 
@@ -109,23 +110,19 @@ public class ToolbarCoordinator implements SelectionObserver<ListItem> {
 
         mView = (ViewGroup) LayoutInflater.from(context).inflate(
                 R.layout.download_home_toolbar, null);
-        mToolbar = mView.findViewById(R.id.toolbar);
+        mToolbar = mView.findViewById(R.id.download_toolbar);
         mShadow = mView.findViewById(R.id.shadow);
 
-        mUiConfig = new UiConfig(mView);
-
         mToolbar.initialize(selectionDelegate, 0 /* titleResId */, null /* drawerLayout */,
-                normalMenuGroupId, R.id.selection_mode_menu_group, R.color.modern_primary_color,
-                hasCloseButton);
+                normalMenuGroupId, R.id.selection_mode_menu_group, hasCloseButton);
         mToolbar.setOnMenuItemClickListener(this ::onMenuItemClick);
 
         // TODO(crbug.com/881037): Pass the visible group to the toolbar during initialization.
         mToolbar.getMenu().setGroupVisible(normalMenuGroupId, true);
         mToolbar.initializeSearchView(
                 mSearchDelegate, R.string.download_manager_search, searchMenuId);
-        mToolbar.configureWideDisplayStyle(mUiConfig);
 
-        if (isLocationEnabled) ToolbarUtils.setupTrackerForDownloadSettingsIPH(mToolbar);
+        if (isLocationEnabled) ToolbarUtils.setupTrackerForDownloadSettingsIPH(mToolbar, profile);
 
         mShadow.init(ApiCompatibilityUtils.getColor(
                              context.getResources(), R.color.toolbar_shadow_color),
@@ -187,28 +184,26 @@ public class ToolbarCoordinator implements SelectionObserver<ListItem> {
     }
 
     private boolean onMenuItemClick(MenuItem item) {
+        UmaUtils.recordTopMenuAction(item.getItemId());
+
         if (item.getItemId() == R.id.close_menu_id
                 || item.getItemId() == R.id.with_settings_close_menu_id) {
-            UmaUtils.recordMenuActionHistogram(UmaUtils.MenuAction.CLOSE);
             mDelegate.close();
             return true;
         } else if (item.getItemId() == R.id.selection_mode_delete_menu_id) {
-            UmaUtils.recordMenuActionHistogram(UmaUtils.MenuAction.MULTI_DELETE);
-            mListActionDelegate.deleteSelectedItems();
+            int itemsDeleted = mListActionDelegate.deleteSelectedItems();
+            UmaUtils.recordTopMenuDeleteCount(itemsDeleted);
             return true;
         } else if (item.getItemId() == R.id.selection_mode_share_menu_id) {
-            UmaUtils.recordMenuActionHistogram(UmaUtils.MenuAction.MULTI_SHARE);
-            mListActionDelegate.shareSelectedItems();
+            int itemsShared = mListActionDelegate.shareSelectedItems();
+            UmaUtils.recordTopMenuShareCount(itemsShared);
             return true;
         } else if (item.getItemId() == R.id.with_settings_search_menu_id
                 || item.getItemId() == R.id.search_menu_id) {
-            RecordUserAction.record("Android.DownloadManager.Search");
-            UmaUtils.recordMenuActionHistogram(UmaUtils.MenuAction.SEARCH);
             mToolbar.showSearchView();
             updateShadowVisibility();
             return true;
         } else if (item.getItemId() == R.id.settings_menu_id) {
-            // TODO(shaktisahu) : Add UMA for settings menu action.
             mDelegate.openSettings();
             return true;
         } else {

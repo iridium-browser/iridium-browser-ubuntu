@@ -76,6 +76,11 @@ std::unique_ptr<views::Widget> CreateMenuWidget() {
   gfx::Rect widget_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
   menu_widget->SetBounds(widget_bounds);
+
+  // Enable arrow key in FocusManager. Arrow right/left and down/up triggers
+  // the same focus movement as tab/shift+tab.
+  menu_widget->GetFocusManager()->set_arrow_key_traversal_enabled_for_widget(
+      true);
   return menu_widget;
 }
 
@@ -143,9 +148,7 @@ class PowerButtonController::ActiveWindowWidgetController
 
 PowerButtonController::PowerButtonController(
     BacklightsForcedOffSetter* backlights_forced_off_setter)
-    : arrow_key_traversal_initially_enabled_(
-          views::FocusManager::arrow_key_traversal_enabled()),
-      backlights_forced_off_setter_(backlights_forced_off_setter),
+    : backlights_forced_off_setter_(backlights_forced_off_setter),
       lock_state_controller_(Shell::Get()->lock_state_controller()),
       tick_clock_(base::DefaultTickClock::GetInstance()),
       backlights_forced_off_observer_(this),
@@ -158,7 +161,7 @@ PowerButtonController::PowerButtonController(
   power_manager_client->AddObserver(this);
   power_manager_client->GetSwitchStates(base::BindOnce(
       &PowerButtonController::OnGetSwitchStates, weak_factory_.GetWeakPtr()));
-  chromeos::AccelerometerReader::GetInstance()->AddObserver(this);
+  AccelerometerReader::GetInstance()->AddObserver(this);
   Shell::Get()->display_configurator()->AddObserver(this);
   backlights_forced_off_observer_.Add(backlights_forced_off_setter);
   Shell::Get()->tablet_mode_controller()->AddObserver(this);
@@ -170,7 +173,7 @@ PowerButtonController::~PowerButtonController() {
   if (Shell::Get()->tablet_mode_controller())
     Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
   Shell::Get()->display_configurator()->RemoveObserver(this);
-  chromeos::AccelerometerReader::GetInstance()->RemoveObserver(this);
+  AccelerometerReader::GetInstance()->RemoveObserver(this);
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(
       this);
 }
@@ -347,8 +350,6 @@ void PowerButtonController::DismissMenu() {
 
   show_menu_animation_done_ = false;
   active_window_widget_controller_.reset();
-  views::FocusManager::set_arrow_key_traversal_enabled(
-      arrow_key_traversal_initially_enabled_);
 }
 
 void PowerButtonController::StopForcingBacklightsOff() {
@@ -420,7 +421,7 @@ void PowerButtonController::OnGetSwitchStates(
 }
 
 void PowerButtonController::OnAccelerometerUpdated(
-    scoped_refptr<const chromeos::AccelerometerUpdate> update) {
+    scoped_refptr<const AccelerometerUpdate> update) {
   if (!has_tablet_mode_switch_ && observe_accelerometer_events_)
     InitTabletPowerButtonMembers();
 }
@@ -521,9 +522,6 @@ void PowerButtonController::LockScreenIfRequired() {
 
 void PowerButtonController::SetShowMenuAnimationDone() {
   show_menu_animation_done_ = true;
-  // Enable arrow key in FocusManager. Arrow right/left and down/up triggers
-  // the same focus movement as tab/shift+tab.
-  views::FocusManager::set_arrow_key_traversal_enabled(true);
   pre_shutdown_timer_.Start(FROM_HERE, kStartShutdownAnimationTimeout, this,
                             &PowerButtonController::OnPreShutdownTimeout);
 }

@@ -129,6 +129,14 @@ class GeneratedBackgroundPageJob : public net::URLRequestSimpleJob {
     return net::OK;
   }
 
+  // base::PowerObserver override:
+  void OnSuspend() override {
+    // Unlike URLRequestJob, don't suspend active requests here. Requests for
+    // generated background pages need not be suspended when the system
+    // suspends. This is not needed for URLRequestExtensionJob since it inherits
+    // from URLRequestFileJob, which has the same behavior.
+  }
+
   void GetResponseInfo(net::HttpResponseInfo* info) override {
     *info = response_info_;
   }
@@ -203,7 +211,7 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
             network_delegate,
             base::FilePath(),
             base::CreateTaskRunnerWithTraits(
-                {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+                {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
                  base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
         verify_job_(std::move(verify_job)),
         seek_position_(0),
@@ -973,7 +981,7 @@ class ExtensionURLLoaderFactory : public network::mojom::URLLoaderFactory {
     content::CreateFileURLLoader(
         request, std::move(loader), std::move(client),
         std::make_unique<FileLoaderObserver>(std::move(verify_job)),
-        std::move(response_headers));
+        /* allow_directory_listing */ false, std::move(response_headers));
   }
 
   content::BrowserContext* browser_context_;

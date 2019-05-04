@@ -32,16 +32,16 @@ inline float XFA_UnitPx2Pt(float fPx, float fDpi) {
   return fPx * 72.0f / fDpi;
 }
 
-#define XFA_FLOAT_PERCISION 0.001f
+constexpr float kXFAWidgetPrecision = 0.001f;
 
 void XFA_DrawImage(CXFA_Graphics* pGS,
                    const CFX_RectF& rtImage,
                    const CFX_Matrix& matrix,
                    const RetainPtr<CFX_DIBitmap>& pDIBitmap,
-                   XFA_AttributeEnum iAspect,
+                   XFA_AttributeValue iAspect,
                    const CFX_Size& dpi,
-                   XFA_AttributeEnum iHorzAlign = XFA_AttributeEnum::Left,
-                   XFA_AttributeEnum iVertAlign = XFA_AttributeEnum::Top);
+                   XFA_AttributeValue iHorzAlign = XFA_AttributeValue::Left,
+                   XFA_AttributeValue iVertAlign = XFA_AttributeValue::Top);
 
 RetainPtr<CFX_DIBitmap> XFA_LoadImageFromBuffer(
     const RetainPtr<IFX_SeekableReadStream>& pImageFileRead,
@@ -88,6 +88,9 @@ class CXFA_FFWidget : public CXFA_ContentLayoutItem {
 
   explicit CXFA_FFWidget(CXFA_Node* pNode);
   ~CXFA_FFWidget() override;
+
+  // CXFA_ContentLayoutItem:
+  CXFA_FFWidget* AsFFWidget() override;
 
   virtual CFX_RectF GetBBox(uint32_t dwStatus, FocusOption focus);
   virtual void RenderWidget(CXFA_Graphics* pGS,
@@ -162,7 +165,7 @@ class CXFA_FFWidget : public CXFA_ContentLayoutItem {
   CFX_PointF Rotate2Normal(const CFX_PointF& point);
   CFX_Matrix GetRotateMatrix();
   bool IsLayoutRectEmpty();
-  CXFA_FFWidget* GetParent();
+  CXFA_LayoutItem* GetParent();
   bool IsAncestorOf(CXFA_FFWidget* pWidget);
   const CFWL_App* GetFWLApp();
 

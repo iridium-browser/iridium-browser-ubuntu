@@ -60,9 +60,8 @@ CFX_Barcode::CFX_Barcode() {}
 CFX_Barcode::~CFX_Barcode() {}
 
 std::unique_ptr<CFX_Barcode> CFX_Barcode::Create(BC_TYPE type) {
-  auto barcodeEngine = CreateBarCodeEngineObject(type);
-  std::unique_ptr<CFX_Barcode> barcode(new CFX_Barcode());
-  barcode->m_pBCEngine.swap(barcodeEngine);
+  auto barcode = pdfium::WrapUnique(new CFX_Barcode());  // Private ctor.
+  barcode->m_pBCEngine = CreateBarCodeEngineObject(type);
   return barcode;
 }
 
@@ -223,7 +222,7 @@ bool CFX_Barcode::SetErrorCorrectionLevel(int32_t level) {
   return m_pBCEngine && m_pBCEngine->SetErrorCorrectionLevel(level);
 }
 
-bool CFX_Barcode::Encode(const WideStringView& contents) {
+bool CFX_Barcode::Encode(WideStringView contents) {
   return m_pBCEngine && m_pBCEngine->Encode(contents);
 }
 

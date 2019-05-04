@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/strings/string_util.h"
-#include "net/dns/dns_protocol.h"
 #include "net/dns/mdns_client.h"
+#include "net/dns/public/dns_protocol.h"
 #include "net/dns/record_rdata.h"
 
 namespace chromeos {
@@ -59,14 +59,14 @@ void MDnsHostLocator::FindHosts(FindHostsCallback callback) {
     Reset();
   }
 
+  callback_ = std::move(callback);
+
   if (!(StartListening() && CreatePtrTransaction())) {
     LOG(ERROR) << "Failed to start MDnsHostLocator";
 
     FireCallback(false /* success */);
     return;
   }
-
-  callback_ = std::move(callback);
 }
 
 bool MDnsHostLocator::CreatePtrTransaction() {

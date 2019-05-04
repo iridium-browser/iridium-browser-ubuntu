@@ -17,12 +17,20 @@ public interface FeedScheduler extends SchedulerApi {
     /** To be called whenever the browser is foregrounded. */
     void onForegrounded();
 
-    /** To be called when a background scheduling task wakes up the browser. */
+    /**
+     * To be called when a background scheduling task wakes up the browser.
+     * @param onCompletion to be run when the fixed timer logic is complete.
+     */
     void onFixedTimer(Runnable onCompletion);
-
-    /** To be called when a background scheduling task needs to be rescheduled. */
-    void onTaskReschedule();
 
     /** To be called when an article is consumed, influencing future scheduling. */
     void onSuggestionConsumed();
+
+    /**
+     * To be called when articles are cleared.
+     * @param suppressRefreshes whether the scheduler should temporarily avoid kicking off
+     * refreshes. This is used, for example, when history data is deleted.
+     * @return If a refresh should be made by the caller.
+     */
+    boolean onArticlesCleared(boolean suppressRefreshes);
 }

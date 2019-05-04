@@ -10,7 +10,6 @@
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
-#include "core/fxge/fx_dib.h"
 #include "fxbarcode/cbc_onecode.h"
 
 class CBC_OnedCode39Writer;
@@ -22,7 +21,7 @@ class CBC_Code39 final : public CBC_OneCode {
 
   // CBC_OneCode:
   BC_TYPE GetType() override;
-  bool Encode(const WideStringView& contents) override;
+  bool Encode(WideStringView contents) override;
   bool RenderDevice(CFX_RenderDevice* device,
                     const CFX_Matrix* matrix) override;
 

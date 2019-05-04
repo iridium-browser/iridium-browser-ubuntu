@@ -6,11 +6,18 @@
 #define CHROMECAST_APP_CAST_MAIN_DELEGATE_H_
 
 #include <memory>
+#include <string>
+#include <vector>
 
+#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "chromecast/common/cast_content_client.h"
 #include "content/public/app/content_main_delegate.h"
+
+namespace base {
+class FieldTrialList;
+}  // namespace base
 
 namespace content {
 class BrowserMainRunner;
@@ -19,6 +26,7 @@ class BrowserMainRunner;
 namespace chromecast {
 
 class CastResourceDelegate;
+class CastFeatureListCreator;
 
 namespace shell {
 
@@ -28,7 +36,7 @@ class CastContentUtilityClient;
 
 class CastMainDelegate : public content::ContentMainDelegate {
  public:
-  CastMainDelegate();
+  CastMainDelegate(int argc, const char** argv);
   ~CastMainDelegate() override;
 
   // content::ContentMainDelegate implementation:
@@ -41,11 +49,21 @@ class CastMainDelegate : public content::ContentMainDelegate {
   void ZygoteForked() override;
 #endif  // defined(OS_LINUX)
   bool ShouldCreateFeatureList() override;
+  void PostEarlyInitialization(bool is_running_tests) override;
   content::ContentBrowserClient* CreateContentBrowserClient() override;
   content::ContentRendererClient* CreateContentRendererClient() override;
   content::ContentUtilityClient* CreateContentUtilityClient() override;
 
+  int argc() const { return argv_.size(); }
+  const char** argv() const { return const_cast<const char**>(argv_.data()); }
+
  private:
+  friend class CastMainDelegateTest;
+
+  // Used for testing.
+  CastMainDelegate(int argc,
+                   const char** argv,
+                   base::FilePath command_line_path);
   void InitializeResourceBundle();
 
   std::unique_ptr<CastContentBrowserClient> browser_client_;
@@ -57,6 +75,19 @@ class CastMainDelegate : public content::ContentMainDelegate {
 #if defined(OS_ANDROID)
   std::unique_ptr<content::BrowserMainRunner> browser_runner_;
 #endif  // defined(OS_ANDROID)
+
+  // |field_trial_list_| is a singleton-like that needs to live for as long as
+  // anything uses it. It is accessible through |FieldTrialList| static methods,
+  // but gives no warning if those methods are called without some instance
+  // existing somewhere.
+  std::unique_ptr<base::FieldTrialList> field_trial_list_;
+
+  std::unique_ptr<CastFeatureListCreator> cast_feature_list_creator_;
+
+  // Combined list of args passed through the main function, and a specified
+  // command-line file.
+  std::vector<std::string> argv_strs_;
+  std::vector<const char*> argv_;
 
   DISALLOW_COPY_AND_ASSIGN(CastMainDelegate);
 };

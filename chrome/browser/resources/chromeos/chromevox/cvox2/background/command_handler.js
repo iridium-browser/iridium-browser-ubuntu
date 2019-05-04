@@ -14,8 +14,9 @@ goog.require('LogStore');
 goog.require('Output');
 goog.require('TreeDumper');
 goog.require('cvox.ChromeVoxBackground');
-goog.require('cvox.ChromeVoxPrefs');
 goog.require('cvox.ChromeVoxKbHandler');
+goog.require('cvox.ChromeVoxPrefs');
+goog.require('cvox.CommandStore');
 
 goog.scope(function() {
 var AutomationEvent = chrome.automation.AutomationEvent;
@@ -25,12 +26,20 @@ var EventType = chrome.automation.EventType;
 var RoleType = chrome.automation.RoleType;
 var StateType = chrome.automation.StateType;
 
+/** @private {boolean} */
+CommandHandler.incognito_ = !!chrome.runtime.getManifest()['incognito'];
+
 /**
  * Handles ChromeVox Next commands.
  * @param {string} command
  * @return {boolean} True if the command should propagate.
  */
 CommandHandler.onCommand = function(command) {
+  // Check for a command disallowed in OOBE/login.
+  if (CommandHandler.incognito_ && cvox.CommandStore.CMD_WHITELIST[command] &&
+      cvox.CommandStore.CMD_WHITELIST[command].disallowOOBE)
+    return true;
+
   // Check for loss of focus which results in us invalidating our current
   // range. Note this call is synchronis.
   chrome.automation.getFocus(function(focusedNode) {
@@ -543,7 +552,17 @@ CommandHandler.onCommand = function(command) {
 
         if (EventSourceState.get() == EventSourceType.TOUCH_GESTURE &&
             AutomationPredicate.editText(actionNode)) {
-          actionNode.focus();
+          // Dispatch a click to ensure the VK gets shown.
+          var location = actionNode.location;
+          var event = {
+            type: chrome.accessibilityPrivate.SyntheticMouseEventType.PRESS,
+            x: location.left + Math.round(location.width / 2),
+            y: location.top + Math.round(location.height / 2)
+          };
+          chrome.accessibilityPrivate.sendSyntheticMouseEvent(event);
+          event.type =
+              chrome.accessibilityPrivate.SyntheticMouseEventType.RELEASE;
+          chrome.accessibilityPrivate.sendSyntheticMouseEvent(event);
           return false;
         }
 
@@ -642,17 +661,24 @@ CommandHandler.onCommand = function(command) {
     case 'readCurrentTitle':
       var target = ChromeVoxState.instance.currentRange.start.node;
       var output = new Output();
-      target = AutomationUtil.getTopLevelRoot(target) || target.parent;
 
-      // Search for a container (e.g. rootWebArea, window) with a title-like
-      // string.
-      while (target && !target.name && !target.docUrl)
-        target = target.parent;
+      if (!target)
+        return false;
+
+      if (target.root && target.root.role == RoleType.DESKTOP) {
+        // Search for the first container with a name.
+        while (target && (!target.name || !AutomationPredicate.root(target)))
+          target = target.parent;
+      } else {
+        // Search for a window with a title.
+        while (target && (!target.name || target.role != RoleType.WINDOW))
+          target = target.parent;
+      }
 
       if (!target)
         output.format('@no_title');
       else
-        output.withString(target.name || target.docUrl);
+        output.withString(target.name);
 
       output.go();
       return false;
@@ -855,6 +881,15 @@ CommandHandler.onCommand = function(command) {
       }
       cvox.ChromeVox.tts.speak(announce, cvox.QueueMode.FLUSH);
       return false;
+    case 'getBatteryDescription':
+      chrome.accessibilityPrivate.getBatteryDescription(function(
+          batteryDescription) {
+        new Output()
+            .withString(batteryDescription)
+            .withQueueMode(cvox.QueueMode.FLUSH)
+            .go();
+      });
+      break;
     default:
       return true;
   }

@@ -5,7 +5,11 @@
 #include "third_party/blink/renderer/core/feature_policy/feature_policy.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/loader/empty_clients.h"
+#include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/testing/histogram_tester.h"
+
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -331,6 +335,57 @@ TEST_F(FeaturePolicyParserTest, HistogramMultiple) {
       static_cast<int>(blink::mojom::FeaturePolicyFeature::kFullscreen), 1);
 }
 
+// Test histogram counting the use of feature policies via "allow"
+// attribute. This test parses two policies on the same document.
+TEST_F(FeaturePolicyParserTest, AllowHistogramSameDocument) {
+  const char* histogram_name = "Blink.UseCounter.FeaturePolicy.Allow";
+  HistogramTester tester;
+  Vector<String> messages;
+  std::unique_ptr<DummyPageHolder> dummy = DummyPageHolder::Create();
+
+  ParseFeaturePolicy("payment; fullscreen", origin_a_.get(), origin_b_.get(),
+                     &messages, test_feature_name_map, &dummy->GetDocument());
+  ParseFeaturePolicy("fullscreen; geolocation", origin_a_.get(),
+                     origin_b_.get(), &messages, test_feature_name_map,
+                     &dummy->GetDocument());
+  tester.ExpectTotalCount(histogram_name, 3);
+  tester.ExpectBucketCount(
+      histogram_name,
+      static_cast<int>(blink::mojom::FeaturePolicyFeature::kPayment), 1);
+  tester.ExpectBucketCount(
+      histogram_name,
+      static_cast<int>(blink::mojom::FeaturePolicyFeature::kFullscreen), 1);
+  tester.ExpectBucketCount(
+      histogram_name,
+      static_cast<int>(blink::mojom::FeaturePolicyFeature::kGeolocation), 1);
+}
+
+// Test histogram counting the use of feature policies via "allow"
+// attribute. This test parses two policies on different documents.
+TEST_F(FeaturePolicyParserTest, AllowHistogramDifferentDocument) {
+  const char* histogram_name = "Blink.UseCounter.FeaturePolicy.Allow";
+  HistogramTester tester;
+  Vector<String> messages;
+  std::unique_ptr<DummyPageHolder> dummy = DummyPageHolder::Create();
+  std::unique_ptr<DummyPageHolder> dummy2 = DummyPageHolder::Create();
+
+  ParseFeaturePolicy("payment; fullscreen", origin_a_.get(), origin_b_.get(),
+                     &messages, test_feature_name_map, &dummy->GetDocument());
+  ParseFeaturePolicy("fullscreen; geolocation", origin_a_.get(),
+                     origin_b_.get(), &messages, test_feature_name_map,
+                     &dummy2->GetDocument());
+  tester.ExpectTotalCount(histogram_name, 4);
+  tester.ExpectBucketCount(
+      histogram_name,
+      static_cast<int>(blink::mojom::FeaturePolicyFeature::kPayment), 1);
+  tester.ExpectBucketCount(
+      histogram_name,
+      static_cast<int>(blink::mojom::FeaturePolicyFeature::kFullscreen), 2);
+  tester.ExpectBucketCount(
+      histogram_name,
+      static_cast<int>(blink::mojom::FeaturePolicyFeature::kGeolocation), 1);
+}
+
 // Test policy mutation methods
 class FeaturePolicyMutationTest : public testing::Test {
  protected:
@@ -537,6 +592,43 @@ TEST_F(FeaturePolicyMutationTest, TestAllowNewFeatureUnconditionally) {
   // Verify that the feature is, in fact, now allowed everywhere
   EXPECT_TRUE(IsFeatureAllowedEverywhere(mojom::FeaturePolicyFeature::kPayment,
                                          test_policy));
+}
+
+class FeaturePolicyViolationHistogramTest : public testing::Test {
+ protected:
+  FeaturePolicyViolationHistogramTest() = default;
+
+  ~FeaturePolicyViolationHistogramTest() override = default;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FeaturePolicyViolationHistogramTest);
+};
+
+TEST_F(FeaturePolicyViolationHistogramTest, PotentialViolation) {
+  HistogramTester tester;
+  const char* histogram_name =
+      "Blink.UseCounter.FeaturePolicy.PotentialViolation";
+  std::unique_ptr<DummyPageHolder> dummy_page_holder_ =
+      DummyPageHolder::Create();
+  // Probing feature state should not count.
+  dummy_page_holder_->GetDocument().IsFeatureEnabled(
+      mojom::FeaturePolicyFeature::kPayment);
+  tester.ExpectTotalCount(histogram_name, 0);
+  // Checking the feature state with reporting intent should record a potential
+  // violation.
+  dummy_page_holder_->GetDocument().IsFeatureEnabled(
+      mojom::FeaturePolicyFeature::kPayment, ReportOptions::kReportOnFailure);
+  tester.ExpectTotalCount(histogram_name, 1);
+  // The potential violation for an already recorded violation does not count
+  // again.
+  dummy_page_holder_->GetDocument().IsFeatureEnabled(
+      mojom::FeaturePolicyFeature::kPayment, ReportOptions::kReportOnFailure);
+  tester.ExpectTotalCount(histogram_name, 1);
+  // Sanity check: check some other feature to increase the count.
+  dummy_page_holder_->GetDocument().IsFeatureEnabled(
+      mojom::FeaturePolicyFeature::kFullscreen,
+      ReportOptions::kReportOnFailure);
+  tester.ExpectTotalCount(histogram_name, 2);
 }
 
 }  // namespace blink

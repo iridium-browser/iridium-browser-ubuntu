@@ -9,7 +9,6 @@
 
 #include <map>
 
-#include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/observable.h"
 #include "core/fxcrt/retain_ptr.h"
@@ -23,7 +22,7 @@ class CFGAS_PDFFontMgr final : public Observable<CFGAS_PDFFontMgr> {
   explicit CFGAS_PDFFontMgr(CPDF_Document* pDoc, CFGAS_FontMgr* pFontMgr);
   ~CFGAS_PDFFontMgr();
 
-  RetainPtr<CFGAS_GEFont> GetFont(const WideStringView& wsFontFamily,
+  RetainPtr<CFGAS_GEFont> GetFont(WideStringView wsFontFamily,
                                   uint32_t dwFontStyles,
                                   bool bStrictMatch);
 
@@ -35,7 +34,7 @@ class CFGAS_PDFFontMgr final : public Observable<CFGAS_PDFFontMgr> {
   ByteString PsNameToFontName(const ByteString& strPsName,
                               bool bBold,
                               bool bItalic);
-  bool PsNameMatchDRFontName(const ByteStringView& bsPsName,
+  bool PsNameMatchDRFontName(ByteStringView bsPsName,
                              bool bBold,
                              bool bItalic,
                              const ByteString& bsDRFontName,

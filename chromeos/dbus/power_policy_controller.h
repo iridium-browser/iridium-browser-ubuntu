@@ -8,8 +8,8 @@
 #include <map>
 #include <string>
 
+#include "base/component_export.h"
 #include "base/macros.h"
-#include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/power_manager/policy.pb.h"
 #include "chromeos/dbus/power_manager_client.h"
 
@@ -17,7 +17,7 @@ namespace chromeos {
 
 // PowerPolicyController is responsible for sending Chrome's assorted power
 // management preferences to the Chrome OS power manager.
-class CHROMEOS_EXPORT PowerPolicyController
+class COMPONENT_EXPORT(CHROMEOS_DBUS) PowerPolicyController
     : public PowerManagerClient::Observer {
  public:
   // Sets the global instance. Must be called before any calls to Get().
@@ -78,7 +78,6 @@ class CHROMEOS_EXPORT PowerPolicyController
     double user_activity_screen_dim_delay_factor;
     bool wait_for_initial_user_activity;
     bool force_nonzero_brightness_for_user_activity;
-    bool smart_dim_enabled;
   };
 
   // Returns a string describing |policy|.  Useful for tests.
@@ -129,6 +128,17 @@ class CHROMEOS_EXPORT PowerPolicyController
 
   // PowerManagerClient::Observer implementation:
   void PowerManagerRestarted() override;
+  void ScreenBrightnessChanged(
+      const power_manager::BacklightBrightnessChange& change) override;
+
+  // Returns the maximum time set by policy for the screen to lock when idle
+  // between AC and battery power sources. Returns zero if screen autolock is
+  // disabled by policy.
+  // If delay is set to zero, Google Chrome OS does not lock the screen when
+  // the user becomes idle.
+  // Note: The actual screen lock delay on the OS may differ as it takes other
+  // factors into account, like wake locks.
+  base::TimeDelta GetMaxPolicyAutoScreenLockDelay();
 
  private:
   explicit PowerPolicyController(PowerManagerClient* client);
@@ -172,7 +182,7 @@ class CHROMEOS_EXPORT PowerPolicyController
   power_manager::PowerManagementPolicy prefs_policy_;
 
   // Was ApplyPrefs() called?
-  bool prefs_were_set_;
+  bool prefs_were_set_ = false;
 
   // Maps from an ID representing a request to prevent the screen from
   // getting dimmed or turned off or to prevent the system from suspending
@@ -180,21 +190,28 @@ class CHROMEOS_EXPORT PowerPolicyController
   WakeLockMap wake_locks_;
 
   // Should |wake_locks_| be honored?
-  bool honor_wake_locks_;
+  bool honor_wake_locks_ = true;
 
   // If wake locks are honored, should TYPE_SCREEN or TYPE_DIM entries in
   // |wake_locks_| be honored?
   // If false, screen wake locks are just treated as TYPE_SYSTEM instead.
-  bool honor_screen_wake_locks_;
+  bool honor_screen_wake_locks_ = true;
 
   // Next ID to be used by an Add*WakeLock() request.
-  int next_wake_lock_id_;
+  int next_wake_lock_id_ = 1;
 
   // True if Chrome is in the process of exiting.
-  bool chrome_is_exiting_;
+  bool chrome_is_exiting_ = false;
 
   // True if a user homedir is in the process of migrating encryption formats.
-  bool encryption_migration_active_;
+  bool encryption_migration_active_ = false;
+
+  // Whether brightness policy value was overridden by a user adjustment in the
+  // current user session.
+  bool per_session_brightness_override_ = false;
+
+  // Indicates if screen autolock is enabled or not by policy.
+  bool auto_screen_lock_enabled_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(PowerPolicyController);
 };

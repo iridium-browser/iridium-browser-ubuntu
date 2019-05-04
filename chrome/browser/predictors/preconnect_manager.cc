@@ -190,8 +190,7 @@ std::unique_ptr<ProxyLookupClientImpl> PreconnectManager::LookupProxyForUrl(
 
   auto* network_context = GetNetworkContext();
   if (!network_context) {
-    // It's okay to not invoke the callback here because PreresolveUrl()
-    // callback will be invoked.
+    std::move(callback).Run(false);
     return nullptr;
   }
 
@@ -217,10 +216,6 @@ void PreconnectManager::TryToLaunchPreresolveJobs() {
       job->proxy_lookup_client = LookupProxyForUrl(
           job->url, base::BindOnce(&PreconnectManager::OnProxyLookupFinished,
                                    weak_factory_.GetWeakPtr(), job_id));
-
-      job->resolve_host_client = PreresolveUrl(
-          job->url, base::BindOnce(&PreconnectManager::OnPreresolveFinished,
-                                   weak_factory_.GetWeakPtr(), job_id));
       if (info)
         ++info->inflight_count;
       ++inflight_preresolves_count_;
@@ -228,8 +223,13 @@ void PreconnectManager::TryToLaunchPreresolveJobs() {
       preresolve_jobs_.Remove(job_id);
     }
 
-    if (info)
+    if (info) {
+      DCHECK_LE(1u, info->queued_count);
       --info->queued_count;
+      if (info->is_done()) {
+        AllPreresolvesForUrlFinished(info);
+      }
+    }
   }
 }
 
@@ -256,7 +256,13 @@ void PreconnectManager::OnProxyLookupFinished(PreresolveJobId job_id,
     observer_->OnProxyLookupFinished(job->url, success);
 
   job->proxy_lookup_client = nullptr;
-  FinishPreresolveJob(job_id, success);
+  if (success) {
+    FinishPreresolveJob(job_id, success);
+  } else {
+    job->resolve_host_client = PreresolveUrl(
+        job->url, base::BindOnce(&PreconnectManager::OnPreresolveFinished,
+                                 weak_factory_.GetWeakPtr(), job_id));
+  }
 }
 
 void PreconnectManager::FinishPreresolveJob(PreresolveJobId job_id,
@@ -264,11 +270,6 @@ void PreconnectManager::FinishPreresolveJob(PreresolveJobId job_id,
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   PreresolveJob* job = preresolve_jobs_.Lookup(job_id);
   DCHECK(job);
-
-  // In case one of the clients failed, wait for the second one, because it may
-  // be successful.
-  if (!success && (job->resolve_host_client || job->proxy_lookup_client))
-    return;
 
   bool need_preconnect = success && job->need_preconnect();
   if (need_preconnect)
@@ -279,8 +280,10 @@ void PreconnectManager::FinishPreresolveJob(PreresolveJobId job_id,
     info->stats->requests_stats.emplace_back(job->url, need_preconnect);
   preresolve_jobs_.Remove(job_id);
   --inflight_preresolves_count_;
-  if (info)
+  if (info) {
+    DCHECK_LE(1u, info->inflight_count);
     --info->inflight_count;
+  }
   if (info && info->is_done())
     AllPreresolvesForUrlFinished(info);
   TryToLaunchPreresolveJobs();

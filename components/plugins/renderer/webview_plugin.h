@@ -16,6 +16,7 @@
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
+#include "third_party/blink/public/web/web_navigation_control.h"
 #include "third_party/blink/public/web/web_plugin.h"
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/public/web/web_widget_client.h"
@@ -90,7 +91,8 @@ class WebViewPlugin : public blink::WebPlugin,
 
   bool IsErrorPlaceholder() override;
 
-  void UpdateAllLifecyclePhases() override;
+  void UpdateAllLifecyclePhases(
+      blink::WebWidget::LifecycleUpdateReason reason) override;
   void Paint(cc::PaintCanvas* canvas, const blink::WebRect& rect) override;
 
   // Coordinates are relative to the containing window.
@@ -124,6 +126,7 @@ class WebViewPlugin : public blink::WebPlugin,
   void OnDestruct() override {}
   void OnZoomLevelChanged() override;
 
+  void LoadHTML(const std::string& html_data, const GURL& url);
   void UpdatePluginForNewGeometry(const blink::WebRect& window_rect,
                                   const blink::WebRect& unobscured_rect);
 
@@ -156,25 +159,22 @@ class WebViewPlugin : public blink::WebPlugin,
     ~WebViewHelper() override;
 
     blink::WebView* web_view() { return web_view_; }
-    blink::WebLocalFrame* main_frame();
+    blink::WebNavigationControl* main_frame() { return frame_; }
 
     // WebViewClient methods:
     bool AcceptsLoadDrops() override;
     bool CanHandleGestureEvent() override;
     bool CanUpdateLayout() override;
-    blink::WebWidgetClient* WidgetClient() override;
+    blink::WebScreenInfo GetScreenInfo() override;
 
     // WebWidgetClient methods:
     void SetToolTipText(const blink::WebString&,
                         blink::WebTextDirection) override;
-    void StartDragging(blink::WebReferrerPolicy,
+    void StartDragging(network::mojom::ReferrerPolicy,
                        const blink::WebDragData&,
                        blink::WebDragOperationsMask,
                        const SkBitmap&,
-                       const blink::WebPoint&) override;
-    // TODO(ojan): Remove this override and have this class give a
-    // LayerTreeView to the WebWidget. Or stop making this a WebView?
-    bool AllowsBrokenNullLayerTreeView() const override;
+                       const gfx::Point&) override;
     void DidInvalidateRect(const blink::WebRect&) override;
     void DidChangeCursor(const blink::WebCursorInfo& cursor) override;
     void ScheduleAnimation() override;
@@ -182,11 +182,13 @@ class WebViewPlugin : public blink::WebPlugin,
         override;
 
     // WebLocalFrameClient methods:
+    void BindToFrame(blink::WebNavigationControl* frame) override;
     void DidClearWindowObject() override;
     void FrameDetached(DetachType) override;
 
    private:
     WebViewPlugin* plugin_;
+    blink::WebNavigationControl* frame_ = nullptr;
 
     // Owned by us, deleted via |close()|.
     blink::WebView* web_view_;

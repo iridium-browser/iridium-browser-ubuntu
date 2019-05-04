@@ -16,6 +16,7 @@
 #include "SkColorPriv.h"
 #include "SkColorFilter.h"
 #include "SkStrokeRec.h"
+#include "SkTextUtils.h"
 #include "SkTypeface.h"
 
 #include "SkGradientShader.h"
@@ -29,15 +30,7 @@ public:
                     SkTDArray<SkPoint>* pts)
     : Sk2DPathEffect(matrix), fRadius(radius), fPts(pts) {}
 
-    SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(Dot2DPathEffect)
-    class Registrar {
-    public:
-        Registrar() {
-            SkFlattenable::Register("Dot2DPathEffect",
-                                    Dot2DPathEffect::CreateProc,
-                                    Dot2DPathEffect::GetFlattenableType());
-        }
-    };
+    SK_FLATTENABLE_HOOKS(Dot2DPathEffect)
 protected:
     void begin(const SkIRect& uvBounds, SkPath* dst) const override {
         if (fPts) {
@@ -60,13 +53,22 @@ protected:
     }
 
 private:
+
     SkScalar fRadius;
     SkTDArray<SkPoint>* fPts;
 
     typedef Sk2DPathEffect INHERITED;
 };
 
-static Dot2DPathEffect::Registrar gReg0;
+// Register this path effect as deserializable before main().
+namespace {
+    static struct Initializer {
+        Initializer() {
+            SK_REGISTER_FLATTENABLE(Dot2DPathEffect);
+        }
+    } initializer;
+}
+
 
 sk_sp<SkFlattenable> Dot2DPathEffect::CreateProc(SkReadBuffer& buffer) {
     SkMatrix matrix;
@@ -84,9 +86,9 @@ public:
         return true;
     }
 
-    SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(InverseFillPE)
-
 private:
+    SK_FLATTENABLE_HOOKS(InverseFillPE)
+
     typedef SkPathEffect INHERITED;
 };
 
@@ -127,13 +129,13 @@ protected:
         canvas->drawColor(SK_ColorWHITE);
     }
 
-    void drawdots(SkCanvas* canvas, SkString s, SkScalar x, SkScalar y, const SkPaint& p) {
+    void drawdots(SkCanvas* canvas, SkString s, SkScalar x, SkScalar y, const SkFont& font) {
         SkTDArray<SkPoint> pts;
         auto pe = makepe(fInterp, &pts);
 
         SkStrokeRec rec(SkStrokeRec::kFill_InitStyle);
         SkPath path, dstPath;
-        p.getTextPath(s.c_str(), s.size(), x, y, &path);
+        SkTextUtils::GetPath(s.c_str(), s.size(), kUTF8_SkTextEncoding, x, y, font, &path);
         pe->filterPath(&dstPath, path, &rec, nullptr);
 
         SkPaint paint;
@@ -149,16 +151,12 @@ protected:
         SkScalar x = SkIntToScalar(20);
         SkScalar y = SkIntToScalar(300);
 
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setTextSize(SkIntToScalar(240));
-        paint.setTypeface(SkTypeface::MakeFromName("sans-serif", SkFontStyle::Bold()));
-        paint.setTypeface(fFace);
+        SkFont font(SkTypeface::MakeFromName("sans-serif", SkFontStyle::Bold()), 240);
 
         SkString str("9");
 
-        canvas->drawString(str, x, y, paint);
-        drawdots(canvas, str, x, y, paint);
+        canvas->drawString(str, x, y, font, SkPaint());
+        drawdots(canvas, str, x, y, font);
 
         if (false) {
             fInterp += fDx;

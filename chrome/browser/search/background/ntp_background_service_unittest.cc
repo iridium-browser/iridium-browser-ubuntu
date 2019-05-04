@@ -22,13 +22,6 @@
 using testing::Eq;
 using testing::StartsWith;
 
-namespace {
-
-// The options to be added to end of an image URL, specifying resolution, etc.
-constexpr char kImageOptions[] = "=imageOptions";
-
-}  // namespace
-
 class NtpBackgroundServiceTest : public testing::Test {
  public:
   NtpBackgroundServiceTest()
@@ -46,9 +39,7 @@ class NtpBackgroundServiceTest : public testing::Test {
     testing::Test::SetUp();
 
     service_ = std::make_unique<NtpBackgroundService>(
-        identity_env_.identity_manager(), test_shared_loader_factory_,
-        base::nullopt, base::nullopt, base::nullopt, base::nullopt,
-        kImageOptions);
+        identity_env_.identity_manager(), test_shared_loader_factory_);
   }
 
   void SetUpResponseWithData(const GURL& load_url,
@@ -189,7 +180,8 @@ TEST_F(NtpBackgroundServiceTest, GoodCollectionImagesResponse) {
   collection_image.asset_id = image.asset_id();
   collection_image.thumbnail_image_url =
       GURL(image.image_url() + GetThumbnailImageOptionsForTesting());
-  collection_image.image_url = GURL(image.image_url() + kImageOptions);
+  collection_image.image_url =
+      GURL(image.image_url() + service()->GetImageOptionsForTesting());
   collection_image.attribution.push_back(image.attribution(0).text());
   collection_image.attribution_action_url = GURL(image.action_url());
 
@@ -243,7 +235,8 @@ TEST_F(NtpBackgroundServiceTest, MultipleRequests) {
   collection_image.asset_id = image.asset_id();
   collection_image.thumbnail_image_url =
       GURL(image.image_url() + GetThumbnailImageOptionsForTesting());
-  collection_image.image_url = GURL(image.image_url() + kImageOptions);
+  collection_image.image_url =
+      GURL(image.image_url() + service()->GetImageOptionsForTesting());
   collection_image.attribution.push_back(image.attribution(0).text());
 
   EXPECT_FALSE(service()->collection_info().empty());
@@ -458,4 +451,31 @@ TEST_F(NtpBackgroundServiceTest, GoodAlbumPhotosResponse) {
   EXPECT_THAT(service()->album_photos().at(0).photo_url.spec(),
               StartsWith(preview.preview_url()));
   EXPECT_EQ(service()->album_photos_error_info().error_type, ErrorType::NONE);
+}
+
+TEST_F(NtpBackgroundServiceTest, CheckValidAndInvalidBackdropUrls) {
+  ntp::background::Image image;
+  image.set_asset_id(12345);
+  image.set_image_url("https://wallpapers.co/some_image");
+  image.add_attribution()->set_text("attribution text");
+  image.set_action_url("https://wallpapers.co/some_image/learn_more");
+  ntp::background::GetImagesInCollectionResponse response;
+  *response.add_images() = image;
+  std::string response_string;
+  response.SerializeToString(&response_string);
+
+  SetUpResponseWithData(service()->GetImagesURLForTesting(), response_string);
+
+  ASSERT_TRUE(service()->collection_images().empty());
+
+  service()->FetchCollectionImageInfo("shapes");
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_TRUE(service()->IsValidBackdropUrl(
+      GURL(image.image_url() + service()->GetImageOptionsForTesting())));
+
+  EXPECT_FALSE(service()->IsValidBackdropUrl(
+      GURL("http://wallpapers.co/some_image=imageOptions")));
+  EXPECT_FALSE(service()->IsValidBackdropUrl(
+      GURL("https://wallpapers.co/another_image")));
 }

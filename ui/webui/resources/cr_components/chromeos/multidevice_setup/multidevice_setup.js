@@ -6,7 +6,6 @@ cr.exportPath('multidevice_setup');
 
 /** @enum {string} */
 multidevice_setup.PageName = {
-  FAILURE: 'setup-failed-page',
   PASSWORD: 'password-page',
   SUCCESS: 'setup-succeeded-page',
   START: 'start-setup-page',
@@ -41,7 +40,7 @@ cr.define('multidevice_setup', function() {
       forwardButtonDisabled: {
         type: Boolean,
         computed: 'shouldForwardButtonBeDisabled_(' +
-            'passwordPageForwardButtonDisabled_, visiblePageName_)',
+            'passwordPageForwardButtonDisabled_, visiblePageName)',
         notify: true
       },
 
@@ -68,19 +67,19 @@ cr.define('multidevice_setup', function() {
       /**
        * Element name of the currently visible page.
        *
-       * @private {!multidevice_setup.PageName}
+       * @type {!multidevice_setup.PageName}
        */
-      visiblePageName_: {
+      visiblePageName: {
         type: String,
         value: PageName.START,
-        notify: true,  // For testing purposes only.
+        notify: true,
       },
 
       /**
        * DOM Element corresponding to the visible page.
        *
        * @private {!PasswordPageElement|!StartSetupPageElement|
-       *           !SetupSucceededPageElement|!SetupFailedPageElement}
+       *           !SetupSucceededPageElement}
        */
       visiblePage_: Object,
 
@@ -95,7 +94,7 @@ cr.define('multidevice_setup', function() {
       /**
        * Array of objects representing all potential MultiDevice hosts.
        *
-       * @private {!Array<!chromeos.deviceSync.mojom.RemoteDevice>}
+       * @private {!Array<!chromeos.multidevice.mojom.RemoteDevice>}
        */
       devices_: Array,
 
@@ -161,48 +160,48 @@ cr.define('multidevice_setup', function() {
 
     /** @private */
     onCancelRequested_: function() {
-      this.exitSetupFlow_();
+      this.exitSetupFlow_(false /* didUserCompleteSetup */);
     },
 
     /** @private */
     onBackwardNavigationRequested_: function() {
       // The back button is only visible on the password page.
-      assert(this.visiblePageName_ == PageName.PASSWORD);
+      assert(this.visiblePageName == PageName.PASSWORD);
 
       this.$$('password-page').clearPasswordTextInput();
-      this.visiblePageName_ = PageName.START;
+      this.visiblePageName = PageName.START;
     },
 
     /** @private */
     onForwardNavigationRequested_: function() {
-      if (this.forwardButtonDisabled)
+      if (this.forwardButtonDisabled) {
         return;
+      }
 
       this.visiblePage_.getCanNavigateToNextPage().then((canNavigate) => {
-        if (!canNavigate)
+        if (!canNavigate) {
           return;
+        }
         this.navigateForward_();
       });
     },
 
     /** @private */
     navigateForward_: function() {
-      switch (this.visiblePageName_) {
-        case PageName.FAILURE:
-          this.visiblePageName_ = PageName.START;
-          return;
+      switch (this.visiblePageName) {
         case PageName.PASSWORD:
           this.$$('password-page').clearPasswordTextInput();
           this.setHostDevice_();
           return;
         case PageName.SUCCESS:
-          this.exitSetupFlow_();
+          this.exitSetupFlow_(true /* didUserCompleteSetup */);
           return;
         case PageName.START:
-          if (this.delegate.isPasswordRequiredToSetHost())
-            this.visiblePageName_ = PageName.PASSWORD;
-          else
+          if (this.delegate.isPasswordRequiredToSetHost()) {
+            this.visiblePageName = PageName.PASSWORD;
+          } else {
             this.setHostDevice_();
+          }
           return;
       }
     },
@@ -221,11 +220,11 @@ cr.define('multidevice_setup', function() {
             }
 
             if (this.delegate.shouldExitSetupFlowAfterSettingHost()) {
-              this.exitSetupFlow_();
+              this.exitSetupFlow_(true /* didUserCompleteSetup */);
               return;
             }
 
-            this.visiblePageName_ = PageName.SUCCESS;
+            this.visiblePageName = PageName.SUCCESS;
             this.fire('forward-button-focus-requested');
           })
           .catch((error) => {
@@ -244,8 +243,9 @@ cr.define('multidevice_setup', function() {
      * @private
      */
     getForwardButtonText_: function() {
-      if (!this.visiblePage_)
+      if (!this.visiblePage_) {
         return undefined;
+      }
       return this.visiblePage_.forwardButtonText;
     },
 
@@ -254,7 +254,7 @@ cr.define('multidevice_setup', function() {
      * @private
      */
     shouldForwardButtonBeDisabled_: function() {
-      return (this.visiblePageName_ == PageName.PASSWORD) &&
+      return (this.visiblePageName == PageName.PASSWORD) &&
           this.passwordPageForwardButtonDisabled_;
     },
 
@@ -264,8 +264,9 @@ cr.define('multidevice_setup', function() {
      * @private
      */
     getCancelButtonText_: function() {
-      if (!this.visiblePage_)
+      if (!this.visiblePage_) {
         return undefined;
+      }
       return this.visiblePage_.cancelButtonText;
     },
 
@@ -275,8 +276,9 @@ cr.define('multidevice_setup', function() {
      * @private
      */
     getBackwardButtonText_: function() {
-      if (!this.visiblePage_)
+      if (!this.visiblePage_) {
         return undefined;
+      }
       return this.visiblePage_.backwardButtonText;
     },
 
@@ -298,11 +300,11 @@ cr.define('multidevice_setup', function() {
 
     /**
      * Notifies observers that the setup flow has completed.
-     *
+     * @param {boolean} didUserCompleteSetup
      * @private
      */
-    exitSetupFlow_: function() {
-      this.fire('setup-exited');
+    exitSetupFlow_: function(didUserCompleteSetup) {
+      this.fire('setup-exited', {didUserCompleteSetup: didUserCompleteSetup});
     },
   });
 

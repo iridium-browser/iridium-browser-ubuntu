@@ -18,10 +18,10 @@ import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.Tab.TabHidingType;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabModelObserver;
+import org.chromium.chrome.browser.tabmodel.TabSelectionType;
 import org.chromium.net.NetworkChangeNotifier;
 
 import java.util.HashMap;
@@ -140,7 +140,7 @@ public class OfflinePageTabObserver
 
     // Methods from EmptyTabObserver
     @Override
-    public void onPageLoadFinished(Tab tab) {
+    public void onPageLoadFinished(Tab tab, String url) {
         Log.d(TAG, "onPageLoadFinished");
         if (isObservingTab(tab)) {
             mObservedTabs.get(tab.getId()).isLoaded = true;

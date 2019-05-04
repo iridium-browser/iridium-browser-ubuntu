@@ -23,6 +23,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate_factory.h"
+#include "chrome/browser/client_hints/client_hints_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/dom_distiller/profile_utils.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -275,10 +276,6 @@ base::FilePath OffTheRecordProfileImpl::GetPath() const {
   return profile_->GetPath();
 }
 
-base::FilePath OffTheRecordProfileImpl::GetCachePath() const {
-  return profile_->GetCachePath();
-}
-
 #if !defined(OS_ANDROID)
 std::unique_ptr<content::ZoomLevelDelegate>
 OffTheRecordProfileImpl::CreateZoomLevelDelegate(
@@ -376,17 +373,16 @@ OffTheRecordProfileImpl::CreateMediaRequestContextForStoragePartition(
       .get();
 }
 
-void OffTheRecordProfileImpl::RegisterInProcessServices(
-    StaticServiceMap* services) {
-  {
-    service_manager::EmbeddedServiceInfo info;
-    info.factory =
-        InProcessPrefServiceFactoryFactory::GetInstanceForContext(this)
-            ->CreatePrefServiceFactory();
-    info.task_runner = base::CreateSingleThreadTaskRunnerWithTraits(
-        {content::BrowserThread::UI});
-    services->insert(std::make_pair(prefs::mojom::kServiceName, info));
+std::unique_ptr<service_manager::Service>
+OffTheRecordProfileImpl::HandleServiceRequest(
+    const std::string& service_name,
+    service_manager::mojom::ServiceRequest request) {
+  if (service_name == prefs::mojom::kServiceName) {
+    return InProcessPrefServiceFactoryFactory::GetInstanceForContext(this)
+        ->CreatePrefService(std::move(request));
   }
+
+  return nullptr;
 }
 
 net::URLRequestContextGetter* OffTheRecordProfileImpl::GetRequestContext() {
@@ -460,6 +456,11 @@ OffTheRecordProfileImpl::GetPermissionControllerDelegate() {
   return PermissionManagerFactory::GetForProfile(this);
 }
 
+content::ClientHintsControllerDelegate*
+OffTheRecordProfileImpl::GetClientHintsControllerDelegate() {
+  return ClientHintsFactory::GetForBrowserContext(this);
+}
+
 content::BackgroundFetchDelegate*
 OffTheRecordProfileImpl::GetBackgroundFetchDelegate() {
   return BackgroundFetchDelegateFactory::GetForProfile(this);
@@ -506,6 +507,20 @@ OffTheRecordProfileImpl::GetVideoDecodePerfHistory() {
   }
 
   return decode_history;
+}
+
+void OffTheRecordProfileImpl::SetCorsOriginAccessListForOrigin(
+    const url::Origin& source_origin,
+    std::vector<network::mojom::CorsOriginPatternPtr> allow_patterns,
+    std::vector<network::mojom::CorsOriginPatternPtr> block_patterns,
+    base::OnceClosure closure) {
+  NOTREACHED()
+      << "CorsOriginAccessList should not be modified in incognito profiles";
+}
+
+const content::SharedCorsOriginAccessList*
+OffTheRecordProfileImpl::GetSharedCorsOriginAccessList() const {
+  return profile_->GetSharedCorsOriginAccessList();
 }
 
 bool OffTheRecordProfileImpl::IsSameProfile(Profile* profile) {

@@ -5,11 +5,11 @@
 package org.chromium.chrome.browser.sync;
 
 import android.app.Notification;
-import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Bundle;
 import android.util.Log;
 
 import org.chromium.base.ContextUtils;
@@ -40,9 +40,8 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
     private final ProfileSyncService mProfileSyncService;
 
     public SyncNotificationController() {
-        mNotificationManager = new NotificationManagerProxyImpl(
-                (NotificationManager) ContextUtils.getApplicationContext().getSystemService(
-                        Context.NOTIFICATION_SERVICE));
+        mNotificationManager =
+                new NotificationManagerProxyImpl(ContextUtils.getApplicationContext());
         mProfileSyncService = ProfileSyncService.get();
         assert mProfileSyncService != null;
     }
@@ -55,7 +54,7 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
         ThreadUtils.assertOnUiThread();
 
         // Auth errors take precedence over passphrase errors.
-        if (!AndroidSyncSettings.isSyncEnabled()) {
+        if (!AndroidSyncSettings.get().isSyncEnabled()) {
             mNotificationManager.cancel(NotificationConstants.NOTIFICATION_ID_SYNC);
             return;
         }
@@ -149,13 +148,16 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
      */
     private Intent createSettingsIntent() {
         final String fragmentName;
+        final Bundle fragmentArguments;
         if (ChromeFeatureList.isEnabled(ChromeFeatureList.UNIFIED_CONSENT)) {
             fragmentName = SyncAndServicesPreferences.class.getName();
+            fragmentArguments = SyncAndServicesPreferences.createArguments(false);
         } else {
             fragmentName = AccountManagementFragment.class.getName();
+            fragmentArguments = null;
         }
         return PreferencesLauncher.createIntentForSettingsPage(
-                ContextUtils.getApplicationContext(), fragmentName);
+                ContextUtils.getApplicationContext(), fragmentName, fragmentArguments);
     }
 
     /**

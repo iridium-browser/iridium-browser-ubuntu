@@ -16,17 +16,17 @@
 #include "base/bind.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/safe_strerror.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "crypto/sha2.h"
-#include "media/midi/midi_port_info.h"
 #include "media/midi/midi_service.h"
+#include "media/midi/midi_service.mojom.h"
 #include "media/midi/task_service.h"
 
 namespace midi {
@@ -169,17 +169,18 @@ MidiManagerAlsa::~MidiManagerAlsa() {
     // because of SND_SEQ_EVENT_CLIENT_EXIT.
     out_client_.reset();
   }
-
   // Ensure that no task is running any more.
-  bool result = service()->task_service()->UnbindInstance();
-  CHECK(result);
+  if (!service()->task_service()->UnbindInstance())
+    return;
+
+  // |out_client_| should be reset before UnbindInstance() call to avoid
+  // a deadlock, but other finalization steps should be implemented after the
+  // UnbindInstance() call above, if we need.
 }
 
 void MidiManagerAlsa::StartInitialization() {
-  if (!service()->task_service()->BindInstance()) {
-    NOTREACHED();
+  if (!service()->task_service()->BindInstance())
     return CompleteInitialization(Result::INITIALIZATION_ERROR);
-  }
 
   // Create client handles and name the clients.
   int err;
@@ -847,7 +848,7 @@ void MidiManagerAlsa::EventLoop() {
   pfd[1].fd = device::udev_monitor_get_fd(udev_monitor_.get());
   pfd[1].events = POLLIN;
 
-  int err = HANDLE_EINTR(poll(pfd, arraysize(pfd), -1));
+  int err = HANDLE_EINTR(poll(pfd, base::size(pfd), -1));
   if (err < 0) {
     VLOG(1) << "poll fails: " << base::safe_strerror(errno);
     loop_again = false;
@@ -1175,8 +1176,8 @@ void MidiManagerAlsa::UpdatePortStateAndGenerateEvents() {
       uint32_t web_port_index = port_state_.push_back(std::move(new_port));
       it = new_port_state->erase(it);
 
-      MidiPortInfo info(opaque_key, manufacturer, port_name, version,
-                        PortState::OPENED);
+      mojom::PortInfo info(opaque_key, manufacturer, port_name, version,
+                           PortState::OPENED);
       switch (type) {
         case MidiPort::Type::kInput:
           if (Subscribe(web_port_index, client_id, port_id))

@@ -42,8 +42,6 @@ WebSettingsImpl::WebSettingsImpl(Settings* settings,
                                  DevToolsEmulator* dev_tools_emulator)
     : settings_(settings),
       dev_tools_emulator_(dev_tools_emulator),
-      show_fps_counter_(false),
-      show_paint_rects_(false),
       render_v_sync_notification_enabled_(false),
       auto_zoom_focused_node_to_legible_scale_(false),
       support_deprecated_target_density_dpi_(false),
@@ -259,12 +257,6 @@ void WebSettingsImpl::SetShouldReuseGlobalForUnownedMainFrame(bool enabled) {
   settings_->SetShouldReuseGlobalForUnownedMainFrame(enabled);
 }
 
-void WebSettingsImpl::SetSavePreviousDocumentResources(
-    SavePreviousDocumentResources save_resources) {
-  settings_->SetSavePreviousDocumentResources(
-      static_cast<blink::SavePreviousDocumentResources>(save_resources));
-}
-
 void WebSettingsImpl::SetPluginsEnabled(bool enabled) {
   dev_tools_emulator_->SetPluginsEnabled(enabled);
 }
@@ -290,8 +282,8 @@ void WebSettingsImpl::SetPreferHiddenVolumeControls(bool enabled) {
   settings_->SetPreferHiddenVolumeControls(enabled);
 }
 
-void WebSettingsImpl::SetShouldThrottlePushState(bool enabled) {
-  settings_->SetShouldThrottlePushState(enabled);
+void WebSettingsImpl::SetShouldProtectAgainstIpcFlooding(bool enabled) {
+  settings_->SetShouldProtectAgainstIpcFlooding(enabled);
 }
 
 void WebSettingsImpl::SetDOMPasteAllowed(bool enabled) {
@@ -461,20 +453,8 @@ void WebSettingsImpl::SetShowContextMenuOnMouseUp(bool enabled) {
   settings_->SetShowContextMenuOnMouseUp(enabled);
 }
 
-void WebSettingsImpl::SetShowFPSCounter(bool show) {
-  show_fps_counter_ = show;
-}
-
-void WebSettingsImpl::SetShowPaintRects(bool show) {
-  show_paint_rects_ = show;
-}
-
 void WebSettingsImpl::SetEditingBehavior(EditingBehavior behavior) {
   settings_->SetEditingBehaviorType(static_cast<EditingBehaviorType>(behavior));
-}
-
-void WebSettingsImpl::SetAcceleratedCompositingEnabled(bool enabled) {
-  settings_->SetAcceleratedCompositingEnabled(enabled);
 }
 
 void WebSettingsImpl::SetMockScrollbarsEnabled(bool enabled) {
@@ -515,6 +495,10 @@ void WebSettingsImpl::SetHideDownloadUI(bool hide) {
 
 void WebSettingsImpl::SetPresentationReceiver(bool enabled) {
   settings_->SetPresentationReceiver(enabled);
+}
+
+void WebSettingsImpl::SetHighlightAds(bool enabled) {
+  settings_->SetHighlightAds(enabled);
 }
 
 void WebSettingsImpl::SetHistoryEntryRequiresUserGesture(bool enabled) {
@@ -568,10 +552,6 @@ void WebSettingsImpl::SetPasswordEchoDurationInSeconds(
   settings_->SetPasswordEchoDurationInSeconds(duration_in_seconds);
 }
 
-void WebSettingsImpl::SetPerTilePaintingEnabled(bool enabled) {
-  per_tile_painting_enabled_ = enabled;
-}
-
 void WebSettingsImpl::SetShouldPrintBackgrounds(bool enabled) {
   settings_->SetShouldPrintBackgrounds(enabled);
 }
@@ -582,6 +562,10 @@ void WebSettingsImpl::SetShouldClearDocumentBackground(bool enabled) {
 
 void WebSettingsImpl::SetEnableScrollAnimator(bool enabled) {
   settings_->SetScrollAnimatorEnabled(enabled);
+}
+
+void WebSettingsImpl::SetPrefersReducedMotion(bool enabled) {
+  settings_->SetPrefersReducedMotion(enabled);
 }
 
 void WebSettingsImpl::SetEnableTouchAdjustment(bool enabled) {
@@ -620,13 +604,8 @@ void WebSettingsImpl::SetDataSaverHoldbackWebApi(bool enabled) {
   settings_->SetDataSaverHoldbackWebApi(enabled);
 }
 
-void WebSettingsImpl::SetDataSaverHoldbackMediaApi(bool enabled) {
-  settings_->SetDataSaverHoldbackMediaApi(enabled);
-}
-
-void WebSettingsImpl::SetMediaPlaybackGestureWhitelistScope(
-    const WebString& scope) {
-  settings_->SetMediaPlaybackGestureWhitelistScope(scope);
+void WebSettingsImpl::SetWebAppScope(const WebString& scope) {
+  settings_->SetWebAppScope(scope);
 }
 
 void WebSettingsImpl::SetPresentationRequiresUserGesture(bool required) {
@@ -715,6 +694,10 @@ void WebSettingsImpl::SetLowPriorityIframesThreshold(
   settings_->SetLowPriorityIframesThreshold(effective_connection_type);
 }
 
+void WebSettingsImpl::SetLazyLoadEnabled(bool enabled) {
+  settings_->SetLazyLoadEnabled(enabled);
+}
+
 void WebSettingsImpl::SetLazyFrameLoadingDistanceThresholdPxUnknown(
     int distance_px) {
   settings_->SetLazyFrameLoadingDistanceThresholdPxUnknown(distance_px);
@@ -775,11 +758,11 @@ void WebSettingsImpl::SetLazyImageLoadingDistanceThresholdPx4G(
   settings_->SetLazyImageLoadingDistanceThresholdPx4G(distance_px);
 }
 
-STATIC_ASSERT_ENUM(WebSettings::kImageAnimationPolicyAllowed,
+STATIC_ASSERT_ENUM(WebSettings::ImageAnimationPolicy::kAllowed,
                    kImageAnimationPolicyAllowed);
-STATIC_ASSERT_ENUM(WebSettings::kImageAnimationPolicyAnimateOnce,
+STATIC_ASSERT_ENUM(WebSettings::ImageAnimationPolicy::kAnimateOnce,
                    kImageAnimationPolicyAnimateOnce);
-STATIC_ASSERT_ENUM(WebSettings::kImageAnimationPolicyNoAnimation,
+STATIC_ASSERT_ENUM(WebSettings::ImageAnimationPolicy::kNoAnimation,
                    kImageAnimationPolicyNoAnimation);
 
 }  // namespace blink

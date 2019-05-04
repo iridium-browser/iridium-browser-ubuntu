@@ -51,9 +51,9 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/file_type_policies.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/download/database/in_progress/in_progress_cache_impl.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
 #include "components/download/public/common/download_item.h"
+#include "components/offline_pages/buildflags/buildflags.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
@@ -90,6 +90,12 @@
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/constants.h"
+#endif
+
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+#include "chrome/browser/offline_pages/offline_page_utils.h"
+#include "components/offline_pages/core/client_namespace_constants.h"
+#include "services/network/public/cpp/features.h"
 #endif
 
 using content::BrowserThread;
@@ -297,6 +303,7 @@ void OnDownloadLocationDetermined(
 ChromeDownloadManagerDelegate::ChromeDownloadManagerDelegate(Profile* profile)
     : profile_(profile),
       next_download_id_(download::DownloadItem::kInvalidId),
+      next_id_retrieved_(false),
       download_prefs_(new DownloadPrefs(profile)),
       disk_access_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
@@ -358,17 +365,13 @@ void ChromeDownloadManagerDelegate::SetNextId(uint32_t next_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!profile_->IsOffTheRecord());
 
-  // |download::DownloadItem::kInvalidId| will be returned only when download
+  // |download::DownloadItem::kInvalidId| will be returned only when history
   // database failed to initialize.
-  bool download_db_available = (next_id != download::DownloadItem::kInvalidId);
-  RecordDatabaseAvailability(download_db_available);
-  if (download_db_available) {
+  bool history_db_available = (next_id != download::DownloadItem::kInvalidId);
+  RecordDatabaseAvailability(history_db_available);
+  if (history_db_available)
     next_download_id_ = next_id;
-  } else {
-    // Still download files without download database, all download history in
-    // this browser session will not be persisted.
-    next_download_id_ = download::DownloadItem::kInvalidId + 1;
-  }
+  next_id_retrieved_ = true;
 
   IdCallbackVector callbacks;
   id_callbacks_.swap(callbacks);
@@ -382,11 +385,11 @@ void ChromeDownloadManagerDelegate::GetNextId(
     const content::DownloadIdCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (profile_->IsOffTheRecord()) {
-    content::BrowserContext::GetDownloadManager(
-        profile_->GetOriginalProfile())->GetDelegate()->GetNextId(callback);
+    content::BrowserContext::GetDownloadManager(profile_->GetOriginalProfile())
+        ->GetNextId(callback);
     return;
   }
-  if (next_download_id_ == download::DownloadItem::kInvalidId) {
+  if (!next_id_retrieved_) {
     id_callbacks_.push_back(callback);
     return;
   }
@@ -397,8 +400,10 @@ void ChromeDownloadManagerDelegate::ReturnNextId(
     const content::DownloadIdCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!profile_->IsOffTheRecord());
-  DCHECK_NE(download::DownloadItem::kInvalidId, next_download_id_);
-  callback.Run(next_download_id_++);
+  // kInvalidId is returned to indicate the error.
+  callback.Run(next_download_id_);
+  if (next_download_id_ != download::DownloadItem::kInvalidId)
+    ++next_download_id_;
 }
 
 bool ChromeDownloadManagerDelegate::DetermineDownloadTarget(
@@ -574,6 +579,19 @@ bool ChromeDownloadManagerDelegate::InterceptDownloadIfApplicable(
     const std::string& mime_type,
     const std::string& request_origin,
     content::WebContents* web_contents) {
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+  if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
+    if (offline_pages::OfflinePageUtils::CanDownloadAsOfflinePage(url,
+                                                                  mime_type)) {
+      offline_pages::OfflinePageUtils::ScheduleDownload(
+          web_contents, offline_pages::kDownloadNamespace, url,
+          offline_pages::OfflinePageUtils::DownloadUIActionFlags::ALL,
+          request_origin);
+      return true;
+    }
+  }
+#endif
   return false;
 }
 
@@ -988,7 +1006,8 @@ void ChromeDownloadManagerDelegate::OnConfirmationCallbackComplete(
   callback.Run(result, virtual_path);
   if (!file_picker_callbacks_.empty()) {
     base::OnceClosure callback = std::move(file_picker_callbacks_.front());
-    std::move(callback).Run();
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback)));
     file_picker_callbacks_.pop_front();
   } else {
     is_file_picker_showing_ = false;
@@ -1001,15 +1020,23 @@ void ChromeDownloadManagerDelegate::ShowFilePicker(
     const DownloadTargetDeterminerDelegate::ConfirmationCallback& callback) {
   DownloadItem* download = download_manager_->GetDownloadByGuid(guid);
   if (download) {
-    DownloadFilePicker::ShowFilePicker(
-        download, suggested_path,
-        base::BindRepeating(
-            &ChromeDownloadManagerDelegate::OnConfirmationCallbackComplete,
-            weak_ptr_factory_.GetWeakPtr(), callback));
+    ShowFilePickerForDownload(download, suggested_path, callback);
   } else {
     OnConfirmationCallbackComplete(
         callback, DownloadConfirmationResult::CANCELED, base::FilePath());
   }
+}
+
+void ChromeDownloadManagerDelegate::ShowFilePickerForDownload(
+    DownloadItem* download,
+    const base::FilePath& suggested_path,
+    const DownloadTargetDeterminerDelegate::ConfirmationCallback& callback) {
+  DCHECK(download);
+  DownloadFilePicker::ShowFilePicker(
+      download, suggested_path,
+      base::BindRepeating(
+          &ChromeDownloadManagerDelegate::OnConfirmationCallbackComplete,
+          weak_ptr_factory_.GetWeakPtr(), callback));
 }
 
 #if defined(OS_ANDROID)

@@ -42,6 +42,9 @@ class CORE_EXPORT SVGImageElement final
 
  public:
   DECLARE_NODE_FACTORY(SVGImageElement);
+
+  explicit SVGImageElement(Document&);
+
   void Trace(blink::Visitor*) override;
 
   bool CurrentFrameHasSingleSecurityOrigin() const;
@@ -73,9 +76,11 @@ class CORE_EXPORT SVGImageElement final
     return is_default_overridden_intrinsic_size_;
   }
 
- private:
-  explicit SVGImageElement(Document&);
+  void SetImageForTest(ImageResourceContent* content) {
+    GetImageLoader().SetImageForTest(content);
+  }
 
+ private:
   bool IsStructurallyExternal() const override {
     return !HrefString().IsNull();
   }

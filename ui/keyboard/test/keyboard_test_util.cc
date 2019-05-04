@@ -5,8 +5,8 @@
 #include "ui/keyboard/test/keyboard_test_util.h"
 
 #include "base/run_loop.h"
-#include "ui/aura/window.h"
-#include "ui/aura/window_observer.h"
+#include "base/time/time.h"
+#include "ui/display/screen.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 
@@ -38,30 +38,6 @@ class KeyboardVisibilityChangeWaiter : public KeyboardControllerObserver {
   DISALLOW_COPY_AND_ASSIGN(KeyboardVisibilityChangeWaiter);
 };
 
-class ControllerStateChangeWaiter : public KeyboardControllerObserver {
- public:
-  explicit ControllerStateChangeWaiter(KeyboardControllerState state)
-      : controller_(KeyboardController::Get()), state_(state) {
-    controller_->AddObserver(this);
-  }
-  ~ControllerStateChangeWaiter() override { controller_->RemoveObserver(this); }
-
-  void Wait() { run_loop_.Run(); }
-
- private:
-  void OnStateChanged(const KeyboardControllerState state) override {
-    if (state == state_) {
-      run_loop_.QuitWhenIdle();
-    }
-  }
-
-  base::RunLoop run_loop_;
-  KeyboardController* controller_;
-  KeyboardControllerState state_;
-
-  DISALLOW_COPY_AND_ASSIGN(ControllerStateChangeWaiter);
-};
-
 bool WaitVisibilityChangesTo(bool wait_until) {
   if (KeyboardController::Get()->IsKeyboardVisible() == wait_until)
     return true;
@@ -84,11 +60,6 @@ bool WaitUntilHidden() {
   // actually detect when the hide animation finishes.
   // TODO(https://crbug.com/849995): Find a proper solution to this.
   return WaitVisibilityChangesTo(false /* wait_until */);
-}
-
-void WaitControllerStateChangesTo(KeyboardControllerState state) {
-  ControllerStateChangeWaiter waiter(state);
-  waiter.Wait();
 }
 
 bool IsKeyboardShowing() {
@@ -114,31 +85,6 @@ gfx::Rect KeyboardBoundsFromRootBounds(const gfx::Rect& root_bounds,
                                        int keyboard_height) {
   return gfx::Rect(root_bounds.x(), root_bounds.bottom() - keyboard_height,
                    root_bounds.width(), keyboard_height);
-}
-
-TestKeyboardUI::TestKeyboardUI(ui::InputMethod* input_method)
-    : input_method_(input_method) {}
-
-TestKeyboardUI::~TestKeyboardUI() {
-  // Destroy the window before the delegate.
-  window_.reset();
-}
-
-aura::Window* TestKeyboardUI::GetKeyboardWindow() {
-  if (!window_) {
-    window_.reset(new aura::Window(&delegate_));
-    window_->Init(ui::LAYER_NOT_DRAWN);
-    window_->set_owned_by_parent(false);
-  }
-  return window_.get();
-}
-
-ui::InputMethod* TestKeyboardUI::GetInputMethod() {
-  return input_method_;
-}
-
-bool TestKeyboardUI::HasKeyboardWindow() const {
-  return !!window_;
 }
 
 }  // namespace keyboard

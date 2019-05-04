@@ -5,14 +5,21 @@
 #ifndef CHROME_BROWSER_CHROMEOS_EXTENSIONS_AUTOTEST_PRIVATE_AUTOTEST_PRIVATE_API_H_
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_AUTOTEST_PRIVATE_AUTOTEST_PRIVATE_API_H_
 
+#include <memory>
 #include <string>
+#include <vector>
 
+#include "ash/public/cpp/assistant/assistant_state_proxy.h"
+#include "ash/public/cpp/assistant/default_voice_interaction_observer.h"
 #include "ash/public/interfaces/ash_message_center_controller.mojom.h"
 #include "base/compiler_specific.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/chromeos/printing/cups_printers_manager.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
+#include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
 #include "chromeos/services/machine_learning/public/mojom/machine_learning_service.mojom.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
+#include "services/ws/public/mojom/window_server_test.mojom.h"
 #include "ui/message_center/public/cpp/notification_types.h"
 #include "ui/snapshot/screenshot_grabber.h"
 
@@ -21,7 +28,7 @@ class Notification;
 }
 
 namespace crostini {
-enum class ConciergeClientResult;
+enum class CrostiniResult;
 }
 
 namespace extensions {
@@ -231,6 +238,14 @@ class AutotestPrivateGetHistogramFunction : public UIThreadExtensionFunction {
  private:
   ~AutotestPrivateGetHistogramFunction() override;
   ResponseAction Run() override;
+
+  // Sends an asynchronous response containing data for the histogram named
+  // |name|. Passed to content::FetchHistogramsAsynchronously() to be run after
+  // new data from other processes has been collected.
+  void RespondOnHistogramsFetched(const std::string& name);
+
+  // Creates a response with current data for the histogram named |name|.
+  ResponseValue GetHistogram(const std::string& name);
 };
 
 class AutotestPrivateIsAppShownFunction : public UIThreadExtensionFunction {
@@ -243,6 +258,47 @@ class AutotestPrivateIsAppShownFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
+class AutotestPrivateIsArcProvisionedFunction
+    : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.isArcProvisioned",
+                             AUTOTESTPRIVATE_ISARCPROVISIONED)
+
+ private:
+  ~AutotestPrivateIsArcProvisionedFunction() override;
+  ResponseAction Run() override;
+};
+
+class AutotestPrivateGetArcAppFunction : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.getArcApp",
+                             AUTOTESTPRIVATE_GETARCAPP)
+
+ private:
+  ~AutotestPrivateGetArcAppFunction() override;
+  ResponseAction Run() override;
+};
+
+class AutotestPrivateGetArcPackageFunction : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.getArcPackage",
+                             AUTOTESTPRIVATE_GETARCPACKAGE)
+
+ private:
+  ~AutotestPrivateGetArcPackageFunction() override;
+  ResponseAction Run() override;
+};
+
+class AutotestPrivateLaunchArcAppFunction : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.launchArcApp",
+                             AUTOTESTPRIVATE_LAUNCHARCAPP)
+
+ private:
+  ~AutotestPrivateLaunchArcAppFunction() override;
+  ResponseAction Run() override;
+};
+
 class AutotestPrivateLaunchAppFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("autotestPrivate.launchApp",
@@ -250,6 +306,16 @@ class AutotestPrivateLaunchAppFunction : public UIThreadExtensionFunction {
 
  private:
   ~AutotestPrivateLaunchAppFunction() override;
+  ResponseAction Run() override;
+};
+
+class AutotestPrivateCloseAppFunction : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.closeApp",
+                             AUTOTESTPRIVATE_CLOSEAPP)
+
+ private:
+  ~AutotestPrivateCloseAppFunction() override;
   ResponseAction Run() override;
 };
 
@@ -274,7 +340,7 @@ class AutotestPrivateRunCrostiniInstallerFunction
   ~AutotestPrivateRunCrostiniInstallerFunction() override;
   ResponseAction Run() override;
 
-  void CrostiniRestarted(crostini::ConciergeClientResult);
+  void CrostiniRestarted(crostini::CrostiniResult);
 };
 
 class AutotestPrivateRunCrostiniUninstallerFunction
@@ -287,7 +353,7 @@ class AutotestPrivateRunCrostiniUninstallerFunction
   ~AutotestPrivateRunCrostiniUninstallerFunction() override;
   ResponseAction Run() override;
 
-  void CrostiniRemoved(crostini::ConciergeClientResult);
+  void CrostiniRemoved(crostini::CrostiniResult);
 };
 
 class AutotestPrivateTakeScreenshotFunction : public UIThreadExtensionFunction {
@@ -352,6 +418,113 @@ class AutotestPrivateBootstrapMachineLearningServiceFunction
   chromeos::machine_learning::mojom::ModelPtr model_;
 };
 
+// Enable/disable the Google Assistant feature. This toggles the Assistant user
+// pref which will indirectly bring up or shut down the Assistant service.
+class AutotestPrivateSetAssistantEnabledFunction
+    : public UIThreadExtensionFunction,
+      public ash::DefaultVoiceInteractionObserver {
+ public:
+  AutotestPrivateSetAssistantEnabledFunction();
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.setAssistantEnabled",
+                             AUTOTESTPRIVATE_SETASSISTANTENABLED)
+
+ private:
+  ~AutotestPrivateSetAssistantEnabledFunction() override;
+  ResponseAction Run() override;
+
+  // ash::DefaultVoiceInteractionObserver overrides:
+  void OnVoiceInteractionStatusChanged(
+      ash::mojom::VoiceInteractionState state) override;
+
+  // Called when the Assistant service does not respond in a timely fashion. We
+  // will respond with an error.
+  void Timeout();
+
+  ash::AssistantStateProxy assistant_state_;
+  base::Optional<ash::mojom::VoiceInteractionState> expected_state_;
+  base::OneShotTimer timeout_timer_;
+};
+
+class AutotestPrivateSendAssistantTextQueryFunction
+    : public UIThreadExtensionFunction,
+      public chromeos::assistant::mojom::AssistantInteractionSubscriber {
+ public:
+  AutotestPrivateSendAssistantTextQueryFunction();
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.sendAssistantTextQuery",
+                             AUTOTESTPRIVATE_SENDASSISTANTTEXTQUERY)
+
+ private:
+  ~AutotestPrivateSendAssistantTextQueryFunction() override;
+  ResponseAction Run() override;
+
+  using AssistantSuggestionPtr =
+      chromeos::assistant::mojom::AssistantSuggestionPtr;
+  using AssistantInteractionResolution =
+      chromeos::assistant::mojom::AssistantInteractionResolution;
+
+  // chromeos::assistant::mojom::AssistantInteractionSubscriber:
+  void OnHtmlResponse(const std::string& response,
+                      const std::string& fallback) override;
+  void OnTextResponse(const std::string& response) override;
+  void OnInteractionFinished(
+      AssistantInteractionResolution resolution) override;
+  void OnInteractionStarted(bool is_voice_interaction) override {}
+  void OnSuggestionsResponse(
+      std::vector<AssistantSuggestionPtr> response) override {}
+  void OnOpenUrlResponse(const GURL& url) override {}
+  void OnSpeechRecognitionStarted() override {}
+  void OnSpeechRecognitionIntermediateResult(
+      const std::string& high_confidence_text,
+      const std::string& low_confidence_text) override {}
+  void OnSpeechRecognitionEndOfUtterance() override {}
+  void OnSpeechRecognitionFinalResult(
+      const std::string& final_result) override {}
+  void OnSpeechLevelUpdated(float speech_level) override {}
+  void OnTtsStarted(bool due_to_error) override {}
+
+  // Called when Assistant service fails to respond in a certain amount of
+  // time. We will respond with an error.
+  void Timeout();
+
+  chromeos::assistant::mojom::AssistantPtr assistant_;
+  mojo::Binding<chromeos::assistant::mojom::AssistantInteractionSubscriber>
+      assistant_interaction_subscriber_binding_;
+  base::OneShotTimer timeout_timer_;
+  std::unique_ptr<base::DictionaryValue> result_;
+};
+
+// Enable/disable a Crostini app's "scaled" property.
+// When an app is "scaled", it will use low display density.
+class AutotestPrivateSetCrostiniAppScaledFunction
+    : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.setCrostiniAppScaled",
+                             AUTOTESTPRIVATE_SETCROSTINIAPPSCALED)
+ private:
+  ~AutotestPrivateSetCrostiniAppScaledFunction() override;
+  ResponseAction Run() override;
+};
+
+// Ensure a Window Service client has drawn windows with a timeout.
+class AutotestPrivateEnsureWindowServiceClientHasDrawnWindowFunction
+    : public UIThreadExtensionFunction {
+ public:
+  AutotestPrivateEnsureWindowServiceClientHasDrawnWindowFunction();
+  DECLARE_EXTENSION_FUNCTION(
+      "autotestPrivate.ensureWindowServiceClientHasDrawnWindow",
+      AUTOTESTPRIVATE_ENSUREWINDOWSERVICECLIENTHASDRAWNWINDOW)
+
+ private:
+  ~AutotestPrivateEnsureWindowServiceClientHasDrawnWindowFunction() override;
+  ResponseAction Run() override;
+
+  void OnEnsureClientHasDrawnWindowCallback(bool success);
+  void OnTimeout();
+
+  ws::mojom::WindowServerTestPtr window_server_test_ptr_;
+  base::OneShotTimer timeout_timer_;
+};
+
 // The profile-keyed service that manages the autotestPrivate extension API.
 class AutotestPrivateAPI : public BrowserContextKeyedAPI {
  public:
@@ -374,6 +547,17 @@ class AutotestPrivateAPI : public BrowserContextKeyedAPI {
   static const bool kServiceRedirectedInIncognito = true;
 
   bool test_mode_;  // true for AutotestPrivateApiTest.AutotestPrivate test.
+};
+
+// Get the primary display's scale factor.
+class AutotestPrivateGetPrimaryDisplayScaleFactorFunction
+    : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.getPrimaryDisplayScaleFactor",
+                             AUTOTESTPRIVATE_GETPRIMARYDISPLAYSCALEFACTOR)
+ private:
+  ~AutotestPrivateGetPrimaryDisplayScaleFactorFunction() override;
+  ResponseAction Run() override;
 };
 
 template <>

@@ -12,12 +12,12 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/test_support.h"
 
-using FPDFParserDecodeEmbeddertest = EmbedderTest;
+using FPDFParserDecodeEmbedderTest = EmbedderTest;
 
 // NOTE: python's zlib.compress() and zlib.decompress() may be useful for
 // external validation of the FlateEncode/FlateDecode test cases.
 
-TEST_F(FPDFParserDecodeEmbeddertest, FlateEncode) {
+TEST_F(FPDFParserDecodeEmbedderTest, FlateEncode) {
   static const pdfium::StrFuncTestData flate_encode_cases[] = {
       STR_IN_OUT_CASE("", "\x78\x9c\x03\x00\x00\x00\x00\x01"),
       STR_IN_OUT_CASE(" ", "\x78\x9c\x53\x00\x00\x00\x21\x00\x21"),
@@ -37,20 +37,19 @@ TEST_F(FPDFParserDecodeEmbeddertest, FlateEncode) {
 
   for (size_t i = 0; i < FX_ArraySize(flate_encode_cases); ++i) {
     const pdfium::StrFuncTestData& data = flate_encode_cases[i];
-    unsigned char* buf = nullptr;
+    std::unique_ptr<uint8_t, FxFreeDeleter> buf;
     uint32_t buf_size;
     EXPECT_TRUE(FlateEncode({data.input, data.input_size}, &buf, &buf_size));
     ASSERT_TRUE(buf);
     EXPECT_EQ(data.expected_size, buf_size) << " for case " << i;
     if (data.expected_size != buf_size)
       continue;
-    EXPECT_EQ(0, memcmp(data.expected, buf, data.expected_size))
+    EXPECT_EQ(0, memcmp(data.expected, buf.get(), data.expected_size))
         << " for case " << i;
-    FX_Free(buf);
   }
 }
 
-TEST_F(FPDFParserDecodeEmbeddertest, FlateDecode) {
+TEST_F(FPDFParserDecodeEmbedderTest, FlateDecode) {
   static const pdfium::DecodeTestData flate_decode_cases[] = {
       STR_IN_OUT_CASE("", "", 0),
       STR_IN_OUT_CASE("preposterous nonsense", "", 2),
@@ -88,7 +87,7 @@ TEST_F(FPDFParserDecodeEmbeddertest, FlateDecode) {
   }
 }
 
-TEST_F(FPDFParserDecodeEmbeddertest, Bug_552046) {
+TEST_F(FPDFParserDecodeEmbedderTest, Bug_552046) {
   // Tests specifying multiple image filters for a stream. Should not cause a
   // crash when rendered.
   EXPECT_TRUE(OpenDocument("bug_552046.pdf"));
@@ -99,7 +98,7 @@ TEST_F(FPDFParserDecodeEmbeddertest, Bug_552046) {
   UnloadPage(page);
 }
 
-TEST_F(FPDFParserDecodeEmbeddertest, Bug_555784) {
+TEST_F(FPDFParserDecodeEmbedderTest, Bug_555784) {
   // Tests bad input to the run length decoder that caused a heap overflow.
   // Should not cause a crash when rendered.
   EXPECT_TRUE(OpenDocument("bug_555784.pdf"));
@@ -110,7 +109,7 @@ TEST_F(FPDFParserDecodeEmbeddertest, Bug_555784) {
   UnloadPage(page);
 }
 
-TEST_F(FPDFParserDecodeEmbeddertest, Bug_455199) {
+TEST_F(FPDFParserDecodeEmbedderTest, Bug_455199) {
   // Tests object numbers with a value > 01000000.
   // Should open successfully.
   EXPECT_TRUE(OpenDocument("bug_455199.pdf"));

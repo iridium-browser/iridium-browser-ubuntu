@@ -11,7 +11,7 @@
 <translation id="1025074108959230262">ஸ்டிக்கி முறை முடக்கப்பட்டது</translation>
 <translation id="1031961866430398710">பின்னர்</translation>
 <translation id="1038643060055067718">வரிகள்:</translation>
-<translation id="1038795173450935438">ஒரு பக்கத்தில் உள்ள உருப்படிகளில் அடுத்தடுத்து செல்ல, தேடல் + வலது அம்புக்குறியை அழுத்தவும். பின்னால் செல்ல, தேடல் + இடது அம்புக்குறியை அழுத்தவும். அடுத்த வரிக்குச் செல்ல, தேடல் + கீழ் அம்புக்குறியை அழுத்தவும். முந்தைய வரிக்குச் செல்ல, தேடல் + மேல் அம்புக்குறியைப் பயன்படுத்தவும். விரும்பும் உருப்படியைக் கிளிக் செய்ய, தேடல் + இடைவெளி விசைகளை அழுத்தவும்.</translation>
+<translation id="1038795173450935438">ஒரு பக்கத்தில் உள்ளவற்றில் அடுத்தடுத்து செல்ல, தேடல் + வலது அம்புக்குறியை அழுத்தவும். பின்னால் செல்ல, தேடல் + இடது அம்புக்குறியை அழுத்தவும். அடுத்த வரிக்குச் செல்ல, தேடல் + கீழ் அம்புக்குறியை அழுத்தவும். முந்தைய வரிக்குச் செல்ல, தேடல் + மேல் அம்புக்குறியைப் பயன்படுத்தவும். விரும்புவதைக் கிளிக் செய்ய, தேடல் + இடைவெளி விசைகளை அழுத்தவும்.</translation>
 <translation id="1044777062731150180">மேற்தலைப்புகள் இல்லை</translation>
 <translation id="106222400312645156">rwhdr</translation>
 <translation id="1065552602950927991">தவறான உள்ளீடு</translation>
@@ -20,7 +20,6 @@
 <translation id="1087788677726983142">நிகழ்வு வரிசை வடிப்பான்களை மறை</translation>
 <translation id="1088219014394087294">தலைப்புகள் இல்லை.</translation>
 <translation id="1106741348836243114">ஒலி மறுமொழியை (ஆடியோ செய்திகள்) இயக்கு அல்லது முடக்கு.</translation>
-<translation id="1108651818222110612">துணை தலைப்பு</translation>
 <translation id="1120743664840974483">{"a": "alpha", "b": "bravo", "c": "charlie", "d": "delta", "e": "echo", "f": "foxtrot", "g": "golf", "h": "hotel", "i": "india", "j": "juliet","k": "kilo", "l": "lima", "m": "mike", "n": "november", "o": "oscar","p": "papa", "q": "quebec", "r": "romeo", "s": "sierra", "t": "tango", "u": "uniform", "v": "victor", "w": "whiskey","x": "xray", "y": "yankee", "z": "zulu"}</translation>
 <translation id="1120938014254001895">இரண்டு விரல்களை மேலே ஸ்வைப் செய்யவும்</translation>
 <translation id="1124771028211010580">தற்போதைய காட்சி நடை: அருகருகே.</translation>
@@ -33,27 +32,31 @@
 <translation id="1177863135347784049">தனிப்பயன்</translation>
 <translation id="1188858454923323853">ஈடுசெய்யக்கூடியது</translation>
 <translation id="1195238899008218998">பின்னுரை</translation>
-<translation id="1201402288615127009">அடுத்தது</translation>
+<translation id="1201402288615127009">அடுத்து</translation>
 <translation id="1206619573307042055">மார்கியூ</translation>
 <translation id="1213216066620407844">ChromeVox - Chrome க்கு குரல் கொடுக்கிறது</translation>
 <translation id="1225437811932752266">வாழ்த்துகள்! ChromeVoxஐப் பயன்படுத்தத் தொடங்குவதற்குத் தேவைப்படும் முக்கியமான விஷயங்களை அறிந்துகொண்டீர்கள். தேடல் மற்றும் முற்றுப்புள்ளி விசைகளை ஒன்றாக அழுத்தி எப்போது வேண்டுமானாலும் ChromeVox கட்டளை மெனுவைத் திறக்கலாம் என்பதை நினைவில்கொள்ளவும். ChromeVox மற்றும் Chrome OS பற்றி மேலும் அறிய, பின்வரும் கட்டுரைகளைப் பார்க்கவும்.
-பயிற்சியை முடித்த பிறகு, ChromeVoxஐப் பயன்படுத்தி மூடு பொத்தானுக்குச் சென்று, அதைக் கிளிக் செய்யவும்.</translation>
+பயிற்சியை முடித்த பிறகு, ChromeVoxஐப் பயன்படுத்தி மூடு பட்டனுக்குச் சென்று, அதைக் கிளிக் செய்யவும்.</translation>
 <translation id="1229276918471378188">முந்தைய தாவல்</translation>
 <translation id="1236794971743289975">முடிவுக்குறிப்பு</translation>
 <translation id="1237866625126425153">rdgrp</translation>
 <translation id="1251750620252348585">அடுத்த 6 ஆம் படிநிலை தலைப்பு</translation>
 <translation id="1275718070701477396">தேர்ந்தெடுக்கப்பட்டது</translation>
-<translation id="1286609444451033486">நிலைமாற்ற, Search+Spaceஐ அழுத்தவும்.</translation>
+<translation id="1286609444451033486">நிலைமாற்ற, தேடல்+Spaceஸை அழுத்தவும்.</translation>
+<translation id="1291286136605998134">நிலைமாற்றுவதற்கான பட்டன்</translation>
+<translation id="1303806948938513162">ChromeVox மெனுக்களுக்குச் செல்ல 4 விரல்களால் தட்டவும்</translation>
 <translation id="1319608975892113573">முன் மேற்கோள் குறி இல்லை</translation>
 <translation id="1321576897702511272">ChromeVox உதவியை மறை</translation>
 <translation id="1331702245475014624"><ph name="TOTAL" /> / <ph name="INDEX" /></translation>
 <translation id="1334095593597963605">எழுத்து மற்றும் சொல் எதிரொலி</translation>
 <translation id="1339428534620983148">முந்தைய அட்டவணை நெடுவரிசை</translation>
 <translation id="1342835525016946179">article</translation>
+<translation id="1346059596910821859">உதவிக்குறிப்பு</translation>
 <translation id="1346748346194534595">வலது</translation>
 <translation id="135978014023467274">ChromeVox 63க்குப் புதுப்பிக்கப்பட்டது!</translation>
+<translation id="1360699455582016846"><ph name="ROUTING_KEY_NUMBER" /> ரூட்டிங் விசைக்குக் கீழுள்ள உருப்படியைக் கிளிக் செய்யவும்</translation>
 <translation id="136718599399906424">அடுத்த அட்டவணை வரிசை</translation>
-<translation id="1377925789329510816">இது கடைசி தலைப்பாகும். முதல் தலைப்பிற்குச் செல்ல, தேடு மற்றும் Hஐ ஒன்றாக அழுத்தவும் அல்லது இந்தப் பக்கத்தில் உள்ள இரண்டாவது தலைப்பிற்குச் செல்ல, தேடு, ஷிஃப்ட் மற்றும் H ஆகியவற்றை ஒன்றாக அழுத்தவும்.</translation>
+<translation id="1377925789329510816">இது கடைசி தலைப்பாகும். முதல் தலைப்பிற்குச் செல்ல, தேடல்+Hஐ ஒன்றாக அழுத்தவும் அல்லது இந்தப் பக்கத்தில் உள்ள இரண்டாவது தலைப்பிற்குச் செல்ல, தேடல்+Shift+Hஐ ஒன்றாக அழுத்தவும்.</translation>
 <translation id="1383876407941801731">தேடல்</translation>
 <translation id="1385214448885562192">ஏற்றுக்கொள்ள enter உம், ரத்துசெய்ய escape உம் அழுத்தவும் மேலும் அடுத்ததற்குச் செல்ல கீழ் என்பதையும் முந்தையதற்குச் செல்ல மேல் என்பதையும் அழுத்தவும்.</translation>
 <translation id="1396114365388024581">tablst</translation>
@@ -63,7 +66,7 @@
 <translation id="1467432559032391204">இடது</translation>
 <translation id="1474557363159888097">முந்தைய ஆங்கர் இல்லை.</translation>
 <translation id="1480046233931937785">பங்களித்தவர்கள்</translation>
-<translation id="1487494366197411587">Chromebook இல், தேடல் விசையானது இடதுபுற ஷிஃப்ட் விசைக்கு மேலே இருக்கும்.</translation>
+<translation id="1487494366197411587">Chromebookகில் தேடல் விசையானது இடதுபுற Shift விசைக்கு மேலே இருக்கும்.</translation>
 <translation id="1499041187027566160">ஒலியளவை அதிகரிக்கும்</translation>
 <translation id="1502086903961450562">முந்தைய கிராஃபிக்</translation>
 <translation id="1506187449813838456">ஸ்ருதியை அதிகரி</translation>
@@ -102,6 +105,7 @@
 <translation id="1828385960365606039">மே</translation>
 <translation id="1834891354138622109">நெடுவரிசை</translation>
 <translation id="1845944666972354496">செயல்படுத்த, இருமுறை தட்டவும்</translation>
+<translation id="1846771122725914429">புளூடூத் பிரெய்ல் காட்சி</translation>
 <translation id="1865601187525349519">உரையின் இறுதி</translation>
 <translation id="1876229593313240038">doc</translation>
 <translation id="188130072164734898">தற்போதைய நேரம் மற்றும் தேதியைக் கூறவும்.</translation>
@@ -109,6 +113,7 @@
 <translation id="1905379170753160525">தலைப்புகள் பட்டியலைக் காட்டு</translation>
 <translation id="1912556590115083156">vlnk</translation>
 <translation id="1913761808037590218">#ed</translation>
+<translation id="1914635379910604678"><ph name="DOT" /> விசைச் சேர்க்கை</translation>
 <translation id="1954623340234317532">ஆண்டு கட்டுப்பாட்டிற்கான வாரம்</translation>
 <translation id="1964135212174907577">அடுத்த பொருள்</translation>
 <translation id="1969092762068865084">ஜூலை</translation>
@@ -159,6 +164,7 @@
 <translation id="2422937916923936891">மெனு உருப்படி செக் பாக்ஸ்</translation>
 <translation id="2428534162001909979">கட்டளை மெனுக்கள்</translation>
 <translation id="2429669115401274487">PM</translation>
+<translation id="242998846562331953">வசனம்</translation>
 <translation id="2435413342408885429"><ph name="KEY" /> என்பதே இப்போது புதிய ChromeVox மாற்றியாகும்.</translation>
 <translation id="2450814015951372393">செக் பாக்ஸ்</translation>
 <translation id="2462626033734746142">ரேடியோ பட்டன் குழு</translation>
@@ -166,7 +172,7 @@
 <translation id="248982282205370495">{COUNT,plural, =1{உடுக்குறி}other{# உடுக்குறிகள்}}</translation>
 <translation id="249330843868392562">‘உரையிலிருந்து பேச்சு’ அமைப்புகளைத் திற</translation>
 <translation id="2523609930580546572">ChromeVox பயிற்சி</translation>
-<translation id="2525706221823668172">Chromebook விசைப்பலகைக் குறுக்குவழிகள்</translation>
+<translation id="2525706221823668172">Chromebook கீபோர்டு ஷார்ட்கட்கள்</translation>
 <translation id="2549392850788122959"><ph name="KEY" /> மீட்டமைக்கப்பட்டுள்ளது.</translation>
 <translation id="2553108862507765288">இலக்கணப் பிழை</translation>
 <translation id="257674075312929031">குழு</translation>
@@ -194,11 +200,10 @@
 <translation id="2737520612859577214">சூப்பர்ஸ்கிரிப்ட்டின் முடிவு</translation>
 <translation id="2749275490991666823">தேர்ந்தெடுக்கப்பட்டது</translation>
 <translation id="27527859628328957">கவனிக்க வேண்டிய அடுத்த உருப்படிக்குத் தாவு</translation>
-<translation id="276402504937943375">உள்ளடக்க அட்டவணை</translation>
 <translation id="2770781857296573485">குழு ஆராய்ச்சியில் நுழை</translation>
 <translation id="2777845298774924149">வெளியேறிவிட்டது</translation>
 <translation id="2781264313200109999">இணைப்பு உரையின் தொடக்கம்</translation>
-<translation id="2784959586797362050">எப்போதும் போல், தேடல் மற்றும் a விசைகளை ஒன்றாக அழுத்தி, பின்னர் i விசையை அழுத்தி, எங்களுக்கு நேரடியாகக் கருத்தை அனுப்பலாம். உங்கள் கருத்தைக் கேட்பதற்கு ஆவலாய் உள்ளோம்.</translation>
+<translation id="2784959586797362050">எப்போதும்போல் தேடல்+ a விசைகளை ஒன்றாக அழுத்தி, பின்னர் i விசையை அழுத்தி எங்களுக்கு நேரடியாகக் கருத்தை அனுப்பலாம். உங்கள் கருத்தைக் கேட்பதற்கு ஆவலாய் உள்ளோம்.</translation>
 <translation id="2800204403141299078">மேலும் வேறுபட்ட கூறுகள் இல்லை.</translation>
 <translation id="2800780099804980316">முந்தைய 1 ஆம் நிலை தலைப்பு இல்லை.</translation>
 <translation id="280499067616661124">ChromeVox இன் பக்கத்தில் கண்டறியும் அம்சம்</translation>
@@ -214,7 +219,7 @@
 <translation id="2867808975387772810">நூல்விவர அட்டவணை</translation>
 <translation id="2873259058405069099">அட்டவணையின் தொடக்கத்திற்குச் செல்</translation>
 <translation id="2879867157561757640">மூன்று விரல்களைக் கீழே ஸ்வைப் செய்யவும்</translation>
-<translation id="288178314850623291">மற்றதைத் தவிர்த்துவிட்டு, குறிப்பிட்ட வகை உறுப்புகளுக்கு மட்டும் செல்ல, தாவும் கட்டளைகளைப் பயன்படுத்தவும். அடுத்தடுத்த தலைப்புகளுக்குச் செல்ல, தேடல் + H விசைகளை அழுத்தவும். முந்தைய தலைப்புகளுக்குச் செல்ல, தேடல் + ஷிஃப்ட் + H விசைகளை அழுத்தவும்.</translation>
+<translation id="288178314850623291">மற்றதைத் தவிர்த்துவிட்டு, குறிப்பிட்ட வகை உறுப்புகளுக்கு மட்டும் செல்ல, தாவும் கட்டளைகளைப் பயன்படுத்தவும். அடுத்தடுத்த தலைப்புகளுக்குச் செல்ல, தேடல் + H விசைகளை அழுத்தவும். முந்தைய தலைப்புகளுக்குச் செல்ல, தேடல் + Shift + H விசைகளை அழுத்தவும்.</translation>
 <translation id="2894654529758326923">தகவல்</translation>
 <translation id="2899328121302785497">{COUNT,plural, =1{இடது பிறை அடைப்புக்குறி}other{# இடது பிறை அடைப்புக்குறிகள்}}</translation>
 <translation id="2909478709401302630">சூப்பர்ஸ்கிரிப்ட்டின் தொடக்கம்</translation>
@@ -238,6 +243,7 @@
 <translation id="3046838483509668188">ChromeVox விருப்பங்கள்</translation>
 <translation id="3047143736589213134">சோதனை விசைவரைபடம்</translation>
 <translation id="3060756054951570867"><ph name="TITLE" /> மெனு திறக்கப்பட்டது</translation>
+<translation id="3060880924447482063">ஒவ்வொன்றாகப் பார்க்க, இடது அல்லது வலதுபுறம் ஸ்வைப் செய்யவும்</translation>
 <translation id="3070245424257836917">மூன்று விரல்களை மேலே ஸ்வைப் செய்யவும்</translation>
 <translation id="3078345202707391975">அடுத்த 2 ஆம் படிநிலை தலைப்பு</translation>
 <translation id="3078740164268491126">அட்டவணை</translation>
@@ -263,6 +269,7 @@
 <translation id="316542773973815724">வழிச்செலுத்தல்</translation>
 <translation id="3172700825913348768">{COUNT,plural, =1{இடைவெளி}other{# இடைவெளிகள்}}</translation>
 <translation id="320961988183078793"><ph name="TYPE" /> ஐ உள்ளிட்டுள்ளீர்கள்</translation>
+<translation id="3218691001991391708"><ph name="TEXT" />ஐ ஒட்டும்.</translation>
 <translation id="3223701887221307104"><ph name="NAME" />, தாவல்</translation>
 <translation id="3226035351387556942">chk</translation>
 <translation id="3229375994964697375">பார்வையிட்ட இணைப்பு</translation>
@@ -282,48 +289,6 @@
 <translation id="3322936298410871309">முந்தைய 1 ஆம் படிநிலை தலைப்பு</translation>
 <translation id="3323447499041942178">உரை பெட்டி</translation>
 <translation id="3338224621010291843"><ph name="VALUE" /> <ph name="NAME" /> ஸ்லைடர்</translation>
-<translation id="3353420241558113817">{"ar": "அரபிக்",
-        "bg": "பல்கேரியன்",
-        "ca": "கேடலன்",
-        "cs": "செக்",
-        "da": "டேனிஷ்",
-        "de": "ஜெர்மன்",
-        "de_CH": "ஜெர்மன் (ஸ்விட்சர்லாந்து)",
-        "de_DE": "ஜெர்மன் (ஜெர்மனி)",
-        "el": "கிரேக்கம்",
-        "en": "ஆங்கிலம்",
-        "en_CA": "ஆங்கிலம் (கனடா)",
-        "en_GB": "ஆங்கிலம் (யுனைடட் கிங்டம்)",
-        "en_US": "ஆங்கிலம் (அமெரிக்கா)",
-        "es": "ஸ்பானிஷ்",
-        "et": "ஈஸ்டோனியன்",
-        "fr": "ஃபிரஞ்ச்",
-        "fr_CA": "ஃபிரஞ்ச் (கனடா)",
-        "fr_FR": "ஃபிரஞ்ச் (ஃபிரான்ஸ்)",
-        "fi": "ஃபின்னிஷ்",
-        "he": "எபிரேயம்",
-        "hi": "இந்தி",
-        "hr": "குரோஷியன்",
-        "hu": "ஹங்கேரியன்",
-        "is": "ஐஸ்லாண்டிக்",
-        "it": "இத்தாலியன்",
-        "ko": "கொரியன்",
-        "lt": "லிதுவேனியன்",
-        "lv": "லத்வியன்",
-        "nb": "நார்வேஜியன் போக்மால்",
-        "nl": "டச்சு",
-        "pl": "போலிஷ்",
-        "pt": "போர்சுகீஸ்",
-        "ro": "ரோமானியன்",
-        "ru": "ரஷ்யன்",
-        "sk": "ஸ்லோவாக்",
-        "sl": "ஸ்லோவேனியன்",
-        "sr": "செர்பியன்",
-        "sv": "ஸ்வேடிஷ்",
-        "tr": "துருக்கி",
-        "vi": "வியட்னாமீஸ்",
-        "zh": "சீனம்",
-        "zh_TW": "சீனம் (பாரம்பரிய ஹான்)"}</translation>
 <translation id="335581015389089642">பேச்சு</translation>
 <translation id="3359142382821736686">seprtr</translation>
 <translation id="3374537878095184207">{COUNT,plural, =1{கூட்டல் குறி}other{# கூட்டல் குறிகள்}}</translation>
@@ -331,8 +296,8 @@
 <translation id="3389259863310851658">முந்தைய படிவப் புலம்</translation>
 <translation id="3390225400784126843">வேறுபட்ட அடுத்த உறுப்பு.</translation>
 <translation id="3392045790598181549"><ph name="NAME" />, மெனு உருப்படி</translation>
+<translation id="3393605254399152980">நீங்கள் தொடுவதைப் பேச்சுவடிவில் கேட்க, ஒரு விரலை இழுக்கவும்</translation>
 <translation id="3406283310380167331">படிவங்கள் பட்டியலைக் காட்டு</translation>
-<translation id="3423495725743882470">வரிசை $1 நெடுவரிசை $2</translation>
 <translation id="3457000393508828486">பகுதியளவு அழுத்தப்பட்டது</translation>
 <translation id="3458865416877308321"><ph name="NAME" />, ஸ்விட்ச் ஆஃப்</translation>
 <translation id="3462439746547587373"><ph name="NAME" />, பொத்தான்</translation>
@@ -340,12 +305,15 @@
 <translation id="3468959318854349468">தலைப்பு இல்லை</translation>
 <translation id="3473644018603298796">தேர்ந்தெடுத்தவை <ph name="COUNT" /></translation>
 <translation id="3486232535569802404"><ph name="V1" /> முதல் <ph name="V2" /> வரை</translation>
+<translation id="3490765818161916458">பட்டியல் கட்டம்</translation>
 <translation id="3492609944033322585">{COUNT,plural, =1{வலது அடைப்புக்குறி}other{# வலது அடைப்புக்குறிகள்}}</translation>
 <translation id="3493915602752813531">அடுத்த ஆங்கர் இல்லை.</translation>
 <translation id="3494946239022273294">mnuitm</translation>
 <translation id="3497063866483065785">{COUNT,plural, =1{கேள்விக் குறி}other{# கேள்விக் குறிகள்}}</translation>
 <translation id="3514822174137761109">{COUNT,plural, =1{கூரைக் குறி}other{# கூரைக் குறிகள்}}</translation>
 <translation id="352577523970648069">திருத்தக்கூடிய உரைப் புலம்</translation>
+<translation id="3549141990712742152"><ph name="TEXT" />ஐ வெட்டும்.</translation>
+<translation id="3549680091535286226">பேச்சைத் தற்காலிகமாக நிறுத்த, 2 விரல்களால் தட்டவும்</translation>
 <translation id="3568702578574425662"><ph name="NAME" />, பெட்டி தேர்ந்தெடுக்கப்படவில்லை</translation>
 <translation id="3589661172894441357">அருஞ்சொல் திரட்டு</translation>
 <translation id="3599054940393788245">உள்கணிதம் இல்லை</translation>
@@ -370,19 +338,20 @@
 <translation id="3795836767122514678">+{COUNT,plural, =1{#}other{#}}</translation>
 <translation id="3801735343383419236">தானே நிரப்புதல் பட்டியல்</translation>
 <translation id="3810838688059735925">வீடியோ</translation>
-<translation id="3812237531158591503">$1ஐ ஒட்டு.</translation>
 <translation id="3816633764618089385">அடுத்த ஊடகம்</translation>
 <translation id="3819376190738087562">தாவல்கள் இல்லை.</translation>
 <translation id="385383972552776628">விருப்பங்கள் பக்கத்தைத் திற</translation>
 <translation id="3856075812838139784">படிக்க மட்டும்</translation>
 <translation id="3887576927692165210">ed</translation>
 <translation id="3897092660631435901">மெனு</translation>
+<translation id="3907138069015388678">lstgrd</translation>
 <translation id="3909320334364316587">முந்தைய 6 ஆம் படிநிலை தலைப்பு</translation>
 <translation id="3914173277599553213">அவசியம்</translation>
 <translation id="3914732343065571127">ChromeVox கட்டளைக் குறிப்பு</translation>
 <translation id="3930498801443296724">Pullquote</translation>
 <translation id="3941269780691800708">மவுஸை நகர்த்துகையில் கர்சர் காண்பிக்கும் உரையைப் பேசு.</translation>
 <translation id="3962990492275676168">நடப்பு இருப்பிடத்திலிருந்து படிக்கத் தொடங்கு</translation>
+<translation id="3989324057180830702">tgl btn</translation>
 <translation id="4004802134384979325">தேர்ந்தெடுக்கப்பட்டது</translation>
 <translation id="4006140876663370126">img</translation>
 <translation id="4038349100599457191">மாதக் கட்டுப்பாடு</translation>
@@ -394,8 +363,9 @@
 <translation id="404803211695627272"><ph name="V1" />-<ph name="V2" /></translation>
 <translation id="4054936709456751127">sts</translation>
 <translation id="4058278702844053247">பக்கம் ஏற்றப்படுகிறது</translation>
-<translation id="4065205963140826639">அடுத்துப் பொத்தானைக் கண்டறிய, தேடல் + வலது அம்புக்குறியைப் பயன்படுத்தவும். பின் அதனைக் கிளிக் செய்ய, தேடல் + இடைவெளி விசைகளை அழுத்தவும்.</translation>
+<translation id="4065205963140826639">'அடுத்து' பட்டனைக் கண்டறிய, தேடல் + வலது அம்புக்குறியைப் பயன்படுத்தவும். பின் அதனைக் கிளிக் செய்ய, தேடல் + இடைவெளி விசைகளை அழுத்தவும்.</translation>
 <translation id="4081085052247739398">{COUNT,plural, =1{தலை பெய் குறி}other{# தலை பெய் குறிகள்}}</translation>
+<translation id="4086311032171418648">'கற்றல் பயன்முறையை’ நிறுத்துகிறது</translation>
 <translation id="409334809956508737">முந்தைய பொருள்</translation>
 <translation id="4099274309791143834">துணைமெனுவுடன்</translation>
 <translation id="4101527861445851766">தேர்வுசெய்த செக்பாக்ஸ்</translation>
@@ -408,6 +378,7 @@
 <translation id="4166192625054637755">சப்ஸ்கிரிப்ட்டின் முடிவு</translation>
 <translation id="4173994908659439270">அடுத்த திருத்தக்கூடிய உரை புலம் இல்லை.</translation>
 <translation id="4176463684765177261">முடக்கப்பட்டது</translation>
+<translation id="4187322598335821254">ஒவ்வொரு வரியாகச் செல்ல, மேலே அல்லது கீழே ஸ்வைப் செய்யவும்</translation>
 <translation id="4188530942454211480">முந்தைய வாக்கியம்</translation>
 <translation id="4191918948604314587">பொத்தான்</translation>
 <translation id="419265409837491189">முந்தைய நெடுவரிசைக்குச் செல்லும்</translation>
@@ -464,7 +435,7 @@
 <translation id="4623097797855662355">முத்திரை</translation>
 <translation id="463135993322337640">புதிய அம்சங்களைப் பார்க்க, ChromeVox o, n ஆகியவற்றை அழுத்தவும்</translation>
 <translation id="4647836961514597010">வண்ணத் தேர்வி</translation>
-<translation id="4652110509054054146">Home அல்லது  Endக்கு Search Left அல்லது Rightஐயும், Control Home அல்லது Endக்கு Search Control Left அல்லது Rightஐயும், Page Up அல்லது Downக்கு Search Up அல்லது Downஐயும் பயன்படுத்தவும்.</translation>
+<translation id="4652110509054054146">Home அல்லது  Endடுக்கு Search Left அல்லது Rightடையும், Control Home அல்லது Endடுக்கு Search Control Left அல்லது Rightடையும், Page Up அல்லது Downனுக்கு Search Up அல்லது Downனையும் பயன்படுத்தவும்.</translation>
 <translation id="4660783501463101648">கிளாசிக் அகற்றப்பட்டது. ChromeVox கிளாசிக்கிற்கு மீண்டும் மாறுவதற்கான விசைப்பலகை நிலைமாற்றி அகற்றப்பட்டது.</translation>
 <translation id="4661075872484491155">tree</translation>
 <translation id="4668929960204016307">,</translation>
@@ -480,7 +451,8 @@
 <translation id="4763296182459741068">கீழ்பகுதிக்கு மடிக்கப்படும்</translation>
 <translation id="4763480195061959176">வீடியோ</translation>
 <translation id="4764692524839457597">இயல்பு</translation>
-<translation id="479989351350248267">Search</translation>
+<translation id="479989351350248267">தேடல்</translation>
+<translation id="4804818685124855865">தொடர்பைத் துண்டி</translation>
 <translation id="481165870889056555">தற்போதைய பக்கத்தின் தலைப்பை அறிவிக்கவும்</translation>
 <translation id="4826415162591436065">முன்னோக்கிச் செல்</translation>
 <translation id="4826604887384865800">அடுத்த தாவல்</translation>
@@ -498,6 +470,7 @@
 <translation id="4877261390094455813">தேடல் வினவலை உள்ளிடவும்.</translation>
 <translation id="4886524826165775965"><ph name="INDEX" />/<ph name="TOTAL" /></translation>
 <translation id="489907760999452556">அக இணைப்பு</translation>
+<translation id="4915087353619183190">’கற்றல் பயன்முறையைத்’ தொடங்குகிறது. அதன் செயல்பாட்டைப் பற்றி அறிய, ஒரு qwerty விசையையோ புதுப்பிக்கக்கூடிய பிரெய்ல் விசையையோ அல்லது தொடு சைகையையோ அழுத்தவும். வெளியேற, 'control + w' அல்லது escape விசையை அழுத்தவும்.</translation>
 <translation id="492295894462528572">அறிமுகம்</translation>
 <translation id="495170559598752135">செயல்கள்</translation>
 <translation id="4953585991029886728">உரையைத் திருத்து</translation>
@@ -521,6 +494,7 @@
 <translation id="5020651427400641814">பேச்சுப் பதிவை இயக்கவும்</translation>
 <translation id="5041394372352067729">பக்கத்தின் மேல்பகுதிக்கு பிரெய்ல் காட்சியை நகர்த்து</translation>
 <translation id="5042770794184672516">பேச்சு ஒலியளவை அதிகரி</translation>
+<translation id="5042992464904238023">வலை உள்ளடக்கம்</translation>
 <translation id="5050015258024679800">முந்தைய 4 ஆம் படிநிலை தலைப்பு</translation>
 <translation id="5054047268577924192">முந்தைய பட்டியல் உருப்படி</translation>
 <translation id="5075936896689244141">அடுத்த விசைவரைபடம்</translation>
@@ -549,6 +523,7 @@
 <translation id="5291783959063340370">பொருள்</translation>
 <translation id="5302089807023311274">நூல்விவர அட்டவணை மேற்கோள்</translation>
 <translation id="5304943142864553931"><ph name="TITLE" />, தாவல்</translation>
+<translation id="5308380583665731573">இணை</translation>
 <translation id="5310788376443009632">அகற்றப்பட்டவை:</translation>
 <translation id="5320727453979144100">ஸ்டிக்கி முறை இயக்கப்பட்டது</translation>
 <translation id="5321085947096604457">{COUNT,plural, =1{காற்புள்ளி}other{# காற்புள்ளிகள்}}</translation>
@@ -560,13 +535,12 @@
 <translation id="536031132345979795">தொடர்ந்து படிக்கும் போது பின்னோக்கிச் செல்வதை தவிர்க்கலாம்</translation>
 <translation id="5368000168321181111">ஆடியோ செய்திகளை முடக்கு</translation>
 <translation id="5374320867641260420">அடுத்த பொத்தான் இல்லை.</translation>
-<translation id="5376407118396657359">ஒவ்வொரு கலத்திற்கும் செல்ல, Search+Ctrl+Alt விசைகளையும் அம்புக்குறி விசைகளையும் அழுத்தவும்.</translation>
+<translation id="5376407118396657359">ஒவ்வொரு கலத்திற்கும் செல்ல, தேடல்+Ctrl+Alt விசைகளையும் அம்புக்குறி விசைகளையும் அழுத்தவும்.</translation>
 <translation id="5382299583965267720">அடுத்த 1 ஆம் நிலை தலைப்பு இல்லை.</translation>
 <translation id="5402367795255837559">பிரெய்ல்</translation>
 <translation id="5402791055281059602">கட்டாய விழிப்பூட்டல்</translation>
 <translation id="5407530583102765689">{COUNT,plural, =1{அரைப்புள்ளி}other{# அரைப்புள்ளிகள்}}</translation>
 <translation id="5411891038905756502">முந்தைய தாவல் புள்ளி இல்லை.</translation>
-<translation id="5417034931411865818">ரூட்டிங் விசை $1க்குக் கீழுள்ள உருப்படியைக் கிளிக் செய்யவும்</translation>
 <translation id="5435274640623994081">ஆடியோ செய்திகள் பதிவிடலை இயக்கு</translation>
 <translation id="5436105723448703439">{COUNT,plural, =1{குறைவிற்கான குறி}other{# குறைவிற்கான குறிகள்}}</translation>
 <translation id="5444587279251314700">(செயலில்)</translation>
@@ -617,7 +591,7 @@
 <translation id="571866080859340309">குழுக்களை ஆராய்கிறது</translation>
 <translation id="5728409797179002635">அட்டவணை காணப்படவில்லை.</translation>
 <translation id="5729047866208036762">கணித உள்ளடக்கத்தை ஆராய்வதற்கு மேல்,கீழ், இடது அல்லது வலது அம்புக்குறிகளை அழுத்தவும்.</translation>
-<translation id="5732189279857692565">இது இரண்டாவது தலைப்பாகும். தொடர்ந்து வாசிக்க, தேடு மற்றும் Hஐ அல்லது தேடு, ஷிஃப்ட் மற்றும் Hஐ ஒன்றாக அழுத்தவும்</translation>
+<translation id="5732189279857692565">இது இரண்டாவது தலைப்பாகும். தொடர்ந்து வாசிக்க, தேடல்+H அல்லது தேடல்+Shift+Hஐ ஒன்றாக அழுத்தவும்</translation>
 <translation id="5748623122140342504">முந்தைய 5 ஆம் படிநிலை தலைப்பு</translation>
 <translation id="5750633686117194034">மாற்றி எதுவும் அழுத்தப்படவில்லை; ஒன்று அல்லது அதற்கு மேற்பட்ட மாற்றிகளை அழுத்திப் பிடிக்கவும்; முடித்தவுடன் உங்கள் விரல்களை எடுக்கவும், விசைகள் அமைக்கப்படுவதைக் கேட்பீர்கள். வெளியேறத் தட்டவும்.</translation>
 <translation id="5760594853119905566">பிற்சேர்க்கை</translation>
@@ -637,6 +611,7 @@
 <translation id="5887397643266327462">பிரெய்ல் தலைப்புகள் இயக்கப்பட்டுள்ளன.</translation>
 <translation id="5891934789323004067">அட்டவணை</translation>
 <translation id="5899860758576822363">ChromeVox பேசும் போது, குறைந்த ஒலியளவில் இயக்கு</translation>
+<translation id="5906974869830879618">ஒரு பின்னை உள்ளிடவும்</translation>
 <translation id="5921587111466148855">அத்தியாயம்</translation>
 <translation id="5937336320314038555">{COUNT,plural, =1{சமக்குறி}other{# சமக்குறிகள்}}</translation>
 <translation id="5939518447894949180">மீட்டமை</translation>
@@ -651,7 +626,7 @@
 <translation id="6006050241733874051">படிவம்</translation>
 <translation id="6006064078185310784">{COUNT,plural, =1{பின்கோடு}other{# பின்கோடுகள்}}</translation>
 <translation id="6037602951055904232">முன்னோக்கி நகர்த்து</translation>
-<translation id="6042826534790431634">செயல்படுத்த, Search+Space விசைகளை அழுத்தவும்.</translation>
+<translation id="6042826534790431634">செயல்படுத்த, தேடல்+Space விசைகளை அழுத்தவும்.</translation>
 <translation id="6044160928851315051">விஷுவல் திரையை முடக்கும்</translation>
 <translation id="605761629541007221">தடிமன் உரையின் இறுதி</translation>
 <translation id="6065293622157674001">இலக்கணப் பிழையின் தொடக்கம்</translation>
@@ -663,8 +638,8 @@
 <translation id="6122013438240733403">btn</translation>
 <translation id="6129953537138746214">இடைவெளி</translation>
 <translation id="6132506484792346370">பட்டியல்பெட்டி அல்லது சேர்க்கைப் பெட்டி</translation>
-<translation id="6138576064440631958">$1 விசைச் சேர்க்கை</translation>
 <translation id="6142308968191113180">தலைப்பு 4</translation>
+<translation id="6158882249329863701"><ph name="TABLECELLROWINDEX" /> வரிசை <ph name="TABLECELLCOLUMNINDEX" /> நெடுவரிசை</translation>
 <translation id="6164829606128959761">மீட்டர்</translation>
 <translation id="6169420925157477918">நீண்ட விளக்கத்துடன் உள்ள படம்</translation>
 <translation id="6186305613600865047">பக்கத்தின் கீழ்பகுதிக்குச் செல்லவும்</translation>
@@ -680,31 +655,34 @@
 <translation id="6307969636681130414">அழுத்தப்பட்டது</translation>
 <translation id="6322856989298155004">ஒலிகள்</translation>
 <translation id="6324551002951139333">இலக்கணத் தவறு கண்டுபிடிக்கப்பட்டது</translation>
+<translation id="6325241889020214828"><ph name="TEXT" />ஐ நகலெடுக்கும்.</translation>
 <translation id="6348657800373377022">தொகுப்பு பெட்டி</translation>
 <translation id="6350358010104919766">{COUNT,plural, =1{பொட்டுக்குறி}other{# பொட்டுக்குறிகள்}}</translation>
 <translation id="6355910664415701303">முந்தைய பட்டியல் உருப்படி இல்லை.</translation>
 <translation id="6364795331201459219">h6</translation>
 <translation id="6368143427468974988">முந்தைய தலைப்பு</translation>
-<translation id="6378565991815958969">$1ஐ நகலெடு.</translation>
 <translation id="6385591741672306837">நெடுவரிசை</translation>
 <translation id="6387719785439924554">aside</translation>
 <translation id="6411426777058107714">முந்தைய ரேடியோ பட்டன் இல்லை.</translation>
 <translation id="6414968628640960377">வேறுபட்ட முந்தைய உறுப்பு.</translation>
+<translation id="6417265370957905582">Google அசிஸ்டண்ட்</translation>
 <translation id="641759969622533235">{COUNT,plural, =1{முக்காற்புள்ளி}other{# முக்காற்புள்ளிகள்}}</translation>
 <translation id="6438968337250688271"><ph name="NAME" />, மெனு</translation>
 <translation id="6444046323172968959">விழிப்பூட்டல் செய்தி</translation>
+<translation id="6452403590345320472">உள்ளடக்க அட்டவணை</translation>
 <translation id="6459511626086141404">தட்டையான விசைவரைபடம்</translation>
 <translation id="6468049171101508116">அடுத்த பொத்தான்</translation>
 <translation id="646954774886932461">பொருளடக்கம்</translation>
 <translation id="6493991254603208962">ஒளிர்வைக் குறைக்கும்</translation>
 <translation id="6508059270146105198">பக்கத்தின் கீழ்ப்பகுதிக்கு பிரெய்ல் காட்சியை நகர்த்து</translation>
 <translation id="6536864053412760904">கணித ML டோக்கன்</translation>
-<translation id="6540201937398578274">ChromeVox இல், தேடல் விசை என்பது மாற்றி விசையாகும். பெரும்பாலான ChromeVox குறுக்குவழிகள் தேடல் விசையுடன் தொடங்கும். வழிசெலுத்த, அம்புக்குறி விசைகளையும் பயன்படுத்தலாம்.</translation>
+<translation id="6540201937398578274">ChromeVox இல் தேடல் விசை என்பது மாற்றி விசையாகும். பெரும்பாலான ChromeVox ஷார்ட்கட்கள் தேடல் விசையுடன் தொடங்கும். வழிசெலுத்த, அம்புக்குறி விசைகளையும் பயன்படுத்தலாம்.</translation>
 <translation id="6550720799683018100">கீழேயுள்ள பட்டியலிலிருந்து விருப்பத்தைத் தேர்ந்தெடுப்பதன் மூலம் தற்போதைய விசைவரைபடத்தை மாற்றலாம்.</translation>
 <translation id="6561818612645211875">நடப்பு வரிசையின் தொடக்கத்திற்குச் செல்</translation>
 <translation id="6583174818554398774">விவர நிலையில் அடுத்ததற்கு நகரும்</translation>
 <translation id="6587021927234520429">அடுத்த 4 ஆம் நிலை தலைப்பு இல்லை.</translation>
 <translation id="6601344353291556895">சொற்களஞ்சிய விளக்கங்களை இயக்கு.</translation>
+<translation id="6609828810966525877">‘கற்றல் பயன்முறையிலும்’ ‘Chromebook உதவி மையத்திலும்’ மேலும் சைகைகளைக் கண்டறியலாம்</translation>
 <translation id="6615602925644411249">பக்கத்தில் கண்டறி.</translation>
 <translation id="6628427060004938651">பகுதி</translation>
 <translation id="6633350132811819843">அடுத்த அட்டவணை இல்லை.</translation>
@@ -725,7 +703,7 @@
 <translation id="6736510033526053669">தாவல் உருவாக்கப்பட்டது</translation>
 <translation id="675895815784134693">pgbar</translation>
 <translation id="6786800275320335305">உறுப்பு</translation>
-<translation id="6787839852456839824">விசைப்பலகைக் குறுக்குவழிகள்</translation>
+<translation id="6787839852456839824">கீபோர்டு ஷார்ட்கட்கள்</translation>
 <translation id="6793101435925451627">lstbx</translation>
 <translation id="6826226459053491773">இரண்டு விரல்களைக் கீழே ஸ்வைப் செய்யவும்</translation>
 <translation id="6833103209700200188">அடிக்குறிப்பு</translation>
@@ -756,12 +734,14 @@
 திறந்துள்ள தாவல்களில் அடுத்தடுத்து செல்ல, Control+Tab விசைகளைப் பயன்படுத்தவும். 
 Chrome உலாவி மெனுவைத் திறக்க, Alt+F விசைகளை அழுத்தவும்.</translation>
 <translation id="7086377898680121060">ஒளிர்வை அதிகரிக்கும்</translation>
+<translation id="7088743565397416204">ஃபோகஸ் செய்யப்பட்டுள்ளதைச் செயல்படுத்த இருமுறை தட்டவும்</translation>
 <translation id="7095834689119144465">உரை எண்ணை மட்டும் திருத்து</translation>
 <translation id="7096001299300236431">முந்தைய ஊடகம்</translation>
 <translation id="7116595520562830928">multln</translation>
 <translation id="712735679809149106">சொல் எதிரொலி</translation>
 <translation id="713824876195128146">அடுத்த மேற்கோள் குறி</translation>
 <translation id="7143034430156387447">6 மற்றும் 8 புள்ளி பிரெய்லிக்கு இடையே மாறும்</translation>
+<translation id="7143207342074048698">இணைத்தல்</translation>
 <translation id="7157306005867877619">சுருக்கம்</translation>
 <translation id="7161425887892204659">உரைப் பொருத்தத்தின் இறுதி</translation>
 <translation id="7161771961008409533">பாப்-அப் பொத்தான்</translation>
@@ -811,8 +791,9 @@ Chrome உலாவி மெனுவைத் திறக்க, Alt+F வி
 <translation id="7491962110804786152">tab</translation>
 <translation id="7492049978501397201">உரையாடலை உள்ளிட்டுள்ளீர்கள்</translation>
 <translation id="7518543783849163354">ChromeVox ஆடியோவைத் தற்காலிகமாக நிறுத்த, கன்ட்ரோல் விசையை அழுத்தவும்.</translation>
+<translation id="7521682724501952239">டச்ஸ்கிரீன் மூலம் ChromeVoxஸைப் பயன்படுத்தலாம்.</translation>
 <translation id="7532613204005497612">ஜூன்</translation>
-<translation id="7552432549459840808">உதவிகரமான Chrome குறுக்குவழிகள்</translation>
+<translation id="7552432549459840808">உதவிகரமான Chrome ஷார்ட்கட்கள்</translation>
 <translation id="7579911500627256166">புள்ளி <ph name="DOT" /></translation>
 <translation id="7596919493010894443">தேர்வுகள் அழிக்கப்பட்டன</translation>
 <translation id="7604026522577407655">நடப்பு நெடுவரிசையின் தொடக்கத்திற்குச் செல்</translation>
@@ -824,7 +805,6 @@ Chrome உலாவி மெனுவைத் திறக்க, Alt+F வி
 <translation id="7625690649919402823">அடுத்த அட்டவணை</translation>
 <translation id="7628927569678398026"><ph name="LOCALE" /> (<ph name="VARIANT" />), தரம் <ph name="GRADE" /></translation>
 <translation id="7641134354185483015">முந்தைய 3 ஆம் படிநிலை தலைப்பு இல்லை.</translation>
-<translation id="7647456547678091388">உதவிக்குறிப்பு</translation>
 <translation id="7659376057562985921"><ph name="VALUE" />, <ph name="NAME" />, உரைப் பெட்டி</translation>
 <translation id="7663318257180412551">தலைப்பு 2</translation>
 <translation id="7674576868851035240">அடுத்த இணைப்பு</translation>
@@ -865,14 +845,99 @@ Chrome உலாவி மெனுவைத் திறக்க, Alt+F வி
 <translation id="8037651341025652929">முடிவு</translation>
 <translation id="8042761080832772327">உரையைத் திருத்து, தேடல் உள்ளீடு</translation>
 <translation id="8049189770492311300">டைமர்</translation>
+<translation id="8056782883599416672">{"ar": "அரபிக்",
+        "as": "அஸ்ஸாமீஸ்",
+        "aw": "அவதி",
+        "be": "பெங்காலி",
+        "bg": "பல்கேரியன்",
+        "bh": "பிஹாரி",
+        "bo": "திபெத்தியன்",
+        "br": "பிரஜ்",
+        "ca": "கேடலான்",
+        "ckb": "சொரணி",
+        "cs": "செக்",
+        "cy": "வெல்ஷ்",
+        "da": "டேனிஷ்",
+        "de": "ஜெர்மன்",
+        "de_CH": "ஜெர்மன் (சுவிட்சர்லாந்து)",
+        "de_DE": "ஜெர்மன் (ஜெர்மனி)",
+        "dra": "திராவிடம்",
+        "el": "கிரேக்கம்",
+        "en": "ஆங்கிலம்",
+        "en_CA": "ஆங்கிலம் (கனடா)",
+        "en_GB": "ஆங்கிலம் (இங்கிலாந்து)",
+        "en_US": "ஆங்கிலம் (அமெரிக்கா)",
+        "eo": "எஸ்பெரான்டோ",
+        "es": "ஸ்பானிஷ்",
+        "et": "எஸ்டோனியன்",
+        "fa": "பெர்ஷியன்",
+        "fr": "ஃபிரஞ்சு",
+        "fr_CA": "ஃபிரஞ்சு (கனடா)",
+        "fr_FR": "ஃபிரஞ்சு (ஃபிரான்ஸ்)",
+        "fi": "ஃபின்னிஷ்",
+        "ga": "ஐரிஷ்",
+        "gd": "கேலிக்",
+        "gon": "காண்டி",
+        "gu": "குஜராத்தி",
+        "he": "ஹீப்ரூ",
+        "hi": "இந்தி",
+        "hr": "குரோஷியன்",
+        "hu": "ஹங்கேரியன்",
+        "hy": "ஆர்மேனியன்",
+        "is": "ஐஸ்லாண்டிக்",
+        "it": "இத்தாலியன்",
+        "iu": "இனுக்டிடுட்",
+        "ka": "கன்னடம்",
+        "kh": "காசி",
+        "ko": "கொரியன்",
+        "kok": "கொங்கணி",
+        "kru": "குருக்",
+        "ks": "காஷ்மீரி",
+        "lt": "லிதுவேனியன்",
+        "lv": "லாட்வியன்",
+        "mao": "மாவோரி",
+        "ml": "மலையாளம்",
+        "mt": "மால்டீஸ்",
+        "mwr": "மார்வாரி",
+        "mn": "மங்கோலியன்",
+        "mun": "முண்டா",
+        "nb": "நார்வேஜியன் போக்மால்",
+        "ne": "நேபாளி",
+        "nl": "டச்சு",
+        "no": "நார்வேஜியன்",
+        "or": "ஒரியா",
+        "pi": "பாலி",
+        "pl": "போலிஷ்",
+        "pt": "போர்த்துகீசியம்",
+        "pu": "பஞ்சாபி",
+        "ro": "ரோமானியன்",
+        "ru": "ரஷ்யன்",
+        "sa": "சமஸ்கிருதம்",
+        "si": "சிந்தி",
+        "sin": "சிங்களம்",
+        "sk": "ஸ்லோவாக்",
+        "sl": "ஸ்லோவேனியன்",
+        "sr": "செர்பியன்",
+        "sv": "ஸ்வீடிஷ்",
+        "ta": "தமிழ்",
+        "te": "தெலுங்கு",
+        "tr": "டர்கிஷ்",
+        "tsn": "ஆஃப்ரிகான்ஸ்",
+        "uk": "உக்ரேனியன்",
+        "ur": "உருது",
+        "vi": "வியட்நாமீஸ்",
+        "zh": "சீனம்",
+        "zh_TW": "சீனம் (பாரம்பரிய ஹான்)"}</translation>
 <translation id="8065607967589909823">நடப்பு தேர்வு</translation>
 <translation id="8066678206530322333">பேனர்</translation>
 <translation id="8076492880354921740">தாவல்கள்</translation>
 <translation id="8091452896542422286">இடைவெளி</translation>
 <translation id="8110647606445335195">ARIA லேண்ட்மார்க்குகள் இல்லை.</translation>
+<translation id="8138880386467279117">தொடுதல்</translation>
 <translation id="8153880621934657047">அட்டவணையின் உள்ளே கிடையாது.</translation>
 <translation id="817440585505441544">{COUNT,plural, =1{அடிக்கோடு}other{# அடிக்கோடுகள்}}</translation>
 <translation id="8179976553408161302">Enter</translation>
+<translation id="8183813379996435469">ChromeVox மொழியைத் தானாகக் கண்டறிந்து, அதற்கு மாறு.</translation>
 <translation id="8184828902145951186">வரிசை</translation>
 <translation id="8186185314313222077">முழுத்திரை நிலையை மாற்றும்</translation>
 <translation id="8199231515320852133">நடப்புக் கலத்தின் தலைப்புகளை அறிவிக்கும்</translation>
@@ -880,7 +945,6 @@ Chrome உலாவி மெனுவைத் திறக்க, Alt+F வி
 <translation id="820469951249669083">அடுத்த வரிசைக்குச் செல்லும்</translation>
 <translation id="8215202828671303819">பலவற்றைத் தேர்ந்தெடுத்தல்</translation>
 <translation id="826825447994856889">அறிமுகம்</translation>
-<translation id="826991282343985864">வ$1நெ$2</translation>
 <translation id="8276439074553447000">முன்பு கவனிக்கப்பட்ட உருப்படிக்குத் தாவு</translation>
 <translation id="8278417001922463147">முந்தைய உறுப்பு இல்லை.</translation>
 <translation id="8283603667300770666">அடுத்தப் படிவப் புலம்</translation>
@@ -907,7 +971,7 @@ Chrome உலாவி மெனுவைத் திறக்க, Alt+F வி
 <translation id="8520472399088452386">சுழல் பொத்தான்</translation>
 <translation id="8538744478902126321">நடப்புக் கலத்தின் வரிசைத் தலைப்பில் யூகத்தை உருவாக்கு</translation>
 <translation id="8540054775867439484">மேல்பகுதிக்கு மடிக்கப்படும்</translation>
-<translation id="8542271685829952264">எல்லா ChromeVox கட்டளைகளையும் குறுக்குவழிகளையும் பார்க்க, தேடு மற்றும் முற்றுப்புள்ளி விசைகளை ஒன்றாக அழுத்தவும். பின்னர், மெனுக்களில் உலாவ, அம்புக்குறி விசைகளைப் பயன்படுத்தவும். கட்டளையை இயக்க, என்டர் விசையை அழுத்தவும். தேடு மற்றும் o விசைகளை அழுத்தி, பின்னர் tஐ அழுத்துவதன் மூலம் இங்கே திரும்பவும் வரலாம்.</translation>
+<translation id="8542271685829952264">எல்லா ChromeVox கட்டளைகளையும் ஷார்ட்கட்களையும் பார்க்க, தேடு மற்றும் முற்றுப்புள்ளி விசைகளை ஒன்றாக அழுத்தவும். பின்னர், மெனுக்களில் உலாவ, அம்புக்குறி விசைகளைப் பயன்படுத்தவும். கட்டளையை இயக்க, எண்டர் விசையை அழுத்தவும். தேடல்+o விசைகளை அழுத்தி, பின்னர் tஐ அழுத்துவதன் மூலம் இங்கே திரும்பவும் வரலாம்.</translation>
 <translation id="8548973727659841685">எழுத்து</translation>
 <translation id="8561322612995434619">பாப்-அப் உள்ளது</translation>
 <translation id="8571096049907249734">multsel</translation>
@@ -948,7 +1012,9 @@ Chrome உலாவி மெனுவைத் திறக்க, Alt+F வி
 <translation id="8937112856099038376">intlnk</translation>
 <translation id="8940925288729953902">மாற்றி விசைகள்</translation>
 <translation id="8943175951035496220">வலப்புறத்தில் கலம் இல்லை.</translation>
+<translation id="8946628535652548639"><ph name="TABLECELLROWINDEX" />வரி.<ph name="TABLECELLCOLUMNINDEX" />நெடு.</translation>
 <translation id="8978496506222343566">tltip</translation>
+<translation id="8986362086234534611">மற</translation>
 <translation id="900114243503212879">கோப்பு</translation>
 <translation id="9027462562263121875">அட்டவணைகள் இல்லை.</translation>
 <translation id="9040132695316389094">தலைப்பு 1</translation>
@@ -961,7 +1027,6 @@ Chrome உலாவி மெனுவைத் திறக்க, Alt+F வி
 <translation id="9082874451376019682">முந்தைய ஸ்லைடர் இல்லை.</translation>
 <translation id="9087707351856729768">தானாக நிரப்ப, உள்ளிடவும்.</translation>
 <translation id="9089864840575085222">தொடர் தட்டச்சிடும் எதிரொலி</translation>
-<translation id="9105227991373418255">$1ஐ வெட்டு.</translation>
 <translation id="9107530006868467849">முந்தைய ஊடக விட்ஜெட் இல்லை.</translation>
 <translation id="9108370397979208512">கணிதம்</translation>
 <translation id="9108589040018540527">scbr</translation>
@@ -982,6 +1047,7 @@ Chrome உலாவி மெனுவைத் திறக்க, Alt+F வி
 <translation id="948171205378458592">பேச்சின் விகிதத்தைக் குறை</translation>
 <translation id="958854023026327378">ஒரு விரலைக் கீழே ஸ்வைப் செய்யவும்</translation>
 <translation id="962913030769097253">அடுத்த 1 ஆம் படிநிலை தலைப்பு</translation>
+<translation id="966588271015727539">புளூடூத் பிரெய்ல் காட்சியைத் தேர்ந்தெடு</translation>
 <translation id="973955474346881951">ஸ்டிக்கி பயன்முறையை இயக்கு/முடக்கு</translation>
 <translation id="976849232629612000">உருப்படிகள் இல்லை.</translation>
 <translation id="995852680044449248">அடித்தம் உரையின் தொடக்கம்</translation>

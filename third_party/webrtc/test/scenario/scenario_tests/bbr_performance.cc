@@ -9,6 +9,7 @@
  */
 #include "rtc_base/random.h"
 
+#include "modules/congestion_controller/bbr/bbr_factory.h"
 #include "rtc_base/experiments/field_trial_parser.h"
 #include "rtc_base/experiments/field_trial_units.h"
 #include "test/field_trial.h"
@@ -144,22 +145,19 @@ class BbrScenarioTest
 };
 
 TEST_P(BbrScenarioTest, ReceivesVideo) {
+  BbrNetworkControllerFactory bbr_factory;
   Scenario s("bbr_test_gen/bbr__" + conf_.Name());
+  CallClientConfig call_config;
+  if (conf_.tuning.use_bbr) {
+    call_config.transport.cc =
+        TransportControllerConfig::CongestionController::kInjected;
+    call_config.transport.cc_factory = &bbr_factory;
+  }
+  call_config.transport.rates.min_rate = DataRate::kbps(30);
+  call_config.transport.rates.max_rate = DataRate::kbps(1800);
 
-  CallClient* alice = s.CreateClient("send", [&](CallClientConfig* c) {
-    if (conf_.tuning.use_bbr)
-      c->transport.cc = TransportControllerConfig::CongestionController::kBbr;
-    c->transport.state_log_interval = TimeDelta::ms(100);
-    c->transport.rates.min_rate = DataRate::kbps(30);
-    c->transport.rates.max_rate = DataRate::kbps(1800);
-  });
-  CallClient* bob = s.CreateClient("return", [&](CallClientConfig* c) {
-    if (conf_.tuning.use_bbr && conf_.scenario.return_traffic)
-      c->transport.cc = TransportControllerConfig::CongestionController::kBbr;
-    c->transport.state_log_interval = TimeDelta::ms(100);
-    c->transport.rates.min_rate = DataRate::kbps(30);
-    c->transport.rates.max_rate = DataRate::kbps(1800);
-  });
+  CallClient* alice = s.CreateClient("send", call_config);
+  CallClient* bob = s.CreateClient("return", call_config);
   NetworkNodeConfig net_conf;
   net_conf.simulation.bandwidth = conf_.scenario.capacity;
   net_conf.simulation.delay = conf_.scenario.propagation_delay;
@@ -167,31 +165,31 @@ TEST_P(BbrScenarioTest, ReceivesVideo) {
   net_conf.simulation.delay_std_dev = conf_.scenario.delay_noise;
   SimulationNode* send_net = s.CreateSimulationNode(net_conf);
   SimulationNode* ret_net = s.CreateSimulationNode(net_conf);
-  VideoStreamPair* alice_video = s.CreateVideoStream(
-      alice, {send_net}, bob, {ret_net}, [&](VideoStreamConfig* c) {
+  auto route = s.CreateRoutes(alice, {send_net}, bob, {ret_net});
+
+  VideoStreamPair* alice_video =
+      s.CreateVideoStream(route->forward(), [&](VideoStreamConfig* c) {
         c->encoder.fake.max_rate = DataRate::kbps(1800);
       });
-  s.CreateAudioStream(alice, {send_net}, bob, {ret_net},
-                      [&](AudioStreamConfig* c) {
-                        if (conf_.tuning.use_bbr) {
-                          c->stream.in_bandwidth_estimation = true;
-                          c->encoder.fixed_rate = DataRate::kbps(31);
-                        }
-                      });
+  s.CreateAudioStream(route->forward(), [&](AudioStreamConfig* c) {
+    if (conf_.tuning.use_bbr) {
+      c->stream.in_bandwidth_estimation = true;
+      c->encoder.fixed_rate = DataRate::kbps(31);
+    }
+  });
 
   VideoStreamPair* bob_video = nullptr;
   if (conf_.scenario.return_traffic) {
-    bob_video = s.CreateVideoStream(
-        bob, {ret_net}, alice, {send_net}, [&](VideoStreamConfig* c) {
+    bob_video =
+        s.CreateVideoStream(route->reverse(), [&](VideoStreamConfig* c) {
           c->encoder.fake.max_rate = DataRate::kbps(1800);
         });
-    s.CreateAudioStream(bob, {ret_net}, alice, {send_net},
-                        [&](AudioStreamConfig* c) {
-                          if (conf_.tuning.use_bbr) {
-                            c->stream.in_bandwidth_estimation = true;
-                            c->encoder.fixed_rate = DataRate::kbps(31);
-                          }
-                        });
+    s.CreateAudioStream(route->reverse(), [&](AudioStreamConfig* c) {
+      if (conf_.tuning.use_bbr) {
+        c->stream.in_bandwidth_estimation = true;
+        c->encoder.fixed_rate = DataRate::kbps(31);
+      }
+    });
   }
   CrossTrafficConfig cross_config;
   cross_config.peak_rate = conf_.scenario.cross_traffic;

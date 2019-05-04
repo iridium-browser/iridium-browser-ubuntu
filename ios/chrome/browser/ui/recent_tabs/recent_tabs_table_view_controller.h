@@ -7,16 +7,18 @@
 
 #import "ios/chrome/browser/ui/recent_tabs/recent_tabs_consumer.h"
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_controller.h"
+#include "ui/base/window_open_disposition.h"
 
 namespace ios {
 class ChromeBrowserState;
 }
+class WebStateList;
 
 @protocol ApplicationCommands;
 @protocol RecentTabsTableViewControllerDelegate;
 @protocol RecentTabsPresentationDelegate;
 @protocol UrlLoader;
-@protocol RecentTabsImageDataSource;
+@protocol TableViewFaviconDataSource;
 
 @interface RecentTabsTableViewController
     : ChromeTableViewController<RecentTabsConsumer>
@@ -26,16 +28,19 @@ class ChromeBrowserState;
 @property(nonatomic, weak) id<ApplicationCommands> dispatcher;
 // UrlLoader used by this ViewController.
 @property(nonatomic, weak) id<UrlLoader> loader;
-
+// Disposition for tabs restored by this object. Defaults to CURRENT_TAB.
+@property(nonatomic, assign) WindowOpenDisposition restoredTabDisposition;
 // RecentTabsTableViewControllerDelegate delegate.
 @property(nonatomic, weak) id<RecentTabsTableViewControllerDelegate> delegate;
+// WebStateList for tabs restored by this object.
+@property(nonatomic, assign) WebStateList* webStateList;
 
 // Delegate to present the tab UI.
 @property(nonatomic, weak) id<RecentTabsPresentationDelegate>
     presentationDelegate;
 
 // Data source for images.
-@property(nonatomic, weak) id<RecentTabsImageDataSource> imageDataSource;
+@property(nonatomic, weak) id<TableViewFaviconDataSource> imageDataSource;
 
 // Initializers.
 - (instancetype)init NS_DESIGNATED_INITIALIZER;

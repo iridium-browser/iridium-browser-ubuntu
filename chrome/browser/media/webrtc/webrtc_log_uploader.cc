@@ -10,13 +10,16 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/pickle.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/media/webrtc/webrtc_logging_handler_host.h"
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "components/version_info/version_info.h"
 #include "components/webrtc_logging/browser/log_cleanup.h"
@@ -27,6 +30,7 @@
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "net/base/load_flags.h"
 #include "net/base/mime_util.h"
+#include "net/base/net_errors.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
@@ -75,6 +79,15 @@ void AddRtpDumpData(std::string* post_data,
   post_data->append("\r\n");
 }
 
+// Helper for WebRtcLogUploader::CompressLog().
+void ResizeForNextOutput(std::string* compressed_log, z_stream* stream) {
+  size_t old_size = compressed_log->size() - stream->avail_out;
+  compressed_log->resize(old_size + kIntermediateCompressionBufferBytes);
+  stream->next_out =
+      reinterpret_cast<unsigned char*>(&(*compressed_log)[old_size]);
+  stream->avail_out = kIntermediateCompressionBufferBytes;
+}
+
 }  // namespace
 
 WebRtcLogUploadDoneData::WebRtcLogUploadDoneData() {}
@@ -86,10 +99,7 @@ WebRtcLogUploadDoneData::~WebRtcLogUploadDoneData() {}
 
 WebRtcLogUploader::WebRtcLogUploader()
     : background_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BEST_EFFORT})),
-      log_count_(0),
-      post_data_(NULL),
-      shutting_down_(false) {}
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT})) {}
 
 WebRtcLogUploader::~WebRtcLogUploader() {
   DCHECK_CALLED_ON_VALID_THREAD(create_thread_checker_);
@@ -119,8 +129,7 @@ void WebRtcLogUploader::LoggingStoppedDoUpload(
   DCHECK(meta_data.get());
   DCHECK(!upload_done_data.log_path.empty());
 
-  std::string compressed_log;
-  CompressLog(&compressed_log, log_buffer.get());
+  std::string compressed_log = CompressLog(log_buffer.get());
 
   std::string local_log_id;
 
@@ -165,7 +174,7 @@ void WebRtcLogUploader::PrepareMultipartPostData(
   // implemented according to the test plan. http://crbug.com/257329.
   if (post_data_) {
     *post_data_ = *post_data;
-    NotifyUploadDone(net::HTTP_OK, "", upload_done_data);
+    NotifyUploadDoneAndLogStats(net::HTTP_OK, net::OK, "", upload_done_data);
     return;
   }
 
@@ -189,6 +198,11 @@ void WebRtcLogUploader::UploadStoredLog(
   std::string compressed_log;
   if (!base::ReadFileToString(native_log_path, &compressed_log)) {
     DPLOG(WARNING) << "Could not read WebRTC log file.";
+    base::UmaHistogramSparse("WebRtcTextLogging.UploadFailed",
+                             upload_data.web_app_id);
+    base::UmaHistogramSparse(
+        "WebRtcTextLogging.UploadFailureReason",
+        WebRtcLoggingHandlerHost::UploadFailureReason::kStoredLogNotFound);
     base::PostTaskWithTraits(
         FROM_HERE, {BrowserThread::UI},
         base::BindOnce(upload_data.callback, false, "", "Log doesn't exist."));
@@ -244,8 +258,7 @@ void WebRtcLogUploader::LoggingStoppedDoStore(
           log_paths.log_path);
 
   // Store the native log with a ".gz" extension.
-  std::string compressed_log;
-  CompressLog(&compressed_log, log_buffer.get());
+  std::string compressed_log = CompressLog(log_buffer.get());
   base::FilePath native_log_path =
       log_paths.log_path.AppendASCII(log_id).AddExtension(
           FILE_PATH_LITERAL(".gz"));
@@ -300,15 +313,16 @@ void WebRtcLogUploader::StartShutdown() {
 
 void WebRtcLogUploader::OnSimpleLoaderComplete(
     SimpleURLLoaderList::iterator it,
-    WebRtcLogUploadDoneData upload_done_data,
+    const WebRtcLogUploadDoneData& upload_done_data,
     std::unique_ptr<std::string> response_body) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!shutting_down_);
   network::SimpleURLLoader* loader = it->get();
-  int response_code = -1;
+  base::Optional<int> response_code;
   if (loader->ResponseInfo() && loader->ResponseInfo()->headers) {
     response_code = loader->ResponseInfo()->headers->response_code();
   }
+  const int network_error_code = loader->NetError();
   pending_uploads_.erase(it);
   std::string report_id;
   if (response_body)
@@ -326,7 +340,8 @@ void WebRtcLogUploader::OnSimpleLoaderComplete(
                        log_list_path, upload_done_data.local_log_id,
                        report_id));
   }
-  NotifyUploadDone(response_code, report_id, upload_done_data);
+  NotifyUploadDoneAndLogStats(response_code, network_error_code, report_id,
+                              upload_done_data);
 }
 
 void WebRtcLogUploader::InitURLLoaderFactoryIfNeeded() {
@@ -413,8 +428,7 @@ void WebRtcLogUploader::SetupMultipart(
                                            post_data);
 }
 
-void WebRtcLogUploader::CompressLog(std::string* compressed_log,
-                                    WebRtcLogBuffer* buffer) {
+std::string WebRtcLogUploader::CompressLog(WebRtcLogBuffer* buffer) {
   z_stream stream = {0};
   int result = deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
                             // windowBits = 15 is default, 16 is added to
@@ -424,15 +438,15 @@ void WebRtcLogUploader::CompressLog(std::string* compressed_log,
                             Z_DEFAULT_STRATEGY);
   DCHECK_EQ(Z_OK, result);
 
-  uint8_t intermediate_buffer[kIntermediateCompressionBufferBytes] = {0};
-  ResizeForNextOutput(compressed_log, &stream);
-  uint32_t read = 0;
+  std::string compressed_log;
+  ResizeForNextOutput(&compressed_log, &stream);
 
+  uint8_t intermediate_buffer[kIntermediateCompressionBufferBytes] = {0};
   webrtc_logging::PartialCircularBuffer read_buffer(buffer->Read());
   do {
     if (stream.avail_in == 0) {
-      read = read_buffer.Read(&intermediate_buffer[0],
-                              sizeof(intermediate_buffer));
+      uint32_t read = read_buffer.Read(&intermediate_buffer[0],
+                                       sizeof(intermediate_buffer));
       stream.next_in = &intermediate_buffer[0];
       stream.avail_in = read;
       if (read != kIntermediateCompressionBufferBytes)
@@ -441,29 +455,21 @@ void WebRtcLogUploader::CompressLog(std::string* compressed_log,
     result = deflate(&stream, Z_SYNC_FLUSH);
     DCHECK_EQ(Z_OK, result);
     if (stream.avail_out == 0)
-      ResizeForNextOutput(compressed_log, &stream);
+      ResizeForNextOutput(&compressed_log, &stream);
   } while (true);
 
   // Ensure we have enough room in the output buffer. Easier to always just do a
   // resize than looping around and resize if needed.
   if (stream.avail_out < kIntermediateCompressionBufferBytes)
-    ResizeForNextOutput(compressed_log, &stream);
+    ResizeForNextOutput(&compressed_log, &stream);
 
   result = deflate(&stream, Z_FINISH);
   DCHECK_EQ(Z_STREAM_END, result);
   result = deflateEnd(&stream);
   DCHECK_EQ(Z_OK, result);
 
-  compressed_log->resize(compressed_log->size() - stream.avail_out);
-}
-
-void WebRtcLogUploader::ResizeForNextOutput(std::string* compressed_log,
-                                            z_stream* stream) {
-  size_t old_size = compressed_log->size() - stream->avail_out;
-  compressed_log->resize(old_size + kIntermediateCompressionBufferBytes);
-  stream->next_out =
-      reinterpret_cast<unsigned char*>(&(*compressed_log)[old_size]);
-  stream->avail_out = kIntermediateCompressionBufferBytes;
+  compressed_log.resize(compressed_log.size() - stream.avail_out);
+  return compressed_log;
 }
 
 void WebRtcLogUploader::UploadCompressedLog(
@@ -473,6 +479,9 @@ void WebRtcLogUploader::UploadCompressedLog(
 
   DecreaseLogCount();
 
+  // We don't log upload failure to UMA in case of shutting down for
+  // consistency, since there are other cases during shutdown were we don't get
+  // a chance to log.
   if (shutting_down_)
     return;
 
@@ -506,7 +515,9 @@ void WebRtcLogUploader::UploadCompressedLog(
 
   constexpr char kUploadURL[] = "https://clients2.google.com/cr/report";
   auto resource_request = std::make_unique<network::ResourceRequest>();
-  resource_request->url = GURL(kUploadURL);
+  resource_request->url = !upload_url_for_testing_.is_empty()
+                              ? upload_url_for_testing_
+                              : GURL(kUploadURL);
   resource_request->load_flags =
       net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
   resource_request->method = "POST";
@@ -630,8 +641,9 @@ void WebRtcLogUploader::AddUploadedLogInfoToUploadListFile(
   }
 }
 
-void WebRtcLogUploader::NotifyUploadDone(
-    int response_code,
+void WebRtcLogUploader::NotifyUploadDoneAndLogStats(
+    base::Optional<int> response_code,
+    int network_error_code,
     const std::string& report_id,
     const WebRtcLogUploadDoneData& upload_done_data) {
   base::PostTaskWithTraits(
@@ -639,11 +651,29 @@ void WebRtcLogUploader::NotifyUploadDone(
       base::BindOnce(&WebRtcLoggingHandlerHost::UploadLogDone,
                      upload_done_data.host));
   if (!upload_done_data.callback.is_null()) {
-    bool success = response_code == net::HTTP_OK;
+    const bool success = response_code == net::HTTP_OK;
     std::string error_message;
-    if (!success) {
-      error_message = "Uploading failed, response code: " +
-                      base::IntToString(response_code);
+    if (success) {
+      base::UmaHistogramSparse("WebRtcTextLogging.UploadSuccessful",
+                               upload_done_data.web_app_id);
+    } else {
+      base::UmaHistogramSparse("WebRtcTextLogging.UploadFailed",
+                               upload_done_data.web_app_id);
+      if (response_code.has_value()) {
+        base::UmaHistogramSparse("WebRtcTextLogging.UploadFailureReason",
+                                 response_code.value());
+      } else {
+        DCHECK_NE(network_error_code, net::OK);
+        base::UmaHistogramSparse(
+            "WebRtcTextLogging.UploadFailureReason",
+            WebRtcLoggingHandlerHost::UploadFailureReason::kNetworkError);
+        base::UmaHistogramSparse("WebRtcTextLogging.UploadFailureNetErrorCode",
+                                 network_error_code);
+      }
+      error_message = base::StrCat(
+          {"Uploading failed, response code: ",
+           response_code.has_value() ? base::IntToString(response_code.value())
+                                     : "<no value>"});
     }
     base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
                              base::BindOnce(upload_done_data.callback, success,

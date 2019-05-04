@@ -103,8 +103,9 @@ BackgroundFetchDownloadClient::OnDownloadStarted(
 
 void BackgroundFetchDownloadClient::OnDownloadUpdated(
     const std::string& guid,
+    uint64_t bytes_uploaded,
     uint64_t bytes_downloaded) {
-  GetDelegate()->OnDownloadUpdated(guid, bytes_downloaded);
+  GetDelegate()->OnDownloadUpdated(guid, bytes_uploaded, bytes_downloaded);
 }
 
 void BackgroundFetchDownloadClient::OnDownloadFailed(
@@ -147,8 +148,7 @@ bool BackgroundFetchDownloadClient::CanServiceRemoveDownloadedFile(
 void BackgroundFetchDownloadClient::GetUploadData(
     const std::string& guid,
     download::GetUploadDataCallback callback) {
-  base::SequencedTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), nullptr));
+  GetDelegate()->GetUploadData(guid, std::move(callback));
 }
 
 BackgroundFetchDelegateImpl* BackgroundFetchDownloadClient::GetDelegate() {

@@ -4,14 +4,25 @@
 
 package org.chromium.chrome.browser.dependency_injection;
 
+import static org.chromium.chrome.browser.dependency_injection.ChromeCommonQualifiers.ACTIVITY_CONTEXT;
+
+import android.content.Context;
 import android.content.res.Resources;
 
+import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.compositor.CompositorViewHolder;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
+import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
+import org.chromium.chrome.browser.init.ActivityLifecycleDispatcher;
+import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.toolbar.ToolbarManager;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
+import org.chromium.ui.base.ActivityWindowAndroid;
+
+import javax.inject.Named;
 
 import dagger.Module;
 import dagger.Provides;
@@ -22,12 +33,15 @@ import dagger.Provides;
 @Module
 public class ChromeActivityCommonsModule {
     private final ChromeActivity<?> mActivity;
+    private final ActivityLifecycleDispatcher mLifecycleDispatcher;
 
     /** See {@link ModuleFactoryOverrides} */
     public interface Factory { ChromeActivityCommonsModule create(ChromeActivity<?> activity); }
 
-    public ChromeActivityCommonsModule(ChromeActivity<?> activity) {
+    public ChromeActivityCommonsModule(
+            ChromeActivity<?> activity, ActivityLifecycleDispatcher lifecycleDispatcher) {
         mActivity = activity;
+        mLifecycleDispatcher = lifecycleDispatcher;
     }
 
     @Provides
@@ -60,13 +74,49 @@ public class ChromeActivityCommonsModule {
 
     @Provides
     public ChromeActivity provideChromeActivity() {
-        // Ideally this should provide only the Context instead of specific activity, but currently
-        // a lot of code is coupled specifically to ChromeActivity.
+        // Ideally providing Context should be enough, but currently a lot of code is coupled
+        // specifically to ChromeActivity.
+        return mActivity;
+    }
+
+    @Provides
+    @Named(ACTIVITY_CONTEXT)
+    public Context provideContext() {
         return mActivity;
     }
 
     @Provides
     public Resources provideResources() {
         return mActivity.getResources();
+    }
+
+    @Provides
+    public ActivityLifecycleDispatcher provideLifecycleDispatcher() {
+        return mLifecycleDispatcher;
+    }
+
+    @Provides
+    public SnackbarManager provideSnackbarManager() {
+        return mActivity.getSnackbarManager();
+    }
+
+    @Provides
+    public ActivityTabProvider provideActivityTabProvider() {
+        return mActivity.getActivityTabProvider();
+    }
+
+    @Provides
+    public TabContentManager provideTabContentManager() {
+        return mActivity.getTabContentManager();
+    }
+
+    @Provides
+    public ActivityWindowAndroid provideActivityWindowAndroid() {
+        return mActivity.getWindowAndroid();
+    }
+
+    @Provides
+    public CompositorViewHolder provideCompositorViewHolder() {
+        return mActivity.getCompositorViewHolder();
     }
 }

@@ -23,6 +23,7 @@
 
 #include "third_party/blink/renderer/platform/text/text_break_iterator.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/text/character.h"
 #include "third_party/blink/renderer/platform/wtf/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
@@ -223,11 +224,11 @@ static const unsigned char kBreakAllLineBreakClassTable[][BA_LB_COUNT / 8 + 1] =
 #undef DI
 #undef AL
 
-static_assert(arraysize(kAsciiLineBreakTable) ==
+static_assert(base::size(kAsciiLineBreakTable) ==
                   kAsciiLineBreakTableLastChar - kAsciiLineBreakTableFirstChar +
                       1,
               "asciiLineBreakTable should be consistent");
-static_assert(arraysize(kBreakAllLineBreakClassTable) == BA_LB_COUNT,
+static_assert(base::size(kBreakAllLineBreakClassTable) == BA_LB_COUNT,
               "breakAllLineBreakClassTable should be consistent");
 
 static inline bool ShouldBreakAfter(UChar last_ch, UChar ch, UChar next_ch) {
@@ -284,9 +285,9 @@ static inline bool ShouldKeepAfterKeepAll(UChar last_ch,
                                           UChar next_ch) {
   UChar pre_ch = U_MASK(u_charType(ch)) & U_GC_M_MASK ? last_ch : ch;
   return U_MASK(u_charType(pre_ch)) & (U_GC_L_MASK | U_GC_N_MASK) &&
-         !WTF::Unicode::HasLineBreakingPropertyComplexContext(pre_ch) &&
+         !WTF::unicode::HasLineBreakingPropertyComplexContext(pre_ch) &&
          U_MASK(u_charType(next_ch)) & (U_GC_L_MASK | U_GC_N_MASK) &&
-         !WTF::Unicode::HasLineBreakingPropertyComplexContext(next_ch);
+         !WTF::unicode::HasLineBreakingPropertyComplexContext(next_ch);
 }
 
 inline bool NeedsLineBreakIterator(UChar ch) {

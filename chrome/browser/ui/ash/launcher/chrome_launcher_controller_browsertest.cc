@@ -14,7 +14,7 @@
 #include "ash/public/cpp/window_properties.h"
 #include "ash/shelf/app_list_button.h"
 #include "ash/shelf/shelf.h"
-#include "ash/shelf/shelf_button.h"
+#include "ash/shelf/shelf_app_button.h"
 #include "ash/shelf/shelf_view.h"
 #include "ash/shelf/shelf_view_test_api.h"
 #include "ash/shelf/shelf_widget.h"
@@ -62,6 +62,7 @@
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/app_window/native_app_window.h"
+#include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/switches.h"
@@ -165,6 +166,12 @@ void RestoreWindow(ui::BaseWindow* window) {
 ash::ShelfView* GetPrimaryShelfView() {
   return ash::Shelf::ForWindow(ash::Shell::GetPrimaryRootWindow())
       ->GetShelfViewForTesting();
+}
+
+int64_t GetDisplayIdForBrowserWindow(BrowserWindow* window) {
+  return display::Screen::GetScreen()
+      ->GetDisplayNearestWindow(window->GetNativeWindow())
+      .id();
 }
 
 }  // namespace
@@ -295,7 +302,7 @@ class ShelfAppBrowserTest : public extensions::ExtensionBrowserTest {
                        ui::test::EventGenerator* generator,
                        ash::ShelfViewTestAPI* test,
                        RipOffCommand command) {
-    ash::ShelfButton* button = test->GetButton(index);
+    ash::ShelfAppButton* button = test->GetButton(index);
     gfx::Point start_point = button->GetBoundsInScreen().CenterPoint();
     gfx::Point rip_off_point(start_point.x(), 0);
     generator->MoveMouseTo(start_point.x(), start_point.y());
@@ -855,10 +862,11 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, LaunchAppFromDisplayWithoutFocus0) {
   // Ensures browser 2 is above browser 1 in display 1.
   browser_list->SetLastActive(browser2);
   browser_list->SetLastActive(browser0);
+  aura::test::WaitForAllChangesToComplete();
   EXPECT_EQ(browser_list->size(), 3U);
-  EXPECT_EQ(browser0->window()->GetNativeWindow()->GetRootWindow(), roots[0]);
-  EXPECT_EQ(browser1->window()->GetNativeWindow()->GetRootWindow(), roots[1]);
-  EXPECT_EQ(browser2->window()->GetNativeWindow()->GetRootWindow(), roots[1]);
+  EXPECT_EQ(displays[0].id(), GetDisplayIdForBrowserWindow(browser0->window()));
+  EXPECT_EQ(displays[1].id(), GetDisplayIdForBrowserWindow(browser1->window()));
+  EXPECT_EQ(displays[1].id(), GetDisplayIdForBrowserWindow(browser2->window()));
   EXPECT_EQ(browser0->tab_strip_model()->count(), 1);
   EXPECT_EQ(browser1->tab_strip_model()->count(), 1);
   EXPECT_EQ(browser2->tab_strip_model()->count(), 1);
@@ -897,8 +905,9 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, LaunchAppFromDisplayWithoutFocus1) {
   BrowserList* browser_list = BrowserList::GetInstance();
   Browser* browser0 = browser();
   browser0->window()->SetBounds(displays[0].work_area());
+  aura::test::WaitForAllChangesToComplete();
   EXPECT_EQ(browser_list->size(), 1U);
-  EXPECT_EQ(browser0->window()->GetNativeWindow()->GetRootWindow(), roots[0]);
+  EXPECT_EQ(displays[0].id(), GetDisplayIdForBrowserWindow(browser0->window()));
   EXPECT_EQ(browser0->tab_strip_model()->count(), 1);
 
   // Launches an app from the shelf of display 0 and expects a new browser with
@@ -946,12 +955,9 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, LaunchInBackground) {
 // activates the right window.
 IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, LaunchMaximized) {
   MaximizeWindow(browser()->window());
-  content::WindowedNotificationObserver open_observer(
-      chrome::NOTIFICATION_BROWSER_OPENED,
-      content::NotificationService::AllSources());
-  chrome::NewEmptyWindow(browser()->profile());
-  open_observer.Wait();
-  Browser* browser2 = content::Source<Browser>(open_observer.source()).ptr();
+  // Load about:blank in a new window.
+  Browser* browser2 = CreateBrowser(browser()->profile());
+  EXPECT_NE(browser(), browser2);
   TabStripModel* tab_strip = browser2->tab_strip_model();
   int tab_count = tab_strip->count();
   MaximizeWindow(browser2->window());
@@ -1594,8 +1600,8 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, DISABLED_DragOffShelf) {
   EXPECT_EQ(browser_index, GetIndexOfShelfItemType(ash::TYPE_BROWSER_SHORTCUT));
   // Make sure that the hide state has been unset after the snap back animation
   // finished.
-  ash::ShelfButton* button = test.GetButton(browser_index);
-  EXPECT_FALSE(button->state() & ash::ShelfButton::STATE_HIDDEN);
+  ash::ShelfAppButton* button = test.GetButton(browser_index);
+  EXPECT_FALSE(button->state() & ash::ShelfAppButton::STATE_HIDDEN);
 
   // Test #2: Ripping out the application and canceling the operation should
   // not change anything.
@@ -1683,17 +1689,30 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTestNoDefaultBrowser,
   const ash::ShelfID browser_id = item_controller->shelf_id();
   EXPECT_EQ(extension_misc::kChromeAppId, browser_id.app_id);
 
+  extensions::ExtensionPrefs* prefs =
+      extensions::ExtensionPrefs::Get(profile());
+
   // Get the number of browsers.
   size_t running_browser = chrome::GetTotalBrowserCount();
   EXPECT_EQ(0u, running_browser);
   EXPECT_FALSE(controller_->IsOpen(browser_id));
+  // No launch time recorded for Chrome yet.
+  EXPECT_EQ(base::Time(),
+            prefs->GetLastLaunchTime(extension_misc::kChromeAppId));
 
   // Activate. This creates new browser
+  base::Time time_before_launch = base::Time::Now();
   SelectItem(browser_id, ui::ET_UNKNOWN);
+  base::Time time_after_launch = base::Time::Now();
   // New Window is created.
   running_browser = chrome::GetTotalBrowserCount();
   EXPECT_EQ(1u, running_browser);
   EXPECT_TRUE(controller_->IsOpen(browser_id));
+  // Valid launch time should be recorded for Chrome.
+  const base::Time time_launch =
+      prefs->GetLastLaunchTime(extension_misc::kChromeAppId);
+  EXPECT_LE(time_before_launch, time_launch);
+  EXPECT_GE(time_after_launch, time_launch);
 
   // Minimize Window.
   Browser* browser = chrome::FindLastActive();
@@ -1707,6 +1726,30 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTestNoDefaultBrowser,
   EXPECT_EQ(1u, running_browser);
   EXPECT_TRUE(controller_->IsOpen(browser_id));
   EXPECT_FALSE(browser->window()->IsMinimized());
+  // Re-activation should not upate the recorded launch time.
+  EXPECT_GE(time_launch,
+            prefs->GetLastLaunchTime(extension_misc::kChromeAppId));
+}
+
+// Check that browser launch time is recorded when the browser is started
+// by means other than BrowserShortcutLauncherItemController.
+IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTestNoDefaultBrowser,
+                       BrowserLaunchTimeRecorded) {
+  extensions::ExtensionPrefs* prefs =
+      extensions::ExtensionPrefs::Get(profile());
+
+  EXPECT_EQ(0u, chrome::GetTotalBrowserCount());
+  EXPECT_EQ(base::Time(),
+            prefs->GetLastLaunchTime(extension_misc::kChromeAppId));
+
+  base::Time time_before_launch = base::Time::Now();
+  // Load about:blank in a new window.
+  CreateBrowser(profile());
+  base::Time time_after_launch = base::Time::Now();
+  const base::Time time_launch =
+      prefs->GetLastLaunchTime(extension_misc::kChromeAppId);
+  EXPECT_LE(time_before_launch, time_launch);
+  EXPECT_GE(time_after_launch, time_launch);
 }
 
 // Check that the window's ShelfID property matches that of the active tab.

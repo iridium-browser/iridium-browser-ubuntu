@@ -13,8 +13,6 @@ if [[ ! -d $EMSDK ]]; then
   exit 1
 fi
 
-BUILD_DIR=${BUILD_DIR:="out/canvaskit_wasm"}
-mkdir -p $BUILD_DIR
 # Navigate to SKIA_HOME from where this file is located.
 pushd $BASE_DIR/../..
 
@@ -22,12 +20,99 @@ source $EMSDK/emsdk_env.sh
 EMCC=`which emcc`
 EMCXX=`which em++`
 
-RELEASE_CONF="-Oz --closure 1 --llvm-lto 3 -DSK_RELEASE"
-EXTRA_CFLAGS="\"-DSK_RELEASE\""
+RELEASE_CONF="-Oz --closure 1 --llvm-lto 3 -DSK_RELEASE --pre-js $BASE_DIR/release.js \
+              -DGR_GL_CHECK_ALLOC_WITH_GET_ERROR=0"
+EXTRA_CFLAGS="\"-DSK_RELEASE\", \"-DGR_GL_CHECK_ALLOC_WITH_GET_ERROR=0\","
 if [[ $@ == *debug* ]]; then
   echo "Building a Debug build"
   EXTRA_CFLAGS="\"-DSK_DEBUG\""
-  RELEASE_CONF="-O0 --js-opts 0 -s SAFE_HEAP=1 -s ASSERTIONS=1 -s GL_ASSERTIONS=1 -g3 -DPATHKIT_TESTING -DSK_DEBUG"
+  RELEASE_CONF="-O0 --js-opts 0 -s DEMANGLE_SUPPORT=1 -s ASSERTIONS=1 -s GL_ASSERTIONS=1 -g4 \
+                --source-map-base /node_modules/canvaskit/bin/ -DSK_DEBUG --pre-js $BASE_DIR/debug.js"
+  BUILD_DIR=${BUILD_DIR:="out/canvaskit_wasm_debug"}
+elif [[ $@ == *profiling* ]]; then
+  echo "Building a build for profiling"
+  RELEASE_CONF="-O3 --source-map-base /node_modules/canvaskit/bin/ --profiling -g4 -DSK_RELEASE \
+                --pre-js $BASE_DIR/release.js -DGR_GL_CHECK_ALLOC_WITH_GET_ERROR=0"
+  BUILD_DIR=${BUILD_DIR:="out/canvaskit_wasm_profile"}
+else
+  BUILD_DIR=${BUILD_DIR:="out/canvaskit_wasm"}
+fi
+
+mkdir -p $BUILD_DIR
+
+GN_GPU="skia_enable_gpu=true"
+GN_GPU_FLAGS="\"-DIS_WEBGL=1\", \"-DSK_DISABLE_LEGACY_SHADERCONTEXT\","
+WASM_GPU="-lEGL -lGLESv2 -DSK_SUPPORT_GPU=1 \
+          -DSK_DISABLE_LEGACY_SHADERCONTEXT --pre-js $BASE_DIR/cpu.js --pre-js $BASE_DIR/gpu.js"
+if [[ $@ == *cpu* ]]; then
+  echo "Using the CPU backend instead of the GPU backend"
+  GN_GPU="skia_enable_gpu=false"
+  GN_GPU_FLAGS=""
+  WASM_GPU="-DSK_SUPPORT_GPU=0 --pre-js $BASE_DIR/cpu.js"
+fi
+
+WASM_SKOTTIE=" \
+  $BASE_DIR/skottie_bindings.cpp \
+  modules/skottie/src/Skottie.cpp \
+  modules/skottie/src/SkottieAdapter.cpp \
+  modules/skottie/src/SkottieAnimator.cpp \
+  modules/skottie/src/SkottieJson.cpp \
+  modules/skottie/src/SkottieLayer.cpp \
+  modules/skottie/src/SkottieLayerEffect.cpp \
+  modules/skottie/src/SkottiePrecompLayer.cpp \
+  modules/skottie/src/SkottieProperty.cpp \
+  modules/skottie/src/SkottieShapeLayer.cpp \
+  modules/skottie/src/SkottieTextLayer.cpp \
+  modules/skottie/src/SkottieValue.cpp \
+  modules/sksg/src/*.cpp \
+  modules/skshaper/src/SkShaper.cpp \
+  modules/skshaper/src/SkShaper_primitive.cpp \
+  src/core/SkCubicMap.cpp \
+  src/core/SkTime.cpp \
+  src/pathops/SkOpBuilder.cpp \
+  src/utils/SkJSON.cpp \
+  src/utils/SkParse.cpp "
+if [[ $@ == *no_skottie* ]]; then
+  echo "Omitting Skottie"
+  WASM_SKOTTIE=""
+fi
+
+WASM_MANAGED_SKOTTIE="\
+  -DSK_INCLUDE_MANAGED_SKOTTIE=1 \
+  modules/skottie/utils/SkottieUtils.cpp"
+if [[ $@ == *no_managed_skottie* ]]; then
+  echo "Omitting managed Skottie"
+  WASM_MANAGED_SKOTTIE="-DSK_INCLUDE_MANAGED_SKOTTIE=0"
+fi
+
+HTML_CANVAS_API="--pre-js $BASE_DIR/htmlcanvas/preamble.js \
+--pre-js $BASE_DIR/htmlcanvas/util.js \
+--pre-js $BASE_DIR/htmlcanvas/color.js \
+--pre-js $BASE_DIR/htmlcanvas/font.js \
+--pre-js $BASE_DIR/htmlcanvas/canvas2dcontext.js \
+--pre-js $BASE_DIR/htmlcanvas/htmlcanvas.js \
+--pre-js $BASE_DIR/htmlcanvas/imagedata.js \
+--pre-js $BASE_DIR/htmlcanvas/lineargradient.js \
+--pre-js $BASE_DIR/htmlcanvas/path2d.js \
+--pre-js $BASE_DIR/htmlcanvas/pattern.js \
+--pre-js $BASE_DIR/htmlcanvas/radialgradient.js \
+--pre-js $BASE_DIR/htmlcanvas/postamble.js "
+if [[ $@ == *no_canvas* ]]; then
+  echo "Omitting bindings for HTML Canvas API"
+  HTML_CANVAS_API=""
+fi
+
+BUILTIN_FONT="$BASE_DIR/fonts/NotoMono-Regular.ttf.cpp"
+if [[ $@ == *no_font* ]]; then
+  echo "Omitting the built-in font(s)"
+  BUILTIN_FONT=""
+else
+  # Generate the font's binary file (which is covered by .gitignore)
+  python tools/embed_resources.py \
+      --name SK_EMBEDDED_FONTS \
+      --input $BASE_DIR/fonts/NotoMono-Regular.ttf \
+      --output $BASE_DIR/fonts/NotoMono-Regular.ttf.cpp \
+      --align 4
 fi
 
 # Turn off exiting while we check for ninja (which may not be on PATH)
@@ -48,7 +133,9 @@ echo "Compiling bitcode"
   cxx=\"${EMCXX}\" \
   extra_cflags_cc=[\"-frtti\"] \
   extra_cflags=[\"-s\",\"USE_FREETYPE=1\",\"-s\",\"USE_LIBPNG=1\", \"-s\", \"WARN_UNALIGNED=1\",
-    \"-DIS_WEBGL=1\", \"-DSKNX_NO_SIMD\",
+    \"-DSKNX_NO_SIMD\", \"-DSK_DISABLE_AAA\", \"-DSK_DISABLE_DAA\", \"-DSK_DISABLE_READBUFFER\",
+    \"-DSK_DISABLE_EFFECT_DESERIALIZATION\",
+    ${GN_GPU_FLAGS}
     ${EXTRA_CFLAGS}
   ] \
   is_debug=false \
@@ -64,7 +151,8 @@ echo "Compiling bitcode"
   skia_use_freetype=true \
   skia_use_icu=false \
   skia_use_libheif=false \
-  skia_use_libjpeg_turbo=false \
+  skia_use_system_libjpeg_turbo = false \
+  skia_use_libjpeg_turbo=true \
   skia_use_libpng=true \
   skia_use_libwebp=false \
   skia_use_lua=false \
@@ -73,7 +161,9 @@ echo "Compiling bitcode"
   skia_use_zlib=true \
   \
   skia_enable_ccpr=false \
-  skia_enable_gpu=true \
+  skia_enable_nvpr=false \
+  skia_enable_skpicture=false \
+  ${GN_GPU} \
   skia_enable_fontmgr_empty=false \
   skia_enable_pdf=false"
 
@@ -85,8 +175,12 @@ echo "Generating final wasm"
 
 # Skottie doesn't end up in libskia and is currently not its own library
 # so we just hack in the .cpp files we need for now.
+# Emscripten prefers that libskia.a goes last in order, otherwise, it
+# may drop symbols that it incorrectly thinks aren't used. One day,
+# Emscripten will use LLD, which may relax this requirement.
 ${EMCXX} \
     $RELEASE_CONF \
+    -Iexperimental \
     -Iinclude/c \
     -Iinclude/codec \
     -Iinclude/config \
@@ -98,39 +192,31 @@ ${EMCXX} \
     -Iinclude/private \
     -Iinclude/utils/ \
     -Imodules/skottie/include \
+    -Imodules/skottie/utils \
     -Imodules/sksg/include \
+    -Imodules/skshaper/include \
     -Isrc/core/ \
-    -Isrc/utils/ \
+    -Isrc/gpu/ \
     -Isrc/sfnt/ \
-    -Itools/fonts \
+    -Isrc/shaders/ \
+    -Isrc/utils/ \
     -Itools \
-    -lEGL \
-    -lGLESv2 \
+    -Itools/fonts \
+    -DSK_DISABLE_READBUFFER \
+    -DSK_DISABLE_AAA \
+    -DSK_DISABLE_DAA \
+    $WASM_GPU \
     -std=c++14 \
     --bind \
     --pre-js $BASE_DIR/helper.js \
     --pre-js $BASE_DIR/interface.js \
+    --post-js $BASE_DIR/ready.js \
+    $HTML_CANVAS_API \
+    $BUILTIN_FONT \
     $BASE_DIR/canvaskit_bindings.cpp \
+    $WASM_SKOTTIE \
+    $WASM_MANAGED_SKOTTIE \
     $BUILD_DIR/libskia.a \
-    modules/skottie/src/Skottie.cpp \
-    modules/skottie/src/SkottieAdapter.cpp \
-    modules/skottie/src/SkottieAnimator.cpp \
-    modules/skottie/src/SkottieJson.cpp \
-    modules/skottie/src/SkottieLayer.cpp \
-    modules/skottie/src/SkottieLayerEffect.cpp \
-    modules/skottie/src/SkottiePrecompLayer.cpp \
-    modules/skottie/src/SkottieProperty.cpp \
-    modules/skottie/src/SkottieShapeLayer.cpp \
-    modules/skottie/src/SkottieTextLayer.cpp \
-    modules/skottie/src/SkottieValue.cpp \
-    modules/sksg/src/*.cpp \
-    src/core/SkCubicMap.cpp \
-    src/core/SkTime.cpp \
-    src/pathops/SkOpBuilder.cpp \
-    tools/fonts/SkTestFontMgr.cpp \
-    tools/fonts/SkTestTypeface.cpp \
-    src/utils/SkJSON.cpp \
-    src/utils/SkParse.cpp \
     -s ALLOW_MEMORY_GROWTH=1 \
     -s EXPORT_NAME="CanvasKitInit" \
     -s FORCE_FILESYSTEM=0 \

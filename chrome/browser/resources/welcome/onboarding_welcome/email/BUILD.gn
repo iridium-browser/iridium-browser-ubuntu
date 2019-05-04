@@ -11,5 +11,24 @@ js_type_check("closure_compile") {
 }
 
 js_library("nux_email") {
-  deps = []
+  deps = [
+    ":email_app_proxy",
+    "../:navigation_behavior",
+    "../shared:app_chooser",
+    "../shared:nux_types",
+  ]
+}
+
+js_library("email_app_proxy") {
+  deps = [
+    "../shared:app_proxy",
+    "../shared:nux_types",
+    "//ui/webui/resources/js:cr",
+    "//ui/webui/resources/js:load_time_data",
+  ]
+  externs_list = [
+    "$externs_path/chrome_extensions.js",
+    "$externs_path/chrome_send.js",
+    "$externs_path/metrics_private.js",
+  ]
 }

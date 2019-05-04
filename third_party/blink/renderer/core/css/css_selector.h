@@ -163,8 +163,8 @@ class CORE_EXPORT CSSSelector {
     kPseudoLink,
     kPseudoVisited,
     kPseudoAny,
-    kPseudoMatches,
-    kPseudoIS,
+    kPseudoIs,
+    kPseudoWhere,
     kPseudoAnyLink,
     kPseudoWebkitAnyLink,
     kPseudoAutofill,
@@ -380,13 +380,17 @@ class CORE_EXPORT CSSSelector {
   }
 
   bool MatchesPseudoElement() const;
+  bool IsTreeAbidingPseudoElement() const;
+  bool IsAllowedAfterPart() const;
 
   bool HasContentPseudo() const;
   bool HasSlottedPseudo() const;
   bool HasDeepCombinatorOrShadowPseudo() const;
+  // Returns true if the immediately preceeding simple selector is ::part.
+  bool FollowsPart() const;
   bool NeedsUpdatedDistribution() const;
-  bool HasPseudoMatches() const;
-  bool HasPseudoIS() const;
+  bool HasPseudoIs() const;
+  bool HasPseudoWhere() const;
 
  private:
   unsigned relation_ : 4;     // enum RelationType

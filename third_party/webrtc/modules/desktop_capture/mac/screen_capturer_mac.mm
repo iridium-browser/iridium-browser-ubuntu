@@ -14,9 +14,9 @@
 
 #include "modules/desktop_capture/mac/desktop_frame_provider.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/constructormagic.h"
+#include "rtc_base/constructor_magic.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/timeutils.h"
+#include "rtc_base/time_utils.h"
 #include "rtc_base/trace_event.h"
 #include "sdk/objc/helpers/scoped_cftyperef.h"
 
@@ -167,11 +167,7 @@ ScreenCapturerMac::~ScreenCapturerMac() {
 
 bool ScreenCapturerMac::Init() {
   TRACE_EVENT0("webrtc", "ScreenCapturerMac::Init");
-
-  desktop_config_monitor_->Lock();
   desktop_config_ = desktop_config_monitor_->desktop_configuration();
-  desktop_config_monitor_->Unlock();
-
   return true;
 }
 
@@ -207,7 +203,6 @@ void ScreenCapturerMac::CaptureFrame() {
   queue_.MoveToNextFrame();
   RTC_DCHECK(!queue_.current_frame() || !queue_.current_frame()->IsShared());
 
-  desktop_config_monitor_->Lock();
   MacDesktopConfiguration new_config = desktop_config_monitor_->desktop_configuration();
   if (!desktop_config_.Equals(new_config)) {
     desktop_config_ = new_config;
@@ -223,6 +218,17 @@ void ScreenCapturerMac::CaptureFrame() {
     ScreenConfigurationChanged();
   }
 
+  // When screen is zoomed in/out, OSX only updates the part of Rects currently
+  // displayed on screen, with relative location to current top-left on screen.
+  // This will cause problems when we copy the dirty regions to the captured
+  // image. So we invalidate the whole screen to copy all the screen contents.
+  // With CGI method, the zooming will be ignored and the whole screen contents
+  // will be captured as before.
+  // With IOSurface method, the zoomed screen contents will be captured.
+  if (UAZoomEnabled()) {
+    helper_.InvalidateScreen(screen_pixel_bounds_.size());
+  }
+
   DesktopRegion region;
   helper_.TakeInvalidRegion(&region);
 
@@ -234,7 +240,6 @@ void ScreenCapturerMac::CaptureFrame() {
   DesktopFrame* current_frame = queue_.current_frame();
 
   if (!CgBlit(*current_frame, region)) {
-    desktop_config_monitor_->Unlock();
     callback_->OnCaptureResult(Result::ERROR_PERMANENT, nullptr);
     return;
   }
@@ -255,10 +260,6 @@ void ScreenCapturerMac::CaptureFrame() {
   }
 
   helper_.set_size_most_recent(new_frame->size());
-
-  // Signal that we are done capturing data from the display framebuffer,
-  // and accessing display structures.
-  desktop_config_monitor_->Unlock();
 
   new_frame->set_capture_time_ms((rtc::TimeNanos() - capture_start_time_nanos) /
                                  rtc::kNumNanosecsPerMillisec);
@@ -295,10 +296,9 @@ bool ScreenCapturerMac::SelectSource(SourceId id) {
 }
 
 bool ScreenCapturerMac::CgBlit(const DesktopFrame& frame, const DesktopRegion& region) {
-  // Copy the entire contents of the previous capture buffer, to capture over.
-  // TODO(wez): Get rid of this as per crbug.com/145064, or implement
-  // crbug.com/92354.
-  if (queue_.previous_frame()) {
+  // If not all screen region is dirty, copy the entire contents of the previous capture buffer,
+  // to capture over.
+  if (queue_.previous_frame() && !region.Equals(DesktopRegion(screen_pixel_bounds_))) {
     memcpy(frame.data(), queue_.previous_frame()->data(), frame.stride() * frame.size().height());
   }
 

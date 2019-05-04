@@ -11,6 +11,7 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/web_applications/bookmark_apps/system_web_app_manager_browsertest.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/web_application_info.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -43,17 +44,18 @@ class BrowserNonClientFrameViewBrowserTest
                                                          web_app_info);
     content::TestNavigationObserver navigation_observer(GetAppURL());
     navigation_observer.StartWatchingNewWebContents();
-    Browser* app_browser = extensions::browsertest_util::LaunchAppBrowser(
+    app_browser_ = extensions::browsertest_util::LaunchAppBrowser(
         browser()->profile(), app);
     navigation_observer.WaitForNavigationFinished();
 
     BrowserView* browser_view =
-        BrowserView::GetBrowserViewForBrowser(app_browser);
+        BrowserView::GetBrowserViewForBrowser(app_browser_);
     app_frame_view_ = browser_view->frame()->GetFrameView();
   }
 
  protected:
   base::Optional<SkColor> app_theme_color_ = SK_ColorBLUE;
+  Browser* app_browser_ = nullptr;
   BrowserNonClientFrameView* app_frame_view_ = nullptr;
 
  private:
@@ -85,12 +87,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewBrowserTest,
 }
 
 // Tests the frame color for a bookmark app when a theme is applied.
-//
-// Disabled because it hits a DCHECK in BrowserView.
-// TODO(mgiuca): Remove this DCHECK, since it seems legitimate.
-// https://crbug.com/879030.
 IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewBrowserTest,
-                       DISABLED_BookmarkAppFrameColorCustomTheme) {
+                       BookmarkAppFrameColorCustomTheme) {
   // The theme color should not affect the window, but the theme must not be the
   // default GTK theme for Linux so we install one anyway.
   InstallExtension(test_data_dir_.AppendASCII("theme"), 1);
@@ -103,12 +101,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewBrowserTest,
 
 // Tests the frame color for a bookmark app when a theme is applied, with the
 // app itself having no theme color.
-//
-// Disabled because it hits a DCHECK in BrowserView.
-// TODO(mgiuca): Remove this DCHECK, since it seems legitimate.
-// https://crbug.com/879030.
 IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewBrowserTest,
-                       DISABLED_BookmarkAppFrameColorCustomThemeNoThemeColor) {
+                       BookmarkAppFrameColorCustomThemeNoThemeColor) {
   InstallExtension(test_data_dir_.AppendASCII("theme"), 1);
   app_theme_color_.reset();
   InstallAndLaunchBookmarkApp();
@@ -143,4 +137,31 @@ IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewBrowserTest,
   EXPECT_EQ(*app_theme_color_,
             app_frame_view_->GetFrameColor(BrowserNonClientFrameView::kActive));
 #endif
+}
+
+using SystemWebAppNonClientFrameViewBrowserTest =
+    web_app::SystemWebAppManagerBrowserTest;
+
+// System Web Apps don't get the hosted app buttons.
+IN_PROC_BROWSER_TEST_F(SystemWebAppNonClientFrameViewBrowserTest,
+                       HideHostedAppButtonContainer) {
+  Browser* app_browser = WaitForSystemAppInstallAndLaunch();
+  EXPECT_EQ(nullptr, BrowserView::GetBrowserViewForBrowser(app_browser)
+                         ->frame()
+                         ->GetFrameView()
+                         ->hosted_app_button_container_for_testing());
+}
+
+// Tests the frame color for a bookmark app when a theme is applied.
+IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewBrowserTest,
+                       FullscreenForTabTitlebarHeight) {
+  InstallAndLaunchBookmarkApp();
+  EXPECT_GT(app_frame_view_->GetTopInset(false), 0);
+
+  content::WebContents* web_contents =
+      app_frame_view_->browser_view()->GetActiveWebContents();
+  static_cast<content::WebContentsDelegate*>(app_browser_)
+      ->EnterFullscreenModeForTab(web_contents, web_contents->GetURL(), {});
+
+  EXPECT_EQ(app_frame_view_->GetTopInset(false), 0);
 }

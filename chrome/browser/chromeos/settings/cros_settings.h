@@ -38,11 +38,21 @@ class CrosSettings {
   static void Shutdown();
   static CrosSettings* Get();
 
+  // Sets the singleton to |test_instance|. Does not take ownership of the
+  // instance. Should be matched with a call to |ShutdownForTesting| once the
+  // test is finished and before the instance is deleted.
+  static void SetForTesting(CrosSettings* test_instance);
+  static void ShutdownForTesting();
+
   // Checks if the given username is whitelisted and allowed to sign-in to
   // this device. |wildcard_match| may be NULL. If it's present, it'll be set to
   // true if the whitelist check was satisfied via a wildcard.
   bool IsUserWhitelisted(const std::string& username,
                          bool* wildcard_match) const;
+
+  // Creates an instance with no providers as yet. This is meant for unit tests,
+  // production code uses the singleton returned by Get() above.
+  CrosSettings();
 
   // Creates a device settings service instance. This is meant for unit tests,
   // production code uses the singleton returned by Get() above.
@@ -52,6 +62,11 @@ class CrosSettings {
 
   // Helper function to test if the given |path| is a valid cros setting.
   static bool IsCrosSettings(const std::string& path);
+
+  // TODO(https://crbug.com/433840): There are no longer any callers of
+  // CrosSettings::Set. Still TODO: delete CrosSettings::Set, convenience forms
+  // of Set, all implementations of CrosSettingsProvider::Set, and remove any
+  // dependencies that are no longer needed.
 
   // Sets |in_value| to given |path| in cros settings.
   void Set(const std::string& path, const base::Value& in_value);

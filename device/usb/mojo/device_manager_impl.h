@@ -39,16 +39,36 @@ class DeviceManagerImpl : public mojom::UsbDeviceManager,
 
  private:
   // DeviceManager implementation:
+  void EnumerateDevicesAndSetClient(
+      mojom::UsbDeviceManagerClientAssociatedPtrInfo client,
+      EnumerateDevicesAndSetClientCallback callback) override;
   void GetDevices(mojom::UsbEnumerationOptionsPtr options,
                   GetDevicesCallback callback) override;
   void GetDevice(const std::string& guid,
                  mojom::UsbDeviceRequest device_request,
                  mojom::UsbDeviceClientPtr device_client) override;
+
+#if defined(OS_CHROMEOS)
+  void CheckAccess(const std::string& guid,
+                   CheckAccessCallback callback) override;
+
+  void OpenFileDescriptor(const std::string& guid,
+                          OpenFileDescriptorCallback callback) override;
+
+  void OnOpenFileDescriptor(OpenFileDescriptorCallback callback,
+                            base::ScopedFD fd);
+
+  void OnOpenFileDescriptorError(OpenFileDescriptorCallback callback,
+                                 const std::string& error_name,
+                                 const std::string& message);
+#endif  // defined(OS_CHROMEOS)
+
   void SetClient(
       mojom::UsbDeviceManagerClientAssociatedPtrInfo client) override;
 
   // Callbacks to handle the async responses from the underlying UsbService.
   void OnGetDevices(mojom::UsbEnumerationOptionsPtr options,
+                    mojom::UsbDeviceManagerClientAssociatedPtrInfo client,
                     GetDevicesCallback callback,
                     const std::vector<scoped_refptr<UsbDevice>>& devices);
 

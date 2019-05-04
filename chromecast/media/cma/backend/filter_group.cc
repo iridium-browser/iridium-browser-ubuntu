@@ -19,40 +19,30 @@ namespace chromecast {
 namespace media {
 
 FilterGroup::FilterGroup(int num_channels,
-                         GroupType type,
                          const std::string& name,
-                         std::unique_ptr<PostProcessingPipeline> pipeline,
-                         const base::flat_set<std::string>& device_ids,
-                         const std::vector<FilterGroup*>& mixed_inputs)
+                         std::unique_ptr<PostProcessingPipeline> pipeline)
     : num_channels_(num_channels),
-      type_(type),
-      mix_to_mono_(false),
-      playout_channel_(kChannelAll),
       name_(name),
-      device_ids_(device_ids),
-      mixed_inputs_(mixed_inputs),
+      playout_channel_selection_(kChannelAll),
       output_samples_per_second_(0),
       frames_zeroed_(0),
       last_volume_(0.0),
       delay_frames_(0),
       content_type_(AudioContentType::kMedia),
-      post_processing_pipeline_(std::move(pipeline)) {
-  for (auto* const m : mixed_inputs) {
-    DCHECK_EQ(m->GetOutputChannelCount(), num_channels);
-  }
-}
+      post_processing_pipeline_(std::move(pipeline)) {}
 
 FilterGroup::~FilterGroup() = default;
+
+void FilterGroup::AddMixedInput(FilterGroup* input) {
+  mixed_inputs_.push_back(input);
+  DCHECK_EQ(input->GetOutputChannelCount(), num_channels_);
+}
 
 void FilterGroup::Initialize(int output_samples_per_second) {
   output_samples_per_second_ = output_samples_per_second;
   CHECK(post_processing_pipeline_->SetSampleRate(output_samples_per_second));
   post_processing_pipeline_->SetContentType(content_type_);
   active_inputs_.clear();
-}
-
-bool FilterGroup::CanProcessInput(const std::string& input_device_id) {
-  return !(device_ids_.find(input_device_id) == device_ids_.end());
 }
 
 void FilterGroup::AddInput(MixerInput* input) {
@@ -145,16 +135,13 @@ float FilterGroup::MixAndFilter(
     }
   }
 
-  // Copy the active channel to all channels. Only used in the "linearize"
-  // instance.
-  if (playout_channel_ != kChannelAll && type_ == GroupType::kLinearize) {
-    DCHECK_GE(playout_channel_, 0);
-    DCHECK_LT(playout_channel_, num_channels_);
-
-    for (int frame = 0; frame < num_frames; ++frame) {
-      float s = interleaved_.get()[frame * num_channels_ + playout_channel_];
+  if (playout_channel_selection_ != kChannelAll) {
+    // Duplicate selected channel to all channels.
+    float* data = interleaved_.get();
+    for (int f = 0; f < num_frames; ++f) {
+      float selected = data[f * num_channels_ + playout_channel_selection_];
       for (int c = 0; c < num_channels_; ++c)
-        interleaved_.get()[frame * num_channels_ + c] = s;
+        data[f * num_channels_ + c] = selected;
     }
   }
 
@@ -174,18 +161,6 @@ float FilterGroup::MixAndFilter(
 
   delay_frames_ = post_processing_pipeline_->ProcessFrames(
       interleaved_.get(), num_frames, last_volume_, is_silence);
-
-  // Mono mixing if needed. Only used in the "Mix" instance.
-  if (mix_to_mono_ && type_ == GroupType::kFinalMix) {
-    for (int frame = 0; frame < num_frames; ++frame) {
-      float sum = 0;
-      for (int c = 0; c < num_channels_; ++c)
-        sum += interleaved_.get()[frame * num_channels_ + c];
-      for (int c = 0; c < num_channels_; ++c)
-        interleaved_.get()[frame * num_channels_ + c] = sum / num_channels_;
-    }
-  }
-
   return last_volume_;
 }
 
@@ -240,18 +215,27 @@ void FilterGroup::SetPostProcessorConfig(const std::string& name,
   post_processing_pipeline_->SetPostProcessorConfig(name, config);
 }
 
-void FilterGroup::SetMixToMono(bool mix_to_mono) {
-  mix_to_mono_ = (num_channels_ != 1 && mix_to_mono);
-}
-
 void FilterGroup::UpdatePlayoutChannel(int playout_channel) {
   if (playout_channel >= num_channels_) {
     LOG(ERROR) << "only " << num_channels_ << " present, wanted channel #"
                << playout_channel;
     return;
   }
-  playout_channel_ = playout_channel;
-  post_processing_pipeline_->UpdatePlayoutChannel(playout_channel_);
+  if (name_ == "linearize") {
+    // We only do playout channel selection in the "linearize" group.
+    playout_channel_selection_ = playout_channel;
+  }
+  post_processing_pipeline_->UpdatePlayoutChannel(playout_channel);
+}
+
+void FilterGroup::PrintTopology() const {
+  std::string input_groups;
+  for (const FilterGroup* mixed_input : mixed_inputs_) {
+    mixed_input->PrintTopology();
+    input_groups += mixed_input->name() + ", ";
+  }
+
+  LOG(INFO) << input_groups << " -> " << num_channels_ << "ch -> " << name_;
 }
 
 }  // namespace media

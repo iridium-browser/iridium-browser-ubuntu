@@ -12,10 +12,11 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/path_service.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -30,7 +31,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/test/test_utils.h"
@@ -49,14 +50,14 @@ namespace {
 // data into local fs. V2 app reads and verifies the data.
 // Webstore data json is in
 //   chrome/test/data/chromeos/app_mode/webstore/inlineinstall/
-//       detail/bmbpicmpniaclbbpdkfglgipkkebnbjf
+//       detail/abbjjkefakmllanciinhgjgjamdmlbdg
 // The version 1.0.0 installed is in
 //   chrome/test/data/chromeos/app_mode/webstore/downloads/
-//       bmbpicmpniaclbbpdkfglgipkkebnbjf.crx
+//       abbjjkefakmllanciinhgjgjamdmlbdg.crx
 // The version 2.0.0 crx is in
 //   chrome/test/data/chromeos/app_mode/webstore/downloads/
-//       bmbpicmpniaclbbpdkfglgipkkebnbjf_v2_read_and_verify_data.crx
-const char kTestLocalFsKioskApp[] = "bmbpicmpniaclbbpdkfglgipkkebnbjf";
+//       abbjjkefakmllanciinhgjgjamdmlbdg_v2_read_and_verify_data.crx
+const char kTestLocalFsKioskApp[] = "abbjjkefakmllanciinhgjgjamdmlbdg";
 const char kTestLocalFsKioskAppName[] = "Kiosk App With Local Data";
 
 // Helper KioskAppManager::GetConsumerKioskAutoLaunchStatusCallback
@@ -412,7 +413,10 @@ class KioskAppManagerTest : public InProcessBrowserTest {
     base::FilePath crx_path;
     std::string crx_version;
     EXPECT_TRUE(GetCachedCrx(id, &crx_path, &crx_version));
-    EXPECT_TRUE(base::PathExists(crx_path));
+    {
+      base::ScopedAllowBlockingForTesting allow_io;
+      EXPECT_TRUE(base::PathExists(crx_path));
+    }
     EXPECT_EQ(expected_version, crx_version);
     // Verify the original crx file is identical to the cached file.
     base::FilePath test_data_dir;
@@ -420,7 +424,10 @@ class KioskAppManagerTest : public InProcessBrowserTest {
     std::string src_file_path_str =
         std::string("chromeos/app_mode/webstore/downloads/") + crx_file_name;
     base::FilePath src_file_path = test_data_dir.Append(src_file_path_str);
-    EXPECT_TRUE(base::PathExists(src_file_path));
+    {
+      base::ScopedAllowBlockingForTesting allow_io;
+      EXPECT_TRUE(base::PathExists(src_file_path));
+    }
     EXPECT_TRUE(base::ContentsEqual(src_file_path, crx_path));
 
     CheckAppDataAndCache(id, expected_app_name,
@@ -431,6 +438,8 @@ class KioskAppManagerTest : public InProcessBrowserTest {
   // of the copied file.
   base::FilePath CopyFileToTempDir(const base::FilePath& file) {
     base::FilePath target_file = temp_dir_.GetPath().Append(file.BaseName());
+
+    base::ScopedAllowBlockingForTesting allow_io;
     CHECK(base::CopyFile(file, target_file));
     return target_file;
   }
@@ -565,7 +574,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateAppDataFromProfile) {
 }
 
 IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateAppDataFromCrx) {
-  const char kAppId[] = "ajoggoflpgplnnjkjamcmbepjdjdnpdp";
+  const char kAppId[] = "iiigpodgfihagabpagjehoocpakbnclp";
   const char kAppName[] = "Test Kiosk App";
 
   SetExistingApp(kAppId, kAppName, "red16x16.png", "");
@@ -587,7 +596,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateAppDataFromCrx) {
   base::FilePath data_dir =
       test_dir.AppendASCII("chromeos/app_mode/webstore/downloads/");
   base::FilePath crx_file = data_dir.AppendASCII(
-      "ajoggoflpgplnnjkjamcmbepjdjdnpdp_v2_required_platform_version_added."
+      "iiigpodgfihagabpagjehoocpakbnclp_v2_required_platform_version_added."
       "crx");
   crx_file = CopyFileToTempDir(crx_file);
 
@@ -677,7 +686,10 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, RemoveApp) {
   base::FilePath crx_path;
   std::string version;
   EXPECT_TRUE(GetCachedCrx(kTestLocalFsKioskApp, &crx_path, &version));
-  EXPECT_TRUE(base::PathExists(crx_path));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    EXPECT_TRUE(base::PathExists(crx_path));
+  }
   EXPECT_EQ("1.0.0", version);
 
   // Remove the app now.
@@ -685,7 +697,10 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, RemoveApp) {
   content::RunAllTasksUntilIdle();
   manager()->GetApps(&apps);
   ASSERT_EQ(0u, apps.size());
-  EXPECT_FALSE(base::PathExists(crx_path));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    EXPECT_FALSE(base::PathExists(crx_path));
+  }
   EXPECT_FALSE(GetCachedCrx(kTestLocalFsKioskApp, &crx_path, &version));
 }
 
@@ -698,14 +713,16 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateApp) {
   base::FilePath crx_path;
   std::string version;
   EXPECT_TRUE(GetCachedCrx(kTestLocalFsKioskApp, &crx_path, &version));
-  EXPECT_TRUE(base::PathExists(crx_path));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    EXPECT_TRUE(base::PathExists(crx_path));
+  }
   EXPECT_EQ("1.0.0", version);
 
   // Update to version 2.
   fake_cws()->SetUpdateCrx(
       kTestLocalFsKioskApp,
-      "bmbpicmpniaclbbpdkfglgipkkebnbjf_v2_read_and_verify_data.crx",
-      "2.0.0");
+      "abbjjkefakmllanciinhgjgjamdmlbdg_v2_read_and_verify_data.crx", "2.0.0");
   AppDataLoadWaiter waiter(manager(), 1);
   UpdateAppData();
   waiter.Wait();
@@ -718,14 +735,20 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateApp) {
   std::string new_version;
   EXPECT_TRUE(GetCachedCrx(kTestLocalFsKioskApp, &new_crx_path, &new_version));
   EXPECT_EQ("2.0.0", new_version);
-  EXPECT_TRUE(base::PathExists(new_crx_path));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    EXPECT_TRUE(base::PathExists(new_crx_path));
+  }
   // Get original version 2 source download crx file path.
   base::FilePath test_data_dir;
   base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
   base::FilePath v2_file_path = test_data_dir.Append(FILE_PATH_LITERAL(
       "chromeos/app_mode/webstore/downloads/"
-      "bmbpicmpniaclbbpdkfglgipkkebnbjf_v2_read_and_verify_data.crx"));
-  EXPECT_TRUE(base::PathExists(v2_file_path));
+      "abbjjkefakmllanciinhgjgjamdmlbdg_v2_read_and_verify_data.crx"));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    EXPECT_TRUE(base::PathExists(v2_file_path));
+  }
   EXPECT_TRUE(base::ContentsEqual(v2_file_path, new_crx_path));
 }
 
@@ -738,14 +761,16 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateAndRemoveApp) {
   base::FilePath v1_crx_path;
   std::string version;
   EXPECT_TRUE(GetCachedCrx(kTestLocalFsKioskApp, &v1_crx_path, &version));
-  EXPECT_TRUE(base::PathExists(v1_crx_path));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    EXPECT_TRUE(base::PathExists(v1_crx_path));
+  }
   EXPECT_EQ("1.0.0", version);
 
   // Update to version 2.
   fake_cws()->SetUpdateCrx(
       kTestLocalFsKioskApp,
-      "bmbpicmpniaclbbpdkfglgipkkebnbjf_v2_read_and_verify_data.crx",
-      "2.0.0");
+      "abbjjkefakmllanciinhgjgjamdmlbdg_v2_read_and_verify_data.crx", "2.0.0");
   AppDataLoadWaiter waiter(manager(), 1);
   UpdateAppData();
   waiter.Wait();
@@ -759,8 +784,11 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateAndRemoveApp) {
   EXPECT_TRUE(GetCachedCrx(kTestLocalFsKioskApp, &v2_crx_path, &new_version));
   EXPECT_EQ("2.0.0", new_version);
   // Verify both v1 and v2 crx files exist.
-  EXPECT_TRUE(base::PathExists(v1_crx_path));
-  EXPECT_TRUE(base::PathExists(v2_crx_path));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    EXPECT_TRUE(base::PathExists(v1_crx_path));
+    EXPECT_TRUE(base::PathExists(v2_crx_path));
+  }
 
   // Remove the app now.
   manager()->RemoveApp(kTestLocalFsKioskApp, owner_settings_service_.get());
@@ -768,8 +796,11 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateAndRemoveApp) {
   manager()->GetApps(&apps);
   ASSERT_EQ(0u, apps.size());
   // Verify both v1 and v2 crx files are removed.
-  EXPECT_FALSE(base::PathExists(v1_crx_path));
-  EXPECT_FALSE(base::PathExists(v2_crx_path));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    EXPECT_FALSE(base::PathExists(v1_crx_path));
+    EXPECT_FALSE(base::PathExists(v2_crx_path));
+  }
   EXPECT_FALSE(GetCachedCrx(kTestLocalFsKioskApp, &v2_crx_path, &version));
 }
 
@@ -918,7 +949,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, IsPlatformCompliantWithApp) {
       {"1234.1.1", false}, {"1234.1.3", false},
   };
 
-  for (size_t i = 0; i < arraysize(kTestCases); ++i) {
+  for (size_t i = 0; i < base::size(kTestCases); ++i) {
     scoped_refptr<extensions::Extension> app = MakeKioskApp(
         "App Name", "1.0", kAppId, kTestCases[i].required_platform_version);
     EXPECT_EQ(kTestCases[i].expected_compliant,
@@ -929,7 +960,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, IsPlatformCompliantWithApp) {
 
   // If an app is not auto launched with zero delay, it is always compliant.
   const char kNoneAutoLaucnhedAppId[] = "none_auto_launch_app_id";
-  for (size_t i = 0; i < arraysize(kTestCases); ++i) {
+  for (size_t i = 0; i < base::size(kTestCases); ++i) {
     scoped_refptr<extensions::Extension> app =
         MakeKioskApp("App Name", "1.0", kNoneAutoLaucnhedAppId,
                      kTestCases[i].required_platform_version);

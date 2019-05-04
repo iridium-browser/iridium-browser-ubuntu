@@ -10,16 +10,11 @@ import android.util.AttributeSet;
 import android.view.ContextMenu;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.view.View.OnClickListener;
-import android.view.View.OnCreateContextMenuListener;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.modelutil.PropertyKey;
-import org.chromium.chrome.browser.modelutil.PropertyModel;
-import org.chromium.chrome.browser.modelutil.PropertyModelChangeProcessor;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.native_page.NativePageNavigationDelegate;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -27,6 +22,9 @@ import org.chromium.chrome.browser.suggestions.TileGridLayout;
 import org.chromium.chrome.browser.widget.RoundedIconGenerator;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.PageTransition;
+import org.chromium.ui.modelutil.PropertyKey;
+import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 import org.chromium.ui.mojom.WindowOpenDisposition;
 
 import java.util.ArrayList;
@@ -38,7 +36,6 @@ import java.util.List;
 public class ExploreSitesCategoryCardView extends LinearLayout {
     private static final String TAG = "ExploreSitesCategoryCardView";
     private static final int MAX_TILE_COUNT = 8;
-    private static final int MAX_COLUMNS = 4;
     private static final int MAX_ROWS = 2;
 
     private TextView mTitleView;
@@ -66,6 +63,7 @@ public class ExploreSitesCategoryCardView extends LinearLayout {
         public void onClick(View view) {
             recordCategoryClick(mCategory.getType());
             recordTileIndexClick(mCategoryCardIndex, mTileIndex);
+            ExploreSitesBridge.recordClick(mProfile, mSiteUrl, mCategory.getType());
             mNavigationDelegate.openUrl(WindowOpenDisposition.CURRENT_TAB,
                     new LoadUrlParams(getUrl(), PageTransition.AUTO_BOOKMARK));
         }
@@ -90,9 +88,9 @@ public class ExploreSitesCategoryCardView extends LinearLayout {
             // Remove from model (category).
             mCategory.removeSite(mTileIndex);
 
-            // Update the view This may add any sites that we didn't have room for before.  It
-            // should reset the tile indexeds for views we keep.
-            updateTileViews(mCategory.getSites());
+            // Update the view. This may add sites that we didn't have room for before.  It
+            // should reset the tile indexes for views we keep.
+            updateTileViews(mCategory);
         }
         @Override
         public String getUrl() {
@@ -146,8 +144,7 @@ public class ExploreSitesCategoryCardView extends LinearLayout {
         super.onFinishInflate();
         mTitleView = findViewById(R.id.category_title);
         mTileView = findViewById(R.id.category_sites);
-        mTileView.setMaxColumns(MAX_COLUMNS);
-        mTileView.setMaxRows(MAX_ROWS);
+        mTileView.setMaxColumns(ExploreSitesCategory.MAX_COLUMNS);
     }
 
     public void setCategory(ExploreSitesCategory category, int categoryCardIndex,
@@ -161,14 +158,14 @@ public class ExploreSitesCategoryCardView extends LinearLayout {
         mCategory = category;
 
         updateTitle(category.getTitle());
-        updateTileViews(category.getSites());
+        updateTileViews(category);
     }
 
     public void updateTitle(String categoryTitle) {
         mTitleView.setText(categoryTitle);
     }
 
-    public void updateTileViews(List<ExploreSitesSite> sites) {
+    public void updateTileViews(ExploreSitesCategory category) {
         // Clear observers.
         for (PropertyModelChangeProcessor<PropertyModel, ExploreSitesTileView, PropertyKey>
                         observer : mModelChangeProcessors) {
@@ -176,13 +173,19 @@ public class ExploreSitesCategoryCardView extends LinearLayout {
         }
         mModelChangeProcessors.clear();
 
-        // Remove extra tiles if too many.
-        if (mTileView.getChildCount() > sites.size()) {
-            mTileView.removeViews(sites.size(), mTileView.getChildCount() - sites.size());
-        }
+        // Only show rows that would be fully populated by original list of sites. This is
+        // calculated within the category.
+        mTileView.setMaxRows(Math.min(category.getMaxRows(), MAX_ROWS));
 
-        // Maximum number of sites to show.
-        int tileMax = Math.min(MAX_TILE_COUNT, sites.size());
+        // Maximum number of sites that can be shown, defined as min of
+        // numSitesToShow and maxRows * maxCols.
+        int tileMax = Math.min(category.getMaxRows() * ExploreSitesCategory.MAX_COLUMNS,
+                category.getNumDisplayed());
+
+        // Remove extra tiles if too many.
+        if (mTileView.getChildCount() > tileMax) {
+            mTileView.removeViews(tileMax, mTileView.getChildCount() - tileMax);
+        }
 
         // Add tiles if too few
         if (mTileView.getChildCount() < tileMax) {
@@ -194,19 +197,27 @@ public class ExploreSitesCategoryCardView extends LinearLayout {
         }
 
         // Initialize all the non-empty tiles again to update.
-        for (int i = 0; i < tileMax; i++) {
-            ExploreSitesTileView tileView = (ExploreSitesTileView) mTileView.getChildAt(i);
-            final PropertyModel site = sites.get(i).getModel();
+        int tileIndex = 0;
+        for (ExploreSitesSite site : category.getSites()) {
+            if (tileIndex >= tileMax) break;
+            final PropertyModel siteModel = site.getModel();
+            // Skip blacklisted sites.
+            if (siteModel.get(ExploreSitesSite.BLACKLISTED_KEY)) continue;
+
+            ExploreSitesTileView tileView = (ExploreSitesTileView) mTileView.getChildAt(tileIndex);
             tileView.initialize(mIconGenerator);
 
+            siteModel.set(ExploreSitesSite.TILE_INDEX_KEY, tileIndex);
+
             mModelChangeProcessors.add(PropertyModelChangeProcessor.create(
-                    site, tileView, new ExploreSitesSiteViewBinder()));
+                    siteModel, tileView, new ExploreSitesSiteViewBinder()));
 
             // Fetch icon if not present already.
-            if (site.get(ExploreSitesSite.ICON_KEY) == null) {
-                ExploreSitesBridge.getSiteImage(mProfile, site.get(ExploreSitesSite.ID_KEY),
-                        (Bitmap icon) -> site.set(ExploreSitesSite.ICON_KEY, icon));
+            if (siteModel.get(ExploreSitesSite.ICON_KEY) == null) {
+                ExploreSitesBridge.getSiteImage(mProfile, siteModel.get(ExploreSitesSite.ID_KEY),
+                        (Bitmap icon) -> siteModel.set(ExploreSitesSite.ICON_KEY, icon));
             }
+            tileIndex++;
         }
     }
 
@@ -228,6 +239,6 @@ public class ExploreSitesCategoryCardView extends LinearLayout {
         // TODO(petewil): Should I get the number of sites in this category from the model instead
         // of using MAX_TILE_COUNT?
         RecordHistogram.recordLinearCountHistogram("ExploreSites.SiteTilesClickIndex",
-                cardIndex * MAX_TILE_COUNT + tileIndex, 0, 100, 100);
+                cardIndex * MAX_TILE_COUNT + tileIndex, 1, 100, 100);
     }
 }

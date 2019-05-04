@@ -25,7 +25,8 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
 
   void OnError(QuicFramer* framer) override { error_ = framer->error(); }
 
-  bool OnProtocolVersionMismatch(ParsedQuicVersion version) override {
+  bool OnProtocolVersionMismatch(ParsedQuicVersion version,
+                                 PacketHeaderFormat form) override {
     return false;
   }
 
@@ -45,7 +46,9 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
   bool OnUnauthenticatedHeader(const QuicPacketHeader& header) override {
     return true;
   }
-  void OnDecryptedPacket(EncryptionLevel level) override {}
+  void OnDecryptedPacket(EncryptionLevel level) override {
+    last_decrypted_level_ = level;
+  }
   bool OnPacketHeader(const QuicPacketHeader& header) override {
     has_header_ = true;
     header_ = header;
@@ -124,6 +127,12 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
 
   bool OnNewConnectionIdFrame(const QuicNewConnectionIdFrame& frame) override {
     new_connection_id_frames_.push_back(frame);
+    return true;
+  }
+
+  bool OnRetireConnectionIdFrame(
+      const QuicRetireConnectionIdFrame& frame) override {
+    retire_connection_id_frames_.push_back(frame);
     return true;
   }
 
@@ -226,9 +235,16 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
   const std::vector<QuicPaddingFrame>& padding_frames() const {
     return padding_frames_;
   }
+  const std::vector<QuicPathChallengeFrame>& path_challenge_frames() const {
+    return path_challenge_frames_;
+  }
+  const std::vector<QuicPathResponseFrame>& path_response_frames() const {
+    return path_response_frames_;
+  }
   const QuicVersionNegotiationPacket* version_negotiation_packet() const {
     return version_negotiation_packet_.get();
   }
+  EncryptionLevel last_decrypted_level() const { return last_decrypted_level_; }
 
  private:
   QuicErrorCode error_;
@@ -254,9 +270,11 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
   std::vector<QuicWindowUpdateFrame> window_update_frames_;
   std::vector<QuicBlockedFrame> blocked_frames_;
   std::vector<QuicNewConnectionIdFrame> new_connection_id_frames_;
+  std::vector<QuicRetireConnectionIdFrame> retire_connection_id_frames_;
   std::vector<QuicNewTokenFrame> new_token_frames_;
   std::vector<QuicMessageFrame> message_frames_;
   std::vector<std::unique_ptr<QuicString>> stream_data_;
+  EncryptionLevel last_decrypted_level_;
 };
 
 SimpleQuicFramer::SimpleQuicFramer()
@@ -294,6 +312,10 @@ SimpleQuicFramer::version_negotiation_packet() const {
   return visitor_->version_negotiation_packet();
 }
 
+EncryptionLevel SimpleQuicFramer::last_decrypted_level() const {
+  return visitor_->last_decrypted_level();
+}
+
 QuicFramer* SimpleQuicFramer::framer() {
   return &framer_;
 }
@@ -301,6 +323,7 @@ QuicFramer* SimpleQuicFramer::framer() {
 size_t SimpleQuicFramer::num_frames() const {
   return ack_frames().size() + goaway_frames().size() +
          rst_stream_frames().size() + stop_waiting_frames().size() +
+         path_challenge_frames().size() + path_response_frames().size() +
          stream_frames().size() + ping_frames().size() +
          connection_close_frames().size() + padding_frames().size();
 }
@@ -312,6 +335,15 @@ const std::vector<QuicAckFrame>& SimpleQuicFramer::ack_frames() const {
 const std::vector<QuicStopWaitingFrame>& SimpleQuicFramer::stop_waiting_frames()
     const {
   return visitor_->stop_waiting_frames();
+}
+
+const std::vector<QuicPathChallengeFrame>&
+SimpleQuicFramer::path_challenge_frames() const {
+  return visitor_->path_challenge_frames();
+}
+const std::vector<QuicPathResponseFrame>&
+SimpleQuicFramer::path_response_frames() const {
+  return visitor_->path_response_frames();
 }
 
 const std::vector<QuicPingFrame>& SimpleQuicFramer::ping_frames() const {

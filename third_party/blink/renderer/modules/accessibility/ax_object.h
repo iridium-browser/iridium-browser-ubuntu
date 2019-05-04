@@ -49,6 +49,7 @@
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "ui/accessibility/ax_enums.mojom-blink.h"
 
@@ -472,6 +473,7 @@ class MODULES_EXPORT AXObject : public GarbageCollectedFinalized<AXObject> {
     return RoleValue() == ax::mojom::Role::kColorWell;
   }
   virtual bool IsControl() const { return false; }
+  virtual bool IsDefault() const { return false; }
   virtual bool IsEmbeddedObject() const { return false; }
   virtual bool IsFieldset() const { return false; }
   virtual bool IsHeading() const { return false; }
@@ -526,6 +528,7 @@ class MODULES_EXPORT AXObject : public GarbageCollectedFinalized<AXObject> {
   virtual bool IsTextControl() const { return false; }
   bool IsTextObject() const;
   bool IsTree() const { return RoleValue() == ax::mojom::Role::kTree; }
+  virtual bool IsValidationMessage() const { return false; }
   virtual bool IsVirtualObject() const { return false; }
   bool IsWebArea() const {
     return RoleValue() == ax::mojom::Role::kRootWebArea;
@@ -551,7 +554,7 @@ class MODULES_EXPORT AXObject : public GarbageCollectedFinalized<AXObject> {
   // Is the object selected because selection is following focus?
   virtual bool IsSelectedFromFocus() const { return false; }
   virtual bool IsSelectedOptionActive() const { return false; }
-  virtual bool IsVisible() const { return true; }
+  virtual bool IsVisible() const;
   virtual bool IsVisited() const { return false; }
 
   // Check whether certain properties can be modified.
@@ -685,7 +688,10 @@ class MODULES_EXPORT AXObject : public GarbageCollectedFinalized<AXObject> {
     return ax::mojom::TextPosition::kNone;
   }
   virtual int TextLength() const { return 0; }
-  virtual TextStyle GetTextStyle() const { return kTextStyleNone; }
+
+  // Bitmask from ax::mojom::TextStyle.
+  virtual int32_t GetTextStyle() const { return 0; }
+
   virtual AXObjectVector RadioButtonsInGroup() const {
     return AXObjectVector();
   }
@@ -709,7 +715,8 @@ class MODULES_EXPORT AXObject : public GarbageCollectedFinalized<AXObject> {
   // negative values for RTL.
   virtual void TextCharacterOffsets(Vector<int>&) const;
   // The start and end character offset of each word in the object's text.
-  virtual void GetWordBoundaries(Vector<AXRange>&) const;
+  virtual void GetWordBoundaries(Vector<int>& word_starts,
+                                 Vector<int>& word_ends) const;
 
   // Properties of interactive elements.
   ax::mojom::DefaultActionVerb Action() const;
@@ -738,6 +745,7 @@ class MODULES_EXPORT AXObject : public GarbageCollectedFinalized<AXObject> {
   virtual String AriaAutoComplete() const { return String(); }
   virtual void AriaOwnsElements(AXObjectVector& owns) const {}
   virtual void AriaDescribedbyElements(AXObjectVector&) const {}
+  virtual AXObject* ErrorMessage() const { return nullptr; }
   virtual ax::mojom::HasPopup HasPopup() const {
     return ax::mojom::HasPopup::kFalse;
   }
@@ -766,8 +774,9 @@ class MODULES_EXPORT AXObject : public GarbageCollectedFinalized<AXObject> {
   bool SupportsARIASetSizeAndPosInSet() const;
 
   // ARIA live-region features.
-  bool IsLiveRegion() const;
-  AXObject* LiveRegionRoot() const;
+  bool IsLiveRegionRoot() const;  // Any live region, including polite="off".
+  bool IsActiveLiveRegionRoot() const;  // Live region that is not polite="off".
+  AXObject* LiveRegionRoot() const;  // Container that controls live politeness.
   virtual const AtomicString& LiveRegionStatus() const { return g_null_atom; }
   virtual const AtomicString& LiveRegionRelevant() const { return g_null_atom; }
   bool LiveRegionAtomic() const;
@@ -1003,6 +1012,9 @@ class MODULES_EXPORT AXObject : public GarbageCollectedFinalized<AXObject> {
                                               const AXObject& second,
                                               int* index_in_ancestor1,
                                               int* index_in_ancestor2);
+
+  // Returns a string representation of this object.
+  String ToString() const;
 
  protected:
   AXID id_;

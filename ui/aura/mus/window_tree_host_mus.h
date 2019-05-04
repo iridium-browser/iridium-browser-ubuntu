@@ -70,9 +70,10 @@ class AURA_EXPORT WindowTreeHostMus : public WindowTreeHostPlatform,
 
   // Tells the window manager to take control of moving the window. Returns
   // true if the move wasn't canceled.
-  void PerformWindowMove(ws::mojom::MoveLoopSource mus_source,
+  void PerformWindowMove(Window* window,
+                         ws::mojom::MoveLoopSource mus_source,
                          const gfx::Point& cursor_location,
-                         const base::Callback<void(bool)>& callback);
+                         base::OnceCallback<void(bool)> callback);
 
   // Tells the window manager to abort any current move initiated by
   // PerformWindowMove().
@@ -85,9 +86,10 @@ class AURA_EXPORT WindowTreeHostMus : public WindowTreeHostPlatform,
 
   // aura::WindowTreeHostPlatform:
   void HideImpl() override;
-  void SetBoundsInPixels(const gfx::Rect& bounds,
-                         const viz::LocalSurfaceId& local_surface_id =
-                             viz::LocalSurfaceId()) override;
+  void SetBoundsInPixels(
+      const gfx::Rect& bounds,
+      const viz::LocalSurfaceIdAllocation& local_surface_id_allocation =
+          viz::LocalSurfaceIdAllocation()) override;
   void DispatchEvent(ui::Event* event) override;
   void OnClosed() override;
   void OnActivationChanged(bool active) override;

@@ -82,9 +82,9 @@ void CloudPolicyCore::RefreshSoon() {
 
 void CloudPolicyCore::StartRefreshScheduler() {
   if (!refresh_scheduler_) {
-    refresh_scheduler_.reset(
-        new CloudPolicyRefreshScheduler(client_.get(), store_, task_runner_,
-                                        network_connection_tracker_getter_));
+    refresh_scheduler_ = std::make_unique<CloudPolicyRefreshScheduler>(
+        client_.get(), store_, service_.get(), task_runner_,
+        network_connection_tracker_getter_);
     UpdateRefreshDelayFromPref();
     for (auto& observer : observers_)
       observer.OnRefreshSchedulerStarted(this);
@@ -107,6 +107,15 @@ void CloudPolicyCore::AddObserver(CloudPolicyCore::Observer* observer) {
 
 void CloudPolicyCore::RemoveObserver(CloudPolicyCore::Observer* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void CloudPolicyCore::ConnectForTesting(
+    std::unique_ptr<CloudPolicyService> service,
+    std::unique_ptr<CloudPolicyClient> client) {
+  service_ = std::move(service);
+  client_ = std::move(client);
+  for (auto& observer : observers_)
+    observer.OnCoreConnected(this);
 }
 
 void CloudPolicyCore::UpdateRefreshDelayFromPref() {

@@ -13,7 +13,7 @@
 #include "components/safe_browsing/triggers/trigger_manager.h"
 #include "components/sessions/core/session_id.h"
 #include "components/sync/protocol/user_event_specifics.pb.h"
-#include "ui/base/ui_features.h"
+#include "ui/base/buildflags.h"
 #include "url/origin.h"
 
 struct AccountInfo;
@@ -271,8 +271,12 @@ class ChromePasswordProtectionService : public PasswordProtectionService {
                            VerifyUserPopulationForSyncPasswordEntryPing);
   FRIEND_TEST_ALL_PREFIXES(ChromePasswordProtectionServiceTest,
                            VerifyUserPopulationForSavedPasswordEntryPing);
-  FRIEND_TEST_ALL_PREFIXES(ChromePasswordProtectionServiceTest,
-                           VerifyPasswordReuseUserEventNotRecorded);
+  FRIEND_TEST_ALL_PREFIXES(
+      ChromePasswordProtectionServiceTest,
+      VerifyPasswordReuseUserEventNotRecordedDueToIncognito);
+  FRIEND_TEST_ALL_PREFIXES(
+      ChromePasswordProtectionServiceTest,
+      VerifyPasswordReuseUserEventNotRecordedDueToNotSignedIn);
   FRIEND_TEST_ALL_PREFIXES(ChromePasswordProtectionServiceTest,
                            VerifyPasswordReuseDetectedUserEventRecorded);
   FRIEND_TEST_ALL_PREFIXES(

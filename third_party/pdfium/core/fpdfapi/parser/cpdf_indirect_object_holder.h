@@ -47,6 +47,15 @@ class CPDF_IndirectObjectHolder {
         pdfium::MakeUnique<T>(m_pByteStringPool, std::forward<Args>(args)...)));
   }
 
+  // Creates and adds a new object not owned by the indirect object holder,
+  // but which can intern strings from it.
+  template <typename T, typename... Args>
+  typename std::enable_if<CanInternStrings<T>::value, std::unique_ptr<T>>::type
+  New(Args&&... args) {
+    return pdfium::MakeUnique<T>(m_pByteStringPool,
+                                 std::forward<Args>(args)...);
+  }
+
   // Takes ownership of |pObj|, returns unowned pointer to it.
   CPDF_Object* AddIndirectObject(std::unique_ptr<CPDF_Object> pObj);
 
@@ -54,6 +63,11 @@ class CPDF_IndirectObjectHolder {
   bool ReplaceIndirectObjectIfHigherGeneration(
       uint32_t objnum,
       std::unique_ptr<CPDF_Object> pObj);
+
+  // Takes ownership of |pObj|, persist it for life of the indirect object
+  // holder (typically so that unowned pointers to it remain valid). No-op
+  // if |pObj| is NULL.
+  void AddOrphan(std::unique_ptr<CPDF_Object> pObj);
 
   uint32_t GetLastObjNum() const { return m_LastObjNum; }
   void SetLastObjNum(uint32_t objnum) { m_LastObjNum = objnum; }

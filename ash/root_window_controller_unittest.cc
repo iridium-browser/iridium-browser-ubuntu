@@ -19,6 +19,7 @@
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
+#include "base/run_loop.h"
 #include "ui/aura/client/focus_change_observer.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/window_parenting_client.h"
@@ -37,9 +38,9 @@
 #include "ui/events/test/event_generator.h"
 #include "ui/events/test/test_event_handler.h"
 #include "ui/keyboard/keyboard_controller.h"
-#include "ui/keyboard/keyboard_switches.h"
 #include "ui/keyboard/keyboard_ui.h"
 #include "ui/keyboard/keyboard_util.h"
+#include "ui/keyboard/public/keyboard_switches.h"
 #include "ui/keyboard/test/keyboard_test_util.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/widget/widget.h"
@@ -189,10 +190,6 @@ TEST_F(RootWindowControllerTest, MoveWindows_Basic) {
   EXPECT_EQ(kShellWindowId_UnparentedControlContainer,
             unparented_control->GetNativeView()->parent()->id());
 
-  aura::Window* panel = CreateTestWindowInShellWithDelegateAndType(
-      NULL, aura::client::WINDOW_TYPE_PANEL, 0, gfx::Rect(700, 100, 100, 100));
-  EXPECT_EQ(root_windows[1], panel->GetRootWindow());
-
   // Make sure a window that will delete itself when losing focus
   // will not crash.
   aura::WindowTracker tracker;
@@ -258,9 +255,6 @@ TEST_F(RootWindowControllerTest, MoveWindows_Basic) {
             unparented_control->GetNativeView()->GetRootWindow());
   EXPECT_EQ(kShellWindowId_UnparentedControlContainer,
             unparented_control->GetNativeView()->parent()->id());
-
-  // Test if the panel has moved.
-  EXPECT_EQ(root_windows[0], panel->GetRootWindow());
 }
 
 TEST_F(RootWindowControllerTest, MoveWindows_Modal) {
@@ -687,12 +681,11 @@ class VirtualKeyboardRootWindowControllerTest
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         keyboard::switches::kEnableVirtualKeyboard);
     AshTestBase::SetUp();
-    keyboard::SetTouchKeyboardEnabled(true);
-    Shell::Get()->EnableKeyboard();
+    SetTouchKeyboardEnabled(true);
   }
 
   void TearDown() override {
-    keyboard::SetTouchKeyboardEnabled(false);
+    SetTouchKeyboardEnabled(false);
     AshTestBase::TearDown();
   }
 
@@ -748,46 +741,34 @@ TEST_F(VirtualKeyboardRootWindowControllerTest,
 
   aura::Window* contents_window =
       keyboard::KeyboardController::Get()->GetKeyboardWindow();
-  contents_window->SetBounds(gfx::Rect());
   contents_window->Show();
+  keyboard::KeyboardController::Get()->ShowKeyboard(false);
 
   // Make sure no pending mouse events in the queue.
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
 
+  // TODO(oshima|yhanada): This simply make sure that targeting logic works, but
+  // doesn't mean it'll deliver the event to the target. Fix this to make this
+  // more reliable.
   ui::test::TestEventHandler handler;
   root_window->AddPreTargetHandler(&handler);
 
   ui::test::EventGenerator event_generator(root_window, contents_window);
   event_generator.ClickLeftButton();
-  int expected_mouse_presses = 1;
-  EXPECT_EQ(expected_mouse_presses, handler.num_mouse_events() / 2);
+  EXPECT_EQ(2, handler.num_mouse_events());
 
   for (int block_reason = FIRST_BLOCK_REASON;
        block_reason < NUMBER_OF_BLOCK_REASONS; ++block_reason) {
+    SCOPED_TRACE(base::StringPrintf("Reason: %d", block_reason));
     BlockUserSession(static_cast<UserSessionBlockReason>(block_reason));
+    handler.Reset();
     event_generator.ClickLeftButton();
-    expected_mouse_presses++;
-    EXPECT_EQ(expected_mouse_presses, handler.num_mouse_events() / 2);
+    // Click may generate CAPTURE_CHANGED event so make sure it's more than
+    // 2 (press,release);
+    EXPECT_LE(2, handler.num_mouse_events());
     UnblockUserSession();
   }
   root_window->RemovePreTargetHandler(&handler);
-}
-
-// Test for http://crbug.com/299787. RootWindowController should remove
-// the old keyboard window when we activate it elsewhere.
-// TODO(https://crbug.com/849995): This test no longer belongs here, but in
-// KeyboardController.
-TEST_F(VirtualKeyboardRootWindowControllerTest,
-       DeleteOldContainerOnVirtualKeyboardInit) {
-  aura::Window* keyboard_window =
-      keyboard::KeyboardController::Get()->GetKeyboardWindow();
-  // Track the keyboard contents window.
-  aura::WindowTracker tracker;
-  tracker.Add(keyboard_window);
-  // Reinitialize the keyboard.
-  Shell::Get()->EnableKeyboard();
-  // keyboard_window should no longer be present.
-  EXPECT_FALSE(tracker.Contains(keyboard_window));
 }
 
 // Test for crbug.com/342524. After user login, the work space should restore to
@@ -827,17 +808,14 @@ TEST_F(VirtualKeyboardRootWindowControllerTest, ClickWithActiveModalDialog) {
   aura::Window* root_window = Shell::GetPrimaryRootWindow();
   ASSERT_EQ(root_window, controller->GetRootWindow());
 
-  aura::Window* contents_window = controller->GetKeyboardWindow();
-  contents_window->SetName("KeyboardWindow");
-  contents_window->SetBounds(
-      keyboard::KeyboardBoundsFromRootBounds(root_window->bounds(), 100));
-  contents_window->Show();
+  controller->ShowKeyboard(false /* locked */);
+  ASSERT_TRUE(keyboard::WaitUntilShown());
 
   ui::test::TestEventHandler handler;
   root_window->AddPreTargetHandler(&handler);
   ui::test::EventGenerator root_window_event_generator(root_window);
-  ui::test::EventGenerator keyboard_event_generator(root_window,
-                                                    contents_window);
+  ui::test::EventGenerator keyboard_event_generator(
+      root_window, controller->GetKeyboardWindow());
 
   views::Widget* modal_widget = CreateModalWidget(gfx::Rect(300, 10, 100, 100));
 
@@ -1064,11 +1042,8 @@ TEST_F(VirtualKeyboardRootWindowControllerTest, ClickDoesNotFocusKeyboard) {
 
   auto* keyboard_controller = keyboard::KeyboardController::Get();
   keyboard_controller->ShowKeyboard(false);
-  keyboard_controller->NotifyKeyboardWindowLoaded();
-
+  ASSERT_TRUE(keyboard::WaitUntilShown());
   aura::Window* keyboard_window = keyboard_controller->GetKeyboardWindow();
-  keyboard_window->SetBounds(gfx::Rect(100, 100, 100, 100));
-  EXPECT_TRUE(keyboard_window->IsVisible());
   EXPECT_FALSE(keyboard_window->HasFocus());
 
   // Click on the keyboard. Make sure the keyboard receives the event, but does

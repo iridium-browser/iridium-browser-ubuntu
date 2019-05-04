@@ -6,7 +6,7 @@
 
 #include <stddef.h>
 
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
 #include "components/sync/protocol/app_notification_specifics.pb.h"
@@ -129,7 +129,7 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
      "Deprecated Articles", sync_pb::EntitySpecifics::kArticleFieldNumber, 28},
     {APP_LIST, "APP_LIST", "app_list", "App List",
      sync_pb::EntitySpecifics::kAppListFieldNumber, 29},
-    {WIFI_CREDENTIALS, "WIFI_CREDENTIAL", "wifi_credentials",
+    {DEPRECATED_WIFI_CREDENTIALS, "WIFI_CREDENTIAL", "wifi_credentials",
      "WiFi Credentials", sync_pb::EntitySpecifics::kWifiCredentialFieldNumber,
      32},
     {SUPERVISED_USER_WHITELISTS, "MANAGED_USER_WHITELIST",
@@ -147,6 +147,9 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
      sync_pb::EntitySpecifics::kMountainShareFieldNumber, 40},
     {USER_CONSENTS, "USER_CONSENT", "user_consent", "User Consents",
      sync_pb::EntitySpecifics::kUserConsentFieldNumber, 41},
+    {SEND_TAB_TO_SELF, "SEND_TAB_TO_SELF", "send_tab_to_self",
+     "Send Tab To Self", sync_pb::EntitySpecifics::kSendTabToSelfFieldNumber,
+     42},
     // ---- Proxy types ----
     {PROXY_TABS, "", "", "Tabs", -1, 25},
     // ---- Control Types ----
@@ -156,14 +159,14 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
      sync_pb::EntitySpecifics::kExperimentsFieldNumber, 19},
 };
 
-static_assert(arraysize(kModelTypeInfoMap) == MODEL_TYPE_COUNT,
+static_assert(base::size(kModelTypeInfoMap) == MODEL_TYPE_COUNT,
               "kModelTypeInfoMap should have MODEL_TYPE_COUNT elements");
 
-static_assert(42 == syncer::MODEL_TYPE_COUNT,
+static_assert(43 == syncer::MODEL_TYPE_COUNT,
               "When adding a new type, update enum SyncModelTypes in enums.xml "
               "and suffix SyncModelType in histograms.xml.");
 
-static_assert(42 == syncer::MODEL_TYPE_COUNT,
+static_assert(43 == syncer::MODEL_TYPE_COUNT,
               "When adding a new type, update kAllocatorDumpNameWhitelist in "
               "base/trace_event/memory_infra_background_whitelist.cc.");
 
@@ -260,7 +263,7 @@ void AddDefaultFieldValue(ModelType type, sync_pb::EntitySpecifics* specifics) {
     case APP_LIST:
       specifics->mutable_app_list();
       break;
-    case WIFI_CREDENTIALS:
+    case DEPRECATED_WIFI_CREDENTIALS:
       specifics->mutable_wifi_credential();
       break;
     case SUPERVISED_USER_WHITELISTS:
@@ -283,6 +286,9 @@ void AddDefaultFieldValue(ModelType type, sync_pb::EntitySpecifics* specifics) {
       break;
     case USER_CONSENTS:
       specifics->mutable_user_consent();
+      break;
+    case SEND_TAB_TO_SELF:
+      specifics->mutable_send_tab_to_self();
       break;
     case PROXY_TABS:
       NOTREACHED() << "No default field value for " << ModelTypeToString(type);
@@ -348,7 +354,7 @@ ModelType GetModelType(const sync_pb::SyncEntity& sync_entity) {
 }
 
 ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
-  static_assert(42 == MODEL_TYPE_COUNT,
+  static_assert(43 == MODEL_TYPE_COUNT,
                 "When adding new protocol types, the following type lookup "
                 "logic must be updated.");
   if (specifics.has_bookmark())
@@ -410,7 +416,7 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
   if (specifics.has_app_list())
     return APP_LIST;
   if (specifics.has_wifi_credential())
-    return WIFI_CREDENTIALS;
+    return DEPRECATED_WIFI_CREDENTIALS;
   if (specifics.has_managed_user_whitelist())
     return SUPERVISED_USER_WHITELISTS;
   if (specifics.has_arc_package())
@@ -429,6 +435,8 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
     return NIGORI;
   if (specifics.has_experiments())
     return EXPERIMENTS;
+  if (specifics.has_send_tab_to_self())
+    return SEND_TAB_TO_SELF;
 
   return UNSPECIFIED;
 }
@@ -447,7 +455,7 @@ ModelTypeNameMap GetUserSelectableTypeNameMap() {
 }
 
 ModelTypeSet EncryptableUserTypes() {
-  static_assert(42 == MODEL_TYPE_COUNT,
+  static_assert(43 == MODEL_TYPE_COUNT,
                 "If adding an unencryptable type, remove from "
                 "encryptable_user_types below.");
   ModelTypeSet encryptable_user_types = UserTypes();
@@ -541,7 +549,7 @@ std::unique_ptr<base::Value> ModelTypeToValue(ModelType model_type) {
 ModelType ModelTypeFromString(const std::string& model_type_string) {
   if (model_type_string != "Unspecified" &&
       model_type_string != "Top Level Folder") {
-    for (size_t i = 0; i < arraysize(kModelTypeInfoMap); ++i) {
+    for (size_t i = 0; i < base::size(kModelTypeInfoMap); ++i) {
       if (kModelTypeInfoMap[i].model_type_string == model_type_string)
         return kModelTypeInfoMap[i].model_type;
     }
@@ -631,7 +639,7 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
     *model_type = UNSPECIFIED;
     return false;
   }
-  for (size_t i = 0; i < arraysize(kModelTypeInfoMap); ++i) {
+  for (size_t i = 0; i < base::size(kModelTypeInfoMap); ++i) {
     if (kModelTypeInfoMap[i].notification_type == notification_type) {
       *model_type = kModelTypeInfoMap[i].model_type;
       return true;

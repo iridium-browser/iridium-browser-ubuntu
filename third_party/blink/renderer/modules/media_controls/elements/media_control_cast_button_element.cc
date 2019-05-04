@@ -12,7 +12,6 @@
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_elements_helper.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
-#include "third_party/blink/renderer/modules/remoteplayback/html_media_element_remote_playback.h"
 #include "third_party/blink/renderer/modules/remoteplayback/remote_playback.h"
 
 namespace blink {
@@ -39,7 +38,7 @@ MediaControlCastButtonElement::MediaControlCastButtonElement(
   SetShadowPseudoId(is_overlay_button
                         ? "-internal-media-controls-overlay-cast-button"
                         : "-internal-media-controls-cast-button");
-  setType(InputTypeNames::button);
+  setType(input_type_names::kButton);
   UpdateDisplayType();
 }
 
@@ -93,7 +92,7 @@ const char* MediaControlCastButtonElement::GetNameForHistograms() const {
 }
 
 void MediaControlCastButtonElement::DefaultEventHandler(Event& event) {
-  if (event.type() == EventTypeNames::click) {
+  if (event.type() == event_type_names::kClick) {
     if (is_overlay_button_) {
       Platform::Current()->RecordAction(
           UserMetricsAction("Media.Controls.CastOverlay"));
@@ -106,10 +105,7 @@ void MediaControlCastButtonElement::DefaultEventHandler(Event& event) {
                                            WebURL(GetDocument().Url()));
     }
 
-    RemotePlayback* remote =
-        HTMLMediaElementRemotePlayback::remote(MediaElement());
-    if (remote)
-      remote->PromptInternal();
+    RemotePlayback::From(MediaElement()).PromptInternal();
   }
   MediaControlInputElement::DefaultEventHandler(event);
 }
@@ -119,9 +115,8 @@ bool MediaControlCastButtonElement::KeepEventInNode(const Event& event) const {
 }
 
 bool MediaControlCastButtonElement::IsPlayingRemotely() const {
-  RemotePlayback* remote =
-      HTMLMediaElementRemotePlayback::remote(MediaElement());
-  return remote && remote->GetState() != WebRemotePlaybackState::kDisconnected;
+  return RemotePlayback::From(MediaElement()).GetState() !=
+         WebRemotePlaybackState::kDisconnected;
 }
 
 }  // namespace blink

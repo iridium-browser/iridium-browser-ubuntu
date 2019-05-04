@@ -10,6 +10,7 @@
 namespace chromecast {
 namespace shell {
 
+// TODO(halliwell) Move this function to its own header.
 std::string GetUserAgent();
 
 class CastContentClient : public content::ContentClient {
@@ -17,8 +18,8 @@ class CastContentClient : public content::ContentClient {
   ~CastContentClient() override;
 
   // content::ContentClient implementation:
+  void SetActiveURL(const GURL& url, std::string top_origin) override;
   void AddAdditionalSchemes(Schemes* schemes) override;
-  std::string GetUserAgent() const override;
   base::string16 GetLocalizedString(int message_id) const override;
   base::StringPiece GetDataResource(
       int resource_id,

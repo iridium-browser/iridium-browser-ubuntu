@@ -11,13 +11,15 @@
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_tab_grid_button.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_tools_menu_button.h"
 #import "ios/chrome/browser/ui/toolbar/public/features.h"
+#import "ios/chrome/browser/ui/toolbar_container/toolbar_collapsing.h"
+#import "ios/chrome/browser/ui/util/named_guide.h"
 #import "ios/chrome/common/ui_util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-@interface SecondaryToolbarView ()
+@interface SecondaryToolbarView ()<ToolbarCollapsing>
 // Factory used to create the buttons.
 @property(nonatomic, strong) ToolbarButtonFactory* buttonFactory;
 
@@ -72,6 +74,18 @@
   return CGSizeMake(UIViewNoIntrinsicMetric, kAdaptiveToolbarHeight);
 }
 
+- (void)willMoveToWindow:(UIWindow*)newWindow {
+  [super willMoveToWindow:newWindow];
+  [NamedGuide guideWithName:kSecondaryToolbarGuide view:self].constrainedView =
+      nil;
+}
+
+- (void)didMoveToWindow {
+  [super didMoveToWindow];
+  [NamedGuide guideWithName:kSecondaryToolbarGuide view:self].constrainedView =
+      self;
+}
+
 #pragma mark - Setup
 
 // Sets all the subviews and constraints of the view.
@@ -97,8 +111,9 @@
   AddSameConstraints(self.blur, self);
 
   UIView* contentView = self;
-  if (UIVisualEffect* vibrancy = [self.buttonFactory.toolbarConfiguration
-          vibrancyEffectForBlurEffect:blurEffect]) {
+  UIVisualEffect* vibrancy = [self.buttonFactory.toolbarConfiguration
+      vibrancyEffectForBlurEffect:blurEffect];
+  if (vibrancy && IconForSearchButton() != ToolbarSearchButtonIconColorful) {
     // Add vibrancy only if we have a vibrancy effect.
     UIVisualEffectView* vibrancyView =
         [[UIVisualEffectView alloc] initWithEffect:vibrancy];
@@ -125,7 +140,7 @@
   self.stackView.translatesAutoresizingMaskIntoConstraints = NO;
   [contentView addSubview:self.stackView];
 
-  id<LayoutGuideProvider> safeArea = SafeAreaLayoutGuideForView(self);
+  id<LayoutGuideProvider> safeArea = self.safeAreaLayoutGuide;
 
   [NSLayoutConstraint activateConstraints:@[
     [self.stackView.leadingAnchor
@@ -160,6 +175,16 @@
 
 - (MDCProgressView*)progressBar {
   return nil;
+}
+
+#pragma mark - ToolbarCollapsing
+
+- (CGFloat)expandedToolbarHeight {
+  return self.intrinsicContentSize.height;
+}
+
+- (CGFloat)collapsedToolbarHeight {
+  return 0.0;
 }
 
 @end

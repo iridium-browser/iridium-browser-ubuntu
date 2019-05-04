@@ -20,7 +20,6 @@
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/memory_coordinator_proxy.h"
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_current.h"
@@ -34,6 +33,7 @@
 #include "base/process/process_metrics.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/synchronization/waitable_event.h"
@@ -62,7 +62,6 @@
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/compositor/gpu_process_transport_factory.h"
 #include "content/browser/compositor/surface_utils.h"
 #include "content/browser/compositor/viz_process_transport_factory.h"
 #include "content/browser/dom_storage/dom_storage_area.h"
@@ -80,7 +79,7 @@
 #include "content/browser/loader_delegate_impl.h"
 #include "content/browser/media/capture/audio_mirroring_manager.h"
 #include "content/browser/media/media_internals.h"
-#include "content/browser/memory/memory_coordinator_impl.h"
+#include "content/browser/media/media_keys_listener_manager_impl.h"
 #include "content/browser/memory/swap_metrics_delegate_uma.h"
 #include "content/browser/net/browser_online_state_observer.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
@@ -127,6 +126,7 @@
 #include "media/mojo/buildflags.h"
 #include "mojo/core/embedder/embedder.h"
 #include "mojo/core/embedder/scoped_ipc_support.h"
+#include "mojo/public/cpp/bindings/mojo_buildflags.h"
 #include "mojo/public/cpp/bindings/sync_call_restrictions.h"
 #include "net/base/network_change_notifier.h"
 #include "net/socket/client_socket_factory.h"
@@ -151,6 +151,7 @@
 #include "ui/gfx/switches.h"
 
 #if defined(USE_AURA) || defined(OS_MACOSX)
+#include "content/browser/compositor/gpu_process_transport_factory.h"
 #include "content/browser/compositor/image_transport_factory.h"
 #endif
 
@@ -177,7 +178,6 @@
 
 #if defined(OS_MACOSX)
 #include "base/memory/memory_pressure_monitor_mac.h"
-#include "content/browser/cocoa/system_hotkey_helper_mac.h"
 #include "content/browser/mach_broker_mac.h"
 #include "content/browser/renderer_host/browser_compositor_view_mac.h"
 #include "content/browser/theme_helper_mac.h"
@@ -197,7 +197,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "base/memory/memory_pressure_monitor_chromeos.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #endif
 
 #if defined(USE_GLIB)
@@ -246,6 +246,10 @@
 #include "base/mac/foundation_util.h"
 #endif
 
+#if BUILDFLAG(MOJO_RANDOM_DELAYS_ENABLED)
+#include "mojo/public/cpp/bindings/lib/test_random_mojo_delays.h"
+#endif
+
 // One of the linux specific headers defines this as a macro.
 #ifdef DestroyAll
 #undef DestroyAll
@@ -288,7 +292,7 @@ static void SetUpGLibLogHandler() {
   // Register GLib-handled assertions to go through our logging system.
   const char* const kLogDomains[] =
       { nullptr, "Gtk", "Gdk", "GLib", "GLib-GObject" };
-  for (size_t i = 0; i < arraysize(kLogDomains); i++) {
+  for (size_t i = 0; i < base::size(kLogDomains); i++) {
     g_log_set_handler(
         kLogDomains[i],
         static_cast<GLogLevelFlags>(G_LOG_FLAG_RECURSION | G_LOG_FLAG_FATAL |
@@ -396,9 +400,6 @@ void SetFileUrlPathAliasForIpcFuzzer() {
       switches::kFileUrlPathAlias, alias_switch);
 }
 #endif
-
-const base::Feature kBrowserResponsivenessCalculator{
-    "BrowserResponsivenessCalculator", base::FEATURE_DISABLED_BY_DEFAULT};
 
 std::unique_ptr<base::MemoryPressureMonitor> CreateMemoryPressureMonitor(
     const base::CommandLine& command_line) {
@@ -566,6 +567,7 @@ void BrowserMainLoop::Init() {
     // This is always invoked before |io_thread_| is initialized (i.e. never
     // resets it).
     io_thread_ = std::move(startup_data->thread);
+    service_manager_context_ = startup_data->service_manager_context;
   }
 
   parts_.reset(
@@ -1018,6 +1020,17 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
       base::BindOnce(
           base::IgnoreResult(&base::ThreadRestrictions::SetIOAllowed), true));
 
+  // Also allow waiting to join threads.
+  // TODO(https://crbug.com/800808): Ideally this (and the above SetIOAllowed()
+  // would be scoped allowances). That would be one of the first step to ensure
+  // no persistent work is being done after TaskScheduler::Shutdown() in order
+  // to move towards atomic shutdown.
+  base::ThreadRestrictions::SetWaitAllowed(true);
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
+      base::BindOnce(
+          base::IgnoreResult(&base::ThreadRestrictions::SetWaitAllowed), true));
+
 #if defined(OS_ANDROID)
   g_browser_main_loop_shutting_down = true;
 #endif
@@ -1086,23 +1099,22 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
     BrowserGpuChannelHostFactory::instance()->CloseChannel();
 
   // Shutdown the Service Manager and IPC.
-  service_manager_context_.reset();
+  if (service_manager_context_)
+    service_manager_context_->ShutDown();
+  owned_service_manager_context_.reset();
   mojo_ipc_support_.reset();
 
   if (save_file_manager_)
     save_file_manager_->Shutdown();
 
   {
-    base::ThreadRestrictions::ScopedAllowWait allow_wait_for_join;
-    {
-      TRACE_EVENT0("shutdown", "BrowserMainLoop::Subsystem:IOThread");
-      ResetThread_IO(std::move(io_thread_));
-    }
+    TRACE_EVENT0("shutdown", "BrowserMainLoop::Subsystem:IOThread");
+    ResetThread_IO(std::move(io_thread_));
+  }
 
-    {
-      TRACE_EVENT0("shutdown", "BrowserMainLoop::Subsystem:TaskScheduler");
-      base::TaskScheduler::GetInstance()->Shutdown();
-    }
+  {
+    TRACE_EVENT0("shutdown", "BrowserMainLoop::Subsystem:TaskScheduler");
+    base::TaskScheduler::GetInstance()->Shutdown();
   }
 
   // Must happen after the IO thread is shutdown since this may be accessed from
@@ -1278,7 +1290,8 @@ int BrowserMainLoop::BrowserThreadsStarted() {
           switches::GetDeadlineToSynchronizeSurfaces());
 
       surface_utils::ConnectWithLocalFrameSinkManager(
-          host_frame_sink_manager_.get(), frame_sink_manager_impl_.get());
+          host_frame_sink_manager_.get(), frame_sink_manager_impl_.get(),
+          base::ThreadTaskRunnerHandle::Get());
 
       ImageTransportFactory::SetFactory(
           std::make_unique<GpuProcessTransportFactory>(
@@ -1312,6 +1325,14 @@ int BrowserMainLoop::BrowserThreadsStarted() {
   {
     TRACE_EVENT0("startup", "BrowserThreadsStarted::Subsystem:MidiService");
     midi_service_.reset(new midi::MidiService);
+  }
+
+  {
+    TRACE_EVENT0("startup", "BrowserThreadsStarted::Subsystem:GamepadService");
+    device::GamepadService::GetInstance()->StartUp(
+        content::ServiceManagerConnection::GetForProcess()
+            ->GetConnector()
+            ->Clone());
   }
 
 #if defined(OS_WIN)
@@ -1431,15 +1452,18 @@ int BrowserMainLoop::BrowserThreadsStarted() {
   }
 #endif
 
+  if (MediaKeysListenerManager::IsMediaKeysListenerManagerEnabled()) {
+    media_keys_listener_manager_ =
+        std::make_unique<MediaKeysListenerManagerImpl>(
+            content::ServiceManagerConnection::GetForProcess()->GetConnector());
+  }
+
 #if defined(OS_MACOSX)
   ThemeHelperMac::GetInstance();
-  SystemHotkeyHelperMac::GetInstance()->DeferredLoadSystemHotkeys();
 #endif  // defined(OS_MACOSX)
 
-  if (base::FeatureList::IsEnabled(kBrowserResponsivenessCalculator)) {
-    responsiveness_watcher_ = new responsiveness::Watcher;
-    responsiveness_watcher_->SetUp();
-  }
+  responsiveness_watcher_ = new responsiveness::Watcher;
+  responsiveness_watcher_->SetUp();
 
 #if defined(OS_ANDROID)
   media::SetMediaDrmBridgeClient(GetContentClient()->GetMediaDrmBridgeClient());
@@ -1458,9 +1482,6 @@ bool BrowserMainLoop::UsingInProcessGpu() const {
 
 void BrowserMainLoop::InitializeMemoryManagementComponent() {
   memory_pressure_monitor_ = CreateMemoryPressureMonitor(parsed_command_line_);
-
-  if (base::FeatureList::IsEnabled(features::kMemoryCoordinator))
-    MemoryCoordinatorImpl::GetInstance()->Start();
 
   std::unique_ptr<SwapMetricsDriver::Delegate> delegate(
       base::WrapUnique<SwapMetricsDriver::Delegate>(
@@ -1544,9 +1565,13 @@ void BrowserMainLoop::InitializeMojo() {
       base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}),
       mojo::core::ScopedIPCSupport::ShutdownPolicy::FAST));
 
-  service_manager_context_.reset(
-      new ServiceManagerContext(io_thread_->task_runner()));
+  if (!service_manager_context_) {
+    owned_service_manager_context_ =
+        std::make_unique<ServiceManagerContext>(io_thread_->task_runner());
+    service_manager_context_ = owned_service_manager_context_.get();
+  }
   ServiceManagerContext::StartBrowserConnection();
+
 #if defined(OS_MACOSX)
   mojo::core::SetMachPortProvider(MachBroker::GetInstance());
 #endif  // defined(OS_MACOSX)
@@ -1597,6 +1622,10 @@ void BrowserMainLoop::InitializeMojo() {
     parts_->ServiceManagerConnectionStarted(
         ServiceManagerConnection::GetForProcess());
   }
+
+#if BUILDFLAG(MOJO_RANDOM_DELAYS_ENABLED)
+  mojo::BeginRandomMojoDelays();
+#endif
 }
 
 base::FilePath BrowserMainLoop::GetStartupTraceFileName() const {
@@ -1683,8 +1712,9 @@ void BrowserMainLoop::InitializeAudio() {
           if (connection) {
             // The browser is not shutting down: |connection| would be null
             // otherwise.
-            connection->GetConnector()->StartService(
-                audio::mojom::kServiceName);
+            connection->GetConnector()->WarmService(
+                service_manager::ServiceFilter::ByName(
+                    audio::mojom::kServiceName));
           }
         }));
   }

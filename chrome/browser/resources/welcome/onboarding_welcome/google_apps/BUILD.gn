@@ -6,22 +6,23 @@ import("//third_party/closure_compiler/compile_js.gni")
 
 js_type_check("closure_compile") {
   deps = [
-    ":apps_chooser",
     ":nux_google_apps",
   ]
 }
 
-js_library("apps_chooser") {
-  deps = []
-}
-
 js_library("nux_google_apps") {
   deps = [
-    ":apps_chooser",
-    ":nux_google_apps_proxy",
+    ":google_app_proxy",
+    "../:navigation_behavior",
+    "../shared:app_chooser",
+    "../shared:nux_types",
   ]
 }
 
-js_library("nux_google_apps_proxy") {
-  deps = []
+js_library("google_app_proxy") {
+  deps = [
+    "../shared:app_proxy",
+    "//ui/webui/resources/js:cr",
+  ]
+  externs_list = [ "$externs_path/chrome_send.js" ]
 }

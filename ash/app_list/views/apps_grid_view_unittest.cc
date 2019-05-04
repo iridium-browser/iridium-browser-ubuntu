@@ -28,7 +28,6 @@
 #include "ash/app_list/views/search_box_view.h"
 #include "ash/app_list/views/search_result_tile_item_view.h"
 #include "ash/app_list/views/suggestion_chip_container_view.h"
-#include "ash/app_list/views/suggestions_container_view.h"
 #include "ash/app_list/views/test/apps_grid_view_test_api.h"
 #include "ash/public/cpp/app_list/app_list_config.h"
 #include "ash/public/cpp/app_list/app_list_constants.h"
@@ -145,35 +144,23 @@ class TestSuggestedSearchResult : public TestSearchResult {
 struct TestParams {
   bool is_rtl_enabled;
   bool is_apps_grid_gap_enabled;
-  bool is_new_style_launcher_enabled;
 };
 
 const TestParams kAppsGridViewTestParams[] = {
-    {false /* is_rtl_enabled */, false /* is_apps_grid_gap_enabled */,
-     false /* is_new_style_launcher_enabled */},
-    {false, false, true},
-    {true, false, false},
-    {true, false, true},
+    {false /* is_rtl_enabled */, false /* is_apps_grid_gap_enabled */},
+    {true, false},
 };
 
 const TestParams kAppsGridViewDragTestParams[] = {
-    {false /* is_rtl_enabled */, false /* is_apps_grid_gap_enabled */,
-     false /* is_new_style_launcher_enabled */},
-    {false, false, true},
-    {true, false, false},
-    {true, false, true},
-    {false, true, false},
-    {false, true, true},
-    {true, true, false},
-    {true, true, true},
+    {false /* is_rtl_enabled */, false /* is_apps_grid_gap_enabled */},
+    {true, false},
+    {false, true},
+    {true, true},
 };
 
 const TestParams kAppsGridGapTestParams[] = {
-    {false /* is_rtl_enabled */, true /* is_apps_grid_gap_enabled */,
-     false /* is_new_style_launcher_enabled */},
-    {false, true, true},
-    {true, true, false},
-    {true, true, true},
+    {false /* is_rtl_enabled */, true /* is_apps_grid_gap_enabled */},
+    {true, true},
 };
 
 }  // namespace
@@ -195,7 +182,6 @@ class AppsGridViewTest : public views::ViewsTestBase,
         base::i18n::SetICUDefaultLocale("he");
 
       is_apps_grid_gap_enabled_ = GetParam().is_apps_grid_gap_enabled;
-      is_new_style_launcher_enabled_ = GetParam().is_new_style_launcher_enabled;
     }
     if (is_apps_grid_gap_enabled_) {
       enabled_features.emplace_back(
@@ -203,12 +189,6 @@ class AppsGridViewTest : public views::ViewsTestBase,
     } else {
       disabled_features.emplace_back(
           app_list_features::kEnableAppsGridGapFeature);
-    }
-    if (is_new_style_launcher_enabled_) {
-      enabled_features.emplace_back(app_list_features::kEnableNewStyleLauncher);
-    } else {
-      disabled_features.emplace_back(
-          app_list_features::kEnableNewStyleLauncher);
     }
     scoped_feature_list_.InitWithFeatures(enabled_features, disabled_features);
     views::ViewsTestBase::SetUp();
@@ -226,15 +206,9 @@ class AppsGridViewTest : public views::ViewsTestBase,
 
     model_ = delegate_->GetTestModel();
     search_model_ = delegate_->GetSearchModel();
-    if (is_new_style_launcher_enabled_) {
-      suggestions_container_ = contents_view_->GetAppsContainerView()
-                                   ->suggestion_chip_container_view_for_test();
-    } else {
-      suggestions_container_ =
-          apps_grid_view_->suggestions_container_for_test();
-    }
-
-    expand_arrow_view_ = apps_grid_view_->expand_arrow_view_for_test();
+    suggestions_container_ = contents_view_->GetAppsContainerView()
+                                 ->suggestion_chip_container_view_for_test();
+    expand_arrow_view_ = contents_view_->expand_arrow_view();
     for (size_t i = 0; i < kNumOfSuggestedApps; ++i) {
       search_model_->results()->Add(
           std::make_unique<TestSuggestedSearchResult>());
@@ -346,7 +320,6 @@ class AppsGridViewTest : public views::ViewsTestBase,
   bool is_rtl_ = false;
   bool test_with_fullscreen_ = true;
   bool is_apps_grid_gap_enabled_ = false;
-  bool is_new_style_launcher_enabled_ = false;
 
  private:
   // Restores the locale to default when destructor is called.
@@ -401,8 +374,7 @@ TEST_P(AppsGridViewTest, CreatePage) {
   EXPECT_EQ(kNumOfSuggestedApps, suggestions_container_->num_results());
   // For new style launcher, each page has the same number of rows.
   const int kExpectedTilesOnFirstPage =
-      apps_grid_view_->cols() * (apps_grid_view_->rows_per_page() -
-                                 (is_new_style_launcher_enabled_ ? 0 : 1));
+      apps_grid_view_->cols() * (apps_grid_view_->rows_per_page());
   EXPECT_EQ(kExpectedTilesOnFirstPage, GetTilesPerPage(kPages - 1));
 
   model_->PopulateApps(kPages * GetTilesPerPage(kPages - 1));
@@ -590,6 +562,29 @@ TEST_F(AppsGridViewTest, CloseFolderByClickingBackground) {
                        ui::EF_LEFT_MOUSE_BUTTON);
   apps_container_view->folder_background_view()->OnMouseEvent(&event);
   EXPECT_FALSE(apps_container_view->IsInFolderView());
+}
+
+TEST_F(AppsGridViewTest, TapsBetweenAppsWontCloseAppList) {
+  model_->PopulateApps(2);
+  gfx::Point between_apps = GetItemRectOnCurrentPageAt(0, 0).right_center();
+  gfx::Point empty_space = GetItemRectOnCurrentPageAt(0, 2).CenterPoint();
+
+  ui::GestureEvent tap_between(between_apps.x(), between_apps.y(), 0,
+                               base::TimeTicks(),
+                               ui::GestureEventDetails(ui::ET_GESTURE_TAP));
+  ui::GestureEvent tap_outside(empty_space.x(), empty_space.y(), 0,
+                               base::TimeTicks(),
+                               ui::GestureEventDetails(ui::ET_GESTURE_TAP));
+
+  // Taps between apps should be handled to prevent them from going into
+  // app_list
+  apps_grid_view_->OnGestureEvent(&tap_between);
+  EXPECT_TRUE(tap_between.handled());
+
+  // Taps outside of occupied tiles should not be handled, that they may close
+  // the app_list
+  apps_grid_view_->OnGestureEvent(&tap_outside);
+  EXPECT_FALSE(tap_outside.handled());
 }
 
 TEST_F(AppsGridViewTest, PageResetAfterOpenFolder) {
@@ -1020,7 +1015,7 @@ TEST_P(AppsGridViewDragTest, MouseDragFlipPage) {
   gfx::Point from = GetItemRectOnCurrentPageAt(0, 0).CenterPoint();
   gfx::Point to;
   const gfx::Rect apps_grid_bounds = apps_grid_view_->GetLocalBounds();
-  to = gfx::Point(apps_grid_bounds.width() / 2, apps_grid_bounds.bottom());
+  to = gfx::Point(apps_grid_bounds.width() / 2, apps_grid_bounds.bottom() + 1);
 
   // For fullscreen/bubble launcher, drag to the bottom/right of bounds.
   page_flip_waiter.Reset();
@@ -1117,7 +1112,7 @@ class AppsGridGapTest : public AppsGridViewTest {
     const gfx::Rect apps_grid_bounds = apps_grid_view_->GetLocalBounds();
     gfx::Point point_in_page_flip_buffer =
         gfx::Point(apps_grid_bounds.width() / 2,
-                   next_page ? apps_grid_bounds.bottom() : 0);
+                   next_page ? apps_grid_bounds.bottom() + 1 : 0);
 
     // Build the drag event which will be triggered after page flip.
     gfx::Point root_to(to);

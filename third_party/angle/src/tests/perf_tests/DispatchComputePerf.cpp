@@ -8,22 +8,23 @@
 //
 
 #include "ANGLEPerfTest.h"
-#include "shader_utils.h"
+#include "util/shader_utils.h"
 
 namespace
 {
+unsigned int kIterationsPerStep = 50;
 
 struct DispatchComputePerfParams final : public RenderTestParams
 {
     DispatchComputePerfParams()
     {
-        majorVersion = 3;
-        minorVersion = 1;
+        iterationsPerStep = kIterationsPerStep;
+        majorVersion      = 3;
+        minorVersion      = 1;
     }
 
     std::string suffix() const override;
 
-    unsigned int iterations    = 50;
     unsigned int localSizeX    = 16;
     unsigned int localSizeY    = 16;
     unsigned int textureWidth  = 32;
@@ -71,13 +72,11 @@ class DispatchComputePerfBenchmark : public ANGLERenderTest,
 
 DispatchComputePerfBenchmark::DispatchComputePerfBenchmark()
     : ANGLERenderTest("DispatchComputePerf", GetParam())
-{
-}
+{}
 
 void DispatchComputePerfBenchmark::initializeBenchmark()
 {
     const auto &params = GetParam();
-    ASSERT_LT(0u, params.iterations);
 
     initComputeShader();
     initTextures();
@@ -95,22 +94,21 @@ void DispatchComputePerfBenchmark::initializeBenchmark()
 
 void DispatchComputePerfBenchmark::initComputeShader()
 {
-    const std::string &csSource =
-        R"(#version 310 es
-        #define LOCAL_SIZE_X 16
-        #define LOCAL_SIZE_Y 16
-        layout(local_size_x=LOCAL_SIZE_X, local_size_y=LOCAL_SIZE_Y) in;
-        precision highp float;
-        uniform sampler2D readTexture;
-        layout(r32f, binding = 4) writeonly uniform highp image2D  outImage;
+    constexpr char kCS[] = R"(#version 310 es
+#define LOCAL_SIZE_X 16
+#define LOCAL_SIZE_Y 16
+layout(local_size_x=LOCAL_SIZE_X, local_size_y=LOCAL_SIZE_Y) in;
+precision highp float;
+uniform sampler2D readTexture;
+layout(r32f, binding = 4) writeonly uniform highp image2D  outImage;
 
-        void main() {
-            float sum = 0.;
-            sum += texelFetch(readTexture, ivec2(gl_GlobalInvocationID.xy), 0).r;
-            imageStore(outImage, ivec2(gl_GlobalInvocationID.xy), vec4(sum));
-        })";
+void main() {
+    float sum = 0.;
+    sum += texelFetch(readTexture, ivec2(gl_GlobalInvocationID.xy), 0).r;
+    imageStore(outImage, ivec2(gl_GlobalInvocationID.xy), vec4(sum));
+})";
 
-    mProgram = CompileComputeProgram(csSource, false);
+    mProgram = CompileComputeProgram(kCS, false);
     ASSERT_NE(0u, mProgram);
 }
 
@@ -149,7 +147,7 @@ void DispatchComputePerfBenchmark::destroyBenchmark()
 void DispatchComputePerfBenchmark::drawBenchmark()
 {
     const auto &params = GetParam();
-    for (unsigned int it = 0; it < params.iterations; it++)
+    for (unsigned int it = 0; it < params.iterationsPerStep; it++)
     {
         glDispatchCompute(mDispatchX, mDispatchY, 1);
         glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);

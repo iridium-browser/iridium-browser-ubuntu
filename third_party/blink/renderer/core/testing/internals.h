@@ -43,11 +43,11 @@ namespace blink {
 class Animation;
 class CallbackFunctionTest;
 class CanvasRenderingContext;
+class DOMArrayBuffer;
+class DOMPoint;
 class DOMRect;
 class DOMRectList;
 class DOMRectReadOnly;
-class DOMArrayBuffer;
-class DOMPoint;
 class DOMWindow;
 class DictionaryTest;
 class Document;
@@ -56,15 +56,15 @@ class Element;
 class ExceptionState;
 class ExecutionContext;
 class GCObservation;
-class HitTestLocation;
-class HitTestResult;
 class HTMLInputElement;
 class HTMLMediaElement;
 class HTMLSelectElement;
 class HTMLVideoElement;
+class HitTestLayerRectList;
+class HitTestLocation;
+class HitTestResult;
 class InternalRuntimeFlags;
 class InternalSettings;
-class LayerRectList;
 class LocalDOMWindow;
 class LocalFrame;
 class Location;
@@ -73,15 +73,16 @@ class OriginTrialsTest;
 class Page;
 class Range;
 class RecordTest;
+class ScrollState;
 class SequenceTest;
 class SerializedScriptValue;
 class ShadowRoot;
+template <typename NodeType>
+class StaticNodeTypeList;
 class StaticSelection;
 class TypeConversions;
 class UnionTypesTest;
-class ScrollState;
-template <typename NodeType>
-class StaticNodeTypeList;
+
 using StaticNodeList = StaticNodeTypeList<Node>;
 
 class Internals final : public ScriptWrappable {
@@ -89,10 +90,12 @@ class Internals final : public ScriptWrappable {
 
  public:
   static Internals* Create(ExecutionContext* context) {
-    return new Internals(context);
+    return MakeGarbageCollected<Internals>(context);
   }
 
   static void ResetToConsistentState(Page*);
+
+  explicit Internals(ExecutionContext*);
 
   String elementLayoutTreeAsText(Element*, ExceptionState&);
 
@@ -104,6 +107,8 @@ class Internals final : public ScriptWrappable {
   bool isLoadingFromMemoryCache(const String& url);
   int getResourcePriority(const String& url, Document*);
   String getResourceHeader(const String& url, const String& header, Document*);
+
+  bool doesWindowHaveUrlFragment(DOMWindow*);
 
   CSSStyleDeclaration* computedStyleIncludingVisitedInfo(Node*) const;
 
@@ -283,7 +288,7 @@ class Internals final : public ScriptWrappable {
   unsigned touchEndOrCancelEventHandlerCount(Document*) const;
   unsigned pointerEventHandlerCount(Document*) const;
 
-  LayerRectList* touchEventTargetLayerRects(Document*, ExceptionState&);
+  HitTestLayerRectList* touchEventTargetLayerRects(Document*, ExceptionState&);
 
   bool executeCommand(Document*,
                       const String& name,
@@ -490,6 +495,8 @@ class Internals final : public ScriptWrappable {
 
   bool ignoreLayoutWithPendingStylesheets(Document*);
 
+  Element* interestedElement();
+
   void setNetworkConnectionInfoOverride(bool,
                                         const String&,
                                         const String&,
@@ -511,7 +518,7 @@ class Internals final : public ScriptWrappable {
 
   // Schedule a forced Blink GC run (Oilpan) at the end of event loop.
   // Note: This is designed to be only used from PerformanceTests/BlinkGC to
-  //       explicitly measure only Blink GC time.  Normal LayoutTests should use
+  //       explicitly measure only Blink GC time.  Normal web tests should use
   //       gc() instead as it would trigger both Blink GC and V8 GC.
   void forceBlinkGCWithoutV8GC();
 
@@ -543,9 +550,6 @@ class Internals final : public ScriptWrappable {
   String unscopableAttribute();
   String unscopableMethod();
 
-  DOMRectList* focusRingRects(Element*);
-  DOMRectList* outlineRects(Element*);
-
   void setCapsLockState(bool enabled);
 
   bool setScrollbarVisibilityInScrollableArea(Node*, bool visible);
@@ -553,6 +557,9 @@ class Internals final : public ScriptWrappable {
   // Translate given platform monotonic time in seconds to high resolution
   // document time in seconds
   double monotonicTimeToZeroBasedDocumentTime(double, ExceptionState&);
+
+  // Returns the current time ticks (in microseconds).
+  int64_t currentTimeTicks();
 
   // Returns the run state of the node's scroll animator (see
   // ScrollAnimatorCompositorCoordinater::RunState), or -1 if the node does not
@@ -596,7 +603,6 @@ class Internals final : public ScriptWrappable {
   void addEmbedderCustomElementName(const AtomicString& name, ExceptionState&);
 
  private:
-  explicit Internals(ExecutionContext*);
   Document* ContextDocument() const;
   LocalFrame* GetFrame() const;
   Vector<String> IconURLs(Document*, int icon_types_mask) const;

@@ -15,11 +15,11 @@
 
 #include "api/video_codecs/video_decoder.h"
 #include "call/rtp_stream_receiver_controller.h"
-#include "media/base/fakevideorenderer.h"
+#include "media/base/fake_video_renderer.h"
 #include "modules/pacing/packet_router.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
 #include "modules/utility/include/process_thread.h"
-#include "rtc_base/criticalsection.h"
+#include "rtc_base/critical_section.h"
 #include "rtc_base/event.h"
 #include "system_wrappers/include/clock.h"
 #include "test/field_trial.h"
@@ -118,7 +118,7 @@ TEST_F(VideoReceiveStreamTest, CreateFrameFromH264FmtpSpropAndIdr) {
   rtppacket.SetPayloadType(99);
   rtppacket.SetSequenceNumber(1);
   rtppacket.SetTimestamp(0);
-  rtc::Event init_decode_event_(false, false);
+  rtc::Event init_decode_event_;
   EXPECT_CALL(mock_h264_video_decoder_, InitDecode(_, _))
       .WillOnce(Invoke([&init_decode_event_](const VideoCodec* config,
                                              int32_t number_of_cores) {

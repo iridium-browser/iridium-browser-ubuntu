@@ -9,7 +9,6 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/metrics/field_trial.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
 #include "chromecast/chromecast_buildflags.h"
@@ -34,6 +33,7 @@ class NetLog;
 
 namespace chromecast {
 class CastMemoryPressureMonitor;
+class WaylandServerController;
 
 #if defined(USE_AURA)
 class CastWindowManagerAura;
@@ -85,7 +85,6 @@ class CastBrowserMainParts : public content::BrowserMainParts {
 
  private:
   std::unique_ptr<CastBrowserProcess> cast_browser_process_;
-  base::FieldTrialList field_trial_list_;
   const content::MainFunctionParams parameters_;  // For running browser tests.
   // Caches a pointer of the CastContentBrowserClient.
   CastContentBrowserClient* const cast_content_browser_client_ = nullptr;
@@ -121,6 +120,10 @@ class CastBrowserMainParts : public content::BrowserMainParts {
       extensions_browser_client_;
   std::unique_ptr<PrefService> local_state_;
   std::unique_ptr<PrefService> user_pref_service_;
+#endif
+
+#if BUILDFLAG(ENABLE_CAST_WAYLAND_SERVER)
+  std::unique_ptr<WaylandServerController> wayland_server_controller_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(CastBrowserMainParts);

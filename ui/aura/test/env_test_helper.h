@@ -27,7 +27,6 @@ class EnvWindowTreeClientSetter {
  private:
   void SetWindowTreeClient(WindowTreeClient* client);
 
-  WindowTreeClient* supplied_client_;
   WindowTreeClient* previous_client_;
 
   DISALLOW_COPY_AND_ASSIGN(EnvWindowTreeClientSetter);
@@ -57,8 +56,11 @@ class EnvTestHelper {
     env_->mode_ = mode;
     if (mode == Env::Mode::MUS)
       env_->EnableMusOSExchangeDataProvider();
+    env_->in_mus_shutdown_ = false;
     return old_mode;
   }
+
+  void SetInMusShutdown(bool value) { env_->in_mus_shutdown_ = value; }
 
   // Use to force Env::last_mouse_location() to return the value last set.
   // This matters for MUS, which may not return the last explicitly set
@@ -66,6 +68,10 @@ class EnvTestHelper {
   void SetAlwaysUseLastMouseLocation(bool value) {
     env_->always_use_last_mouse_location_ = value;
   }
+
+  // Reset aura::Env to eliminate potential test dependency.
+  // (https://crbug.com/586514)
+  void ResetEnvForTesting() { env_->is_touch_down_ = false; }
 
   void SetGestureRecognizer(
       std::unique_ptr<ui::GestureRecognizer> gesture_recognizer) {

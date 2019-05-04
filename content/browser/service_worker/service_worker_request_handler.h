@@ -20,7 +20,7 @@
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "services/network/public/mojom/request_context_frame_type.mojom.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
-#include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom.h"
 
 namespace net {
 class NetworkDelegate;
@@ -64,7 +64,7 @@ class CONTENT_EXPORT ServiceWorkerRequestHandler
       network::mojom::RequestContextFrameType frame_type,
       bool is_parent_frame_secure,
       scoped_refptr<network::ResourceRequestBody> body,
-      const base::Callback<WebContents*(void)>& web_contents_getter);
+      base::RepeatingCallback<WebContents*()> web_contents_getter);
 
   // S13nServiceWorker:
   // Same as InitializeForNavigation() but instead of attaching to a URLRequest,
@@ -81,7 +81,8 @@ class CONTENT_EXPORT ServiceWorkerRequestHandler
       network::mojom::RequestContextFrameType frame_type,
       bool is_parent_frame_secure,
       scoped_refptr<network::ResourceRequestBody> body,
-      const base::Callback<WebContents*(void)>& web_contents_getter);
+      base::RepeatingCallback<WebContents*()> web_contents_getter,
+      base::WeakPtr<ServiceWorkerProviderHost>* out_provider_host);
 
   static std::unique_ptr<NavigationLoaderInterceptor> InitializeForSharedWorker(
       const network::ResourceRequest& resource_request,

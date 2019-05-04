@@ -79,7 +79,7 @@ namespace blink {
 
 BaseAudioContext* BaseAudioContext::Create(
     Document& document,
-    const AudioContextOptions& context_options,
+    const AudioContextOptions* context_options,
     ExceptionState& exception_state) {
   return AudioContext::Create(document, context_options, exception_state);
 }
@@ -101,6 +101,7 @@ BaseAudioContext::BaseAudioContext(Document* document,
       periodic_wave_sawtooth_(nullptr),
       periodic_wave_triangle_(nullptr),
       output_position_(),
+      callback_metric_(),
       task_runner_(document->GetTaskRunner(TaskType::kInternalMedia)) {}
 
 BaseAudioContext::~BaseAudioContext() {
@@ -175,6 +176,15 @@ void BaseAudioContext::Uninitialize() {
   DCHECK_EQ(active_source_nodes_.size(), 0u);
 }
 
+void BaseAudioContext::ContextPaused(PauseState pause_state) {
+  if (pause_state == PauseState::kFrozen)
+    destination()->GetAudioDestinationHandler().Pause();
+}
+
+void BaseAudioContext::ContextUnpaused() {
+  destination()->GetAudioDestinationHandler().Resume();
+}
+
 void BaseAudioContext::ContextDestroyed(ExecutionContext*) {
   destination()->GetAudioDestinationHandler().ContextDestroyed();
   Uninitialize();
@@ -204,8 +214,8 @@ void BaseAudioContext::ThrowExceptionForClosedState(
                                     "AudioContext has been closed.");
 }
 
-AudioBuffer* BaseAudioContext::createBuffer(unsigned number_of_channels,
-                                            size_t number_of_frames,
+AudioBuffer* BaseAudioContext::createBuffer(uint32_t number_of_channels,
+                                            uint32_t number_of_frames,
                                             float sample_rate,
                                             ExceptionState& exception_state) {
   // It's ok to call createBuffer, even if the context is closed because the
@@ -225,8 +235,8 @@ AudioBuffer* BaseAudioContext::createBuffer(unsigned number_of_channels,
                         ("WebAudio.AudioBuffer.Length", 1, 1000000, 50));
     // The limits are the min and max AudioBuffer sample rates currently
     // supported.  We use explicit values here instead of
-    // AudioUtilities::minAudioBufferSampleRate() and
-    // AudioUtilities::maxAudioBufferSampleRate().  The number of buckets is
+    // audio_utilities::minAudioBufferSampleRate() and
+    // audio_utilities::maxAudioBufferSampleRate().  The number of buckets is
     // fairly arbitrary.
     DEFINE_STATIC_LOCAL(
         CustomCountHistogram, audio_buffer_sample_rate_histogram,
@@ -369,7 +379,7 @@ ScriptProcessorNode* BaseAudioContext::createScriptProcessor(
 }
 
 ScriptProcessorNode* BaseAudioContext::createScriptProcessor(
-    size_t buffer_size,
+    uint32_t buffer_size,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
@@ -377,8 +387,8 @@ ScriptProcessorNode* BaseAudioContext::createScriptProcessor(
 }
 
 ScriptProcessorNode* BaseAudioContext::createScriptProcessor(
-    size_t buffer_size,
-    size_t number_of_input_channels,
+    uint32_t buffer_size,
+    uint32_t number_of_input_channels,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
@@ -387,9 +397,9 @@ ScriptProcessorNode* BaseAudioContext::createScriptProcessor(
 }
 
 ScriptProcessorNode* BaseAudioContext::createScriptProcessor(
-    size_t buffer_size,
-    size_t number_of_input_channels,
-    size_t number_of_output_channels,
+    uint32_t buffer_size,
+    uint32_t number_of_input_channels,
+    uint32_t number_of_output_channels,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
@@ -473,7 +483,7 @@ ChannelSplitterNode* BaseAudioContext::createChannelSplitter(
 }
 
 ChannelSplitterNode* BaseAudioContext::createChannelSplitter(
-    size_t number_of_outputs,
+    uint32_t number_of_outputs,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
@@ -488,7 +498,7 @@ ChannelMergerNode* BaseAudioContext::createChannelMerger(
 }
 
 ChannelMergerNode* BaseAudioContext::createChannelMerger(
-    size_t number_of_inputs,
+    uint32_t number_of_inputs,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
@@ -514,11 +524,11 @@ PeriodicWave* BaseAudioContext::createPeriodicWave(
 PeriodicWave* BaseAudioContext::createPeriodicWave(
     const Vector<float>& real,
     const Vector<float>& imag,
-    const PeriodicWaveConstraints& options,
+    const PeriodicWaveConstraints* options,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  bool disable = options.disableNormalization();
+  bool disable = options->disableNormalization();
 
   return PeriodicWave::Create(*this, real, imag, disable, exception_state);
 }
@@ -605,11 +615,15 @@ void BaseAudioContext::SetContextState(AudioContextState new_state) {
   // notification is required when the context gets suspended or closed.
   if (was_audible_ && context_state_ != kRunning) {
     was_audible_ = false;
-    PostCrossThreadTask(
-        *task_runner_, FROM_HERE,
-        CrossThreadBind(&BaseAudioContext::NotifyAudibleAudioStopped,
-                        WrapCrossThreadPersistent(this)));
+    GetExecutionContext()
+        ->GetTaskRunner(TaskType::kMediaElementEvent)
+        ->PostTask(FROM_HERE,
+                   WTF::Bind(&BaseAudioContext::NotifyAudibleAudioStopped,
+                             WrapPersistent(this)));
   }
+
+  if (new_state == kClosed)
+    GetDeferredTaskHandler().StopAcceptingTailProcessing();
 
   // Notify context that state changed
   if (GetExecutionContext()) {
@@ -621,7 +635,7 @@ void BaseAudioContext::SetContextState(AudioContextState new_state) {
 }
 
 void BaseAudioContext::NotifyStateChange() {
-  DispatchEvent(*Event::Create(EventTypeNames::statechange));
+  DispatchEvent(*Event::Create(event_type_names::kStatechange));
 }
 
 void BaseAudioContext::NotifySourceNodeFinishedProcessing(
@@ -662,7 +676,8 @@ void BaseAudioContext::HandleStoppableSourceNodes() {
 }
 
 void BaseAudioContext::HandlePreRenderTasks(
-    const AudioIOPosition& output_position) {
+    const AudioIOPosition& output_position,
+    const AudioIOCallbackMetric& metric) {
   DCHECK(IsAudioThread());
 
   // At the beginning of every render quantum, try to update the internal
@@ -680,8 +695,9 @@ void BaseAudioContext::HandlePreRenderTasks(
     // Update the dirty state of the listener.
     listener()->UpdateState();
 
-    // Update output timestamp.
+    // Update output timestamp and metric.
     output_position_ = output_position;
+    callback_metric_ = metric;
 
     unlock();
   }
@@ -693,11 +709,11 @@ static bool IsAudible(const AudioBus* rendered_data) {
   // for the total energy.
   float energy = 0;
 
-  unsigned data_size = rendered_data->length();
-  for (unsigned k = 0; k < rendered_data->NumberOfChannels(); ++k) {
+  uint32_t data_size = rendered_data->length();
+  for (uint32_t k = 0; k < rendered_data->NumberOfChannels(); ++k) {
     const float* data = rendered_data->Channel(k)->Data();
     float channel_energy;
-    VectorMath::Vsvesq(data, 1, &channel_energy, data_size);
+    vector_math::Vsvesq(data, 1, &channel_energy, data_size);
     energy += channel_energy;
   }
 
@@ -786,11 +802,11 @@ void BaseAudioContext::PerformCleanupOnMainThread() {
     }
     // Break the connection and release active nodes that have finished
     // playing.
-    unsigned remove_count = 0;
+    wtf_size_t remove_count = 0;
     Vector<bool> removables;
     removables.resize(active_source_nodes_.size());
     for (AudioHandler* handler : finished_handlers) {
-      for (unsigned i = 0; i < active_source_nodes_.size(); ++i) {
+      for (wtf_size_t i = 0; i < active_source_nodes_.size(); ++i) {
         if (handler == &active_source_nodes_[i]->Handler()) {
           handler->BreakConnectionWithLock();
           removables[i] = true;
@@ -804,11 +820,11 @@ void BaseAudioContext::PerformCleanupOnMainThread() {
     if (remove_count > 0) {
       HeapVector<Member<AudioNode>> actives;
       DCHECK_GE(active_source_nodes_.size(), remove_count);
-      size_t initial_capacity =
+      wtf_size_t initial_capacity =
           std::min(active_source_nodes_.size() - remove_count,
                    active_source_nodes_.size());
       actives.ReserveInitialCapacity(initial_capacity);
-      for (unsigned i = 0; i < removables.size(); ++i) {
+      for (wtf_size_t i = 0; i < removables.size(); ++i) {
         if (!removables[i])
           actives.push_back(active_source_nodes_[i]);
       }
@@ -852,7 +868,7 @@ void BaseAudioContext::RejectPendingDecodeAudioDataResolvers() {
   decode_audio_resolvers_.clear();
 }
 
-AudioIOPosition BaseAudioContext::OutputPosition() {
+AudioIOPosition BaseAudioContext::OutputPosition() const {
   DCHECK(IsMainThread());
   GraphAutoLocker locker(this);
   return output_position_;
@@ -875,7 +891,7 @@ void BaseAudioContext::RejectPendingResolvers() {
 }
 
 const AtomicString& BaseAudioContext::InterfaceName() const {
-  return EventTargetNames::AudioContext;
+  return event_target_names::kAudioContext;
 }
 
 ExecutionContext* BaseAudioContext::GetExecutionContext() const {
@@ -950,7 +966,7 @@ void BaseAudioContext::UpdateWorkletGlobalScopeOnRenderingThread() {
   if (TryLock()) {
     if (audio_worklet_thread_) {
       AudioWorkletGlobalScope* global_scope =
-          ToAudioWorkletGlobalScope(audio_worklet_thread_->GlobalScope());
+          To<AudioWorkletGlobalScope>(audio_worklet_thread_->GlobalScope());
       DCHECK(global_scope);
       global_scope->SetCurrentFrame(CurrentSampleFrame());
     }

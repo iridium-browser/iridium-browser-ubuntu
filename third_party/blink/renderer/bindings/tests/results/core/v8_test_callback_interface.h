@@ -8,9 +8,8 @@
 // DO NOT MODIFY!
 
 // clang-format off
-
-#ifndef V8TestCallbackInterface_h
-#define V8TestCallbackInterface_h
+#ifndef THIRD_PARTY_BLINK_RENDERER_BINDINGS_TESTS_RESULTS_CORE_V8_TEST_CALLBACK_INTERFACE_H_
+#define THIRD_PARTY_BLINK_RENDERER_BINDINGS_TESTS_RESULTS_CORE_V8_TEST_CALLBACK_INTERFACE_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/callback_interface_base.h"
@@ -21,12 +20,13 @@ class TestInterfaceEmpty;
 
 class CORE_EXPORT V8TestCallbackInterface final : public CallbackInterfaceBase {
  public:
-  // Creates and returns a new instance. Returns nullptr when |callback_object|
-  // is an object in a remote context (e.g. cross origin window object). The
-  // call sites may want to throw a SecurityError in the case.
-  // See also crbug.com/886588
-  static V8TestCallbackInterface* CreateOrNull(v8::Local<v8::Object> callback_object);
+  static V8TestCallbackInterface* Create(v8::Local<v8::Object> callback_object) {
+    return MakeGarbageCollected<V8TestCallbackInterface>(callback_object);
+  }
 
+  explicit V8TestCallbackInterface(v8::Local<v8::Object> callback_object)
+      : CallbackInterfaceBase(callback_object,
+                              kNotSingleOperation) {}
   ~V8TestCallbackInterface() override = default;
 
   // NameClient overrides:
@@ -67,13 +67,6 @@ class CORE_EXPORT V8TestCallbackInterface final : public CallbackInterfaceBase {
   // Performs "call a user object's operation".
   // https://heycam.github.io/webidl/#call-a-user-objects-operation
   v8::Maybe<void> customVoidMethodTestInterfaceEmptyArg(ScriptWrappable* callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg) WARN_UNUSED_RESULT;
-
- private:
-  explicit V8TestCallbackInterface(
-      v8::Local<v8::Object> callback_object,
-      v8::Local<v8::Context> callback_object_creation_context)
-      : CallbackInterfaceBase(callback_object, callback_object_creation_context,
-                              kNotSingleOperation) {}
 };
 
 template <>
@@ -81,6 +74,8 @@ class V8PersistentCallbackInterface<V8TestCallbackInterface> final : public V8Pe
   using V8CallbackInterface = V8TestCallbackInterface;
 
  public:
+  explicit V8PersistentCallbackInterface(V8CallbackInterface* callback_interface)
+      : V8PersistentCallbackInterfaceBase(callback_interface) {}
   ~V8PersistentCallbackInterface() override = default;
 
   CORE_EXPORT v8::Maybe<void> voidMethod(ScriptWrappable* callback_this_value) WARN_UNUSED_RESULT;
@@ -94,9 +89,6 @@ class V8PersistentCallbackInterface<V8TestCallbackInterface> final : public V8Pe
   CORE_EXPORT v8::Maybe<void> customVoidMethodTestInterfaceEmptyArg(ScriptWrappable* callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg) WARN_UNUSED_RESULT;
 
  private:
-  explicit V8PersistentCallbackInterface(V8CallbackInterface* callback_interface)
-      : V8PersistentCallbackInterfaceBase(callback_interface) {}
-
   V8CallbackInterface* Proxy() {
     return As<V8CallbackInterface>();
   }
@@ -115,4 +107,4 @@ Persistent<V8TestCallbackInterface> WrapPersistent(V8TestCallbackInterface*) = d
 
 }  // namespace blink
 
-#endif  // V8TestCallbackInterface_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_BINDINGS_TESTS_RESULTS_CORE_V8_TEST_CALLBACK_INTERFACE_H_

@@ -49,6 +49,10 @@ void NativeViewHost::Detach() {
   Detach(false);
 }
 
+void NativeViewHost::SetParentAccessible(gfx::NativeViewAccessible accessible) {
+  native_wrapper_->SetParentAccessible(accessible);
+}
+
 bool NativeViewHost::SetCornerRadius(int corner_radius) {
   return SetCustomMask(views::Painter::CreatePaintedLayer(
       views::Painter::CreateSolidRoundRectPainter(SK_ColorBLACK,
@@ -58,6 +62,10 @@ bool NativeViewHost::SetCornerRadius(int corner_radius) {
 bool NativeViewHost::SetCustomMask(std::unique_ptr<ui::LayerOwner> mask) {
   DCHECK(native_wrapper_);
   return native_wrapper_->SetCustomMask(std::move(mask));
+}
+
+void NativeViewHost::SetHitTestTopInset(int top_inset) {
+  native_wrapper_->SetHitTestTopInset(top_inset);
 }
 
 void NativeViewHost::SetNativeViewSize(const gfx::Size& size) {
@@ -176,7 +184,7 @@ void NativeViewHost::ViewHierarchyChanged(
     if (!native_wrapper_.get())
       native_wrapper_.reset(NativeViewHostWrapper::CreateWrapper(this));
     native_wrapper_->AddedToWidget();
-  } else if (!details.is_add) {
+  } else if (!details.is_add && native_wrapper_) {
     native_wrapper_->RemovedFromWidget();
   }
 }
@@ -204,6 +212,11 @@ gfx::NativeViewAccessible NativeViewHost::GetNativeViewAccessible() {
 
 gfx::NativeCursor NativeViewHost::GetCursor(const ui::MouseEvent& event) {
   return native_wrapper_->GetCursor(event.x(), event.y());
+}
+
+void NativeViewHost::SetVisible(bool visible) {
+  native_wrapper_->SetVisible(visible);
+  View::SetVisible(visible);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

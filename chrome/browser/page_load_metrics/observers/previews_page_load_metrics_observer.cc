@@ -8,11 +8,12 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/optional.h"
 #include "base/time/time.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/loader/chrome_navigation_data.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
+#include "chrome/browser/previews/previews_ui_tab_helper.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
@@ -55,7 +56,8 @@ void RecordPageSizeHistograms(previews::PreviewsType previews_type,
                                 num_network_resources);
   // Match PAGE_BYTES_HISTOGRAM params:
   base::UmaHistogramCustomCounts(
-      GetHistogramNamePrefix(previews_type) + "Experimental.Bytes.Network",
+      GetHistogramNamePrefix(previews_type) +
+          "Experimental.Bytes.NetworkIncludingHeaders",
       static_cast<int>((network_bytes) / 1024), 1, 500 * 1024, 50);
 }
 
@@ -111,20 +113,25 @@ page_load_metrics::PageLoadMetricsObserver::ObservePolicy
 PreviewsPageLoadMetricsObserver::OnCommit(
     content::NavigationHandle* navigation_handle,
     ukm::SourceId source_id) {
-  ChromeNavigationData* nav_data = static_cast<ChromeNavigationData*>(
-      navigation_handle->GetNavigationData());
-  if (!nav_data)
+  PreviewsUITabHelper* ui_tab_helper =
+      PreviewsUITabHelper::FromWebContents(navigation_handle->GetWebContents());
+  if (!ui_tab_helper)
     return STOP_OBSERVING;
 
-  previews_type_ =
-      previews::GetMainFramePreviewsType(nav_data->previews_state());
+  previews::PreviewsUserData* previews_user_data =
+      ui_tab_helper->GetPreviewsUserData(navigation_handle);
+  if (!previews_user_data)
+    return STOP_OBSERVING;
+
+  previews_type_ = previews::GetMainFramePreviewsType(
+      previews_user_data->committed_previews_state());
   if (previews_type_ != previews::PreviewsType::NOSCRIPT &&
       previews_type_ != previews::PreviewsType::RESOURCE_LOADING_HINTS) {
     return STOP_OBSERVING;
   }
 
   data_savings_inflation_percent_ =
-      nav_data->previews_user_data()->data_savings_inflation_percent();
+      previews_user_data->data_savings_inflation_percent();
 
   browser_context_ = navigation_handle->GetWebContents()->GetBrowserContext();
 
@@ -167,16 +174,6 @@ void PreviewsPageLoadMetricsObserver::OnLoadEventStart(
   WriteToSavings(info.url, total_saved_bytes);
 }
 
-void PreviewsPageLoadMetricsObserver::OnLoadedResource(
-    const page_load_metrics::ExtraRequestCompleteInfo&
-        extra_request_complete_info) {
-  if (extra_request_complete_info.was_cached)
-    return;
-
-  num_network_resources_++;
-  network_bytes_ += extra_request_complete_info.raw_body_bytes;
-}
-
 void PreviewsPageLoadMetricsObserver::OnComplete(
     const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
@@ -186,7 +183,7 @@ void PreviewsPageLoadMetricsObserver::OnComplete(
 
 void PreviewsPageLoadMetricsObserver::RecordPageSizeUMA() const {
   RecordPageSizeHistograms(previews_type_, num_network_resources_,
-                           network_bytes_);
+                           total_network_bytes_);
 }
 
 void PreviewsPageLoadMetricsObserver::RecordTimingMetrics(
@@ -223,9 +220,13 @@ void PreviewsPageLoadMetricsObserver::RecordTimingMetrics(
 }
 
 void PreviewsPageLoadMetricsObserver::OnResourceDataUseObserved(
+    FrameTreeNodeId frame_tree_node_id,
     const std::vector<page_load_metrics::mojom::ResourceDataUpdatePtr>&
         resources) {
   for (auto const& resource : resources) {
+    if (!resource->was_fetched_via_cache && resource->is_complete) {
+      num_network_resources_++;
+    }
     total_network_bytes_ += resource->delta_bytes;
   }
 }

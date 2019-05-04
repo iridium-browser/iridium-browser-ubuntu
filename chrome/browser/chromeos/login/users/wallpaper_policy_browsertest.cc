@@ -19,6 +19,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
@@ -34,10 +35,11 @@
 #include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_paths.h"
-#include "chromeos/chromeos_paths.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_paths.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/cryptohome/system_salt_getter.h"
+#include "chromeos/dbus/constants/dbus_paths.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
@@ -150,7 +152,8 @@ class WallpaperPolicyTest : public LoginManagerTest,
     std::unique_ptr<policy::UserPolicyBuilder> user_policy_builder(
         new policy::UserPolicyBuilder());
     base::FilePath user_keys_dir;
-    EXPECT_TRUE(base::PathService::Get(DIR_USER_POLICY_KEYS, &user_keys_dir));
+    EXPECT_TRUE(base::PathService::Get(dbus_paths::DIR_USER_POLICY_KEYS,
+                                       &user_keys_dir));
     const std::string sanitized_user_id =
         CryptohomeClient::GetStubSanitizedUsername(
             cryptohome::CreateAccountIdentifierFromAccountId(account_id));
@@ -258,6 +261,7 @@ class WallpaperPolicyTest : public LoginManagerTest,
   }
 
   std::string ConstructPolicy(const std::string& relative_path) const {
+    base::ScopedAllowBlockingForTesting allow_io;
     std::string image_data;
     if (!base::ReadFileToString(test_data_dir_.Append(relative_path),
                                 &image_data)) {

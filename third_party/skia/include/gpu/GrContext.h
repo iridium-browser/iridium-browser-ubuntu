@@ -29,7 +29,7 @@ class GrContextThreadSafeProxyPriv;
 class GrDrawingManager;
 class GrFragmentProcessor;
 struct GrGLInterface;
-class GrGlyphCache;
+class GrStrikeCache;
 class GrGpu;
 struct GrMockOptions;
 class GrOpMemoryPool;
@@ -283,20 +283,27 @@ public:
 
     bool supportsDistanceFieldText() const;
 
+    void storeVkPipelineCacheData();
+
 protected:
-    GrContext(GrBackend, int32_t id = SK_InvalidGenID);
+    GrContext(GrBackendApi, int32_t id = SK_InvalidGenID);
 
     bool initCommon(const GrContextOptions&);
     virtual bool init(const GrContextOptions&) = 0; // must be called after the ctor!
 
     virtual GrAtlasManager* onGetAtlasManager() = 0;
 
-    const GrBackend                         fBackend;
+    const GrBackendApi                         fBackend;
     sk_sp<const GrCaps>                     fCaps;
     sk_sp<GrContextThreadSafeProxy>         fThreadSafeProxy;
     sk_sp<GrSkSLFPFactoryCache>             fFPFactoryCache;
 
 private:
+    // fTaskGroup must appear before anything that uses it (e.g. fGpu), so that it is destroyed
+    // after all of its users. Clients of fTaskGroup will generally want to ensure that they call
+    // wait() on it as they are being destroyed, to avoid the possibility of pending tasks being
+    // invoked after objects they depend upon have already been destroyed.
+    std::unique_ptr<SkTaskGroup>            fTaskGroup;
     sk_sp<GrGpu>                            fGpu;
     GrResourceCache*                        fResourceCache;
     GrResourceProvider*                     fResourceProvider;
@@ -305,7 +312,7 @@ private:
     // All the GrOp-derived classes use this pool.
     sk_sp<GrOpMemoryPool>                   fOpMemoryPool;
 
-    GrGlyphCache*                           fGlyphCache;
+    GrStrikeCache*                           fGlyphCache;
     std::unique_ptr<GrTextBlobCache>        fTextBlobCache;
 
     bool                                    fDisableGpuYUVConversion;
@@ -318,8 +325,6 @@ private:
     // This guard is passed to the GrDrawingManager and, from there to all the
     // GrRenderTargetContexts.  It is also passed to the GrResourceProvider and SkGpuDevice.
     mutable GrSingleOwner                   fSingleOwner;
-
-    std::unique_ptr<SkTaskGroup>            fTaskGroup;
 
     const uint32_t                          fUniqueID;
 
@@ -417,13 +422,13 @@ private:
     // DDL TODO: need to add unit tests for backend & maybe options
     GrContextThreadSafeProxy(sk_sp<const GrCaps> caps,
                              uint32_t uniqueID,
-                             GrBackend backend,
+                             GrBackendApi backend,
                              const GrContextOptions& options,
                              sk_sp<GrSkSLFPFactoryCache> cache);
 
     sk_sp<const GrCaps>         fCaps;
     const uint32_t              fContextUniqueID;
-    const GrBackend             fBackend;
+    const GrBackendApi             fBackend;
     const GrContextOptions      fOptions;
     sk_sp<GrSkSLFPFactoryCache> fFPFactoryCache;
 

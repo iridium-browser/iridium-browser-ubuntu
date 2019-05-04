@@ -79,7 +79,6 @@
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_thread_observer.h"
 #include "content/public/renderer/render_view_visitor.h"
-#include "content/renderer/appcache/appcache_dispatcher.h"
 #include "content/renderer/appcache/appcache_frontend_impl.h"
 #include "content/renderer/browser_plugin/browser_plugin_manager.h"
 #include "content/renderer/categorized_worker_pool.h"
@@ -87,14 +86,12 @@
 #include "content/renderer/dom_storage/webstoragearea_impl.h"
 #include "content/renderer/dom_storage/webstoragenamespace_impl.h"
 #include "content/renderer/effective_connection_type_helper.h"
-#include "content/renderer/gpu/frame_swap_message_queue.h"
-#include "content/renderer/indexed_db/indexed_db_dispatcher.h"
+#include "content/renderer/frame_swap_message_queue.h"
 #include "content/renderer/input/widget_input_handler_manager.h"
 #include "content/renderer/loader/resource_dispatcher.h"
 #include "content/renderer/low_memory_mode_controller.h"
 #include "content/renderer/media/audio/audio_renderer_mixer_manager.h"
 #include "content/renderer/media/gpu/gpu_video_accelerator_factories_impl.h"
-#include "content/renderer/media/midi/midi_message_filter.h"
 #include "content/renderer/media/render_media_client.h"
 #include "content/renderer/media/stream/aec_dump_message_filter.h"
 #include "content/renderer/media/stream/media_stream_center.h"
@@ -119,6 +116,7 @@
 #include "device/gamepad/public/cpp/gamepads.h"
 #include "gin/public/debug.h"
 #include "gpu/GLES2/gl2extchromium.h"
+#include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/client/raster_interface.h"
 #include "gpu/command_buffer/client/shared_memory_limits.h"
@@ -140,6 +138,7 @@
 #include "net/base/url_util.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "services/metrics/public/cpp/mojo_ukm_recorder.h"
+#include "services/network/public/cpp/network_switches.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "services/ws/public/cpp/gpu/context_provider_command_buffer.h"
@@ -385,7 +384,7 @@ void CreateSingleSampleMetricsProvider(
 
 class RendererLocalSurfaceIdProvider : public viz::LocalSurfaceIdProvider {
  public:
-  const viz::LocalSurfaceId& GetLocalSurfaceIdForFrame(
+  const viz::LocalSurfaceIdAllocation& GetLocalSurfaceIdAllocationForFrame(
       const viz::CompositorFrame& frame) override {
     auto new_surface_properties =
         RenderWidgetSurfaceProperties::FromCompositorFrame(frame);
@@ -393,11 +392,11 @@ class RendererLocalSurfaceIdProvider : public viz::LocalSurfaceIdProvider {
       parent_local_surface_id_allocator_.GenerateId();
       surface_properties_ = new_surface_properties;
     }
-    return parent_local_surface_id_allocator_.GetCurrentLocalSurfaceId();
+    return parent_local_surface_id_allocator_
+        .GetCurrentLocalSurfaceIdAllocation();
   }
 
  private:
-  viz::ParentLocalSurfaceIdAllocator parent_local_surface_id_allocator_;
   RenderWidgetSurfaceProperties surface_properties_;
 };
 
@@ -757,14 +756,12 @@ void RenderThreadImpl::Init() {
   widget_count_ = 0;
   hidden_widget_count_ = 0;
 
-  appcache_dispatcher_.reset(
-      new AppCacheDispatcher(new AppCacheFrontendImpl()));
+  appcache_frontend_impl_ = std::make_unique<AppCacheFrontendImpl>();
   registry->AddInterface(
-      base::BindRepeating(&AppCacheDispatcher::Bind,
-                          base::Unretained(appcache_dispatcher())),
+      base::BindRepeating(&AppCacheFrontendImpl::Bind,
+                          base::Unretained(appcache_frontend_impl())),
       GetWebMainThreadScheduler()->IPCTaskRunner());
   dom_storage_dispatcher_.reset(new DomStorageDispatcher());
-  main_thread_indexed_db_dispatcher_.reset(new IndexedDBDispatcher());
 
   vc_manager_.reset(new VideoCaptureImplManager());
 
@@ -788,9 +785,6 @@ void RenderThreadImpl::Init() {
   audio_input_ipc_factory_.emplace(main_thread_runner(), GetIOTaskRunner());
 
   audio_output_ipc_factory_.emplace(GetIOTaskRunner());
-
-  midi_message_filter_ = new MidiMessageFilter(GetIOTaskRunner());
-  AddFilter(midi_message_filter_.get());
 
 #if defined(USE_AURA)
   if (features::IsMultiProcessMash())
@@ -1001,6 +995,13 @@ void RenderThreadImpl::Init() {
 
 RenderThreadImpl::~RenderThreadImpl() {
   g_main_task_runner.Get() = nullptr;
+
+  // Need to make sure this reference is removed on the correct task runner;
+  if (video_frame_compositor_task_runner_ &&
+      video_frame_compositor_context_provider_) {
+    video_frame_compositor_task_runner_->ReleaseSoon(
+        FROM_HERE, std::move(video_frame_compositor_context_provider_));
+  }
 }
 
 void RenderThreadImpl::Shutdown() {
@@ -1160,7 +1161,7 @@ void RenderThreadImpl::SetResourceDispatcherDelegate(
 }
 
 void RenderThreadImpl::InitializeCompositorThread() {
-  blink_platform_impl_->InitializeCompositorThread();
+  blink_platform_impl_->CreateAndSetCompositorThread();
   compositor_task_runner_ = blink_platform_impl_->CompositorThreadTaskRunner();
   compositor_task_runner_->PostTask(
       FROM_HERE,
@@ -1233,9 +1234,9 @@ void RenderThreadImpl::InitializeWebKit(
   SkGraphics::SetImageGeneratorFromEncodedDataFactory(
       blink::WebImageGenerator::CreateAsSkImageGenerator);
 
-  if (command_line.HasSwitch(switches::kExplicitlyAllowedPorts)) {
-    std::string allowed_ports =
-        command_line.GetSwitchValueASCII(switches::kExplicitlyAllowedPorts);
+  if (command_line.HasSwitch(network::switches::kExplicitlyAllowedPorts)) {
+    std::string allowed_ports = command_line.GetSwitchValueASCII(
+        network::switches::kExplicitlyAllowedPorts);
     net::SetExplicitlyAllowedPorts(allowed_ports);
   }
 }
@@ -1307,6 +1308,11 @@ media::GpuVideoAcceleratorFactories* RenderThreadImpl::GetGpuFactories() {
       EstablishGpuChannelSync();
   if (!gpu_channel_host)
     return nullptr;
+  // Currently, VideoResourceUpdater can't convert hardware resources to
+  // software resources in software compositing mode.  So, fall back to software
+  // video decoding if gpu compositing is off.
+  if (is_gpu_compositing_disabled_)
+    return nullptr;
   // This context is only used to create textures and mailbox them, so
   // use lower limits than the default.
   gpu::SharedMemoryLimits limits = gpu::SharedMemoryLimits::ForMailboxContext();
@@ -1367,12 +1373,17 @@ media::GpuVideoAcceleratorFactories* RenderThreadImpl::GetGpuFactories() {
 scoped_refptr<viz::ContextProvider>
 RenderThreadImpl::GetVideoFrameCompositorContextProvider(
     scoped_refptr<viz::ContextProvider> unwanted_context_provider) {
+  DCHECK(video_frame_compositor_task_runner_);
   if (video_frame_compositor_context_provider_ &&
       video_frame_compositor_context_provider_ != unwanted_context_provider) {
     return video_frame_compositor_context_provider_;
   }
 
-  video_frame_compositor_context_provider_ = nullptr;
+  // Need to make sure these references are removed on the correct task runner;
+  if (video_frame_compositor_context_provider_) {
+    video_frame_compositor_task_runner_->ReleaseSoon(
+        FROM_HERE, std::move(video_frame_compositor_context_provider_));
+  }
 
   scoped_refptr<gpu::GpuChannelHost> gpu_channel_host =
       EstablishGpuChannelSync();
@@ -1482,11 +1493,11 @@ bool RenderThreadImpl::IsOnline() {
 }
 
 void RenderThreadImpl::SetRendererProcessType(
-    blink::scheduler::RendererProcessType type) {
+    blink::scheduler::WebRendererProcessType type) {
   main_thread_scheduler_->SetRendererProcessType(type);
 }
 
-blink::WebString RenderThreadImpl::GetUserAgent() const {
+blink::WebString RenderThreadImpl::GetUserAgent() {
   DCHECK(!user_agent_.IsNull());
   return user_agent_;
 }
@@ -1878,7 +1889,7 @@ scoped_refptr<gpu::GpuChannelHost> RenderThreadImpl::EstablishGpuChannelSync() {
 }
 
 void RenderThreadImpl::RequestNewLayerTreeFrameSink(
-    int routing_id,
+    int widget_routing_id,
     scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue,
     const GURL& url,
     LayerTreeFrameSinkCallback callback,
@@ -1886,10 +1897,10 @@ void RenderThreadImpl::RequestNewLayerTreeFrameSink(
         render_frame_metadata_observer_client_request,
     mojom::RenderFrameMetadataObserverPtr render_frame_metadata_observer_ptr,
     const char* client_name) {
-  // Misconfigured bots (eg. crbug.com/780757) could run layout tests on a
+  // Misconfigured bots (eg. crbug.com/780757) could run web tests on a
   // machine where gpu compositing doesn't work. Don't crash in that case.
-  if (layout_test_mode() && is_gpu_compositing_disabled_) {
-    LOG(FATAL) << "Layout tests require gpu compositing, but it is disabled.";
+  if (web_test_mode() && is_gpu_compositing_disabled_) {
+    LOG(FATAL) << "Web tests require gpu compositing, but it is disabled.";
     return;
   }
 
@@ -1904,7 +1915,8 @@ void RenderThreadImpl::RequestNewLayerTreeFrameSink(
   if (features::IsVizHitTestingDrawQuadEnabled()) {
     params.hit_test_data_provider =
         std::make_unique<viz::HitTestDataProviderDrawQuad>(
-            true /* should_ask_for_child_region */);
+            true /* should_ask_for_child_region */,
+            true /* root_accepts_events */);
   }
 
   // The renderer runs animations and layout for animate_only BeginFrames.
@@ -1922,7 +1934,7 @@ void RenderThreadImpl::RequestNewLayerTreeFrameSink(
 
 #if defined(USE_AURA)
   if (features::IsMultiProcessMash()) {
-    if (!RendererWindowTreeClient::Get(routing_id)) {
+    if (!RendererWindowTreeClient::Get(widget_routing_id)) {
       std::move(callback).Run(nullptr);
       return;
     }
@@ -1933,12 +1945,13 @@ void RenderThreadImpl::RequestNewLayerTreeFrameSink(
       std::move(callback).Run(nullptr);
       return;
     }
-    RendererWindowTreeClient::Get(routing_id)
+    RendererWindowTreeClient::Get(widget_routing_id)
         ->RequestLayerTreeFrameSink(
             gpu_->CreateContextProvider(std::move(channel)),
             GetGpuMemoryBufferManager(), std::move(callback));
     frame_sink_provider_->RegisterRenderFrameMetadataObserver(
-        routing_id, std::move(render_frame_metadata_observer_client_request),
+        widget_routing_id,
+        std::move(render_frame_metadata_observer_client_request),
         std::move(render_frame_metadata_observer_ptr));
     return;
   }
@@ -1951,12 +1964,13 @@ void RenderThreadImpl::RequestNewLayerTreeFrameSink(
       mojo::MakeRequest(&compositor_frame_sink_client);
 
   if (is_gpu_compositing_disabled_) {
-    DCHECK(!layout_test_mode());
+    DCHECK(!web_test_mode());
     frame_sink_provider_->CreateForWidget(
-        routing_id, std::move(compositor_frame_sink_request),
+        widget_routing_id, std::move(compositor_frame_sink_request),
         std::move(compositor_frame_sink_client));
     frame_sink_provider_->RegisterRenderFrameMetadataObserver(
-        routing_id, std::move(render_frame_metadata_observer_client_request),
+        widget_routing_id,
+        std::move(render_frame_metadata_observer_client_request),
         std::move(render_frame_metadata_observer_ptr));
     std::move(callback).Run(
         std::make_unique<cc::mojo_embedder::AsyncLayerTreeFrameSink>(
@@ -1974,7 +1988,7 @@ void RenderThreadImpl::RequestNewLayerTreeFrameSink(
   }
 
   scoped_refptr<viz::RasterContextProvider> worker_context_provider =
-      SharedCompositorWorkerContextProvider();
+      SharedCompositorWorkerContextProvider(/*try_gpu_rasterization=*/true);
   if (!worker_context_provider) {
     // Cause the compositor to wait and try again.
     std::move(callback).Run(nullptr);
@@ -2012,16 +2026,16 @@ void RenderThreadImpl::RequestNewLayerTreeFrameSink(
           attributes,
           ws::command_buffer_metrics::ContextType::RENDER_COMPOSITOR));
 
-  if (layout_test_deps_) {
-    if (!layout_test_deps_->UseDisplayCompositorPixelDump()) {
-      std::move(callback).Run(layout_test_deps_->CreateLayerTreeFrameSink(
-          routing_id, std::move(gpu_channel_host), std::move(context_provider),
-          std::move(worker_context_provider), GetGpuMemoryBufferManager(),
-          this));
+  if (web_test_deps_) {
+    if (!web_test_deps_->UseDisplayCompositorPixelDump()) {
+      std::move(callback).Run(web_test_deps_->CreateLayerTreeFrameSink(
+          widget_routing_id, std::move(gpu_channel_host),
+          std::move(context_provider), std::move(worker_context_provider),
+          GetGpuMemoryBufferManager(), this));
       return;
     } else if (!params.compositor_task_runner) {
       // The frame sink provider expects a compositor task runner, but we might
-      // not have that if we're running layout tests in single threaded mode.
+      // not have that if we're running web tests in single threaded mode.
       // Set it to be our thread's task runner instead.
       params.compositor_task_runner = GetCompositorMainThreadTaskRunner();
     }
@@ -2029,12 +2043,13 @@ void RenderThreadImpl::RequestNewLayerTreeFrameSink(
 
 #if defined(OS_ANDROID)
   if (GetContentClient()->UsingSynchronousCompositing()) {
-    RenderWidget* widget = RenderWidget::FromRoutingID(routing_id);
+    RenderWidget* widget = RenderWidget::FromRoutingID(widget_routing_id);
     if (widget) {
       std::move(callback).Run(std::make_unique<SynchronousLayerTreeFrameSink>(
           std::move(context_provider), std::move(worker_context_provider),
           compositor_task_runner_, GetGpuMemoryBufferManager(),
-          sync_message_filter(), routing_id, g_next_layer_tree_frame_sink_id++,
+          sync_message_filter(), widget_routing_id,
+          g_next_layer_tree_frame_sink_id++,
           std::move(params.synthetic_begin_frame_source),
           widget->widget_input_handler_manager()
               ->GetSynchronousCompositorRegistry(),
@@ -2046,10 +2061,11 @@ void RenderThreadImpl::RequestNewLayerTreeFrameSink(
   }
 #endif
   frame_sink_provider_->CreateForWidget(
-      routing_id, std::move(compositor_frame_sink_request),
+      widget_routing_id, std::move(compositor_frame_sink_request),
       std::move(compositor_frame_sink_client));
   frame_sink_provider_->RegisterRenderFrameMetadataObserver(
-      routing_id, std::move(render_frame_metadata_observer_client_request),
+      widget_routing_id,
+      std::move(render_frame_metadata_observer_client_request),
       std::move(render_frame_metadata_observer_ptr));
   params.gpu_memory_buffer_manager = GetGpuMemoryBufferManager();
   std::move(callback).Run(
@@ -2064,12 +2080,12 @@ RenderThreadImpl::GetAssociatedInterfaceRegistry() {
 }
 
 std::unique_ptr<cc::SwapPromise>
-RenderThreadImpl::RequestCopyOfOutputForLayoutTest(
-    int32_t routing_id,
+RenderThreadImpl::RequestCopyOfOutputForWebTest(
+    int32_t widget_routing_id,
     std::unique_ptr<viz::CopyOutputRequest> request) {
-  DCHECK(layout_test_deps_ &&
-         !layout_test_deps_->UseDisplayCompositorPixelDump());
-  return layout_test_deps_->RequestCopyOfOutput(routing_id, std::move(request));
+  DCHECK(web_test_deps_ && !web_test_deps_->UseDisplayCompositorPixelDump());
+  return web_test_deps_->RequestCopyOfOutput(widget_routing_id,
+                                             std::move(request));
 }
 
 std::unique_ptr<blink::WebMediaStreamCenter>
@@ -2121,14 +2137,19 @@ void RenderThreadImpl::CreateView(mojom::CreateViewParamsPtr params) {
 void RenderThreadImpl::CreateFrame(mojom::CreateFrameParamsPtr params) {
   CompositorDependencies* compositor_deps = this;
   service_manager::mojom::InterfaceProviderPtr interface_provider(
-      std::move(params->interface_provider));
+      std::move(params->interface_bundle->interface_provider));
+  blink::mojom::DocumentInterfaceBrokerPtr document_interface_broker_content(
+      std::move(params->interface_bundle->document_interface_broker_content));
+  blink::mojom::DocumentInterfaceBrokerPtr document_interface_broker_blink(
+      std::move(params->interface_bundle->document_interface_broker_blink));
   RenderFrameImpl::CreateFrame(
       params->routing_id, std::move(interface_provider),
-      params->proxy_routing_id, params->opener_routing_id,
-      params->parent_routing_id, params->previous_sibling_routing_id,
-      params->devtools_frame_token, params->replication_state, compositor_deps,
-      *params->widget_params, params->frame_owner_properties,
-      params->has_committed_real_load);
+      std::move(document_interface_broker_content),
+      std::move(document_interface_broker_blink), params->proxy_routing_id,
+      params->opener_routing_id, params->parent_routing_id,
+      params->previous_sibling_routing_id, params->devtools_frame_token,
+      params->replication_state, compositor_deps, *params->widget_params,
+      params->frame_owner_properties, params->has_committed_real_load);
 }
 
 void RenderThreadImpl::CreateFrameProxy(
@@ -2189,6 +2210,7 @@ void RenderThreadImpl::SetWebKitSharedTimersSuspended(bool suspend) {
 void RenderThreadImpl::SetUserAgent(const std::string& user_agent) {
   DCHECK(user_agent_.IsNull());
   user_agent_ = WebString::FromUTF8(user_agent);
+  GetContentClient()->renderer()->DidSetUserAgent(user_agent);
 }
 
 void RenderThreadImpl::UpdateScrollbarTheme(
@@ -2257,7 +2279,12 @@ RenderThreadImpl::GetMediaThreadTaskRunner() {
   DCHECK(main_thread_runner()->BelongsToCurrentThread());
   if (!media_thread_) {
     media_thread_.reset(new base::Thread("Media"));
-    media_thread_->Start();
+    base::Thread::Options options;
+#if defined(OS_FUCHSIA)
+    // Start IO thread on Fuchsia to make that thread usable for FIDL.
+    options = base::Thread::Options(base::MessageLoop::TYPE_IO, 0);
+#endif
+    media_thread_->StartWithOptions(options);
   }
   return media_thread_->task_runner();
 }
@@ -2267,7 +2294,8 @@ base::TaskRunner* RenderThreadImpl::GetWorkerTaskRunner() {
 }
 
 scoped_refptr<viz::RasterContextProvider>
-RenderThreadImpl::SharedCompositorWorkerContextProvider() {
+RenderThreadImpl::SharedCompositorWorkerContextProvider(
+    bool try_gpu_rasterization) {
   DCHECK(IsMainThread());
   // Try to reuse existing shared worker context provider.
   if (shared_worker_context_provider_) {
@@ -2290,9 +2318,15 @@ RenderThreadImpl::SharedCompositorWorkerContextProvider() {
       gpu_channel_host->gpu_feature_info()
           .status_values[gpu::GPU_FEATURE_TYPE_OOP_RASTERIZATION] ==
       gpu::kGpuFeatureStatusEnabled;
-  bool support_gles2_interface = !support_oop_rasterization;
+  bool support_gpu_rasterization =
+      try_gpu_rasterization && !support_oop_rasterization &&
+      (IsGpuRasterizationForced() ||
+       gpu_channel_host->gpu_feature_info()
+               .status_values[gpu::GPU_FEATURE_TYPE_GPU_RASTERIZATION] ==
+           gpu::kGpuFeatureStatusEnabled);
+  bool support_gles2_interface = support_gpu_rasterization;
   bool support_raster_interface = true;
-  bool support_grcontext = !support_oop_rasterization;
+  bool support_grcontext = support_gpu_rasterization;
   bool automatic_flushes = false;
   auto shared_memory_limits =
       support_oop_rasterization ? gpu::SharedMemoryLimits::ForOOPRasterContext()
@@ -2304,8 +2338,38 @@ RenderThreadImpl::SharedCompositorWorkerContextProvider() {
       automatic_flushes, ws::command_buffer_metrics::ContextType::RENDER_WORKER,
       kGpuStreamIdWorker, kGpuStreamPriorityWorker);
   auto result = shared_worker_context_provider_->BindToCurrentThread();
-  if (result != gpu::ContextResult::kSuccess)
+  if (result != gpu::ContextResult::kSuccess) {
     shared_worker_context_provider_ = nullptr;
+    return nullptr;
+  }
+
+  // Check if we really have support for GPU rasterization.
+  if (support_gpu_rasterization) {
+    bool really_support_gpu_rasterization = false;
+    {
+      viz::RasterContextProvider::ScopedRasterContextLock scoped_context(
+          shared_worker_context_provider_.get());
+      bool forced_or_supported =
+          IsGpuRasterizationForced() ||
+          shared_worker_context_provider_->ContextCapabilities()
+              .gpu_rasterization;
+      if (forced_or_supported &&
+          shared_worker_context_provider_->ContextSupport()
+              ->HasGrContextSupport()) {
+        // Do not check GrContext above. It is lazy-created, and we only want to
+        // create it if it might be used.
+        GrContext* gr_context = shared_worker_context_provider_->GrContext();
+        really_support_gpu_rasterization = !!gr_context;
+      }
+    }
+
+    // If not really supported, recreate context with different attributes.
+    if (!really_support_gpu_rasterization) {
+      shared_worker_context_provider_ = nullptr;
+      return SharedCompositorWorkerContextProvider(
+          /*try_gpu_rasterization=*/false);
+    }
+  }
   return shared_worker_context_provider_;
 }
 

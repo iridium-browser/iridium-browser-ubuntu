@@ -7,6 +7,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
+#include "third_party/blink/renderer/core/event_interface_names.h"
 
 namespace blink {
 
@@ -42,13 +43,19 @@ v8::Local<v8::Value> JSEventListener::GetEffectiveFunction(
 }
 
 // https://dom.spec.whatwg.org/#concept-event-listener-inner-invoke
-void JSEventListener::CallListenerFunction(EventTarget&,
-                                           Event& event,
-                                           v8::Local<v8::Value> js_event) {
+void JSEventListener::InvokeInternal(EventTarget&,
+                                     Event& event,
+                                     v8::Local<v8::Value> js_event) {
   // Step 10: Call a listener with event's currentTarget as receiver and event
   // and handle errors if thrown.
-  v8::Maybe<void> maybe_result =
-      event_listener_->handleEvent(event.currentTarget(), &event);
+  if (!event_listener_->IsRunnableOrThrowException(
+          event.ShouldDispatchEvenWhenExecutionContextIsPaused()
+              ? V8EventListener::IgnorePause::kIgnore
+              : V8EventListener::IgnorePause::kDontIgnore)) {
+    return;
+  }
+  v8::Maybe<void> maybe_result = event_listener_->InvokeWithoutRunnabilityCheck(
+      event.currentTarget(), &event);
   ALLOW_UNUSED_LOCAL(maybe_result);
 }
 

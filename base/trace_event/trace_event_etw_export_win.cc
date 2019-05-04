@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
@@ -32,6 +33,7 @@
 #include "base/trace_event/etw_manifest/chrome_events_win.h"  // NOLINT
 
 namespace {
+
 // |kFilteredEventGroupNames| contains the event categories that can be
 // exported individually. These categories can be enabled by passing the correct
 // keyword when starting the trace. A keyword is a 64-bit flag and we attribute
@@ -135,12 +137,6 @@ TraceEventETWExport::~TraceEventETWExport() {
 }
 
 // static
-TraceEventETWExport* TraceEventETWExport::GetInstance() {
-  return Singleton<TraceEventETWExport,
-                   StaticMemorySingletonTraits<TraceEventETWExport>>::get();
-}
-
-// static
 void TraceEventETWExport::EnableETWExport() {
   auto* instance = GetInstance();
   if (instance && !instance->etw_export_enabled_) {
@@ -167,21 +163,16 @@ void TraceEventETWExport::DisableETWExport() {
 
 // static
 bool TraceEventETWExport::IsETWExportEnabled() {
-  auto* instance = GetInstance();
+  auto* instance = GetInstanceIfExists();
   return (instance && instance->etw_export_enabled_);
 }
 
 // static
-void TraceEventETWExport::AddEvent(
-    char phase,
-    const unsigned char* category_group_enabled,
-    const char* name,
-    unsigned long long id,
-    int num_args,
-    const char* const* arg_names,
-    const unsigned char* arg_types,
-    const unsigned long long* arg_values,
-    const std::unique_ptr<ConvertableToTraceFormat>* convertable_values) {
+void TraceEventETWExport::AddEvent(char phase,
+                                   const unsigned char* category_group_enabled,
+                                   const char* name,
+                                   unsigned long long id,
+                                   const TraceArguments* args) {
   // We bail early in case exporting is disabled or no consumer is listening.
   auto* instance = GetInstance();
   if (!instance || !instance->etw_export_enabled_ || !EventEnabledChromeEvent())
@@ -259,26 +250,22 @@ void TraceEventETWExport::AddEvent(
   }
 
   std::string arg_values_string[3];
-  for (int i = 0; i < num_args; i++) {
-    if (arg_types[i] == TRACE_VALUE_TYPE_CONVERTABLE) {
+  size_t num_args = args ? args->size() : 0;
+  for (size_t i = 0; i < num_args; i++) {
+    if (args->types()[i] == TRACE_VALUE_TYPE_CONVERTABLE) {
       // Temporarily do nothing here. This function consumes 1/3 to 1/2 of
       // *total* process CPU time when ETW tracing, and many of the strings
       // created exceed WPA's 4094 byte limit and are shown as:
       // "Unable to parse data". See crbug.com/488257
-      // convertable_values[i]->AppendAsTraceFormat(arg_values_string + i);
     } else {
-      TraceEvent::TraceValue trace_event;
-      trace_event.as_uint = arg_values[i];
-      TraceEvent::AppendValueAsJSON(arg_types[i], trace_event,
-                                    arg_values_string + i);
+      args->values()[i].AppendAsJSON(args->types()[i], arg_values_string + i);
     }
   }
 
   EventWriteChromeEvent(
-      name, phase_string, num_args > 0 ? arg_names[0] : "",
-      arg_values_string[0].c_str(), num_args > 1 ? arg_names[1] : "",
-      arg_values_string[1].c_str(), num_args > 2 ? arg_names[2] : "",
-      arg_values_string[2].c_str());
+      name, phase_string, num_args > 0 ? args->names()[0] : "",
+      arg_values_string[0].c_str(), num_args > 1 ? args->names()[1] : "",
+      arg_values_string[1].c_str(), "", "");
 }
 
 // static
@@ -294,7 +281,7 @@ void TraceEventETWExport::AddCompleteEndEvent(const char* name) {
 bool TraceEventETWExport::IsCategoryGroupEnabled(
     StringPiece category_group_name) {
   DCHECK(!category_group_name.empty());
-  auto* instance = GetInstance();
+  auto* instance = GetInstanceIfExists();
   if (instance == nullptr)
     return false;
 
@@ -377,5 +364,19 @@ void TraceEventETWExport::UpdateETWKeyword() {
   DCHECK(instance);
   instance->UpdateEnabledCategories();
 }
+
+// static
+TraceEventETWExport* TraceEventETWExport::GetInstance() {
+  return Singleton<TraceEventETWExport,
+                   StaticMemorySingletonTraits<TraceEventETWExport>>::get();
+}
+
+// static
+TraceEventETWExport* TraceEventETWExport::GetInstanceIfExists() {
+  return Singleton<
+      TraceEventETWExport,
+      StaticMemorySingletonTraits<TraceEventETWExport>>::GetIfExists();
+}
+
 }  // namespace trace_event
 }  // namespace base

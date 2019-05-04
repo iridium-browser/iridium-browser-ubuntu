@@ -51,7 +51,7 @@ import java.util.LinkedHashSet;
 public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
     private static final String TAG = "ThumbnailStorage";
     private static final int MAX_CACHE_BYTES =
-            ConversionUtils.BYTES_PER_MEGABYTE; // Max disk cache size is 1MB.
+            5 * ConversionUtils.BYTES_PER_MEGABYTE; // Max disk cache size is 5MB.
 
     // LRU cache of a pair of thumbnail's contentID and size. The order is based on the sequence of
     // add and get with the most recent at the end. The order at initialization (i.e. browser
@@ -76,9 +76,15 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
 
     private ThumbnailStorageDelegate mDelegate;
 
+    // Maximum size in bytes for the disk cache.
+    private final int mMaxCacheBytes;
+
     // Number of bytes used in disk for cache.
     @VisibleForTesting
     long mSizeBytes;
+
+    // Whether or not this class has been destroyed and should not be used.
+    private boolean mDestroyed;
 
     private class InitTask extends AsyncTask<Void> {
         @Override
@@ -174,10 +180,12 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
     }
 
     @VisibleForTesting
-    ThumbnailDiskStorage(ThumbnailStorageDelegate delegate, ThumbnailGenerator thumbnailGenerator) {
+    ThumbnailDiskStorage(ThumbnailStorageDelegate delegate, ThumbnailGenerator thumbnailGenerator,
+            int maxCacheSizeBytes) {
         ThreadUtils.assertOnUiThread();
         mDelegate = delegate;
         mThumbnailGenerator = thumbnailGenerator;
+        mMaxCacheBytes = maxCacheSizeBytes;
         new InitTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
@@ -188,7 +196,7 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
      * @return An instance of {@link ThumbnailDiskStorage}.
      */
     public static ThumbnailDiskStorage create(ThumbnailStorageDelegate delegate) {
-        return new ThumbnailDiskStorage(delegate, new ThumbnailGenerator());
+        return new ThumbnailDiskStorage(delegate, new ThumbnailGenerator(), MAX_CACHE_BYTES);
     }
 
     /**
@@ -196,6 +204,7 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
      */
     public void destroy() {
         mThumbnailGenerator.destroy();
+        mDestroyed = true;
     }
 
     /**
@@ -212,7 +221,7 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
      */
     public void retrieveThumbnail(ThumbnailProvider.ThumbnailRequest request) {
         ThreadUtils.assertOnUiThread();
-        if (TextUtils.isEmpty(request.getContentId())) return;
+        if (mDestroyed || TextUtils.isEmpty(request.getContentId())) return;
 
         new GetThumbnailTask(request).executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
@@ -228,6 +237,9 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
     @Override
     public void onThumbnailRetrieved(
             @NonNull String contentId, @Nullable Bitmap bitmap, int iconSizePx) {
+        // If we've been destroyed, drop any responses coming back from retrieval tasks.
+        if (mDestroyed) return;
+
         ThreadUtils.assertOnUiThread();
         if (bitmap != null && !TextUtils.isEmpty(contentId)) {
             new CacheThumbnailTask(contentId, bitmap, iconSizePx)
@@ -391,12 +403,12 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
     }
 
     /**
-     * Trim the cache to stay under the MAX_CACHE_BYTES limit by removing the oldest entries.
+     * Trim the cache to stay under the max cache size by removing the oldest entries.
      */
     @VisibleForTesting
     void trim() {
         ThreadUtils.assertOnBackgroundThread();
-        while (mSizeBytes > MAX_CACHE_BYTES) {
+        while (mSizeBytes > mMaxCacheBytes) {
             removeFromDiskHelper(sDiskLruCache.iterator().next());
         }
     }
@@ -476,7 +488,6 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
      * Get directory for thumbnail entries in the designated app (internal) cache directory.
      * The directory's name must be unique.
      * @param context The application's context.
-     * @param uniqueName The name of the thumbnail directory. Must be unique.
      * @return The path to the thumbnail cache directory.
      */
     private static File getDiskCacheDir(Context context, String thumbnailDirName) {

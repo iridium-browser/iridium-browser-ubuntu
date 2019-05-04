@@ -22,18 +22,6 @@ namespace media {
 const int kBlockSizeShift = 15;  // 1<<15 == 32kb
 const int kUrlMappingTimeoutSeconds = 300;
 
-// Max number of resource preloading in parallel.
-const size_t kMaxParallelPreload = 6;
-
-namespace {
-// Helper function, return max parallel preloads.
-size_t GetMaxParallelPreload() {
-  if (base::FeatureList::IsEnabled(media::kLimitParallelMediaPreloading))
-    return kMaxParallelPreload;
-  return std::numeric_limits<size_t>::max();
-}
-};  // namespace
-
 ResourceMultiBuffer::ResourceMultiBuffer(UrlData* url_data, int block_shift)
     : MultiBuffer(block_shift, url_data->url_index_->lru_),
       url_data_(url_data) {}
@@ -57,7 +45,7 @@ void ResourceMultiBuffer::OnEmpty() {
   url_data_->OnEmpty();
 }
 
-UrlData::UrlData(const GURL& url, CORSMode cors_mode, UrlIndex* url_index)
+UrlData::UrlData(const GURL& url, CorsMode cors_mode, UrlIndex* url_index)
     : url_(url),
       have_data_origin_(false),
       cors_mode_(cors_mode),
@@ -73,11 +61,9 @@ UrlData::~UrlData() {
                           BytesReadFromCache() >> 10);
   UMA_HISTOGRAM_MEMORY_KB("Media.BytesReadFromNetwork",
                           BytesReadFromNetwork() >> 10);
-  DCHECK_EQ(0, playing_);
-  DCHECK_EQ(0, preloading_);
 }
 
-std::pair<GURL, UrlData::CORSMode> UrlData::key() const {
+std::pair<GURL, UrlData::CorsMode> UrlData::key() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   return std::make_pair(url(), cors_mode());
 }
@@ -130,6 +116,12 @@ void UrlData::RedirectTo(const scoped_refptr<UrlData>& url_data) {
   DCHECK(thread_checker_.CalledOnValidThread());
   // Copy any cached data over to the new location.
   url_data->multibuffer()->MergeFrom(multibuffer());
+
+  // All |bytes_received_callbacks_| should also listen for bytes on the
+  // redirect UrlData.
+  for (const auto& cb : bytes_received_callbacks_) {
+    url_data->AddBytesReceivedCallback(cb);
+  }
 
   std::vector<RedirectCB> redirect_callbacks;
   redirect_callbacks.swap(redirect_callbacks_);
@@ -219,127 +211,21 @@ ResourceMultiBuffer* UrlData::multibuffer() {
   return &multibuffer_;
 }
 
+void UrlData::AddBytesReceivedCallback(BytesReceivedCB bytes_received_cb) {
+  bytes_received_callbacks_.emplace_back(std::move(bytes_received_cb));
+}
+
+void UrlData::AddBytesReadFromNetwork(int64_t b) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  bytes_read_from_network_ += b;
+  for (const auto& cb : bytes_received_callbacks_) {
+    cb.Run(b);
+  }
+}
+
 size_t UrlData::CachedSize() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return multibuffer()->map().size();
-}
-
-UrlData::UrlDataWithLoadingState::UrlDataWithLoadingState() {}
-UrlData::UrlDataWithLoadingState::~UrlDataWithLoadingState() {
-  SetLoadingState(LoadingState::kIdle);
-}
-
-void UrlData::UrlDataWithLoadingState::SetLoadingState(
-    LoadingState loading_state) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!url_data_)
-    return;
-  // Note that we increase loading state first and decrease afterwards to avoid
-  // having the loading/playing counts go to zero temporarily.
-  url_data_->IncreaseLoadersInState(loading_state);
-  url_data_->DecreaseLoadersInState(loading_state_);
-  loading_state_ = loading_state;
-}
-
-void UrlData::UrlDataWithLoadingState::SetUrlData(
-    scoped_refptr<UrlData> url_data) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  // Note that we increase loading state first and decrease afterwards to avoid
-  // having the loading/playing counts go to zero temporarily.
-  if (url_data)
-    url_data->IncreaseLoadersInState(loading_state_);
-  if (url_data_)
-    url_data_->DecreaseLoadersInState(loading_state_);
-  url_data_ = std::move(url_data);
-}
-
-bool UrlData::IsPreloading() const {
-  return preloading_ > 0 && playing_ == 0;
-}
-
-void UrlData::IncreaseLoadersInState(
-    UrlDataWithLoadingState::LoadingState state) {
-  switch (state) {
-    case UrlDataWithLoadingState::LoadingState::kIdle:
-      break;
-    case UrlDataWithLoadingState::LoadingState::kPreload:
-      preloading_++;
-      break;
-    case UrlDataWithLoadingState::LoadingState::kHasPlayed:
-      playing_++;
-      if (playing_ == 1)
-        url_index_->RemoveLoading(this);
-      break;
-  }
-}
-
-void UrlData::DecreaseLoadersInState(
-    UrlDataWithLoadingState::LoadingState state) {
-  switch (state) {
-    case UrlDataWithLoadingState::LoadingState::kIdle:
-      return;
-    case UrlDataWithLoadingState::LoadingState::kPreload:
-      preloading_--;
-      DCHECK_GE(preloading_, 0);
-      break;
-    case UrlDataWithLoadingState::LoadingState::kHasPlayed:
-      playing_--;
-      DCHECK_GE(playing_, 0);
-      break;
-  }
-  if (preloading_ == 0 && playing_ == 0)
-    url_index_->RemoveLoading(this);
-}
-
-void UrlData::WaitToLoad(base::OnceClosure cb) {
-  // We only limit and queue preloading requests.
-  if (!IsPreloading()) {
-    std::move(cb).Run();
-  } else {
-    waiting_load_callbacks_.emplace_back(std::move(cb));
-    if (waiting_load_callbacks_.size() == 1)
-      url_index_->WaitToLoad(this);
-  }
-}
-
-void UrlData::LoadNow() {
-  // Move the callbacks into local variables in case
-  // any of the callbacks decide to call WaitToLoad().
-  std::vector<base::OnceClosure> waiting_load_callbacks;
-  std::swap(waiting_load_callbacks, waiting_load_callbacks_);
-  for (auto& i : waiting_load_callbacks)
-    std::move(i).Run();
-}
-
-
-void UrlIndex::WaitToLoad(UrlData* url_data) {
-  if (loading_.find(url_data) != loading_.end()) {
-    // Already loading
-    url_data->LoadNow();
-    return;
-  }
-  if (loading_.size() < GetMaxParallelPreload()) {
-    loading_.insert(url_data);
-    url_data->LoadNow();
-    return;
-  }
-  loading_queue_.push_back(url_data);
-}
-
-void UrlIndex::RemoveLoading(UrlData* url_data) {
-  auto i = loading_.find(url_data);
-  if (i == loading_.end())
-    return;
-  loading_.erase(i);
-  while (loading_.size() < GetMaxParallelPreload() && !loading_queue_.empty()) {
-    auto url_data = loading_queue_.front();
-    loading_queue_.pop_front();
-    if (url_data->IsPreloading()) {
-      WaitToLoad(url_data.get());
-    } else {
-      url_data->LoadNow();
-    }
-  }
 }
 
 UrlIndex::UrlIndex(ResourceFetchContext* fetch_context)
@@ -368,12 +254,10 @@ void UrlIndex::RemoveUrlData(const scoped_refptr<UrlData>& url_data) {
   auto i = indexed_data_.find(url_data->key());
   if (i != indexed_data_.end() && i->second == url_data)
     indexed_data_.erase(i);
-
-  RemoveLoading(url_data.get());
 }
 
 scoped_refptr<UrlData> UrlIndex::GetByUrl(const GURL& gurl,
-                                          UrlData::CORSMode cors_mode) {
+                                          UrlData::CorsMode cors_mode) {
   auto i = indexed_data_.find(std::make_pair(gurl, cors_mode));
   if (i != indexed_data_.end() && i->second->Valid()) {
     return i->second;
@@ -383,7 +267,7 @@ scoped_refptr<UrlData> UrlIndex::GetByUrl(const GURL& gurl,
 }
 
 scoped_refptr<UrlData> UrlIndex::NewUrlData(const GURL& url,
-                                            UrlData::CORSMode cors_mode) {
+                                            UrlData::CorsMode cors_mode) {
   return new UrlData(url, cors_mode, this);
 }
 

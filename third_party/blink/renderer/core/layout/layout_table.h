@@ -28,7 +28,7 @@
 
 #include <memory>
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/layout/layout_block.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -320,7 +320,7 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
 
     needs_section_recalc_ = true;
     SetNeedsLayoutAndFullPaintInvalidation(
-        LayoutInvalidationReason::kTableChanged);
+        layout_invalidation_reason::kTableChanged);
 
     // Grid structure affects cell adjacence relationships which affect
     // conflict resolution of collapsed borders.
@@ -361,10 +361,10 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
   // onto the same compositing layer as the table (which is rare), and the table
   // will create one display item for all collapsed borders. Otherwise each row
   // will create one display item for collapsed borders.
-  // It always returns false for SPv2.
+  // It always returns false for CAP.
   bool ShouldPaintAllCollapsedBorders() const {
     DCHECK(collapsed_borders_valid_);
-    if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
+    if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled())
       DCHECK(!should_paint_all_collapsed_borders_);
     return should_paint_all_collapsed_borders_;
   }
@@ -426,7 +426,10 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
  protected:
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
   void SimplifiedNormalFlowLayout() override;
-  bool RecalcOverflow() override;
+
+  bool RecalcLayoutOverflow() final;
+  void RecalcVisualOverflow() final;
+
   void EnsureIsReadyForPaintInvalidation() override;
   void InvalidatePaint(const PaintInvalidatorContext&) const override;
   bool PaintedOutputOfObjectHasNoEffectRegardlessOfSize() const override;
@@ -474,7 +477,9 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
       OverlayScrollbarClipBehavior =
           kIgnorePlatformOverlayScrollbarSize) const override;
 
-  void AddVisualOverflowFromChildren() override;
+  void ComputeVisualOverflow(bool recompute_floats) final;
+
+  void AddVisualOverflowFromChildren();
   void AddLayoutOverflowFromChildren() override;
 
   void RecalcSections() const;

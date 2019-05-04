@@ -20,28 +20,33 @@
 #include <pthread.h>
 #include <stddef.h>
 
+#include <condition_variable>
 #include <mutex>
 #include <vector>
 
-#include "perfetto/base/scoped_file.h"
+#include "perfetto/base/unix_socket.h"
 #include "src/profiling/memory/wire_protocol.h"
 
 namespace perfetto {
+namespace profiling {
 
 class BorrowedSocket;
 
 class SocketPool {
  public:
   friend class BorrowedSocket;
-  SocketPool(std::vector<base::ScopedFile> sockets);
+  SocketPool(std::vector<base::UnixSocketRaw> sockets);
 
   BorrowedSocket Borrow();
+  void Shutdown();
 
  private:
-  void Return(base::ScopedFile fd);
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  std::vector<base::ScopedFile> sockets_;
+  bool shutdown_ = false;
+
+  void Return(base::UnixSocketRaw);
+  std::timed_mutex mutex_;
+  std::condition_variable_any cv_;
+  std::vector<base::UnixSocketRaw> sockets_;
   size_t available_sockets_;
   size_t dead_sockets_ = 0;
 };
@@ -51,28 +56,26 @@ class BorrowedSocket {
  public:
   BorrowedSocket(const BorrowedSocket&) = delete;
   BorrowedSocket& operator=(const BorrowedSocket&) = delete;
-  BorrowedSocket(BorrowedSocket&& other) noexcept {
-    fd_ = std::move(other.fd_);
-    socket_pool_ = other.socket_pool_;
+  BorrowedSocket(BorrowedSocket&& other) noexcept
+      : sock_(std::move(other.sock_)), socket_pool_(other.socket_pool_) {
     other.socket_pool_ = nullptr;
   }
 
-  BorrowedSocket(base::ScopedFile fd, SocketPool* socket_pool)
-      : fd_(std::move(fd)), socket_pool_(socket_pool) {}
+  BorrowedSocket(base::UnixSocketRaw sock, SocketPool* socket_pool)
+      : sock_(std::move(sock)), socket_pool_(socket_pool) {}
 
   ~BorrowedSocket() {
     if (socket_pool_ != nullptr)
-      socket_pool_->Return(std::move(fd_));
+      socket_pool_->Return(std::move(sock_));
   }
 
-  int operator*() { return get(); }
-
-  int get() { return *fd_; }
-
-  void Close() { fd_.reset(); }
+  base::UnixSocketRaw* operator->() { return &sock_; }
+  base::UnixSocketRaw* get() { return &sock_; }
+  void Shutdown() { sock_.Shutdown(); }
+  explicit operator bool() const { return !!sock_; }
 
  private:
-  base::ScopedFile fd_;
+  base::UnixSocketRaw sock_;
   SocketPool* socket_pool_ = nullptr;
 };
 
@@ -83,14 +86,14 @@ class FreePage {
   // Add address to buffer. Flush if necessary using a socket borrowed from
   // pool.
   // Can be called from any thread. Must not hold mutex_.`
-  void Add(const uint64_t addr, uint64_t sequence_number, SocketPool* pool);
+  bool Add(const uint64_t addr, uint64_t sequence_number, SocketPool* pool);
 
  private:
   // Needs to be called holding mutex_.
-  void FlushLocked(SocketPool* pool);
+  bool FlushLocked(SocketPool* pool);
 
   FreeMetadata free_page_;
-  std::mutex mutex_;
+  std::timed_mutex mutex_;
   size_t offset_ = 0;
 };
 
@@ -120,22 +123,33 @@ class PThreadKey {
   bool valid_;
 };
 
+constexpr uint32_t kClientSockTxTimeoutMs = 1000;
+
 // This is created and owned by the malloc hooks.
 class Client {
  public:
-  Client(std::vector<base::ScopedFile> sockets);
+  Client(std::vector<base::UnixSocketRaw> sockets);
   Client(const std::string& sock_name, size_t conns);
-  void RecordMalloc(uint64_t alloc_size, uint64_t alloc_address);
+  void RecordMalloc(uint64_t alloc_size,
+                    uint64_t total_size,
+                    uint64_t alloc_address);
   void RecordFree(uint64_t alloc_address);
-  bool ShouldSampleAlloc(uint64_t alloc_size,
-                         void* (*unhooked_malloc)(size_t),
-                         void (*unhooked_free)(void*));
+  void MaybeSampleAlloc(uint64_t alloc_size,
+                        uint64_t alloc_address,
+                        void* (*unhooked_malloc)(size_t),
+                        void (*unhooked_free)(void*));
+  void Shutdown();
 
   ClientConfiguration client_config_for_testing() { return client_config_; }
+  bool inited() { return inited_; }
 
  private:
+  size_t ShouldSampleAlloc(uint64_t alloc_size,
+                           void* (*unhooked_malloc)(size_t),
+                           void (*unhooked_free)(void*));
   const char* GetStackBase();
 
+  std::atomic<bool> inited_{false};
   ClientConfiguration client_config_;
   PThreadKey pthread_key_;
   SocketPool socket_pool_;
@@ -144,6 +158,7 @@ class Client {
   std::atomic<uint64_t> sequence_number_{0};
 };
 
+}  // namespace profiling
 }  // namespace perfetto
 
 #endif  // SRC_PROFILING_MEMORY_CLIENT_H_

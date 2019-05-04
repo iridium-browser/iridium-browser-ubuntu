@@ -6,6 +6,7 @@
 
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#include "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #import "ios/chrome/browser/ui/ntp/ntp_util.h"
 #import "ios/chrome/browser/ui/toolbar/adaptive_toolbar_coordinator+subclassing.h"
 #import "ios/chrome/browser/ui/toolbar/adaptive_toolbar_view_controller.h"
@@ -13,7 +14,7 @@
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_button_visibility_configuration.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_tools_menu_button.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_mediator.h"
-#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 
@@ -53,6 +54,9 @@
   self.viewController.longPressDelegate = self.longPressDelegate;
 
   self.mediator = [[ToolbarMediator alloc] init];
+  self.mediator.incognito = self.browserState->IsOffTheRecord();
+  self.mediator.templateURLService =
+      ios::TemplateURLServiceFactory::GetForBrowserState(self.browserState);
   self.mediator.consumer = self.viewController;
   self.mediator.webStateList = self.webStateList;
   self.mediator.bookmarkModel =
@@ -120,7 +124,7 @@
 }
 
 - (void)updateToolbarForSideSwipeSnapshot:(web::WebState*)webState {
-  BOOL isNTP = IsVisibleUrlNewTabPage(webState);
+  BOOL isNTP = IsVisibleURLNewTabPage(webState);
 
   [self.mediator updateConsumerForWebState:webState];
   [self.viewController updateForSideSwipeSnapshotOnNTP:isNTP];

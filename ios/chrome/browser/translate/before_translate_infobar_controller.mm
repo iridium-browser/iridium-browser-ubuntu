@@ -54,9 +54,9 @@
   return [super initWithInfoBarDelegate:infoBarDelegate];
 }
 
-- (UIView<InfoBarViewSizing>*)viewForFrame:(CGRect)frame {
+- (UIView*)infobarView {
   ConfirmInfoBarView* infoBarView =
-      [[ConfirmInfoBarView alloc] initWithFrame:frame];
+      [[ConfirmInfoBarView alloc] initWithFrame:CGRectZero];
   _infoBarView = infoBarView;
   // Icon
   gfx::Image icon = self.infoBarDelegate->GetIcon();
@@ -169,6 +169,7 @@
       [LanguageSelectionContext contextWithLanguageData:self.infoBarDelegate
                                            initialIndex:selectedRow
                                        unavailableIndex:disabledRow];
+  DCHECK(self.languageSelectionHandler);
   [self.languageSelectionHandler showLanguageSelectorWithContext:context
                                                         delegate:self];
 }

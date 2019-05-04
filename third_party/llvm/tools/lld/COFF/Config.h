@@ -84,6 +84,7 @@ struct Configuration {
   bool is64() { return Machine == AMD64 || Machine == ARM64; }
 
   llvm::COFF::MachineTypes Machine = IMAGE_FILE_MACHINE_UNKNOWN;
+  size_t Wordsize;
   bool Verbose = false;
   WindowsSubsystem Subsystem = llvm::COFF::IMAGE_SUBSYSTEM_UNKNOWN;
   Symbol *Entry = nullptr;
@@ -196,6 +197,7 @@ struct Configuration {
   bool MinGW = false;
   bool WarnMissingOrderSymbol = true;
   bool WarnLocallyDefinedImported = true;
+  bool WarnDebugInfoUnusable = true;
   bool Incremental = true;
   bool IntegrityCheck = false;
   bool KillAt = false;

@@ -12,6 +12,7 @@
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/content/browser/bad_message.h"
 #include "components/password_manager/content/browser/content_password_manager_driver_factory.h"
+#include "components/password_manager/content/browser/form_submission_tracker_util.h"
 #include "components/password_manager/core/browser/log_manager.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
@@ -23,6 +24,7 @@
 #include "content/public/browser/web_contents.h"
 #include "net/cert/cert_status_flags.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
+#include "ui/base/page_transition_types.h"
 
 namespace password_manager {
 
@@ -67,21 +69,28 @@ void ContentPasswordManagerDriver::FillPasswordForm(
     const autofill::PasswordFormFillData& form_data) {
   password_autofill_manager_.OnAddPasswordFillData(form_data);
   GetPasswordAutofillAgent()->FillPasswordForm(
-      autofill::ClearPasswordValues(form_data));
+      autofill::MaybeClearPasswordValues(form_data));
 }
 
 void ContentPasswordManagerDriver::AllowPasswordGenerationForForm(
     const autofill::PasswordForm& form) {
-  if (!GetPasswordGenerationManager()->IsGenerationEnabled(
+  if (GetPasswordGenerationManager()->IsGenerationEnabled(
           /*log_debug_data=*/true)) {
-    return;
+    GetPasswordGenerationAgent()->FormNotBlacklisted(form);
   }
-  GetPasswordGenerationAgent()->FormNotBlacklisted(form);
 }
 
 void ContentPasswordManagerDriver::FormsEligibleForGenerationFound(
     const std::vector<autofill::PasswordFormGenerationData>& forms) {
   GetPasswordGenerationAgent()->FoundFormsEligibleForGeneration(forms);
+}
+
+void ContentPasswordManagerDriver::FormEligibleForGenerationFound(
+    const autofill::NewPasswordFormGenerationData& form) {
+  if (GetPasswordGenerationManager()->IsGenerationEnabled(
+          /*log_debug_data=*/true)) {
+    GetPasswordGenerationAgent()->FoundFormEligibleForGeneration(form);
+  }
 }
 
 void ContentPasswordManagerDriver::AutofillDataReceived(
@@ -126,10 +135,6 @@ void ContentPasswordManagerDriver::ClearPreviewedForm() {
   GetAutofillAgent()->ClearPreviewedForm();
 }
 
-void ContentPasswordManagerDriver::GeneratePassword() {
-  GetPasswordGenerationAgent()->UserTriggeredGeneratePassword();
-}
-
 PasswordGenerationManager*
 ContentPasswordManagerDriver::GetPasswordGenerationManager() {
   return &password_generation_manager_;
@@ -158,14 +163,28 @@ bool ContentPasswordManagerDriver::IsMainFrame() const {
   return is_main_frame_;
 }
 
+GURL ContentPasswordManagerDriver::GetLastCommittedURL() const {
+  return render_frame_host_->GetLastCommittedURL();
+}
+
 void ContentPasswordManagerDriver::DidNavigateFrame(
     content::NavigationHandle* navigation_handle) {
   // Clear page specific data after main frame navigation.
   if (navigation_handle->IsInMainFrame() &&
       !navigation_handle->IsSameDocument()) {
-    GetPasswordManager()->DidNavigateMainFrame();
+    NotifyDidNavigateMainFrame(navigation_handle->IsRendererInitiated(),
+                               navigation_handle->GetPageTransition(),
+                               navigation_handle->HasUserGesture(),
+                               GetPasswordManager());
     GetPasswordAutofillManager()->DidNavigateMainFrame();
   }
+}
+
+void ContentPasswordManagerDriver::GeneratePassword(
+    autofill::mojom::PasswordGenerationAgent::
+        UserTriggeredGeneratePasswordCallback callback) {
+  GetPasswordGenerationAgent()->UserTriggeredGeneratePassword(
+      std::move(callback));
 }
 
 const autofill::mojom::AutofillAgentAssociatedPtr&

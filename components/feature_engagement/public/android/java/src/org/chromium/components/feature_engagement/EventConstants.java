@@ -51,9 +51,9 @@ public final class EventConstants {
     public static final String CONTEXTUAL_SUGGESTIONS_OPENED = "contextual_suggestions_opened";
 
     /**
-     * The contextual suggestions bottom sheet was shown in its peeking state.
+     * A contextual suggestion was clicked, opened in a new tab or downloaded.
      */
-    public static final String CONTEXTUAL_SUGGESTIONS_PEEKED = "contextual_suggestions_peeked";
+    public static final String CONTEXTUAL_SUGGESTION_TAKEN = "contextual_suggestion_taken";
 
     /**
      * Screenshot is taken with Chrome in the foreground.
@@ -159,6 +159,9 @@ public final class EventConstants {
 
     /** The pinned homepage tile in MV tiles was clicked. */
     public static final String HOMEPAGE_TILE_CLICKED = "homepage_tile_clicked";
+
+    /** The `Translate` app menu button was clicked. */
+    public static final String TRANSLATE_MENU_BUTTON_CLICKED = "translate_menu_button_clicked";
 
     /**
      * Do not instantiate.

@@ -23,6 +23,7 @@
 #include <limits>
 
 namespace perfetto {
+namespace profiling {
 
 namespace {
 constexpr size_t kMaxRecordSize = 8 * 1024 * 1024;  // 8 MiB
@@ -42,12 +43,13 @@ RecordReader::ReceiveBuffer RecordReader::BeginReceive() {
 
 RecordReader::Result RecordReader::EndReceive(size_t recv_size,
                                               Record* record) {
-  if (record_.size == 0)
+  if (record_.size == 0) {
     // Still receiving header.
     PERFETTO_DCHECK(recv_size <= sizeof(uint64_t) - read_idx_);
-  else
+  } else {
     // Receiving payload.
     PERFETTO_DCHECK(record_.data && recv_size <= record_.size);
+  }
 
   read_idx_ += recv_size;
   if (read_idx_ == sizeof(record_size_buf_)) {
@@ -72,4 +74,5 @@ void RecordReader::Reset() {
   record_.size = 0;
 }
 
+}  // namespace profiling
 }  // namespace perfetto

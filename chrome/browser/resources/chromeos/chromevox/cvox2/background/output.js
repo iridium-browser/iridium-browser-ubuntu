@@ -236,6 +236,7 @@ Output.ROLE_INFO_ = {
   list: {msgId: 'role_list'},
   listBox: {msgId: 'role_listbox', earconId: 'LISTBOX'},
   listBoxOption: {msgId: 'role_listitem', earconId: 'LIST_ITEM'},
+  listGrid: {msgId: 'role_list_grid', inherits: 'table'},
   listItem:
       {msgId: 'role_listitem', earconId: 'LIST_ITEM', inherits: 'abstractItem'},
   log: {msgId: 'role_log', inherits: 'abstractNameFromContents'},
@@ -259,6 +260,7 @@ Output.ROLE_INFO_ = {
   popUpButton: {msgId: 'role_button', earconId: 'POP_UP_BUTTON'},
   radioButton: {msgId: 'role_radio'},
   radioGroup: {msgId: 'role_radiogroup', inherits: 'abstractContainer'},
+  region: {msgId: 'role_region', inherits: 'abstractContainer'},
   rootWebArea: {outputContextFirst: true},
   row: {msgId: 'role_row', inherits: 'abstractContainer'},
   rowHeader: {msgId: 'role_rowheader', inherits: 'cell'},
@@ -281,7 +283,7 @@ Output.ROLE_INFO_ = {
   time: {msgId: 'tag_time', inherits: 'abstractContainer'},
   timer: {msgId: 'role_timer', inherits: 'abstractNameFromContents'},
   toolbar: {msgId: 'role_toolbar', ignoreAncestry: true},
-  toggleButton: {msgId: 'role_button', inherits: 'checkBox'},
+  toggleButton: {msgId: 'role_toggle_button', inherits: 'checkBox'},
   tree: {msgId: 'role_tree'},
   treeItem: {msgId: 'role_treeitem'},
   window: {ignoreAncestry: true}
@@ -359,8 +361,8 @@ Output.PRESSED_STATE_MAP = {
 Output.RULES = {
   navigate: {
     'default': {
-      speak: `$name $node(activeDescendant) $value $state $restriction $role
-          $description`,
+      speak: `$name $node(activeDescendant) $value $state
+          $if($selected, @aria_selected_true) $restriction $role $description`,
       braille: ``
     },
     abstractContainer: {
@@ -400,8 +402,10 @@ Output.RULES = {
     },
     cell: {
       enter: {
-        speak: `$cellIndexText $node(tableCellColumnHeaders) $state`,
-        braille: `$state $cellIndexText $node(tableCellColumnHeaders)`,
+        speak: `$cellIndexText $node(tableCellColumnHeaders) $nameFromNode
+            $state`,
+        braille: `$state $cellIndexText $node(tableCellColumnHeaders)
+            $nameFromNode`,
       },
       speak: `$name $cellIndexText $node(tableCellColumnHeaders)
           $state $description`,
@@ -526,7 +530,7 @@ Output.RULES = {
           @describe_index($posInSet, $setSize)
           $roleDescription $description $state $restriction`
     },
-    rootWebArea: {enter: `$name`, speak: `$if($name, $name, $docUrl)`},
+    rootWebArea: {enter: `$name`, speak: `$if($name, $name, @web_content)`},
     region: {speak: `$state $nameOrTextContent $description $roleDescription`},
     row: {
       enter: `$node(tableRowHeader)`,
@@ -704,7 +708,7 @@ Output.forceModeForNextSpeechUtterance_;
  * Calling this will make the next speech utterance use |mode| even if it would
  * normally queue or do a category flush. This differs from the |withQueueMode|
  * instance method as it can apply to future output.
- * @param {cvox.QueueMode} mode
+ * @param {cvox.QueueMode|undefined} mode
  */
 Output.forceModeForNextSpeechUtterance = function(mode) {
   Output.forceModeForNextSpeechUtterance_ = mode;
@@ -1002,7 +1006,7 @@ Output.prototype = {
    */
   go: function() {
     // Speech.
-    var queueMode = cvox.QueueMode.CATEGORY_FLUSH;
+    var queueMode = cvox.QueueMode.QUEUE;
     if (Output.forceModeForNextSpeechUtterance_ !== undefined) {
       queueMode = /** @type{cvox.QueueMode} */ (
           Output.forceModeForNextSpeechUtterance_);
@@ -1519,13 +1523,22 @@ Output.prototype = {
             this.format_(node, '$name', buff, ruleStr);
             return;
           }
+
+          if (!node.firstChild)
+            return;
+
+          var root = node;
           var walker = new AutomationTreeWalker(node, Dir.FORWARD, {
             visit: AutomationPredicate.leafOrStaticText,
-            leaf: AutomationPredicate.leafOrStaticText
+            leaf: (n) => {
+              // The root might be a leaf itself, but we still want to descend
+              // into it.
+              return n != root && AutomationPredicate.leafOrStaticText(n);
+            },
+            root: (r) => r == root
           });
           var outputStrings = [];
-          while (walker.next().node &&
-                 walker.phase == AutomationTreeWalkerPhase.DESCENDANT) {
+          while (walker.next().node) {
             if (walker.node.name)
               outputStrings.push(walker.node.name);
           }
@@ -1944,7 +1957,7 @@ Output.prototype = {
     /**
      * Use Output.RULES for node.role if exists.
      * If not, use Output.RULES for parentRole if exists.
-     * If not, use Output.RULES for 'defalt'.
+     * If not, use Output.RULES for 'default'.
      */
     if (node.role && (eventBlock[node.role] || {}).speak !== undefined)
       rule.role = node.role;
@@ -2043,9 +2056,10 @@ Output.prototype = {
     if (!this.outputContextFirst_)
       this.ancestry_(node, prevNode, type, buff, ruleStr);
 
-    var loc = range.start.node.boundsForRange(rangeStart, rangeEnd);
-    if (loc)
-      this.locations_.push(loc);
+    range.start.node.boundsForRange(rangeStart, rangeEnd, (loc) => {
+      if (loc)
+        this.locations_.push(loc);
+    });
   },
 
   /**

@@ -7,9 +7,9 @@
 # be found in the AUTHORS file in the root of the source tree.
 
 if (is_android) {
-  import("../../webrtc.gni")
   import("//build/config/android/config.gni")
   import("//build/config/android/rules.gni")
+  import("../../webrtc.gni")
 
   group("android") {
     if (!build_with_chromium && is_android) {
@@ -38,6 +38,7 @@ if (is_android) {
     deps = [
       ":audio_api_java",
       ":base_java",
+      ":builtin_audio_codecs_java",
       ":camera_java",
       ":default_video_codec_factory_java",
       ":filevideo_java",
@@ -45,6 +46,8 @@ if (is_android) {
       ":java_audio_device_module_java",
       ":libjingle_peerconnection_java",
       ":libjingle_peerconnection_metrics_default_java",
+      ":libvpx_vp8_java",
+      ":libvpx_vp9_java",
       ":logging_java",
       ":peerconnection_java",
       ":screencapturer_java",
@@ -65,6 +68,7 @@ if (is_android) {
       ":native_api_codecs",
       ":native_api_jni",
       ":native_api_peerconnection",
+      ":native_api_stacktrace",
       ":native_api_video",
     ]
   }
@@ -110,23 +114,22 @@ if (is_android) {
     public_deps = [  # no-presubmit-check TODO(webrtc:8603)
       ":audio_jni",
       ":base_jni",
+      ":builtin_audio_codecs_jni",
+      ":default_video_codec_factory_jni",
       ":java_audio_device_module_jni",
+      ":legacy_hwcodecs_jni",
       ":media_jni",
       ":peerconnection_jni",
       ":video_jni",
-      "../../pc:create_pc_factory",
+      "../../api:create_peerconnection_factory",
     ]
   }
 
   rtc_static_library("libjingle_peerconnection_metrics_default_jni") {
     visibility = [ "*" ]
-
-    allow_poison = [ "software_video_codecs" ]  # TODO(bugs.webrtc.org/7925): Remove.
-
     sources = [
-      "src/jni/androidmetrics.cc",
+      "src/jni/android_metrics.cc",
     ]
-
     deps = [
       ":base_jni",
       ":generated_metrics_jni",
@@ -189,6 +192,7 @@ if (is_android) {
   rtc_android_library("base_java") {
     java_files = [
       "api/org/webrtc/RefCounted.java",
+      "api/org/webrtc/Predicate.java",
       "src/java/org/webrtc/CalledByNative.java",
       "src/java/org/webrtc/CalledByNativeUnchecked.java",
       "src/java/org/webrtc/Histogram.java",
@@ -200,11 +204,16 @@ if (is_android) {
 
     deps = [
       "//rtc_base:base_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
   rtc_android_library("audio_api_java") {
-    java_files = [ "api/org/webrtc/audio/AudioDeviceModule.java" ]
+    java_files = [
+      "api/org/webrtc/audio/AudioDeviceModule.java",
+      "api/org/webrtc/AudioDecoderFactoryFactory.java",
+      "api/org/webrtc/AudioEncoderFactoryFactory.java",
+    ]
 
     deps = [
       ":base_java",
@@ -229,6 +238,7 @@ if (is_android) {
     deps = [
       ":base_java",
       "//rtc_base:base_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
@@ -250,6 +260,7 @@ if (is_android) {
       "api/org/webrtc/VideoFrameDrawer.java",
       "api/org/webrtc/YuvConverter.java",
       "api/org/webrtc/YuvHelper.java",
+      "api/org/webrtc/TimestampAligner.java",
       "src/java/org/webrtc/EglBase10.java",
       "src/java/org/webrtc/EglBase14.java",
       "src/java/org/webrtc/GlGenericDrawer.java",
@@ -266,6 +277,7 @@ if (is_android) {
       ":base_java",
       ":video_api_java",
       "//rtc_base:base_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
@@ -276,9 +288,11 @@ if (is_android) {
       "api/org/webrtc/AudioSource.java",
       "api/org/webrtc/AudioTrack.java",
       "api/org/webrtc/CallSessionFileRotatingLogSink.java",
+      "api/org/webrtc/CryptoOptions.java",
       "api/org/webrtc/DataChannel.java",
       "api/org/webrtc/DtmfSender.java",
       "api/org/webrtc/FecControllerFactoryFactoryInterface.java",
+      "api/org/webrtc/MediaTransportFactoryFactory.java",
       "api/org/webrtc/FrameDecryptor.java",
       "api/org/webrtc/FrameEncryptor.java",
       "api/org/webrtc/IceCandidate.java",
@@ -318,6 +332,7 @@ if (is_android) {
     deps = [
       ":audio_api_java",
       ":base_java",
+      ":builtin_audio_codecs_java",
       ":default_video_codec_factory_java",
       ":logging_java",
       ":swcodecs_java",
@@ -325,6 +340,7 @@ if (is_android) {
       ":video_java",
       "//modules/audio_device:audio_device_java",
       "//rtc_base:base_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
@@ -350,6 +366,7 @@ if (is_android) {
       ":video_api_java",
       ":video_java",
       "//rtc_base:base_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
@@ -364,6 +381,7 @@ if (is_android) {
       ":swcodecs_java",
       ":video_api_java",
       ":video_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
@@ -406,6 +424,7 @@ if (is_android) {
       ":video_api_java",
       ":video_java",
       "//rtc_base:base_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
@@ -424,6 +443,18 @@ if (is_android) {
       ":audio_api_java",
       ":base_java",
       "//rtc_base:base_java",
+      "//third_party/android_deps:android_support_annotations_java",
+    ]
+  }
+
+  rtc_android_library("builtin_audio_codecs_java") {
+    java_files = [
+      "api/org/webrtc/BuiltinAudioDecoderFactoryFactory.java",
+      "api/org/webrtc/BuiltinAudioEncoderFactoryFactory.java",
+    ]
+
+    deps = [
+      ":audio_api_java",
     ]
   }
 
@@ -434,6 +465,7 @@ if (is_android) {
       ":video_api_java",
       ":video_java",
       "//rtc_base:base_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
@@ -450,21 +482,48 @@ if (is_android) {
     ]
   }
 
-  rtc_android_library("swcodecs_java") {
+  rtc_android_library("libvpx_vp8_java") {
+    visibility = [ "*" ]
     java_files = [
-      "api/org/webrtc/SoftwareVideoDecoderFactory.java",
-      "api/org/webrtc/SoftwareVideoEncoderFactory.java",
-      "src/java/org/webrtc/VP8Encoder.java",
-      "src/java/org/webrtc/VP8Decoder.java",
-      "src/java/org/webrtc/VP9Encoder.java",
-      "src/java/org/webrtc/VP9Decoder.java",
+      "api/org/webrtc/LibvpxVp8Decoder.java",
+      "api/org/webrtc/LibvpxVp8Encoder.java",
     ]
-
     deps = [
       ":base_java",
       ":video_api_java",
       ":video_java",
       "//rtc_base:base_java",
+    ]
+  }
+
+  rtc_android_library("libvpx_vp9_java") {
+    visibility = [ "*" ]
+    java_files = [
+      "api/org/webrtc/LibvpxVp9Decoder.java",
+      "api/org/webrtc/LibvpxVp9Encoder.java",
+    ]
+    deps = [
+      ":base_java",
+      ":video_api_java",
+      ":video_java",
+      "//rtc_base:base_java",
+    ]
+  }
+
+  rtc_android_library("swcodecs_java") {
+    java_files = [
+      "api/org/webrtc/SoftwareVideoDecoderFactory.java",
+      "api/org/webrtc/SoftwareVideoEncoderFactory.java",
+    ]
+
+    deps = [
+      ":base_java",
+      ":libvpx_vp8_java",
+      ":libvpx_vp9_java",
+      ":video_api_java",
+      ":video_java",
+      "//rtc_base:base_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
@@ -477,10 +536,12 @@ if (is_android) {
   rtc_source_set("base_jni") {
     visibility = [ "*" ]
     sources = [
-      "src/jni/androidhistogram.cc",
-      "src/jni/androidnetworkmonitor.cc",
+      "src/jni/android_histogram.cc",
+      "src/jni/android_network_monitor.cc",
+      "src/jni/android_network_monitor.h",
       "src/jni/androidnetworkmonitor.h",
       "src/jni/class_loader.h",
+      "src/jni/class_reference_holder.h",
       "src/jni/classreferenceholder.h",
       "src/jni/jni_common.cc",
       "src/jni/jni_helpers.cc",
@@ -512,87 +573,130 @@ if (is_android) {
 
     deps = [
       ":base_jni",
+      ":builtin_audio_codecs_jni",
       "../../api/audio_codecs:builtin_audio_decoder_factory",
       "../../api/audio_codecs:builtin_audio_encoder_factory",
+      "../../modules/audio_processing:api",
       "../../modules/audio_processing:audio_processing",
       "../../rtc_base:rtc_base_approved",
     ]
   }
 
-  rtc_static_library("video_jni") {
-    sources = []
+  rtc_static_library("builtin_audio_codecs_jni") {
+    sources = [
+      "src/jni/builtin_audio_decoder_factory_factory.cc",
+      "src/jni/builtin_audio_encoder_factory_factory.cc",
+    ]
+
     deps = [
-      "../../system_wrappers:field_trial",
+      ":base_jni",
+      ":generated_builtin_audio_codecs_jni",
+      ":native_api_jni",
+      "../../api/audio_codecs:builtin_audio_decoder_factory",
+      "../../api/audio_codecs:builtin_audio_encoder_factory",
+      "../../rtc_base:rtc_base_approved",
     ]
+  }
 
-    sources += [
+  # Corresponds to MediaCodecVideoEncoder/Decoder in Java.
+  rtc_static_library("legacy_hwcodecs_jni") {
+    visibility = [ "*" ]
+    allow_poison = [ "software_video_codecs" ]
+    sources = [
+      "src/jni/android_media_codec_common.h",
+      "src/jni/android_media_decoder.cc",
+      "src/jni/android_media_encoder.cc",
       "src/jni/androidmediacodeccommon.h",
-      "src/jni/androidmediadecoder.cc",
-      "src/jni/androidmediaencoder.cc",
-      "src/jni/androidvideotracksource.cc",
+    ]
+    deps = [
+      ":base_jni",
+      ":default_video_codec_factory_jni",
+      ":generated_video_jni",
+      ":native_api_jni",
+      ":video_jni",
+      ":videoframe_jni",
+      "../..:webrtc_common",
+      "../../api/video_codecs:video_codecs_api",
+      "../../common_video:common_video",
+      "../../media:rtc_internal_video_codecs",
+      "../../media:rtc_media_base",
+      "../../modules/video_coding:video_codec_interface",
+      "../../modules/video_coding:video_coding_utility",
+      "../../rtc_base:checks",
+      "../../rtc_base:rtc_base",
+      "../../rtc_base:rtc_task_queue_api",
+      "../../rtc_base:sequenced_task_checker",
+      "../../rtc_base:weak_ptr",
+      "../../system_wrappers:field_trial",
+      "//third_party/libyuv",
+    ]
+  }
+
+  rtc_static_library("video_jni") {
+    sources = [
+      "src/jni/android_video_track_source.cc",
+      "src/jni/android_video_track_source.h",
       "src/jni/androidvideotracksource.h",
-      "src/jni/encodedimage.cc",
+      "src/jni/encoded_image.cc",
+      "src/jni/encoded_image.h",
       "src/jni/encodedimage.h",
-      "src/jni/h264utils.cc",
-      "src/jni/javai420buffer.cc",
+      "src/jni/h264_utils.cc",
+      "src/jni/java_i420_buffer.cc",
       "src/jni/jni_generator_helper.h",
-      "src/jni/nativecapturerobserver.cc",
+      "src/jni/native_capturer_observer.cc",
+      "src/jni/native_capturer_observer.h",
       "src/jni/nativecapturerobserver.h",
-      "src/jni/nv12buffer.cc",
-      "src/jni/nv21buffer.cc",
+      "src/jni/nv12_buffer.cc",
+      "src/jni/nv21_buffer.cc",
       "src/jni/pc/video.cc",
-      "src/jni/videocodecinfo.cc",
+      "src/jni/timestamp_aligner.cc",
+      "src/jni/video_codec_info.cc",
+      "src/jni/video_codec_info.h",
+      "src/jni/video_codec_status.cc",
+      "src/jni/video_codec_status.h",
+      "src/jni/video_decoder_factory_wrapper.cc",
+      "src/jni/video_decoder_factory_wrapper.h",
+      "src/jni/video_decoder_fallback.cc",
+      "src/jni/video_decoder_wrapper.cc",
+      "src/jni/video_decoder_wrapper.h",
+      "src/jni/video_encoder_factory_wrapper.cc",
+      "src/jni/video_encoder_factory_wrapper.h",
+      "src/jni/video_encoder_fallback.cc",
+      "src/jni/video_encoder_wrapper.cc",
+      "src/jni/video_encoder_wrapper.h",
+      "src/jni/video_sink.cc",
+      "src/jni/video_sink.h",
+      "src/jni/video_source.cc",
+      "src/jni/video_track.cc",
       "src/jni/videocodecinfo.h",
-      "src/jni/videocodecstatus.cc",
       "src/jni/videocodecstatus.h",
-      "src/jni/videodecoderfactorywrapper.cc",
       "src/jni/videodecoderfactorywrapper.h",
-      "src/jni/videodecoderfallback.cc",
-      "src/jni/videodecoderwrapper.cc",
       "src/jni/videodecoderwrapper.h",
-      "src/jni/videoencoderfactorywrapper.cc",
       "src/jni/videoencoderfactorywrapper.h",
-      "src/jni/videoencoderfallback.cc",
-      "src/jni/videoencoderwrapper.cc",
       "src/jni/videoencoderwrapper.h",
-      "src/jni/videosink.cc",
       "src/jni/videosink.h",
-      "src/jni/videosource.cc",
-      "src/jni/videotrack.cc",
-      "src/jni/yuvhelper.cc",
+      "src/jni/yuv_helper.cc",
     ]
 
-    deps += [
+    deps = [
       ":base_jni",
       ":generated_video_jni",
       ":native_api_jni",
       ":videoframe_jni",
-      ":vp8_jni",  # TODO(bugs.webrtc.org/7925): Remove.
-      ":vp9_jni",  # TODO(bugs.webrtc.org/7925): Remove.
       "../..:webrtc_common",
       "../../api:libjingle_peerconnection_api",
       "../../api/video:encoded_image",
       "../../api/video:video_frame",
-      "../../api/video_codecs:builtin_video_decoder_factory",
-      "../../api/video_codecs:builtin_video_encoder_factory",
       "../../api/video_codecs:rtc_software_fallback_wrappers",
       "../../api/video_codecs:video_codecs_api",
       "../../common_video:common_video",
-      "../../media:rtc_audio_video",
-      "../../media:rtc_h264_profile_id",
-      "../../media:rtc_internal_video_codecs",
       "../../media:rtc_media_base",
-      "../../modules/utility:utility",
       "../../modules/video_coding:codec_globals_headers",
       "../../modules/video_coding:video_codec_interface",
       "../../modules/video_coding:video_coding_utility",
       "../../rtc_base:checks",
       "../../rtc_base:rtc_base",
-      "../../rtc_base:rtc_base_approved",
-      "../../rtc_base:rtc_task_queue",
-      "../../rtc_base:sequenced_task_checker",
-      "../../rtc_base:weak_ptr",
-      "../../rtc_base/memory:aligned_malloc",
+      "../../rtc_base:rtc_task_queue_api",
       "//third_party/libyuv",
     ]
   }
@@ -604,49 +708,73 @@ if (is_android) {
     visibility = [ "*" ]
 
     sources = [
+      "src/jni/android_network_monitor_jni.h",
       "src/jni/androidnetworkmonitor_jni.h",
+      "src/jni/pc/android_network_monitor.h",
       "src/jni/pc/androidnetworkmonitor.h",
-      "src/jni/pc/audiotrack.cc",
-      "src/jni/pc/callsessionfilerotatinglogsink.cc",
-      "src/jni/pc/datachannel.cc",
+      "src/jni/pc/audio_track.cc",
+      "src/jni/pc/call_session_file_rotating_log_sink.cc",
+      "src/jni/pc/crypto_options.cc",
+      "src/jni/pc/crypto_options.h",
+      "src/jni/pc/cryptooptions.h",
+      "src/jni/pc/data_channel.cc",
+      "src/jni/pc/data_channel.h",
       "src/jni/pc/datachannel.h",
-      "src/jni/pc/dtmfsender.cc",
-      "src/jni/pc/icecandidate.cc",
+      "src/jni/pc/dtmf_sender.cc",
+      "src/jni/pc/ice_candidate.cc",
+      "src/jni/pc/ice_candidate.h",
       "src/jni/pc/icecandidate.h",
-      "src/jni/pc/mediaconstraints.cc",
+      "src/jni/pc/media_constraints.cc",
+      "src/jni/pc/media_constraints.h",
+      "src/jni/pc/media_source.cc",
+      "src/jni/pc/media_stream.cc",
+      "src/jni/pc/media_stream.h",
+      "src/jni/pc/media_stream_track.cc",
+      "src/jni/pc/media_stream_track.h",
       "src/jni/pc/mediaconstraints.h",
-      "src/jni/pc/mediasource.cc",
-      "src/jni/pc/mediastream.cc",
       "src/jni/pc/mediastream.h",
-      "src/jni/pc/mediastreamtrack.cc",
       "src/jni/pc/mediastreamtrack.h",
-      "src/jni/pc/ownedfactoryandthreads.cc",
+      "src/jni/pc/owned_factory_and_threads.cc",
+      "src/jni/pc/owned_factory_and_threads.h",
       "src/jni/pc/ownedfactoryandthreads.h",
-      "src/jni/pc/peerconnection.cc",
+      "src/jni/pc/peer_connection.cc",
+      "src/jni/pc/peer_connection.h",
+      "src/jni/pc/peer_connection_factory.cc",
+      "src/jni/pc/peer_connection_factory.h",
       "src/jni/pc/peerconnection.h",
-      "src/jni/pc/peerconnectionfactory.cc",
       "src/jni/pc/peerconnectionfactory.h",
-      "src/jni/pc/rtccertificate.cc",
+      "src/jni/pc/rtc_certificate.cc",
+      "src/jni/pc/rtc_certificate.h",
+      "src/jni/pc/rtc_stats_collector_callback_wrapper.cc",
+      "src/jni/pc/rtc_stats_collector_callback_wrapper.h",
       "src/jni/pc/rtccertificate.h",
-      "src/jni/pc/rtcstatscollectorcallbackwrapper.cc",
       "src/jni/pc/rtcstatscollectorcallbackwrapper.h",
-      "src/jni/pc/rtpparameters.cc",
+      "src/jni/pc/rtp_parameters.cc",
+      "src/jni/pc/rtp_parameters.h",
+      "src/jni/pc/rtp_receiver.cc",
+      "src/jni/pc/rtp_receiver.h",
+      "src/jni/pc/rtp_sender.cc",
+      "src/jni/pc/rtp_sender.h",
+      "src/jni/pc/rtp_transceiver.cc",
+      "src/jni/pc/rtp_transceiver.h",
       "src/jni/pc/rtpparameters.h",
-      "src/jni/pc/rtpreceiver.cc",
       "src/jni/pc/rtpreceiver.h",
-      "src/jni/pc/rtpsender.cc",
       "src/jni/pc/rtpsender.h",
-      "src/jni/pc/rtptransceiver.cc",
       "src/jni/pc/rtptransceiver.h",
-      "src/jni/pc/sdpobserver.cc",
+      "src/jni/pc/sdp_observer.cc",
+      "src/jni/pc/sdp_observer.h",
       "src/jni/pc/sdpobserver.h",
-      "src/jni/pc/sessiondescription.cc",
+      "src/jni/pc/session_description.cc",
+      "src/jni/pc/session_description.h",
       "src/jni/pc/sessiondescription.h",
-      "src/jni/pc/sslcertificateverifierwrapper.cc",
+      "src/jni/pc/ssl_certificate_verifier_wrapper.cc",
+      "src/jni/pc/ssl_certificate_verifier_wrapper.h",
       "src/jni/pc/sslcertificateverifierwrapper.h",
-      "src/jni/pc/statsobserver.cc",
+      "src/jni/pc/stats_observer.cc",
+      "src/jni/pc/stats_observer.h",
       "src/jni/pc/statsobserver.h",
-      "src/jni/pc/turncustomizer.cc",
+      "src/jni/pc/turn_customizer.cc",
+      "src/jni/pc/turn_customizer.h",
       "src/jni/pc/turncustomizer.h",
     ]
 
@@ -656,6 +784,7 @@ if (is_android) {
       ":generated_peerconnection_jni",
       ":logging_jni",
       ":native_api_jni",
+      ":native_api_stacktrace",
       "../..:webrtc_common",
       "../../api:libjingle_peerconnection_api",
       "../../api/video_codecs:video_codecs_api",
@@ -670,9 +799,9 @@ if (is_android) {
       "../../rtc_base:rtc_base",
       "../../rtc_base:rtc_base_approved",
       "../../rtc_base:rtc_task_queue",
-      "../../rtc_base:stringutils",
       "../../system_wrappers:field_trial",
       "//third_party/abseil-cpp/absl/memory",
+      "//third_party/abseil-cpp/absl/types:optional",
     ]
   }
 
@@ -686,6 +815,51 @@ if (is_android) {
       ":base_jni",
       ":generated_java_audio_jni",
       ":java_audio_device_module",
+      "//third_party/abseil-cpp/absl/memory",
+    ]
+  }
+
+  rtc_static_library("default_video_codec_factory_jni") {
+    visibility = [ "*" ]
+    allow_poison = [ "software_video_codecs" ]
+    deps = [
+      ":swcodecs_jni",
+      ":video_jni",
+    ]
+  }
+
+  rtc_static_library("libvpx_vp8_jni") {
+    visibility = [ "*" ]
+    allow_poison = [ "software_video_codecs" ]
+    sources = [
+      "src/jni/vp8_codec.cc",
+    ]
+    deps = [
+      ":base_jni",
+      ":generated_libvpx_vp8_jni",
+      ":video_jni",
+      "../../modules/video_coding:webrtc_vp8",
+    ]
+  }
+
+  rtc_static_library("libvpx_vp9_jni") {
+    visibility = [ "*" ]
+    allow_poison = [ "software_video_codecs" ]
+    sources = [
+      "src/jni/vp9_codec.cc",
+    ]
+    deps = [
+      ":base_jni",
+      ":generated_libvpx_vp9_jni",
+      ":video_jni",
+      "../../modules/video_coding:webrtc_vp9",
+    ]
+  }
+
+  rtc_static_library("swcodecs_jni") {
+    deps = [
+      ":libvpx_vp8_jni",
+      ":libvpx_vp9_jni",
     ]
   }
 
@@ -730,7 +904,8 @@ if (is_android) {
     sources = [
       "native_api/base/init.cc",
       "native_api/base/init.h",
-      "native_api/base/networkmonitor.cc",
+      "native_api/base/network_monitor.cc",
+      "native_api/base/network_monitor.h",
       "native_api/base/networkmonitor.h",
     ]
 
@@ -773,10 +948,7 @@ if (is_android) {
   # objects.
   rtc_static_library("native_api_codecs") {
     visibility = [ "*" ]
-    allow_poison = [
-      "audio_codecs",  # TODO(bugs.webrtc.org/8396): Remove.
-      "software_video_codecs",  # TODO(bugs.webrtc.org/7925): Remove.
-    ]
+    allow_poison = [ "audio_codecs" ]  # TODO(bugs.webrtc.org/8396): Remove.
     sources = [
       "native_api/codecs/wrapper.cc",
       "native_api/codecs/wrapper.h",
@@ -796,14 +968,11 @@ if (is_android) {
   # API for creating Java PeerConnectionFactory from C++ equivalents.
   rtc_static_library("native_api_peerconnection") {
     visibility = [ "*" ]
-
-    allow_poison = [ "software_video_codecs" ]  # TODO(bugs.webrtc.org/7925): Remove.
-
     sources = [
-      "native_api/peerconnection/peerconnectionfactory.cc",
+      "native_api/peerconnection/peer_connection_factory.cc",
+      "native_api/peerconnection/peer_connection_factory.h",
       "native_api/peerconnection/peerconnectionfactory.h",
     ]
-
     deps = [
       ":base_jni",
       ":peerconnection_jni",
@@ -813,16 +982,27 @@ if (is_android) {
     ]
   }
 
+  # API for capturing and printing native stacktraces.
+  rtc_static_library("native_api_stacktrace") {
+    visibility = [ "*" ]
+    sources = [
+      "native_api/stacktrace/stacktrace.cc",
+      "native_api/stacktrace/stacktrace.h",
+    ]
+
+    deps = [
+      "../../rtc_base",
+    ]
+  }
+
   # API for creating C++ wrapper implementations of api/mediastreaminterface.h
   # video interfaces from their Java equivalents.
   rtc_static_library("native_api_video") {
     visibility = [ "*" ]
-    allow_poison = [
-      "audio_codecs",  # TODO(bugs.webrtc.org/8396): Remove.
-      "software_video_codecs",  # TODO(bugs.webrtc.org/7925): Remove.
-    ]
+    allow_poison = [ "audio_codecs" ]  # TODO(bugs.webrtc.org/8396): Remove.
     sources = [
-      "native_api/video/videosource.cc",
+      "native_api/video/video_source.cc",
+      "native_api/video/video_source.h",
       "native_api/video/videosource.h",
       "native_api/video/wrapper.cc",
       "native_api/video/wrapper.h",
@@ -894,8 +1074,10 @@ if (is_android) {
       "../../api/video_codecs:video_codecs_api",
       "../../call:call_interfaces",
       "../../logging:rtc_event_log_api",
+      "../../logging:rtc_event_log_impl_base",
       "../../media:rtc_audio_video",
       "../../modules/audio_device:audio_device",
+      "../../modules/audio_processing:api",
       "../../modules/audio_processing:audio_processing",
     ]
   }
@@ -916,7 +1098,8 @@ if (is_android) {
 
   rtc_static_library("videoframe_jni") {
     sources = [
-      "src/jni/videoframe.cc",
+      "src/jni/video_frame.cc",
+      "src/jni/video_frame.h",
       "src/jni/videoframe.h",
       "src/jni/wrapped_native_i420_buffer.cc",
       "src/jni/wrapped_native_i420_buffer.h",
@@ -934,34 +1117,11 @@ if (is_android) {
     ]
   }
 
-  rtc_static_library("vp8_jni") {
-    sources = [
-      "src/jni/vp8codec.cc",
-    ]
-
-    deps = [
-      ":base_jni",
-      ":generated_vp8_jni",
-      "../../modules/video_coding:webrtc_vp8",
-    ]
-  }
-
-  rtc_static_library("vp9_jni") {
-    sources = [
-      "src/jni/vp9codec.cc",
-    ]
-
-    deps = [
-      ":base_jni",
-      ":generated_vp9_jni",
-      "../../modules/video_coding:webrtc_vp9",
-    ]
-  }
-
   rtc_static_library("logging_jni") {
     visibility = [ "*" ]
     sources = [
-      "src/jni/logging/logsink.cc",
+      "src/jni/logging/log_sink.cc",
+      "src/jni/logging/log_sink.h",
       "src/jni/logging/logsink.h",
     ]
 
@@ -986,10 +1146,12 @@ if (is_android) {
       ":base_jni",
       ":generated_audio_device_module_base_jni",
       ":native_api_jni",
+      "../../modules/audio_device:audio_device_api",
       "../../modules/audio_device:audio_device_buffer",
       "../../rtc_base:checks",
       "../../rtc_base:rtc_base_approved",
       "../../system_wrappers:metrics",
+      "//third_party/abseil-cpp/absl/memory",
       "//third_party/abseil-cpp/absl/types:optional",
     ]
   }
@@ -1119,6 +1281,7 @@ if (is_android) {
       "api/org/webrtc/JavaI420Buffer.java",
       "api/org/webrtc/MediaCodecVideoDecoder.java",
       "api/org/webrtc/MediaCodecVideoEncoder.java",
+      "api/org/webrtc/TimestampAligner.java",
       "api/org/webrtc/VideoCodecInfo.java",
       "api/org/webrtc/VideoCodecStatus.java",
       "api/org/webrtc/VideoDecoder.java",
@@ -1145,10 +1308,10 @@ if (is_android) {
     jni_generator_include = "//sdk/android/src/jni/jni_generator_helper.h"
   }
 
-  generate_jni("generated_vp8_jni") {
+  generate_jni("generated_libvpx_vp8_jni") {
     sources = [
-      "src/java/org/webrtc/VP8Decoder.java",
-      "src/java/org/webrtc/VP8Encoder.java",
+      "api/org/webrtc/LibvpxVp8Decoder.java",
+      "api/org/webrtc/LibvpxVp8Encoder.java",
     ]
 
     jni_package = ""
@@ -1156,10 +1319,10 @@ if (is_android) {
     jni_generator_include = "//sdk/android/src/jni/jni_generator_helper.h"
   }
 
-  generate_jni("generated_vp9_jni") {
+  generate_jni("generated_libvpx_vp9_jni") {
     sources = [
-      "src/java/org/webrtc/VP9Decoder.java",
-      "src/java/org/webrtc/VP9Encoder.java",
+      "api/org/webrtc/LibvpxVp9Decoder.java",
+      "api/org/webrtc/LibvpxVp9Encoder.java",
     ]
 
     jni_package = ""
@@ -1171,6 +1334,7 @@ if (is_android) {
     sources = [
       "api/org/webrtc/AudioTrack.java",
       "api/org/webrtc/CallSessionFileRotatingLogSink.java",
+      "api/org/webrtc/CryptoOptions.java",
       "api/org/webrtc/DataChannel.java",
       "api/org/webrtc/DtmfSender.java",
       "api/org/webrtc/IceCandidate.java",
@@ -1203,6 +1367,16 @@ if (is_android) {
   generate_jni("generated_java_audio_jni") {
     sources = [
       "api/org/webrtc/audio/JavaAudioDeviceModule.java",
+    ]
+    jni_package = ""
+    namespace = "webrtc::jni"
+    jni_generator_include = "//sdk/android/src/jni/jni_generator_helper.h"
+  }
+
+  generate_jni("generated_builtin_audio_codecs_jni") {
+    sources = [
+      "api/org/webrtc/BuiltinAudioDecoderFactoryFactory.java",
+      "api/org/webrtc/BuiltinAudioEncoderFactoryFactory.java",
     ]
     jni_package = ""
     namespace = "webrtc::jni"
@@ -1261,6 +1435,7 @@ if (is_android) {
 
       java_files = [
         "instrumentationtests/src/org/webrtc/AndroidVideoDecoderInstrumentationTest.java",
+        "instrumentationtests/src/org/webrtc/BuiltinAudioCodecsFactoryFactoryTest.java",
         "instrumentationtests/src/org/webrtc/Camera1CapturerUsingByteBufferTest.java",
         "instrumentationtests/src/org/webrtc/Camera1CapturerUsingTextureTest.java",
         "instrumentationtests/src/org/webrtc/Camera2CapturerTest.java",
@@ -1282,6 +1457,7 @@ if (is_android) {
         "instrumentationtests/src/org/webrtc/TestConstants.java",
         "instrumentationtests/src/org/webrtc/VideoFileRendererTest.java",
         "instrumentationtests/src/org/webrtc/VideoFrameBufferTest.java",
+        "instrumentationtests/src/org/webrtc/TimestampAlignerTest.java",
         "instrumentationtests/src/org/webrtc/WebRtcJniBootTest.java",
         "instrumentationtests/src/org/webrtc/YuvHelperTest.java",
       ]
@@ -1350,9 +1526,10 @@ if (is_android) {
       "native_unittests/audio_device/audio_device_unittest.cc",
       "native_unittests/codecs/wrapper_unittest.cc",
       "native_unittests/java_types_unittest.cc",
-      "native_unittests/peerconnection/peerconnectionfactory_unittest.cc",
+      "native_unittests/peerconnection/peer_connection_factory_unittest.cc",
+      "native_unittests/stacktrace/stacktrace_unittest.cc",
       "native_unittests/test_jni_onload.cc",
-      "native_unittests/video/videosource_unittest.cc",
+      "native_unittests/video/video_source_unittest.cc",
     ]
 
     data = [
@@ -1376,26 +1553,28 @@ if (is_android) {
       ":native_api_codecs",
       ":native_api_jni",
       ":native_api_peerconnection",
+      ":native_api_stacktrace",
       ":native_api_video",
       ":opensles_audio_device_module",
       ":video_jni",
-      "../../system_wrappers:system_wrappers",
-      "//api/audio_codecs:builtin_audio_decoder_factory",
-      "//api/audio_codecs:builtin_audio_encoder_factory",
-      "//api/video:video_frame",
-      "//media:rtc_audio_video",
-      "//media:rtc_internal_video_codecs",
-      "//media:rtc_media_base",
-      "//modules/audio_device:audio_device",
-      "//modules/audio_device:mock_audio_device",
-      "//modules/audio_processing:audio_processing",
-      "//modules/utility:utility",
-      "//pc:libjingle_peerconnection",
-      "//rtc_base:checks",
-      "//rtc_base:rtc_base_approved",
-      "//test:fileutils",
-      "//test:test_support",
-      "//testing/gtest",
+      "../../api/audio_codecs:builtin_audio_decoder_factory",
+      "../../api/audio_codecs:builtin_audio_encoder_factory",
+      "../../api/video:video_frame",
+      "../../logging:rtc_event_log_impl_base",
+      "../../media:rtc_audio_video",
+      "../../media:rtc_internal_video_codecs",
+      "../../media:rtc_media_base",
+      "../../modules/audio_device:audio_device",
+      "../../modules/audio_device:mock_audio_device",
+      "../../modules/audio_processing:api",
+      "../../modules/audio_processing:audio_processing",
+      "../../modules/utility:utility",
+      "../../pc:libjingle_peerconnection",
+      "../../rtc_base:checks",
+      "../../rtc_base:rtc_base_approved",
+      "../../test:fileutils",
+      "../../test:test_support",
+      "../../testing/gtest",
       "//third_party/abseil-cpp/absl/memory",
     ]
   }

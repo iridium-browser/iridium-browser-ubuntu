@@ -7,12 +7,9 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/omnibox/omnibox_theme.h"
-#include "chrome/browser/ui/views/location_bar/background_with_1_px_border.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_bubble_delegate_view.h"
-#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/event.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/paint_vector_icon.h"
@@ -53,11 +50,8 @@ PageActionIconView::PageActionIconView(CommandUpdater* command_updater,
       command_id_(command_id),
       active_(false),
       suppress_mouse_released_action_(false) {
-  if (ui::MaterialDesignController::IsNewerMaterialUi()) {
-    // Ink drop ripple opacity.
-    set_ink_drop_visible_opacity(
-        GetOmniboxStateAlpha(OmniboxPartState::SELECTED));
-  }
+  set_ink_drop_visible_opacity(
+      GetOmniboxStateOpacity(OmniboxPartState::SELECTED));
 }
 
 PageActionIconView::~PageActionIconView() {}
@@ -198,17 +192,13 @@ PageActionIconView::CreateInkDropHighlight() const {
       CreateDefaultInkDropHighlight(
           gfx::RectF(GetMirroredRect(GetContentsBounds())).CenterPoint(),
           size());
-  if (ui::MaterialDesignController::IsNewerMaterialUi()) {
-    highlight->set_visible_opacity(
-        GetOmniboxStateAlpha(OmniboxPartState::HOVERED));
-  }
+  highlight->set_visible_opacity(
+      GetOmniboxStateOpacity(OmniboxPartState::HOVERED));
   return highlight;
 }
 
 std::unique_ptr<views::InkDropMask> PageActionIconView::CreateInkDropMask()
     const {
-  if (!LocationBarView::IsRounded())
-    return nullptr;
   return std::make_unique<views::RoundRectInkDropMask>(size(), gfx::Insets(),
                                                        height() / 2.f);
 }
@@ -231,6 +221,10 @@ void PageActionIconView::ExecuteCommand(ExecuteSource source) {
     command_updater_->ExecuteCommand(command_id_);
 }
 
+const gfx::VectorIcon& PageActionIconView::GetVectorIconBadge() const {
+  return gfx::kNoneIcon;
+}
+
 void PageActionIconView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   views::BubbleDialogDelegateView* bubble = GetBubble();
   if (bubble)
@@ -238,10 +232,10 @@ void PageActionIconView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   IconLabelBubbleView::OnBoundsChanged(previous_bounds);
 }
 
-void PageActionIconView::OnMdModeChanged() {
+void PageActionIconView::OnTouchUiChanged() {
   icon_size_ = GetLayoutConstant(LOCATION_BAR_ICON_SIZE);
   UpdateIconImage();
-  IconLabelBubbleView::OnMdModeChanged();
+  IconLabelBubbleView::OnTouchUiChanged();
 }
 
 void PageActionIconView::UpdateBorder() {
@@ -260,7 +254,8 @@ void PageActionIconView::UpdateIconImage() {
                            ? theme->GetSystemColor(
                                  ui::NativeTheme::kColorId_ProminentButtonColor)
                            : icon_color_;
-  SetImage(gfx::CreateVectorIcon(GetVectorIcon(), icon_size_, icon_color));
+  SetImage(gfx::CreateVectorIconWithBadge(GetVectorIcon(), icon_size_,
+                                          icon_color, GetVectorIconBadge()));
 }
 
 void PageActionIconView::SetActiveInternal(bool active) {

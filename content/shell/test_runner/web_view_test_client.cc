@@ -11,6 +11,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "content/shell/test_runner/event_sender.h"
+#include "content/shell/test_runner/mock_screen_orientation_client.h"
 #include "content/shell/test_runner/test_common.h"
 #include "content/shell/test_runner/test_interfaces.h"
 #include "content/shell/test_runner/test_runner.h"
@@ -29,17 +30,15 @@
 namespace test_runner {
 
 WebViewTestClient::WebViewTestClient(
-    WebViewTestProxyBase* web_view_test_proxy_base,
-    std::unique_ptr<blink::WebWidgetClient> web_widget_client)
-    : web_view_test_proxy_base_(web_view_test_proxy_base),
-      web_widget_client_(std::move(web_widget_client)) {
+    WebViewTestProxyBase* web_view_test_proxy_base)
+    : web_view_test_proxy_base_(web_view_test_proxy_base) {
   DCHECK(web_view_test_proxy_base);
 }
 
 WebViewTestClient::~WebViewTestClient() {}
 
-// The output from these methods in layout test mode should match that
-// expected by the layout tests. See EditingDelegate.m in DumpRenderTree.
+// The output from these methods in web test mode should match that
+// expected by the web tests. See EditingDelegate.m in DumpRenderTree.
 
 blink::WebView* WebViewTestClient::CreateView(
     blink::WebLocalFrame* frame,
@@ -48,7 +47,8 @@ blink::WebView* WebViewTestClient::CreateView(
     const blink::WebString& frame_name,
     blink::WebNavigationPolicy policy,
     bool suppress_opener,
-    blink::WebSandboxFlags sandbox_flags) {
+    blink::WebSandboxFlags sandbox_flags,
+    const blink::SessionStorageNamespaceId& session_storage_namespace_id) {
   if (test_runner()->shouldDumpNavigationPolicy()) {
     delegate()->PrintMessage("Default policy for createView for '" +
                              URLDescription(request.Url()) + "' is '" +
@@ -70,7 +70,7 @@ blink::WebView* WebViewTestClient::CreateView(
 
 // Simulate a print by going into print mode and then exit straight away.
 void WebViewTestClient::PrintPage(blink::WebLocalFrame* frame) {
-  blink::WebSize page_size_in_pixels = frame->View()->Size();
+  blink::WebSize page_size_in_pixels = frame->View()->MainFrameWidget()->Size();
   if (page_size_in_pixels.IsEmpty())
     return;
   blink::WebPrintParams printParams(page_size_in_pixels);
@@ -102,8 +102,19 @@ bool WebViewTestClient::CanUpdateLayout() {
   return true;
 }
 
-blink::WebWidgetClient* WebViewTestClient::WidgetClient() {
-  return web_widget_client_.get();
+blink::WebScreenInfo WebViewTestClient::GetScreenInfo() {
+  blink::WebScreenInfo screen_info;
+  MockScreenOrientationClient* mock_client =
+      test_runner()->getMockScreenOrientationClient();
+  if (mock_client->IsDisabled()) {
+    // Indicate to WebViewTestProxy that there is no test/mock info.
+    screen_info.orientation_type = blink::kWebScreenOrientationUndefined;
+  } else {
+    // Override screen orientation information with mock data.
+    screen_info.orientation_type = mock_client->CurrentOrientationType();
+    screen_info.orientation_angle = mock_client->CurrentOrientationAngle();
+  }
+  return screen_info;
 }
 
 }  // namespace test_runner

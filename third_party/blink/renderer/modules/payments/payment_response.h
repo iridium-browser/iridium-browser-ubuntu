@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/world_safe_v8_reference.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
@@ -59,11 +60,11 @@ class MODULES_EXPORT PaymentResponse final
   const String& payerPhone() const { return payer_phone_; }
 
   ScriptPromise complete(ScriptState*, const String& result = "");
-  ScriptPromise retry(ScriptState*, const PaymentValidationErrors&);
+  ScriptPromise retry(ScriptState*, const PaymentValidationErrors*);
 
   bool HasPendingActivity() const override;
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(payerdetailchange);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(payerdetailchange, kPayerdetailchange);
 
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
@@ -73,7 +74,7 @@ class MODULES_EXPORT PaymentResponse final
  private:
   String request_id_;
   String method_name_;
-  ScriptValue details_;
+  WorldSafeV8Reference<v8::Value> details_;
   Member<PaymentAddress> shipping_address_;
   String shipping_option_;
   String payer_name_;

@@ -40,7 +40,7 @@
 #include "ui/strings/grit/ui_strings.h"
 
 #if defined(OS_CHROMEOS)
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/time/time.h"
 #include "chromeos/system/devicemode.h"
 #include "ui/display/manager/display_util.h"
@@ -477,13 +477,19 @@ void DisplayManager::SetLayoutForCurrentDisplays(
 }
 
 const Display& DisplayManager::GetDisplayForId(int64_t display_id) const {
-  Display* display =
+  auto* display =
       const_cast<DisplayManager*>(this)->FindDisplayForId(display_id);
+  // TODO(oshima): This happens when windows in unified desktop have
+  // been moved to a normal window. Fix this.
+  if (!display && display_id != kUnifiedDisplayId)
+    DLOG(ERROR) << "Could not find display:" << display_id;
   return display ? *display : GetInvalidDisplay();
 }
 
 bool DisplayManager::IsDisplayIdValid(int64_t display_id) const {
-  return GetDisplayForId(display_id).is_valid();
+  Display* display =
+      const_cast<DisplayManager*>(this)->FindDisplayForId(display_id);
+  return !!display;
 }
 
 const Display& DisplayManager::FindDisplayContainingPoint(
@@ -1003,7 +1009,7 @@ void DisplayManager::UpdateDisplaysWith(
       new_displays.push_back(new_display);
       ++curr_iter;
       ++new_info_iter;
-    } else if (curr_iter->id() < new_info_iter->id()) {
+    } else if (CompareDisplayIds(curr_iter->id(), new_info_iter->id())) {
       // more displays in current list between ids, which means it is deleted.
       removed_displays.push_back(*curr_iter);
       ++curr_iter;
@@ -1214,12 +1220,40 @@ void DisplayManager::SetUnifiedDesktopMatrix(
   SetDefaultMultiDisplayModeForCurrentDisplays(UNIFIED);
 }
 
-const Display* DisplayManager::GetPrimaryMirroringDisplayForUnifiedDesktop()
-    const {
+Display DisplayManager::GetMirroringDisplayForUnifiedDesktop(
+    DisplayPositionInUnifiedMatrix cell_position) const {
   if (!IsInUnifiedMode())
-    return nullptr;
+    return Display();
 
-  return &software_mirroring_display_list_[0];
+  DCHECK(!current_unified_desktop_matrix_.empty());
+
+  const size_t rows = current_unified_desktop_matrix_.size();
+  const size_t columns = current_unified_desktop_matrix_[0].size();
+
+  int64_t display_id = kInvalidDisplayId;
+  switch (cell_position) {
+    case DisplayPositionInUnifiedMatrix::kTopLeft:
+      display_id = current_unified_desktop_matrix_[0][0];
+      break;
+
+    case DisplayPositionInUnifiedMatrix::kTopRight:
+      display_id = current_unified_desktop_matrix_[0][columns - 1];
+      break;
+
+    case DisplayPositionInUnifiedMatrix::kBottomLeft:
+      display_id = current_unified_desktop_matrix_[rows - 1][0];
+      break;
+  }
+
+  DCHECK_NE(display_id, kInvalidDisplayId);
+
+  for (auto& display : software_mirroring_display_list_) {
+    if (display.id() == display_id)
+      return display;
+  }
+
+  NOTREACHED();
+  return Display();
 }
 
 int DisplayManager::GetMirroringDisplayRowIndexInUnifiedMatrix(
@@ -1338,7 +1372,8 @@ void DisplayManager::SetMirrorMode(
   ReconfigureDisplays();
 }
 
-void DisplayManager::AddRemoveDisplay() {
+void DisplayManager::AddRemoveDisplay(
+    ManagedDisplayInfo::ManagedDisplayModeList display_modes) {
   DCHECK(!active_display_list_.empty());
 
   DisplayInfoList new_display_info_list;
@@ -1349,13 +1384,33 @@ void DisplayManager::AddRemoveDisplay() {
   new_display_info_list.push_back(first_display);
   // Add if there is only one display connected.
   if (num_connected_displays() == 1) {
+    gfx::Rect host_bounds = first_display.bounds_in_native();
+    if (display_modes.empty()) {
+      display_modes.emplace_back(
+          gfx::Size(600 /* width */, host_bounds.height()),
+          60.0, /* refresh_rate */
+          false /* is_interlaced */, true /* native */);
+    }
+
+    // Find native display mode (or just the first one if there is no
+    // mode marked as native) and create a display with this mode as a default
+    const ManagedDisplayMode* native_display_mode = &(display_modes[0]);
+    for (const ManagedDisplayMode& display_mode : display_modes) {
+      if (display_mode.native()) {
+        native_display_mode = &display_mode;
+        break;
+      }
+    }
+
     const int kVerticalOffsetPx = 100;
     // Layout the 2nd display below the primary as with the real device.
-    gfx::Rect host_bounds = first_display.bounds_in_native();
-    new_display_info_list.push_back(
-        ManagedDisplayInfo::CreateFromSpec(base::StringPrintf(
-            "%d+%d-600x%d", host_bounds.x(),
-            host_bounds.bottom() + kVerticalOffsetPx, host_bounds.height())));
+    ManagedDisplayInfo display = ManagedDisplayInfo::CreateFromSpec(
+        base::StringPrintf("%d+%d-%dx%d", host_bounds.x(),
+                           host_bounds.bottom() + kVerticalOffsetPx,
+                           native_display_mode->size().width(),
+                           native_display_mode->size().height()));
+    display.SetManagedDisplayModes(std::move(display_modes));
+    new_display_info_list.push_back(std::move(display));
   }
   num_connected_displays_ = new_display_info_list.size();
   ClearMirroringSourceAndDestination();
@@ -1945,10 +2000,6 @@ Display* DisplayManager::FindDisplayForId(int64_t id) {
                    [id](const Display& display) { return display.id() == id; });
   if (iter != active_display_list_.end())
     return &(*iter);
-  // TODO(oshima): This happens when windows in unified desktop have
-  // been moved to a normal window. Fix this.
-  if (id != kUnifiedDisplayId)
-    DLOG(ERROR) << "Could not find display:" << id;
   return nullptr;
 }
 
@@ -2145,6 +2196,12 @@ const Display& DisplayManager::GetSecondaryDisplay() const {
 
 void DisplayManager::UpdateInfoForRestoringMirrorMode() {
   if (num_connected_displays_ <= 1)
+    return;
+
+  // External displays mirrored because of forced tablet mode mirroring should
+  // not be considered candidates for restoring their mirrored state.
+  // https://crbug.com/919994.
+  if (layout_store_->forced_mirror_mode_for_tablet())
     return;
 
   for (auto id : GetCurrentDisplayIdList()) {

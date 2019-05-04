@@ -59,7 +59,7 @@ struct SPEED_FEATURES;
 int vp9_init_search_range(int size);
 
 int vp9_refining_search_sad(const struct macroblock *x, struct mv *ref_mv,
-                            int sad_per_bit, int distance,
+                            int error_per_bit, int search_range,
                             const struct vp9_variance_vtable *fn_ptr,
                             const struct mv *center_mv);
 
@@ -75,7 +75,7 @@ typedef uint32_t(fractional_mv_step_fp)(
     int forced_stop,  // 0 - full, 1 - qtr only, 2 - half only
     int iters_per_step, int *cost_list, int *mvjcost, int *mvcost[2],
     uint32_t *distortion, uint32_t *sse1, const uint8_t *second_pred, int w,
-    int h);
+    int h, int use_accurate_subpel_search);
 
 extern fractional_mv_step_fp vp9_find_best_sub_pixel_tree;
 extern fractional_mv_step_fp vp9_find_best_sub_pixel_tree_pruned;
@@ -126,14 +126,52 @@ double vp9_refining_search_sad_new(const MACROBLOCK *x, MV *best_full_mv,
                                    double *best_mv_dist, double *best_mv_cost,
                                    double lambda, int search_range,
                                    const vp9_variance_fn_ptr_t *fn_ptr,
-                                   const int_mv *nb_full_mvs);
+                                   const int_mv *nb_full_mvs, int full_mv_num);
 
 double vp9_full_pixel_diamond_new(const struct VP9_COMP *cpi, MACROBLOCK *x,
                                   MV *mvp_full, int step_param, double lambda,
-                                  int further_steps, int do_refine,
+                                  int do_refine,
                                   const vp9_variance_fn_ptr_t *fn_ptr,
-                                  const int_mv *nb_full_mvs,
-                                  struct TplDepStats *tpl_stats, int rf_idx);
+                                  const int_mv *nb_full_mvs, int full_mv_num,
+                                  MV *best_mv, double *best_mv_dist,
+                                  double *best_mv_cost);
+
+double vp9_nb_mvs_inconsistency(const MV *mv, const int_mv *nb_mvs, int mv_num);
+static INLINE MV get_full_mv(const MV *mv) {
+  MV out_mv;
+  out_mv.row = mv->row >> 3;
+  out_mv.col = mv->col >> 3;
+  return out_mv;
+}
+
+struct TplDepFrame;
+void vp9_prepare_nb_full_mvs(const struct TplDepFrame *tpl_frame, int mi_row,
+                             int mi_col, int rf_idx, BLOCK_SIZE bsize,
+                             int_mv *nb_full_mvs);
+
+static INLINE BLOCK_SIZE get_square_block_size(BLOCK_SIZE bsize) {
+  BLOCK_SIZE square_bsize;
+  switch (bsize) {
+    case BLOCK_4X4:
+    case BLOCK_4X8:
+    case BLOCK_8X4: square_bsize = BLOCK_4X4; break;
+    case BLOCK_8X8:
+    case BLOCK_8X16:
+    case BLOCK_16X8: square_bsize = BLOCK_8X8; break;
+    case BLOCK_16X16:
+    case BLOCK_16X32:
+    case BLOCK_32X16: square_bsize = BLOCK_16X16; break;
+    case BLOCK_32X32:
+    case BLOCK_32X64:
+    case BLOCK_64X32:
+    case BLOCK_64X64: square_bsize = BLOCK_32X32; break;
+    default:
+      square_bsize = BLOCK_INVALID;
+      assert(0 && "ERROR: invalid block size");
+      break;
+  }
+  return square_bsize;
+}
 #endif  // CONFIG_NON_GREEDY_MV
 #ifdef __cplusplus
 }  // extern "C"

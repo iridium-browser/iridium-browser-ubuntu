@@ -125,6 +125,8 @@ typedef struct SVC {
 
   BLOCK_SIZE *prev_partition_svc;
   int mi_stride[VPX_MAX_LAYERS];
+  int mi_rows[VPX_MAX_LAYERS];
+  int mi_cols[VPX_MAX_LAYERS];
 
   int first_layer_denoise;
 
@@ -141,10 +143,11 @@ typedef struct SVC {
 
   INTER_LAYER_PRED disable_inter_layer_pred;
 
-  // Flag to indicate scene change at current superframe, scene detection is
-  // currently checked for each superframe prior to encoding, on the full
-  // resolution source.
+  // Flag to indicate scene change and high num of motion blocks at current
+  // superframe, scene detection is currently checked for each superframe prior
+  // to encoding, on the full resolution source.
   int high_source_sad_superframe;
+  int high_num_blocks_with_motion;
 
   // Flags used to get SVC pattern info.
   int update_buffer_slot[VPX_SS_MAX_LAYERS];
@@ -178,9 +181,14 @@ typedef struct SVC {
 
   int first_spatial_layer_to_encode;
 
+  // Parameters for allowing framerate per spatial layer, and buffer
+  // update based on timestamps.
   int64_t duration[VPX_SS_MAX_LAYERS];
-
   int64_t timebase_fac;
+  int64_t time_stamp_superframe;
+  int64_t time_stamp_prev[VPX_SS_MAX_LAYERS];
+
+  int num_encoded_top_layer;
 } SVC;
 
 struct VP9_COMP;
@@ -228,13 +236,17 @@ struct lookahead_entry *vp9_svc_lookahead_pop(struct VP9_COMP *const cpi,
 // Start a frame and initialize svc parameters
 int vp9_svc_start_frame(struct VP9_COMP *const cpi);
 
+#if CONFIG_VP9_TEMPORAL_DENOISING
+int vp9_denoise_svc_non_key(struct VP9_COMP *const cpi);
+#endif
+
 void vp9_copy_flags_ref_update_idx(struct VP9_COMP *const cpi);
 
 int vp9_one_pass_cbr_svc_start_layer(struct VP9_COMP *const cpi);
 
 void vp9_free_svc_cyclic_refresh(struct VP9_COMP *const cpi);
 
-void vp9_svc_reset_key_frame(struct VP9_COMP *const cpi);
+void vp9_svc_reset_temporal_layers(struct VP9_COMP *const cpi, int is_key);
 
 void vp9_svc_check_reset_layer_rc_flag(struct VP9_COMP *const cpi);
 
@@ -250,6 +262,7 @@ void vp9_svc_update_ref_frame(struct VP9_COMP *const cpi);
 
 void vp9_svc_adjust_frame_rate(struct VP9_COMP *const cpi);
 
+void vp9_svc_adjust_avg_frame_qindex(struct VP9_COMP *const cpi);
 #ifdef __cplusplus
 }  // extern "C"
 #endif

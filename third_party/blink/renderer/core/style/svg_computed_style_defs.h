@@ -30,9 +30,10 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/style_color.h"
 #include "third_party/blink/renderer/core/style/style_path.h"
+#include "third_party/blink/renderer/platform/geometry/length.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
-#include "third_party/blink/renderer/platform/length.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/ref_vector.h"
@@ -249,8 +250,8 @@ class StyleStopData : public RefCounted<StyleStopData> {
     return !(*this == other);
   }
 
+  StyleColor color;
   float opacity;
-  Color color;
 
  private:
   StyleStopData();

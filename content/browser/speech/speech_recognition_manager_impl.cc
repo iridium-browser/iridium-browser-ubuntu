@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <map>
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -55,6 +56,8 @@ namespace {
 SpeechRecognitionManagerImpl* g_speech_recognition_manager_impl;
 
 }  // namespace
+
+int SpeechRecognitionManagerImpl::next_requester_id_ = 0;
 
 class SpeechRecognitionManagerImpl::FrameDeletionObserver {
  public:
@@ -231,6 +234,7 @@ SpeechRecognitionManagerImpl::SpeechRecognitionManagerImpl(
       delegate_(GetContentClient()
                     ->browser()
                     ->CreateSpeechRecognitionManagerDelegate()),
+      requester_id_(next_requester_id_++),
       weak_factory_(this) {
   DCHECK(!g_speech_recognition_manager_impl);
   g_speech_recognition_manager_impl = this;
@@ -350,8 +354,8 @@ void SpeechRecognitionManagerImpl::RecognitionAllowedCallback(int session_id,
   if (ask_user) {
     SpeechRecognitionSessionContext& context = session->context;
     context.label = media_stream_manager_->MakeMediaAccessRequest(
-        context.render_process_id, context.render_frame_id, session_id,
-        StreamControls(true, false), context.security_origin,
+        context.render_process_id, context.render_frame_id, requester_id_,
+        session_id, blink::StreamControls(true, false), context.security_origin,
         base::BindOnce(
             &SpeechRecognitionManagerImpl::MediaRequestPermissionCallback,
             weak_factory_.GetWeakPtr(), session_id));
@@ -377,7 +381,7 @@ void SpeechRecognitionManagerImpl::RecognitionAllowedCallback(int session_id,
 
 void SpeechRecognitionManagerImpl::MediaRequestPermissionCallback(
     int session_id,
-    const MediaStreamDevices& devices,
+    const blink::MediaStreamDevices& devices,
     std::unique_ptr<MediaStreamUIProxy> stream_ui) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -470,7 +474,7 @@ void SpeechRecognitionManagerImpl::OnRecognitionStart(int session_id) {
   auto iter = sessions_.find(session_id);
   if (iter->second->ui) {
     // Notify the UI that the devices are being used.
-    iter->second->ui->OnStarted(base::OnceClosure(),
+    iter->second->ui->OnStarted(base::OnceClosure(), base::RepeatingClosure(),
                                 MediaStreamUIProxy::WindowIdCallback());
   }
 
@@ -716,7 +720,7 @@ SpeechRecognitionManagerImpl::GetSessionState(int session_id) const {
 
 void SpeechRecognitionManagerImpl::SessionStart(const Session& session) {
   DCHECK_EQ(primary_session_id_, session.id);
-  const MediaStreamDevices& devices = session.context.devices;
+  const blink::MediaStreamDevices& devices = session.context.devices;
   std::string device_id;
   if (devices.empty()) {
     // From the ask_user=false path, use the default device.
@@ -726,7 +730,7 @@ void SpeechRecognitionManagerImpl::SessionStart(const Session& session) {
   } else {
     // From the ask_user=true path, use the selected device.
     DCHECK_EQ(1u, devices.size());
-    DCHECK_EQ(MEDIA_DEVICE_AUDIO_CAPTURE, devices.front().type);
+    DCHECK_EQ(blink::MEDIA_DEVICE_AUDIO_CAPTURE, devices.front().type);
     device_id = devices.front().id;
   }
 

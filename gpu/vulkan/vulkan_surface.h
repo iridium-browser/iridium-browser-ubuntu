@@ -7,6 +7,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include "base/callback.h"
 #include "gpu/vulkan/vulkan_device_queue.h"
 #include "gpu/vulkan/vulkan_export.h"
 #include "gpu/vulkan/vulkan_swap_chain.h"

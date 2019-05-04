@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/containers/flat_set.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -193,9 +192,10 @@ void ScriptContext::SafeCallFunction(
     web_frame_->RequestExecuteV8Function(v8_context(), function, global, argc,
                                          argv, wrapper_callback);
   } else {
-    // TODO(devlin): This probably isn't safe.
-    v8::Local<v8::Value> result = function->Call(global, argc, argv);
-    if (!callback.is_null()) {
+    v8::MaybeLocal<v8::Value> maybe_result =
+        function->Call(v8_context(), global, argc, argv);
+    v8::Local<v8::Value> result;
+    if (!callback.is_null() && maybe_result.ToLocal(&result)) {
       std::vector<v8::Local<v8::Value>> results(1, result);
       callback.Run(results);
     }
@@ -273,7 +273,7 @@ GURL ScriptContext::GetDocumentLoaderURLForFrame(
       frame->GetProvisionalDocumentLoader()
           ? frame->GetProvisionalDocumentLoader()
           : frame->GetDocumentLoader();
-  return document_loader ? GURL(document_loader->GetRequest().Url()) : GURL();
+  return document_loader ? GURL(document_loader->GetUrl()) : GURL();
 }
 
 // static
@@ -286,9 +286,9 @@ GURL ScriptContext::GetAccessCheckedFrameURL(
             ? frame->GetProvisionalDocumentLoader()
             : frame->GetDocumentLoader();
     if (document_loader &&
-        frame->GetSecurityOrigin().CanAccess(blink::WebSecurityOrigin::Create(
-            document_loader->GetRequest().Url()))) {
-      return GURL(document_loader->GetRequest().Url());
+        frame->GetSecurityOrigin().CanAccess(
+            blink::WebSecurityOrigin::Create(document_loader->GetUrl()))) {
+      return GURL(document_loader->GetUrl());
     }
   }
   return GURL(weburl);
@@ -364,7 +364,7 @@ void ScriptContext::OnResponseReceived(const std::string& name,
           .ToLocalChecked()};
 
   module_system()->CallModuleMethodSafe("sendRequest", "handleResponse",
-                                        arraysize(argv), argv);
+                                        base::size(argv), argv);
 }
 
 bool ScriptContext::HasAPIPermission(APIPermission::ID permission) const {
@@ -518,8 +518,16 @@ v8::Local<v8::Value> ScriptContext::CallFunction(
   }
 
   v8::Local<v8::Object> global = v8_context()->Global();
-  if (!web_frame_)
-    return handle_scope.Escape(function->Call(global, argc, argv));
+  if (!web_frame_) {
+    v8::MaybeLocal<v8::Value> maybe_result =
+        function->Call(v8_context(), global, argc, argv);
+    v8::Local<v8::Value> result;
+    if (!maybe_result.ToLocal(&result)) {
+      return handle_scope.Escape(
+          v8::Local<v8::Primitive>(v8::Undefined(isolate())));
+    }
+    return handle_scope.Escape(result);
+  }
 
   v8::MaybeLocal<v8::Value> result =
       web_frame_->CallFunctionEvenIfScriptDisabled(function, global, argc,

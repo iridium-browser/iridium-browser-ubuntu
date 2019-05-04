@@ -28,9 +28,9 @@
 #include "net/spdy/bidirectional_stream_spdy_impl.h"
 #include "net/spdy/spdy_http_stream.h"
 #include "net/spdy/spdy_session.h"
-#include "net/third_party/spdy/core/hpack/hpack_constants.h"
-#include "net/third_party/spdy/core/hpack/hpack_huffman_table.h"
-#include "net/third_party/spdy/core/hpack/hpack_static_table.h"
+#include "net/third_party/quiche/src/spdy/core/hpack/hpack_constants.h"
+#include "net/third_party/quiche/src/spdy/core/hpack/hpack_huffman_table.h"
+#include "net/third_party/quiche/src/spdy/core/hpack/hpack_static_table.h"
 
 namespace net {
 
@@ -57,7 +57,8 @@ SpdySessionPool::SpdySessionPool(
     size_t session_max_recv_window_size,
     const spdy::SettingsMap& initial_settings,
     const base::Optional<GreasedHttp2Frame>& greased_http2_frame,
-    SpdySessionPool::TimeFunc time_func)
+    SpdySessionPool::TimeFunc time_func,
+    NetworkQualityEstimator* network_quality_estimator)
     : http_server_properties_(http_server_properties),
       transport_security_state_(transport_security_state),
       ssl_config_service_(ssl_config_service),
@@ -71,7 +72,8 @@ SpdySessionPool::SpdySessionPool(
       initial_settings_(initial_settings),
       greased_http2_frame_(greased_http2_frame),
       time_func_(time_func),
-      push_delegate_(nullptr) {
+      push_delegate_(nullptr),
+      network_quality_estimator_(network_quality_estimator) {
   NetworkChangeNotifier::AddIPAddressObserver(this);
   if (ssl_config_service_)
     ssl_config_service_->AddObserver(this);
@@ -101,7 +103,7 @@ base::WeakPtr<SpdySession> SpdySessionPool::CreateAvailableSessionFromSocket(
     bool is_trusted_proxy,
     std::unique_ptr<ClientSocketHandle> connection,
     const NetLogWithSource& net_log) {
-  TRACE_EVENT0(kNetTracingCategory,
+  TRACE_EVENT0(NetTracingCategory(),
                "SpdySessionPool::CreateAvailableSessionFromSocket");
 
   UMA_HISTOGRAM_ENUMERATION(
@@ -113,7 +115,8 @@ base::WeakPtr<SpdySession> SpdySessionPool::CreateAvailableSessionFromSocket(
       enable_sending_initial_data_, enable_ping_based_connection_checking_,
       support_ietf_format_quic_altsvc_, is_trusted_proxy,
       session_max_recv_window_size_, initial_settings_, greased_http2_frame_,
-      time_func_, push_delegate_, net_log.net_log());
+      time_func_, push_delegate_, network_quality_estimator_,
+      net_log.net_log());
 
   new_session->InitializeWithSocket(std::move(connection), this);
 
@@ -199,7 +202,8 @@ base::WeakPtr<SpdySession> SpdySessionPool::FindAvailableSession(
       // We can reuse this session only if the proxy and privacy
       // settings match.
       if (!(alias_key.proxy_server() == key.proxy_server()) ||
-          !(alias_key.privacy_mode() == key.privacy_mode())) {
+          !(alias_key.privacy_mode() == key.privacy_mode()) ||
+          !(alias_key.is_proxy_session() == key.is_proxy_session())) {
         continue;
       }
 
@@ -258,9 +262,9 @@ base::WeakPtr<SpdySession> SpdySessionPool::FindAvailableSession(
             continue;
           }
           UnmapKey(*it);
-          SpdySessionKey new_pool_alias_key =
-              SpdySessionKey(it->host_port_pair(), it->proxy_server(),
-                             it->privacy_mode(), key.socket_tag());
+          SpdySessionKey new_pool_alias_key = SpdySessionKey(
+              it->host_port_pair(), it->proxy_server(), it->privacy_mode(),
+              it->is_proxy_session(), key.socket_tag());
           MapKeyToAvailableSession(new_pool_alias_key, available_session);
           auto old_it = it;
           ++it;

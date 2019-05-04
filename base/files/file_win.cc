@@ -273,7 +273,7 @@ File File::Duplicate() const {
 }
 
 bool File::DeleteOnClose(bool delete_on_close) {
-  FILE_DISPOSITION_INFO disposition = {delete_on_close ? TRUE : FALSE};
+  FILE_DISPOSITION_INFO disposition = {delete_on_close};
   return ::SetFileInformationByHandle(GetPlatformFile(), FileDispositionInfo,
                                       &disposition, sizeof(disposition)) != 0;
 }
@@ -411,6 +411,10 @@ bool File::Flush() {
   ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
   SCOPED_FILE_TRACE("Flush");
+
+  // On Windows 8 and above, FlushFileBuffers is guaranteed to flush the storage
+  // device's internal buffers (if they exist) before returning.
+  // https://blogs.msdn.microsoft.com/oldnewthing/20170510-00/?p=95505
   return ::FlushFileBuffers(file_.Get()) != FALSE;
 }
 

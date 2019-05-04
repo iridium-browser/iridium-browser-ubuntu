@@ -6,6 +6,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/no_destructor.h"
+#include "chromeos/components/multidevice/logging/logging.h"
 #include "chromeos/services/multidevice_setup/host_status_provider.h"
 #include "chromeos/services/multidevice_setup/public/cpp/android_sms_app_helper_delegate.h"
 #include "chromeos/services/multidevice_setup/public/mojom/multidevice_setup.mojom.h"
@@ -40,8 +41,7 @@ std::unique_ptr<AndroidSmsAppInstallingStatusObserver>
 AndroidSmsAppInstallingStatusObserver::Factory::BuildInstance(
     HostStatusProvider* host_status_provider,
     FeatureStateManager* feature_state_manager,
-    std::unique_ptr<AndroidSmsAppHelperDelegate>
-        android_sms_app_helper_delegate) {
+    AndroidSmsAppHelperDelegate* android_sms_app_helper_delegate) {
   return base::WrapUnique(new AndroidSmsAppInstallingStatusObserver(
       host_status_provider, feature_state_manager,
       std::move(android_sms_app_helper_delegate)));
@@ -56,24 +56,21 @@ AndroidSmsAppInstallingStatusObserver::
 AndroidSmsAppInstallingStatusObserver::AndroidSmsAppInstallingStatusObserver(
     HostStatusProvider* host_status_provider,
     FeatureStateManager* feature_state_manager,
-    std::unique_ptr<AndroidSmsAppHelperDelegate>
-        android_sms_app_helper_delegate)
+    AndroidSmsAppHelperDelegate* android_sms_app_helper_delegate)
     : host_status_provider_(host_status_provider),
       feature_state_manager_(feature_state_manager),
-      android_sms_app_helper_delegate_(
-          std::move(android_sms_app_helper_delegate)) {
+      android_sms_app_helper_delegate_(android_sms_app_helper_delegate) {
   host_status_provider_->AddObserver(this);
   feature_state_manager_->AddObserver(this);
   InstallPwaIfNeeded();
 }
 
-void AndroidSmsAppInstallingStatusObserver::InstallPwaIfNeeded() {
+bool AndroidSmsAppInstallingStatusObserver::IsPwaNeeded() {
   mojom::FeatureState feature_state =
       feature_state_manager_->GetFeatureStates()[mojom::Feature::kMessages];
-  if (feature_state == mojom::FeatureState::kProhibitedByPolicy ||
-      feature_state == mojom::FeatureState::kNotSupportedByChromebook ||
-      feature_state == mojom::FeatureState::kNotSupportedByPhone) {
-    return;
+  if (feature_state != mojom::FeatureState::kEnabledByUser &&
+      feature_state != mojom::FeatureState::kFurtherSetupRequired) {
+    return false;
   }
 
   mojom::HostStatus status(
@@ -81,12 +78,22 @@ void AndroidSmsAppInstallingStatusObserver::InstallPwaIfNeeded() {
   if (status !=
           mojom::HostStatus::kHostSetLocallyButWaitingForBackendConfirmation &&
       status != mojom::HostStatus::kHostVerified) {
+    return false;
+  }
+
+  return true;
+}
+
+void AndroidSmsAppInstallingStatusObserver::InstallPwaIfNeeded() {
+  // If PWA is not needed, clear default to persist cookie that was set
+  // during the last installation.
+  if (!IsPwaNeeded()) {
+    android_sms_app_helper_delegate_->TearDownAndroidSmsApp();
     return;
   }
 
-  // This call is re-entrant. If the app is already installed, it will just
-  // fail silently, which is fine.
-  android_sms_app_helper_delegate_->InstallAndroidSmsApp();
+  // Otherwise, set the default to persist cookie and install the PWA.
+  android_sms_app_helper_delegate_->SetUpAndroidSmsApp();
 }
 
 void AndroidSmsAppInstallingStatusObserver::OnHostStatusChange(

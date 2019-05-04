@@ -8,7 +8,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "extensions/common/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -45,7 +45,7 @@ TEST(ExtensionURLPatternTest, ParseInvalid) {
       {"http://bar", URLPattern::ParseResult::kEmptyPath},
       {"http://foo.*/bar", URLPattern::ParseResult::kInvalidHostWildcard}};
 
-  for (size_t i = 0; i < arraysize(kInvalidPatterns); ++i) {
+  for (size_t i = 0; i < base::size(kInvalidPatterns); ++i) {
     URLPattern pattern(URLPattern::SCHEME_ALL);
     EXPECT_EQ(kInvalidPatterns[i].expected_result,
               pattern.Parse(kInvalidPatterns[i].pattern))
@@ -88,7 +88,7 @@ TEST(ExtensionURLPatternTest, Ports) {
       {"http://foo/bar:1234/path", URLPattern::ParseResult::kSuccess, "*"},
       {"http://*.foo.*/:1234", URLPattern::ParseResult::kSuccess, "*"}};
 
-  for (size_t i = 0; i < arraysize(kTestPatterns); ++i) {
+  for (size_t i = 0; i < base::size(kTestPatterns); ++i) {
     URLPattern pattern(URLPattern::SCHEME_ALL);
     EXPECT_EQ(kTestPatterns[i].expected_result,
               pattern.Parse(kTestPatterns[i].pattern,
@@ -389,7 +389,7 @@ static const struct MatchPatterns {
 
 // SCHEME_ALL and specific schemes.
 TEST(ExtensionURLPatternTest, Match13) {
-  for (size_t i = 0; i < arraysize(kMatch13UrlPatternTestCases); ++i) {
+  for (size_t i = 0; i < base::size(kMatch13UrlPatternTestCases); ++i) {
     URLPattern pattern(URLPattern::SCHEME_ALL);
     EXPECT_EQ(URLPattern::ParseResult::kSuccess,
               pattern.Parse(kMatch13UrlPatternTestCases[i].pattern))
@@ -568,7 +568,7 @@ static const struct GetAsStringPatterns {
 };
 
 TEST(ExtensionURLPatternTest, GetAsString) {
-  for (size_t i = 0; i < arraysize(kGetAsStringTestCases); ++i) {
+  for (size_t i = 0; i < base::size(kGetAsStringTestCases); ++i) {
     URLPattern pattern(URLPattern::SCHEME_ALL);
     EXPECT_EQ(URLPattern::ParseResult::kSuccess,
               pattern.Parse(kGetAsStringTestCases[i].pattern))
@@ -785,7 +785,7 @@ TEST(ExtensionURLPatternTest, Equals) {
     }
   };
 
-  for (size_t i = 0; i < arraysize(kEqualsTestCases); ++i) {
+  for (size_t i = 0; i < base::size(kEqualsTestCases); ++i) {
     std::string message = kEqualsTestCases[i].pattern1;
     message += " ";
     message += kEqualsTestCases[i].pattern2;
@@ -1248,6 +1248,55 @@ TEST(ExtensionURLPatternTest, ValidSchemeIntersection) {
       EXPECT_EQ(test_case.expected_scheme, intersection2->valid_schemes());
     }
   }
+}
+
+// Tests that <all_urls> patterns correctly check schemes when testing if one
+// contains the other.
+TEST(ExtensionURLPatternTest, ContainsSchemes) {
+  const URLPattern http(URLPattern::SCHEME_HTTP, URLPattern::kAllUrlsPattern);
+  const URLPattern chrome(URLPattern::SCHEME_CHROMEUI,
+                          URLPattern::kAllUrlsPattern);
+  const URLPattern http_and_https(
+      URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS,
+      URLPattern::kAllUrlsPattern);
+  const URLPattern http_https_and_chrome(URLPattern::SCHEME_HTTP |
+                                             URLPattern::SCHEME_HTTPS |
+                                             URLPattern::SCHEME_CHROMEUI,
+                                         URLPattern::kAllUrlsPattern);
+
+  // A map between each URLPattern and the other patterns it should contain.
+  const std::map<const URLPattern*, std::set<const URLPattern*>> contains_map =
+      {
+          {&http, {}},
+          {&chrome, {}},
+          {&http_and_https, {&http}},
+          {&http_https_and_chrome, {&http, &http_and_https, &chrome}},
+      };
+
+  const URLPattern* all_patterns[] = {&http, &chrome, &http_and_https,
+                                      &http_https_and_chrome};
+
+  // Verify that each pattern contains exactly the expected patterns.
+  for (const auto& entry : contains_map) {
+    const URLPattern* pattern = entry.first;
+    const std::set<const URLPattern*>& contains_patterns = entry.second;
+    for (const URLPattern* other_pattern : all_patterns) {
+      SCOPED_TRACE(base::StringPrintf("Checking if %d contains %d",
+                                      pattern->valid_schemes(),
+                                      other_pattern->valid_schemes()));
+      bool expect_contains =
+          // Patterns should always contain themselves.
+          pattern == other_pattern || contains_patterns.count(other_pattern);
+      EXPECT_EQ(expect_contains, pattern->Contains(*other_pattern));
+    }
+  }
+
+  // Fun edge case for bonus points: |http| doesn't contain all the valid
+  // schemes of the other pattern, but does in practice (since the scheme is
+  // restricted to http by the match pattern).
+  EXPECT_TRUE(http.Contains(
+      URLPattern(URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS,
+                 "http://google.com/*")));
 }
 
 }  // namespace

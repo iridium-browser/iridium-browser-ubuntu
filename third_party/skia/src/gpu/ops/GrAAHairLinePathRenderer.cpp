@@ -318,7 +318,7 @@ static int gather_lines_and_quads(const SkPath& path,
                 if (convertConicsToQuads) {
                     SkScalar weight = iter.conicWeight();
                     SkAutoConicToQuads converter;
-                    const SkPoint* quadPts = converter.computeQuads(pathPts, weight, 0.5f);
+                    const SkPoint* quadPts = converter.computeQuads(pathPts, weight, 0.25f);
                     for (int i = 0; i < converter.countQuads(); ++i) {
                         addSrcChoppedQuad(quadPts + 2 * i, !verbsInContour && 0 == i);
                     }
@@ -514,7 +514,7 @@ static void intersect_lines(const SkPoint& ptA, const SkVector& normA,
 static void set_uv_quad(const SkPoint qpts[3], BezierVertex verts[kQuadNumVertices]) {
     // this should be in the src space, not dev coords, when we have perspective
     GrPathUtils::QuadUVMatrix DevToUV(qpts);
-    DevToUV.apply<kQuadNumVertices, sizeof(BezierVertex), sizeof(SkPoint)>(verts);
+    DevToUV.apply(verts, kQuadNumVertices, sizeof(BezierVertex), sizeof(SkPoint));
 }
 
 static void bloat_quad(const SkPoint qpts[3], const SkMatrix* toDevice,
@@ -803,7 +803,7 @@ public:
     }
 
     AAHairlineOp(const Helper::MakeArgs& helperArgs,
-                 GrColor color,
+                 const SkPMColor4f& color,
                  uint8_t coverage,
                  const SkMatrix& viewMatrix,
                  const SkPath& path,
@@ -822,24 +822,26 @@ public:
 
     const char* name() const override { return "AAHairlineOp"; }
 
-    void visitProxies(const VisitProxyFunc& func) const override {
+    void visitProxies(const VisitProxyFunc& func, VisitorType) const override {
         fHelper.visitProxies(func);
     }
 
+#ifdef SK_DEBUG
     SkString dumpInfo() const override {
         SkString string;
-        string.appendf("Color: 0x%08x Coverage: 0x%02x, Count: %d\n", fColor, fCoverage,
-                       fPaths.count());
+        string.appendf("Color: 0x%08x Coverage: 0x%02x, Count: %d\n", fColor.toBytes_RGBA(),
+                       fCoverage, fPaths.count());
         string += INHERITED::dumpInfo();
         string += fHelper.dumpInfo();
         return string;
     }
+#endif
 
     FixedFunctionFlags fixedFunctionFlags() const override { return fHelper.fixedFunctionFlags(); }
 
-    RequiresDstTexture finalize(const GrCaps& caps, const GrAppliedClip* clip) override {
-        return fHelper.xpRequiresDstTexture(caps, clip, GrProcessorAnalysisCoverage::kSingleChannel,
-                                            &fColor);
+    GrProcessorSet::Analysis finalize(const GrCaps& caps, const GrAppliedClip* clip) override {
+        return fHelper.finalizeProcessors(caps, clip, GrProcessorAnalysisCoverage::kSingleChannel,
+                                          &fColor);
     }
 
 private:
@@ -882,11 +884,10 @@ private:
         }
 
         fPaths.push_back_n(that->fPaths.count(), that->fPaths.begin());
-        this->joinBounds(*that);
         return CombineResult::kMerged;
     }
 
-    GrColor color() const { return fColor; }
+    const SkPMColor4f& color() const { return fColor; }
     uint8_t coverage() const { return fCoverage; }
     const SkMatrix& viewMatrix() const { return fPaths[0].fViewMatrix; }
 
@@ -899,7 +900,7 @@ private:
 
     SkSTArray<1, PathData, true> fPaths;
     Helper fHelper;
-    GrColor fColor;
+    SkPMColor4f fColor;
     uint8_t fCoverage;
 
     typedef GrMeshDrawOp INHERITED;
@@ -975,7 +976,7 @@ void AAHairlineOp::onPrepareDraws(Target* target) {
         const GrBuffer* vertexBuffer;
         int firstVertex;
 
-        SkASSERT(sizeof(LineVertex) == lineGP->debugOnly_vertexStride());
+        SkASSERT(sizeof(LineVertex) == lineGP->vertexStride());
         int vertexCount = kLineSegNumVertices * lineCount;
         LineVertex* verts = reinterpret_cast<LineVertex*>(target->makeVertexSpace(
                 sizeof(LineVertex), vertexCount, &vertexBuffer, &firstVertex));
@@ -1018,8 +1019,8 @@ void AAHairlineOp::onPrepareDraws(Target* target) {
 
         sk_sp<const GrBuffer> quadsIndexBuffer = get_quads_index_buffer(target->resourceProvider());
 
-        SkASSERT(sizeof(BezierVertex) == quadGP->debugOnly_vertexStride());
-        SkASSERT(sizeof(BezierVertex) == conicGP->debugOnly_vertexStride());
+        SkASSERT(sizeof(BezierVertex) == quadGP->vertexStride());
+        SkASSERT(sizeof(BezierVertex) == conicGP->vertexStride());
         int vertexCount = kQuadNumVertices * quadAndConicCount;
         void* vertices = target->makeVertexSpace(sizeof(BezierVertex), vertexCount, &vertexBuffer,
                                                  &firstVertex);

@@ -16,11 +16,10 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/time/time.h"
 #include "base/trace_event/memory_usage_estimator.h"
 #include "build/build_config.h"
-#include "components/omnibox/browser/omnibox_switches.h"
 #include "components/omnibox/browser/url_index_private_data.h"
 #include "components/search/search.h"
 #include "components/variations/active_field_trials.h"
@@ -34,13 +33,59 @@ using metrics::OmniboxEventProto;
 
 namespace omnibox {
 
+// Feature used to hide the scheme from steady state URLs displayed in the
+// toolbar. It is restored during editing.
+const base::Feature kHideFileUrlScheme {
+  "OmniboxUIExperimentHideFileUrlScheme",
+// Android and iOS don't have the File security chip, and therefore still
+// need to show the file scheme.
+      base::FEATURE_DISABLED_BY_DEFAULT
+};
+
+// Feature used to hide the scheme from steady state URLs displayed in the
+// toolbar. It is restored during editing.
+const base::Feature kHideSteadyStateUrlScheme {
+  "OmniboxUIExperimentHideSteadyStateUrlScheme",
+      base::FEATURE_DISABLED_BY_DEFAULT
+};
+
+// Feature used to hide trivial subdomains from steady state URLs displayed in
+// the toolbar. It is restored during editing.
+const base::Feature kHideSteadyStateUrlTrivialSubdomains {
+  "OmniboxUIExperimentHideSteadyStateUrlTrivialSubdomains",
+      base::FEATURE_DISABLED_BY_DEFAULT
+};
+
+// Feature used to hide the path, query and ref from steady state URLs
+// displayed in the toolbar. It is restored during editing.
+const base::Feature kHideSteadyStateUrlPathQueryAndRef {
+  "OmniboxUIExperimentHideSteadyStateUrlPathQueryAndRef",
+      base::FEATURE_DISABLED_BY_DEFAULT
+};
+
+// Feature used to undo all omnibox elisions on a single click or focus action.
+const base::Feature kOneClickUnelide{"OmniboxOneClickUnelide",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+
+// This feature simplifies the security indiciator UI for https:// pages. The
+// exact UI treatment is dependent on the parameter 'treatment' which can have
+// the following value:
+// - 'ev-to-secure': Show the "Secure" chip for pages with an EV certificate.
+// - 'secure-to-lock': Show only the lock icon for non-EV https:// pages.
+// - 'both-to-lock': Show only the lock icon for all https:// pages.
+// - 'keep-secure-chip': Show the old "Secure" chip for non-EV https:// pages.
+// The default behavior is the same as 'secure-to-lock'.
+// This feature is used for EV UI removal experiment (https://crbug.com/803501).
+const base::Feature kSimplifyHttpsIndicator{"SimplifyHttpsIndicator",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Feature used to enable entity suggestion images and enhanced presentation
 // showing more context and descriptive text about the entity.
 const base::Feature kOmniboxRichEntitySuggestions{
     "OmniboxRichEntitySuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Feature used to enable enhanced presentation showing larger images, currently
-// only used on desktop platforms.
+// Feature used to enable enhanced presentation showing larger images.
+// This is currently only used on Android.
 const base::Feature kOmniboxNewAnswerLayout{"OmniboxNewAnswerLayout",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -64,6 +109,12 @@ const base::Feature kOmniboxTabSwitchSuggestions{
       base::FEATURE_ENABLED_BY_DEFAULT
 #endif
 };
+
+// Feature used to reverse the sense of the tab switch button. Selecting the
+// suggestion will switch to the tab, while the button will navigate
+// locally.
+const base::Feature kOmniboxReverseTabSwitchLogic{
+    "OmniboxReverseTabSwitchLogic", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Feature used to enable various experiments on keyword mode, UI and
 // suggestions.
@@ -97,6 +148,16 @@ const base::Feature kEnableClipboardProvider {
 #endif
 };
 
+// Feature to enable clipboard provider to suggest copied text.
+const base::Feature kEnableClipboardProviderTextSuggestions{
+    "OmniboxEnableClipboardProviderTextSuggestions",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature to enable clipboard provider to suggest searching for copied images.
+const base::Feature kEnableClipboardProviderImageSuggestions{
+    "OmniboxEnableClipboardProviderImageSuggestions",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Feature to enable the search provider to send a request to the suggest
 // server on focus.  This allows the suggest server to warm up, by, for
 // example, loading per-user models into memory.  Having a per-user model
@@ -115,15 +176,10 @@ const base::Feature kSearchProviderWarmUpOnFocus{
 const base::Feature kZeroSuggestRedirectToChrome{
     "ZeroSuggestRedirectToChrome", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Feature used to swap the title and URL when providing zero suggest
-// suggestions.
-const base::Feature kZeroSuggestSwapTitleAndUrl{
-    "ZeroSuggestSwapTitleAndUrl", base::FEATURE_DISABLED_BY_DEFAULT};
-
 // Feature used to display the title of the current URL match.
 const base::Feature kDisplayTitleForCurrentUrl{
   "OmniboxDisplayTitleForCurrentUrl",
-#if defined(OS_ANDROID)
+#if !defined(OS_IOS)
       base::FEATURE_ENABLED_BY_DEFAULT
 #else
       base::FEATURE_DISABLED_BY_DEFAULT
@@ -139,20 +195,6 @@ const base::Feature kUIExperimentMaxAutocompleteMatches{
 // when the user is on the search results page of the default search provider.
 const base::Feature kQueryInOmnibox{"QueryInOmnibox",
                                     base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Feature used for eliding the suggestion URL after the host as a UI
-// experiment.
-const base::Feature kUIExperimentElideSuggestionUrlAfterHost{
-    "OmniboxUIExperimentElideSuggestionUrlAfterHost",
-    base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Feature used to jog the Omnibox textfield to align with the dropdown
-// suggestions text when the popup is opened. When this feature is disabled, the
-// textfield is always aligned with the suggestions text, and a separator fills
-// the gap.
-const base::Feature kUIExperimentJogTextfieldOnPopup{
-    "OmniboxUIExperimentJogTextfieldOnPopup",
-    base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Feature used for showing the URL suggestion favicons as a UI experiment,
 // currently only used on desktop platforms.
@@ -170,6 +212,62 @@ const base::Feature kUIExperimentSwapTitleAndUrl{
 #endif
 };
 
+// Feature used for the vertical margin UI experiment, currently only used on
+// desktop platforms.
+const base::Feature kUIExperimentVerticalMargin{
+    "OmniboxUIExperimentVerticalMargin", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to color "blue" the generic search icon and search terms.
+// Technically, this makes the search icon and search terms match the color of
+// Omnibox link text, which is blue by convention.
+const base::Feature kUIExperimentBlueSearchLoopAndSearchQuery{
+    "OmniboxUIExperimentBlueSearchLoopAndSearchQuery",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to change the color of text in navigation suggestions. It
+// changes title text from black to blue, and URL text from blue to gray.
+const base::Feature kUIExperimentBlueTitlesAndGrayUrlsOnPageSuggestions{
+    "OmniboxUIExperimentBlueTitlesAndGrayUrlsOnPageSuggestions",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to change the color of text in navigation suggestions. It
+// changes title text from black to blue.
+const base::Feature kUIExperimentBlueTitlesOnPageSuggestions{
+    "OmniboxUIExperimentBlueTitlesOnPageSuggestions",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to show a " - Google Search", " - Bing Search", etc. suffix on
+// all search suggestions instead of just the first one in each cluster.
+const base::Feature kUIExperimentShowSuffixOnAllSearchSuggestions{
+    "OmniboxUIExperimentShowSuffixOnAllSearchSuggestions",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to show a white background in the omnibox while it's unfocused.
+// More technically, with this flag on, it uses the same background color as
+// the results popup (conventionally white).
+const base::Feature kUIExperimentWhiteBackgroundOnBlur{
+    "OmniboxUIExperimentWhiteBackgroundOnBlur",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to show a generic vector icon for omnibox search instead of the
+// search engine favicon.
+const base::Feature kUIExperimentUseGenericSearchEngineIcon{
+    "OminboxUIExperimentUseGenericSearchEngineIcon",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to bold the "user text" part of search suggestions instead
+// of the "autocomplete" part. For example, if the user typed "point reyes",
+// and the search suggestion was "point reyes weather", this feature makes
+// the "point reyes" part of the suggestion bold, instead of "weather".
+const base::Feature kUIExperimentBoldUserTextOnSearchSuggestions{
+    "OmniboxUIExperimentBoldUserTextOnSearchSuggestions",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to unbold suggestion text.
+const base::Feature kUIExperimentUnboldSuggestionText{
+    "OmniboxUIExperimentUnboldSuggestionText",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Feature used to enable speculatively starting a service worker associated
 // with the destination of the default match when the user's input looks like a
 // query.
@@ -178,14 +276,15 @@ const base::Feature kSpeculativeServiceWorkerStartOnQueryInput{
       base::FEATURE_ENABLED_BY_DEFAULT
 };
 
-// Feature used to allow breaking words at underscores in building
-// URLIndexPrivateData.
-const base::Feature kBreakWordsAtUnderscores{"OmniboxBreakWordsAtUnderscores",
-                                             base::FEATURE_ENABLED_BY_DEFAULT};
-
 // Feature used to fetch document suggestions.
 const base::Feature kDocumentProvider{"OmniboxDocumentProvider",
                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to dedupe Google Drive URLs between different formats.
+// OmniboxDocumentProvider arms may wish to enable this, though it may also be
+// run on its own.
+const base::Feature kDedupeGoogleDriveURLs{"OmniboxDedupeGoogleDriveURLs",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Feature to replace the standard ZeroSuggest with icons for most visited sites
 // and collections (bookmarks, history, recent tabs, reading list). Only
@@ -693,15 +792,7 @@ OmniboxFieldTrial::GetEmphasizeTitlesConditionForInput(
   }
 
   // Touch-optimized UI always swaps title and URL.
-  if (ui::MaterialDesignController::is_mode_initialized() &&
-      ui::MaterialDesignController::IsTouchOptimizedUiEnabled()) {
-    return EMPHASIZE_WHEN_NONEMPTY;
-  }
-
-  // Check the feature that swaps the title and URL only for zero suggest
-  // suggestions.
-  if (input.from_omnibox_focus() &&
-      base::FeatureList::IsEnabled(omnibox::kZeroSuggestSwapTitleAndUrl))
+  if (ui::MaterialDesignController::touch_ui())
     return EMPHASIZE_WHEN_NONEMPTY;
 
   // Look up the parameter named kEmphasizeTitlesRule + "_" + input.type(),
@@ -730,11 +821,6 @@ bool OmniboxFieldTrial::IsRichEntitySuggestionsEnabled() {
   return base::FeatureList::IsEnabled(omnibox::kOmniboxRichEntitySuggestions);
 }
 
-bool OmniboxFieldTrial::IsNewAnswerLayoutEnabled() {
-  return base::FeatureList::IsEnabled(omnibox::kOmniboxNewAnswerLayout) ||
-         base::FeatureList::IsEnabled(features::kExperimentalUi);
-}
-
 bool OmniboxFieldTrial::IsReverseAnswersEnabled() {
   return base::FeatureList::IsEnabled(omnibox::kOmniboxReverseAnswers) ||
          base::FeatureList::IsEnabled(features::kExperimentalUi);
@@ -749,6 +835,10 @@ bool OmniboxFieldTrial::IsTabSwitchSuggestionsEnabled() {
 #endif
 }
 
+bool OmniboxFieldTrial::IsTabSwitchLogicReversed() {
+  return base::FeatureList::IsEnabled(omnibox::kOmniboxReverseTabSwitchLogic);
+}
+
 OmniboxFieldTrial::PedalSuggestionMode
 OmniboxFieldTrial::GetPedalSuggestionMode() {
   // Disabled case is handled specially, as no parameter values are specified.
@@ -758,15 +848,23 @@ OmniboxFieldTrial::GetPedalSuggestionMode() {
   return omnibox::pedal_suggestion_mode.Get();
 }
 
-bool OmniboxFieldTrial::IsJogTextfieldOnPopupEnabled() {
-  return base::FeatureList::IsEnabled(
-      omnibox::kUIExperimentJogTextfieldOnPopup);
+bool OmniboxFieldTrial::IsHideSteadyStateUrlSchemeEnabled() {
+  return base::FeatureList::IsEnabled(omnibox::kHideSteadyStateUrlScheme) ||
+         base::FeatureList::IsEnabled(features::kExperimentalUi);
 }
 
-bool OmniboxFieldTrial::IsShowSuggestionFaviconsEnabled() {
+bool OmniboxFieldTrial::IsHideSteadyStateUrlTrivialSubdomainsEnabled() {
   return base::FeatureList::IsEnabled(
-             omnibox::kUIExperimentShowSuggestionFavicons) ||
+             omnibox::kHideSteadyStateUrlTrivialSubdomains) ||
          base::FeatureList::IsEnabled(features::kExperimentalUi);
+}
+
+int OmniboxFieldTrial::GetSuggestionVerticalMargin() {
+  // When the vertical margin is set to 2dp, the suggestion height is the
+  // closest to the pre-Refresh height. In fact it's 1dp taller than the
+  // pre-Refresh height on Linux.
+  return base::GetFieldTrialParamByFeatureAsInt(
+      omnibox::kUIExperimentVerticalMargin, kUIVerticalMarginParam, 2);
 }
 
 bool OmniboxFieldTrial::IsExperimentalKeywordModeEnabled() {
@@ -843,8 +941,20 @@ const char
 
 const char OmniboxFieldTrial::kUIMaxAutocompleteMatchesParam[] =
     "UIMaxAutocompleteMatches";
+const char OmniboxFieldTrial::kUIVerticalMarginParam[] = "UIVerticalMargin";
 const char OmniboxFieldTrial::kPedalSuggestionModeParam[] =
     "PedalSuggestionMode";
+
+const char OmniboxFieldTrial::kSimplifyHttpsIndicatorParameterName[] =
+    "treatment";
+const char OmniboxFieldTrial::kSimplifyHttpsIndicatorParameterEvToSecure[] =
+    "ev-to-secure";
+const char OmniboxFieldTrial::kSimplifyHttpsIndicatorParameterSecureToLock[] =
+    "secure-to-lock";
+const char OmniboxFieldTrial::kSimplifyHttpsIndicatorParameterBothToLock[] =
+    "both-to-lock";
+const char OmniboxFieldTrial::kSimplifyHttpsIndicatorParameterKeepSecureChip[] =
+    "keep-secure-chip";
 
 const char OmniboxFieldTrial::kZeroSuggestRedirectToChromeExperimentIdParam[] =
     "ZeroSuggestRedirectToChromeExperimentID";

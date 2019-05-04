@@ -7,7 +7,7 @@
  * <settings-subpage-search> for a simple implementation.
  * @polymerBehavior
  */
-var CrSearchFieldBehavior = {
+const CrSearchFieldBehavior = {
   properties: {
     label: {
       type: String,
@@ -55,7 +55,7 @@ var CrSearchFieldBehavior = {
    *     firing for this change.
    */
   setValue: function(value, opt_noEvent) {
-    var searchInput = this.getSearchInput();
+    const searchInput = this.getSearchInput();
     searchInput.value = value;
 
     this.onSearchTermInput();
@@ -64,8 +64,9 @@ var CrSearchFieldBehavior = {
 
   /** @private */
   scheduleSearch_: function() {
-    if (this.searchDelayTimer_ >= 0)
+    if (this.searchDelayTimer_ >= 0) {
       clearTimeout(this.searchDelayTimer_);
+    }
     // Dispatch 'search' event after:
     //    0ms if the value is empty
     //  500ms if the value length is 1
@@ -73,8 +74,8 @@ var CrSearchFieldBehavior = {
     //  300ms if the value length is 3
     //  200ms if the value length is 4 or greater.
     // The logic here was copied from WebKit's native 'search' event.
-    var length = this.getValue().length;
-    var timeoutMs = length > 0 ? (500 - 100 * (Math.min(length, 4) - 1)) : 0;
+    const length = this.getValue().length;
+    const timeoutMs = length > 0 ? (500 - 100 * (Math.min(length, 4) - 1)) : 0;
     this.searchDelayTimer_ = setTimeout(() => {
       this.getSearchInput().dispatchEvent(
           new CustomEvent('search', {composed: true, detail: this.getValue()}));
@@ -106,12 +107,14 @@ var CrSearchFieldBehavior = {
    */
   onValueChanged_: function(newValue, noEvent) {
     const effectiveValue = newValue.replace(/\s+/g, ' ');
-    if (effectiveValue == this.lastValue_)
+    if (effectiveValue == this.lastValue_) {
       return;
+    }
 
     this.lastValue_ = effectiveValue;
 
-    if (!noEvent)
+    if (!noEvent) {
       this.fire('search-changed', effectiveValue);
+    }
   },
 };

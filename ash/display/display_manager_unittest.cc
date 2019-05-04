@@ -5,6 +5,9 @@
 #include "ui/display/manager/display_manager.h"
 
 #include "ash/accelerators/accelerator_commands.h"
+#include "ash/accelerometer/accelerometer_reader.h"
+#include "ash/accelerometer/accelerometer_types.h"
+#include "ash/app_list/app_list_controller_impl.h"
 #include "ash/display/cursor_window_controller.h"
 #include "ash/display/display_configuration_controller.h"
 #include "ash/display/display_util.h"
@@ -15,7 +18,9 @@
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/public/cpp/app_types.h"
 #include "ash/public/cpp/ash_switches.h"
+#include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
+#include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/test/ash_test_base.h"
@@ -24,12 +29,11 @@
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/format_macros.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
-#include "chromeos/accelerometer/accelerometer_reader.h"
-#include "chromeos/accelerometer/accelerometer_types.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window_observer.h"
@@ -55,8 +59,8 @@
 
 namespace ash {
 
-using std::vector;
 using std::string;
+using std::vector;
 
 using base::StringPrintf;
 
@@ -164,7 +168,7 @@ class DisplayManagerTest : public AshTestBase,
     display_manager()->SetMirrorMode(
         active ? display::MirrorMode::kNormal : display::MirrorMode::kOff,
         base::nullopt);
-    RunAllPendingInMessageLoop();
+    base::RunLoop().RunUntilIdle();
   }
 
  private:
@@ -1888,6 +1892,41 @@ TEST_F(DisplayManagerTest, ResolutionFallback) {
   }
 }
 
+TEST_F(DisplayManagerTest, DisplayRemovedOnlyOnceWhenEnteringDockedMode) {
+  // Create two displays, one internal, and one external, such that the full ID
+  // of the internal display is *greater* than the full ID of the external
+  // display, but the port-index part (least significant 8-bit) of the ID of the
+  // internal display is *less* than the port-index part of the external
+  // display.
+  constexpr int64_t kInternalDisplayId = 0x4D10DBEBF24802LL;
+  constexpr int64_t kExternalDisplayId = 0x4CABEF61B95735LL;
+  const auto internal_info = display::ManagedDisplayInfo::CreateFromSpecWithID(
+      "0+0-400x400", kInternalDisplayId);
+  const auto external_info = display::ManagedDisplayInfo::CreateFromSpecWithID(
+      "401+0-600x600", kExternalDisplayId);
+  vector<display::ManagedDisplayInfo> display_info_list{internal_info,
+                                                        external_info};
+  display_manager()->OnNativeDisplaysChanged(display_info_list);
+  display::test::DisplayManagerTestApi(display_manager())
+      .SetFirstDisplayAsInternalDisplay();
+
+  // Switching to docked mode in this configuration should result in only a
+  // single display removal, and no new display additions.
+  // https://crbug.com/921275.
+  reset();
+  display_info_list.clear();
+  display_info_list.emplace_back(external_info);
+  display_manager()->OnNativeDisplaysChanged(display_info_list);
+
+  // There should only be 1 display change, 0 adds, and 1 removal.
+  EXPECT_EQ("1 0 1 1 1", GetCountSummary());
+  const unsigned int expected_changed_metrics =
+      display::DisplayObserver::DISPLAY_METRIC_BOUNDS |
+      display::DisplayObserver::DISPLAY_METRIC_WORK_AREA |
+      display::DisplayObserver::DISPLAY_METRIC_PRIMARY;
+  EXPECT_EQ(expected_changed_metrics, changed_metrics());
+}
+
 TEST_F(DisplayManagerTest, Rotate) {
   UpdateDisplay("100x200/r,300x400/l");
   EXPECT_EQ("1,1 100x200", GetDisplayInfoAt(0).bounds_in_native().ToString());
@@ -2137,7 +2176,7 @@ TEST_F(DisplayManagerTest, SoftwareMirroring) {
 
   display_manager()->SetMultiDisplayMode(display::DisplayManager::MIRRORING);
   display_manager()->UpdateDisplays();
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(display_observer.changed_and_reset());
   EXPECT_EQ(1U, display_manager()->GetNumDisplays());
   EXPECT_EQ(
@@ -2589,10 +2628,10 @@ TEST_F(DisplayManagerTest, ConfigureUnifiedTwice) {
 
   UpdateDisplay("300x200,400x500");
   // Mirror windows are created in a posted task.
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
 
   UpdateDisplay("300x250,400x550");
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(DisplayManagerTest, NoRotateUnifiedDesktop) {
@@ -2718,10 +2757,12 @@ TEST_F(DisplayManagerTest, UnifiedDesktopVerticalLayout2x1) {
     display_manager()->SetUnifiedDesktopMatrix(matrix);
     // 500 + 400 * 200 / 300 ~= 766.
     EXPECT_EQ(gfx::Size(400, 766), screen->GetPrimaryDisplay().size());
-    // Display in top-left cell is considered primary.
-    EXPECT_EQ(
-        list[0],
-        display_manager()->GetPrimaryMirroringDisplayForUnifiedDesktop()->id());
+    // Default shelf alignment is bottom. Display in bottom-left cell is
+    // considered the primary mirroring display.
+    EXPECT_EQ(list[1], Shell::Get()
+                           ->display_configuration_controller()
+                           ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                           .id());
 
     // Validate display rows and max heights.
     EXPECT_EQ(0, display_manager()->GetMirroringDisplayRowIndexInUnifiedMatrix(
@@ -2747,10 +2788,11 @@ TEST_F(DisplayManagerTest, UnifiedDesktopVerticalLayout2x1) {
     // 200 + 300 * 500 / 400 ~= 574 (Note that we actually scale the max unified
     // bounds).
     EXPECT_EQ(gfx::Size(300, 574), screen->GetPrimaryDisplay().size());
-    // Display in top-left cell is considered primary.
-    EXPECT_EQ(
-        list[1],
-        display_manager()->GetPrimaryMirroringDisplayForUnifiedDesktop()->id());
+    // Display in bottom-left cell is considered primary.
+    EXPECT_EQ(list[0], Shell::Get()
+                           ->display_configuration_controller()
+                           ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                           .id());
 
     // Validate display rows and max heights.
     EXPECT_EQ(1, display_manager()->GetMirroringDisplayRowIndexInUnifiedMatrix(
@@ -2781,10 +2823,11 @@ TEST_F(DisplayManagerTest, UnifiedDesktopVerticalLayout2x1) {
                                                            list[1]);
     display_manager()->OnNativeDisplaysChanged(display_info_list);
     EXPECT_EQ(gfx::Size(300, 574), screen->GetPrimaryDisplay().size());
-    // Display in top-left cell is considered primary.
-    EXPECT_EQ(
-        list[0],
-        display_manager()->GetPrimaryMirroringDisplayForUnifiedDesktop()->id());
+    // Display in bottom-left cell is considered primary.
+    EXPECT_EQ(list[1], Shell::Get()
+                           ->display_configuration_controller()
+                           ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                           .id());
 
     // Validate display rows and max heights.
     EXPECT_EQ(0, display_manager()->GetMirroringDisplayRowIndexInUnifiedMatrix(
@@ -2820,10 +2863,11 @@ TEST_F(DisplayManagerTest, UnifiedDesktopVerticalLayout3x1) {
     matrix[2].emplace_back(list[2]);
     display_manager()->SetUnifiedDesktopMatrix(matrix);
     EXPECT_EQ(gfx::Size(500, 1225), screen->GetPrimaryDisplay().size());
-    // Display in top-left cell is considered primary.
-    EXPECT_EQ(
-        list[0],
-        display_manager()->GetPrimaryMirroringDisplayForUnifiedDesktop()->id());
+    // Display in bottom-left cell is considered primary.
+    EXPECT_EQ(list[2], Shell::Get()
+                           ->display_configuration_controller()
+                           ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                           .id());
 
     // Validate display rows and max heights.
     EXPECT_EQ(0, display_manager()->GetMirroringDisplayRowIndexInUnifiedMatrix(
@@ -2851,10 +2895,11 @@ TEST_F(DisplayManagerTest, UnifiedDesktopVerticalLayout3x1) {
     matrix[2].emplace_back(list[2]);
     display_manager()->SetUnifiedDesktopMatrix(matrix);
     EXPECT_EQ(gfx::Size(400, 980), screen->GetPrimaryDisplay().size());
-    // Display in top-left cell is considered primary.
-    EXPECT_EQ(
-        list[1],
-        display_manager()->GetPrimaryMirroringDisplayForUnifiedDesktop()->id());
+    // Display in bottom-left cell is considered primary.
+    EXPECT_EQ(list[2], Shell::Get()
+                           ->display_configuration_controller()
+                           ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                           .id());
 
     // Validate display rows and max heights.
     EXPECT_EQ(1, display_manager()->GetMirroringDisplayRowIndexInUnifiedMatrix(
@@ -2892,10 +2937,16 @@ TEST_F(DisplayManagerTest, UnifiedDesktopGridLayout2x2) {
   matrix[1].emplace_back(list[3]);
   display_manager()->SetUnifiedDesktopMatrix(matrix);
   EXPECT_EQ(gfx::Size(739, 933), screen->GetPrimaryDisplay().size());
-  // Display in top-left cell is considered primary.
-  EXPECT_EQ(
-      list[0],
-      display_manager()->GetPrimaryMirroringDisplayForUnifiedDesktop()->id());
+
+  // Default shelf alignment is bottom.
+  Shelf* shelf = Shell::GetPrimaryRootWindowController()->shelf();
+  EXPECT_EQ(shelf->alignment(), SHELF_ALIGNMENT_BOTTOM);
+
+  // Display in bottom-left cell is considered the primary mirroring display.
+  EXPECT_EQ(list[2], Shell::Get()
+                         ->display_configuration_controller()
+                         ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                         .id());
 
   // Validate display rows and max heights.
   EXPECT_EQ(0, display_manager()->GetMirroringDisplayRowIndexInUnifiedMatrix(
@@ -2909,6 +2960,22 @@ TEST_F(DisplayManagerTest, UnifiedDesktopGridLayout2x2) {
   EXPECT_EQ(300, display_manager()->GetUnifiedDesktopRowMaxHeight(0));
   EXPECT_EQ(633, display_manager()->GetUnifiedDesktopRowMaxHeight(1));
   EXPECT_FALSE(OverlappingMirroringDisplaysExist());
+
+  // Change the shelf alignment to left, and expect that the primary mirroring
+  // display in the top-left display in the matrix.
+  shelf->SetAlignment(SHELF_ALIGNMENT_LEFT);
+  EXPECT_EQ(list[0], Shell::Get()
+                         ->display_configuration_controller()
+                         ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                         .id());
+
+  // Change the shelf alignment to right, and expect that the primary mirroring
+  // display in the top-right display in the matrix.
+  shelf->SetAlignment(SHELF_ALIGNMENT_RIGHT);
+  EXPECT_EQ(list[1], Shell::Get()
+                         ->display_configuration_controller()
+                         ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                         .id());
 }
 
 TEST_F(DisplayManagerTest, UnifiedDesktopGridLayout3x2) {
@@ -2935,10 +3002,16 @@ TEST_F(DisplayManagerTest, UnifiedDesktopGridLayout3x2) {
   matrix[2].emplace_back(list[5]);
   display_manager()->SetUnifiedDesktopMatrix(matrix);
   EXPECT_EQ(gfx::Size(739, 1108), screen->GetPrimaryDisplay().size());
-  // Display in top-left cell is considered primary.
-  EXPECT_EQ(
-      list[0],
-      display_manager()->GetPrimaryMirroringDisplayForUnifiedDesktop()->id());
+
+  // Default shelf alignment is bottom.
+  Shelf* shelf = Shell::GetPrimaryRootWindowController()->shelf();
+  EXPECT_EQ(shelf->alignment(), SHELF_ALIGNMENT_BOTTOM);
+
+  // Display in bottom-left cell is considered the primary mirroring display.
+  EXPECT_EQ(list[4], Shell::Get()
+                         ->display_configuration_controller()
+                         ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                         .id());
 
   // Validate display rows and max heights.
   EXPECT_EQ(0, display_manager()->GetMirroringDisplayRowIndexInUnifiedMatrix(
@@ -2957,6 +3030,100 @@ TEST_F(DisplayManagerTest, UnifiedDesktopGridLayout3x2) {
   EXPECT_EQ(633, display_manager()->GetUnifiedDesktopRowMaxHeight(1));
   EXPECT_EQ(175, display_manager()->GetUnifiedDesktopRowMaxHeight(2));
   EXPECT_FALSE(OverlappingMirroringDisplaysExist());
+
+  // Change the shelf alignment to left, and expect that the primary mirroring
+  // display in the top-left display in the matrix.
+  shelf->SetAlignment(SHELF_ALIGNMENT_LEFT);
+  EXPECT_EQ(list[0], Shell::Get()
+                         ->display_configuration_controller()
+                         ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                         .id());
+
+  // Change the shelf alignment to right, and expect that the primary mirroring
+  // display in the top-right display in the matrix.
+  shelf->SetAlignment(SHELF_ALIGNMENT_RIGHT);
+  EXPECT_EQ(list[1], Shell::Get()
+                         ->display_configuration_controller()
+                         ->GetPrimaryMirroringDisplayForUnifiedDesktop()
+                         .id());
+}
+
+TEST_F(DisplayManagerTest, UnifiedDesktopTabletMode) {
+  // Don't check root window destruction in unified mode.
+  Shell::GetPrimaryRootWindow()->RemoveObserver(this);
+
+  UpdateDisplay("400x300,800x800");
+  base::RunLoop().RunUntilIdle();
+
+  // Set the first display as internal display so that the tablet mode can be
+  // enabled.
+  display::test::DisplayManagerTestApi(display_manager())
+      .SetFirstDisplayAsInternalDisplay();
+
+  display_manager()->SetUnifiedDesktopEnabled(true);
+  EXPECT_TRUE(display_manager()->IsInUnifiedMode());
+
+  // Turn on tablet mode, expect that we switch to mirror mode without any
+  // crashes.
+  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(display_manager()->IsInSoftwareMirrorMode());
+
+  // The Home Launcher should be created and shown, not dismissed as a result of
+  // the destruction of the Unified host when we switched to mirror mode
+  // asynchronously.
+  auto* app_list_controller = Shell::Get()->app_list_controller();
+  auto* tablet_mode_controller = Shell::Get()->tablet_mode_controller();
+  EXPECT_TRUE(tablet_mode_controller->IsTabletModeWindowManagerEnabled());
+  EXPECT_TRUE(app_list_controller->IsVisible());
+
+  // Exiting tablet mode should exit mirror mode and return back to Unified
+  // mode.
+  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(display_manager()->IsInSoftwareMirrorMode());
+  EXPECT_TRUE(display_manager()->IsInUnifiedMode());
+
+  // Home Launcher should be dismissed.
+  EXPECT_FALSE(tablet_mode_controller->IsTabletModeWindowManagerEnabled());
+  EXPECT_FALSE(app_list_controller->IsVisible());
+}
+
+TEST_F(DisplayManagerTest, DisplayPrefsAndForcedMirrorMode) {
+  UpdateDisplay("400x300,800x800");
+  base::RunLoop().RunUntilIdle();
+
+  // Set the first display as internal display so that the tablet mode can be
+  // enabled.
+  display::test::DisplayManagerTestApi(display_manager())
+      .SetFirstDisplayAsInternalDisplay();
+
+  // Initially we can save display prefs ...
+  EXPECT_TRUE(Shell::Get()->ShouldSaveDisplaySettings());
+  // ... and there are no external displays that are candidates for mirror
+  // restore.
+  EXPECT_TRUE(display_manager()->external_display_mirror_info().empty());
+
+  // Turn on tablet mode, and expect that it's not possible to persist the
+  // display prefs while forced mirror mode is active.
+  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(display_manager()->IsInSoftwareMirrorMode());
+  EXPECT_TRUE(
+      display_manager()->layout_store()->forced_mirror_mode_for_tablet());
+  EXPECT_FALSE(Shell::Get()->ShouldSaveDisplaySettings());
+  // Forced mirror mode does not add external displays as candidates for mirror
+  // restore.
+  EXPECT_TRUE(display_manager()->external_display_mirror_info().empty());
+
+  // Exit tablet mode and expect everything is back to normal.
+  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(display_manager()->IsInSoftwareMirrorMode());
+  EXPECT_FALSE(
+      display_manager()->layout_store()->forced_mirror_mode_for_tablet());
+  EXPECT_TRUE(Shell::Get()->ShouldSaveDisplaySettings());
+  EXPECT_TRUE(display_manager()->external_display_mirror_info().empty());
 }
 
 TEST_F(DisplayManagerTest, DockMode) {
@@ -3417,21 +3584,19 @@ class DisplayManagerOrientationTest : public DisplayManagerTest {
   void SetUp() override {
     DisplayManagerTest::SetUp();
     const float kMeanGravity = 9.8066f;
-    portrait_primary->Set(chromeos::ACCELEROMETER_SOURCE_SCREEN, -kMeanGravity,
-                          0.f, 0.f);
-    portrait_secondary->Set(chromeos::ACCELEROMETER_SOURCE_SCREEN, kMeanGravity,
-                            0.f, 0.f);
-    landscape_primary->Set(chromeos::ACCELEROMETER_SOURCE_SCREEN, 0,
-                           -kMeanGravity, 0.f);
+    portrait_primary->Set(ACCELEROMETER_SOURCE_SCREEN, -kMeanGravity, 0.f, 0.f);
+    portrait_secondary->Set(ACCELEROMETER_SOURCE_SCREEN, kMeanGravity, 0.f,
+                            0.f);
+    landscape_primary->Set(ACCELEROMETER_SOURCE_SCREEN, 0, -kMeanGravity, 0.f);
   }
 
  protected:
-  scoped_refptr<chromeos::AccelerometerUpdate> portrait_primary =
-      new chromeos::AccelerometerUpdate();
-  scoped_refptr<chromeos::AccelerometerUpdate> portrait_secondary =
-      new chromeos::AccelerometerUpdate();
-  scoped_refptr<chromeos::AccelerometerUpdate> landscape_primary =
-      new chromeos::AccelerometerUpdate();
+  scoped_refptr<AccelerometerUpdate> portrait_primary =
+      new AccelerometerUpdate();
+  scoped_refptr<AccelerometerUpdate> portrait_secondary =
+      new AccelerometerUpdate();
+  scoped_refptr<AccelerometerUpdate> landscape_primary =
+      new AccelerometerUpdate();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DisplayManagerOrientationTest);
@@ -3738,7 +3903,7 @@ TEST_F(DisplayManagerTest, HardwareMirrorMode) {
 
   // mirrored across 3 displays...
   display_manager()->OnNativeDisplaysChanged(display_info_list);
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(1U, display_manager()->GetNumDisplays());
   EXPECT_EQ(3U, display_manager()->num_connected_displays());
@@ -3852,7 +4017,7 @@ TEST_F(DisplayManagerTest, SwitchToAndFromSoftwareMirrorMode) {
   // Switch from mirroring to unified, but it fails.
   SetSoftwareMirrorMode(true);
   display_manager()->SetUnifiedDesktopEnabled(true);
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(display_manager()->IsInSoftwareMirrorMode());
   EXPECT_FALSE(display_manager()->IsInUnifiedMode());
 
@@ -3881,7 +4046,7 @@ TEST_F(DisplayManagerTest, SourceAndDestinationInSoftwareMirrorMode) {
 
   // Connect all displays.
   display_manager()->OnNativeDisplaysChanged(display_info_list);
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(display::kInvalidDisplayId,
             display_manager()->mirroring_source_id());
   EXPECT_TRUE(
@@ -3926,7 +4091,7 @@ TEST_F(DisplayManagerTest, CompositingCursorInMultiSoftwareMirroring) {
 
   // Connect all displays, cursor compositing is disabled by default.
   display_manager()->OnNativeDisplaysChanged(display_info_list);
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   CursorWindowController* cursor_window_controller =
       Shell::Get()->window_tree_host_manager()->cursor_window_controller();
   EXPECT_FALSE(cursor_window_controller->is_cursor_compositing_enabled());
@@ -4255,7 +4420,7 @@ TEST_F(DisplayManagerTest, MirrorModeRestoreAfterResume) {
 
 TEST_F(DisplayManagerTest, SoftwareMirrorRotationForTablet) {
   UpdateDisplay("400x300,800x800");
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
 
   // Set the first display as internal display so that the tablet mode can be
   // enabled.
@@ -4264,7 +4429,7 @@ TEST_F(DisplayManagerTest, SoftwareMirrorRotationForTablet) {
 
   // Simulate turning on mirror mode triggered by tablet mode on.
   Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(display_manager()->IsInSoftwareMirrorMode());
   EXPECT_EQ(gfx::Rect(0, 0, 400, 300),
             display::Screen::GetScreen()->GetPrimaryDisplay().bounds());

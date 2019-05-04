@@ -30,7 +30,7 @@ class FakeDownloadItem : public download::DownloadItem {
   void UpdateObservers() override;
   void Remove() override;
   void Pause() override;
-  void Resume() override;
+  void Resume(bool user_resume) override;
   void Cancel(bool user_cancel) override;
   void OpenDownload() override;
   void ShowDownloadInShell() override;
@@ -53,13 +53,16 @@ class FakeDownloadItem : public download::DownloadItem {
   base::Time GetLastAccessTime() const override;
   bool IsTransient() const override;
   bool IsParallelDownload() const override;
+  DownloadCreationType GetDownloadCreationType() const override;
   bool IsDone() const override;
   const std::string& GetETag() const override;
   const std::string& GetLastModifiedTime() const override;
   bool IsPaused() const override;
+  bool AllowMetered() const override;
   bool IsTemporary() const override;
   bool CanResume() const override;
   int64_t GetBytesWasted() const override;
+  int32_t GetAutoResumeCount() const override;
   const GURL& GetReferrerUrl() const override;
   const GURL& GetSiteUrl() const override;
   const GURL& GetTabUrl() const override;

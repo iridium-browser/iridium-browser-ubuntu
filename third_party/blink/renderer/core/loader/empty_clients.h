@@ -34,6 +34,7 @@
 #include "base/macros.h"
 #include "cc/paint/paint_canvas.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/mojom/frame/document_interface_broker.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_focus_type.h"
 #include "third_party/blink/public/platform/web_menu_source_type.h"
@@ -41,7 +42,6 @@
 #include "third_party/blink/public/platform/web_spell_check_panel_host_client.h"
 #include "third_party/blink/public/platform/web_url_loader.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/frame/content_settings_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_client.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
@@ -77,7 +77,9 @@ namespace blink {
 
 class CORE_EXPORT EmptyChromeClient : public ChromeClient {
  public:
-  static EmptyChromeClient* Create() { return new EmptyChromeClient; }
+  static EmptyChromeClient* Create() {
+    return MakeGarbageCollected<EmptyChromeClient>();
+  }
 
   ~EmptyChromeClient() override = default;
   void ChromeDestroyed() override {}
@@ -94,13 +96,6 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
   void TakeFocus(WebFocusType) override {}
 
   void FocusedNodeChanged(Node*, Node*) override {}
-  Page* CreateWindow(LocalFrame*,
-                     const FrameLoadRequest&,
-                     const WebWindowFeatures&,
-                     NavigationPolicy,
-                     SandboxFlags) override {
-    return nullptr;
-  }
   void Show(NavigationPolicy) override {}
 
   void DidOverscroll(const FloatSize&,
@@ -117,7 +112,7 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
                      const WebDragData&,
                      WebDragOperationsMask,
                      const SkBitmap& drag_image,
-                     const WebPoint& drag_image_offset) override {}
+                     const gfx::Point& drag_image_offset) override {}
   bool AcceptsLoadDrops() const override { return true; }
 
   bool ShouldReportDetailedMessageForSource(LocalFrame&,
@@ -138,6 +133,15 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
   }
 
   void CloseWindowSoon() override {}
+
+  Page* CreateWindowDelegate(LocalFrame*,
+                             const FrameLoadRequest&,
+                             const WebWindowFeatures&,
+                             NavigationPolicy,
+                             SandboxFlags,
+                             const SessionStorageNamespaceId&) override {
+    return nullptr;
+  }
 
   bool OpenJavaScriptAlertDelegate(LocalFrame*, const String&) override {
     return false;
@@ -177,8 +181,6 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
 
   void PrintDelegate(LocalFrame*) override {}
 
-  void EnumerateChosenDirectory(FileChooser*) override {}
-
   ColorChooser* OpenColorChooser(LocalFrame*,
                                  ColorChooserClient*,
                                  const Color&) override;
@@ -207,6 +209,7 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
   }
   void SetHasScrollEventHandlers(LocalFrame*, bool) override {}
   void SetNeedsLowLatencyInput(LocalFrame*, bool) override {}
+  void SetNeedsUnbufferedInputForDebugger(LocalFrame*, bool) override {}
   void RequestUnbufferedInputEvents(LocalFrame*) override {}
   void SetTouchAction(LocalFrame*, TouchAction) override {}
 
@@ -225,7 +228,11 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
 
 class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
  public:
-  static EmptyLocalFrameClient* Create() { return new EmptyLocalFrameClient; }
+  static EmptyLocalFrameClient* Create() {
+    return MakeGarbageCollected<EmptyLocalFrameClient>();
+  }
+
+  EmptyLocalFrameClient() = default;
   ~EmptyLocalFrameClient() override = default;
 
   bool HasWebView() const override { return true; }  // mainly for assertions
@@ -251,10 +258,7 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
 
   void DispatchDidHandleOnloadEvents() override {}
   void DispatchWillCommitProvisionalLoad() override {}
-  void DispatchDidStartProvisionalLoad(
-      DocumentLoader*,
-      ResourceRequest&,
-      mojo::ScopedMessagePipeHandle navigation_initiator_handle) override {}
+  void DispatchDidStartProvisionalLoad(DocumentLoader*) override {}
   void DispatchDidReceiveTitle(const String&) override {}
   void DispatchDidChangeIcons(IconType) override {}
   void DispatchDidCommitLoad(HistoryItem*,
@@ -268,19 +272,22 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
   void DispatchDidFinishLoad() override {}
   void DispatchDidChangeThemeColor() override {}
 
-  NavigationPolicy DecidePolicyForNavigation(const ResourceRequest&,
-                                             Document* origin_document,
-                                             DocumentLoader*,
-                                             WebNavigationType,
-                                             NavigationPolicy,
-                                             bool,
-                                             bool,
-                                             bool,
-                                             WebTriggeringEventInfo,
-                                             HTMLFormElement*,
-                                             ContentSecurityPolicyDisposition,
-                                             mojom::blink::BlobURLTokenPtr,
-                                             base::TimeTicks) override;
+  void BeginNavigation(const ResourceRequest&,
+                       Document* origin_document,
+                       DocumentLoader*,
+                       WebNavigationType,
+                       NavigationPolicy,
+                       bool,
+                       WebFrameLoadType,
+                       bool,
+                       WebTriggeringEventInfo,
+                       HTMLFormElement*,
+                       ContentSecurityPolicyDisposition,
+                       mojom::blink::BlobURLTokenPtr,
+                       base::TimeTicks,
+                       const String&,
+                       WebContentSecurityPolicyList,
+                       mojom::blink::NavigationInitiatorPtr) override;
 
   void DispatchWillSendSubmitEvent(HTMLFormElement*) override;
 
@@ -296,10 +303,7 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
 
   DocumentLoader* CreateDocumentLoader(
       LocalFrame*,
-      const ResourceRequest&,
-      const SubstituteData&,
-      ClientRedirectPolicy,
-      const base::UnguessableToken& devtools_navigation_token,
+      WebNavigationType,
       std::unique_ptr<WebNavigationParams> navigation_params,
       std::unique_ptr<WebDocumentLoader::ExtraData> extra_data) override;
   void UpdateDocumentLoader(
@@ -322,6 +326,9 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
   void SelectorMatchChanged(const Vector<String>&,
                             const Vector<String>&) override {}
   LocalFrame* CreateFrame(const AtomicString&, HTMLFrameOwnerElement*) override;
+  std::pair<RemoteFrame*, base::UnguessableToken> CreatePortal(
+      HTMLPortalElement*,
+      mojom::blink::PortalRequest) override;
   WebPluginContainerImpl* CreatePlugin(HTMLPlugInElement&,
                                        const KURL&,
                                        const Vector<String>&,
@@ -354,13 +361,17 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
     return &interface_provider_;
   }
 
+  mojom::blink::DocumentInterfaceBroker* GetDocumentInterfaceBroker() override;
+
   WebSpellCheckPanelHostClient* SpellCheckPanelHostClient() const override {
     return nullptr;
   }
 
   std::unique_ptr<WebServiceWorkerProvider> CreateServiceWorkerProvider()
       override;
-  ContentSettingsClient& GetContentSettingsClient() override;
+  WebContentSettingsClient* GetContentSettingsClient() override {
+    return nullptr;
+  }
   std::unique_ptr<WebApplicationCacheHost> CreateApplicationCacheHost(
       WebApplicationCacheHostClient*) override;
 
@@ -368,7 +379,13 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
   WebTextCheckClient* GetTextCheckerClient() const override;
 
   std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() override {
-    return Platform::Current()->CreateDefaultURLLoaderFactory();
+    // Most consumers of EmptyLocalFrameClient should not make network requests.
+    // If an exception needs to be made (e.g. in test code), then the consumer
+    // should define their own subclass of LocalFrameClient or
+    // EmptyLocalFrameClient and override the CreateURLLoaderFactory method.
+    // See also https://crbug.com/891872.
+    NOTREACHED();
+    return nullptr;
   }
 
   void BubbleLogicalScrollInParentFrame(
@@ -386,13 +403,11 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
   Frame* FindFrame(const AtomicString& name) const override;
 
  protected:
-  EmptyLocalFrameClient() = default;
-
   // Not owned
   WebTextCheckClient* text_check_client_;
 
-  ContentSettingsClient content_settings_client_;
   service_manager::InterfaceProvider interface_provider_;
+  mojom::blink::DocumentInterfaceBrokerPtr document_interface_broker_;
 
   DISALLOW_COPY_AND_ASSIGN(EmptyLocalFrameClient);
 };
@@ -417,6 +432,8 @@ class CORE_EXPORT EmptyRemoteFrameClient : public RemoteFrameClient {
   // RemoteFrameClient implementation.
   void Navigate(const ResourceRequest&,
                 bool should_replace_current_entry,
+                bool is_opener_navigation,
+                bool prevent_sandboxed_download,
                 mojom::blink::BlobURLTokenPtr) override {}
   unsigned BackForwardLength() override { return 0; }
   void CheckCompleted() override {}

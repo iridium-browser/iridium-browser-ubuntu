@@ -32,9 +32,12 @@ namespace syncer {
 
 class SyncPrefObserver {
  public:
-  // Called whenever the pref that controls whether sync is managed
-  // changes.
   virtual void OnSyncManagedPrefChange(bool is_sync_managed) = 0;
+  virtual void OnFirstSetupCompletePrefChange(bool is_first_setup_complete) = 0;
+  virtual void OnSyncRequestedPrefChange(bool is_sync_requested) = 0;
+  virtual void OnPreferredDataTypesPrefChange(
+      bool sync_everything,
+      syncer::ModelTypeSet preferred_types) = 0;
 
  protected:
   virtual ~SyncPrefObserver();
@@ -68,29 +71,13 @@ class CryptoSyncPrefs {
       sync_pb::NigoriSpecifics* nigori_specifics) const = 0;
 };
 
-// SyncPrefs is a helper class that manages getting, setting, and
-// persisting global sync preferences.  It is not thread-safe, and
-// lives on the UI thread.
-//
-// TODO(akalin): Some classes still read the prefs directly.  Consider
-// passing down a pointer to SyncPrefs to them.  A list of files:
-//
-//   profile_sync_service_startup_unittest.cc
-//   profile_sync_service.cc
-//   sync_setup_flow.cc
-//   sync_setup_wizard.cc
-//   sync_setup_wizard_unittest.cc
-//   two_client_preferences_sync_test.cc
+// SyncPrefs is a helper class that manages getting, setting, and persisting
+// global sync preferences. It is not thread-safe, and lives on the UI thread.
 class SyncPrefs : public CryptoSyncPrefs,
                   public base::SupportsWeakPtr<SyncPrefs> {
  public:
-  // |pref_service| may not be null.
-  // Does not take ownership of |pref_service|.
+  // |pref_service| must not be null and must outlive this object.
   explicit SyncPrefs(PrefService* pref_service);
-
-  // For testing.
-  SyncPrefs();
-
   ~SyncPrefs() override;
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -98,7 +85,10 @@ class SyncPrefs : public CryptoSyncPrefs,
   void AddSyncPrefObserver(SyncPrefObserver* sync_pref_observer);
   void RemoveSyncPrefObserver(SyncPrefObserver* sync_pref_observer);
 
-  // Clears important sync preferences.
+  // Clears "bookkeeping" sync preferences, such as the last synced time,
+  // whether the last shutdown was clean, etc. Does *not* clear sync preferences
+  // which are directly user-controlled, such as the set of preferred data
+  // types.
   void ClearPreferences();
 
   // Getters and setters for global sync prefs.
@@ -125,38 +115,32 @@ class SyncPrefs : public CryptoSyncPrefs,
   void SetLongPollInterval(base::TimeDelta interval);
 
   bool HasKeepEverythingSynced() const;
-  void SetKeepEverythingSynced(bool keep_everything_synced);
 
-  // The returned set is guaranteed to be a subset of
-  // |registered_types|.  Returns |registered_types| directly if
-  // HasKeepEverythingSynced() is true.
-  // |user_events_separate_pref_group| is true when USER_EVENTS model type has
-  // a separate pref group instead of being bundled with the TYPED_URLS. This
-  // is used when Unified Consent is enabled.
-  //
-  // TODO(https://crbug.com/862983): |user_events_separate_pref_group| is only
-  // temporary and should removed once Unified Consent feature is is launched.
-  ModelTypeSet GetPreferredDataTypes(
-      ModelTypeSet registered_types,
-      bool user_events_separate_pref_group) const;
+  // The returned set is guaranteed to be a subset of |registered_types|.
+  // Returns |registered_types| directly if HasKeepEverythingSynced() is true.
+  ModelTypeSet GetPreferredDataTypes(ModelTypeSet registered_types) const;
 
-  // |preferred_types| should be a subset of |registered_types|.  All
-  // types in |preferred_types| are marked preferred, and all types in
+  // Sets the desired configuration for all data types, including the "keep
+  // everything synced" flag and the "preferred" state for each individual data
+  // type.
+  // |keep_everything_synced| indicates that all current and future data types
+  // should be synced. If this is set to true, then GetPreferredDataTypes() will
+  // always return all available data types, even if not all of them are
+  // individually marked as preferred.
+  // The |chosen_types| should be a subset of the |registered_types|. The
+  // |preferred_types| are derived from |chosen_types| by resolving pref groups.
+  // Then all types in |preferred_types| are marked preferred, and all types in
   // |registered_types| \ |preferred_types| are marked not preferred.
-  // Changes are still made to the prefs even if
-  // HasKeepEverythingSynced() is true, but won't be visible until
-  // SetKeepEverythingSynced(false) is called.
-  // |user_events_separate_pref_group| is true when USER_EVENTS model type has
-  // a separate pref group instead of being bundled with the TYPED_URLS. This
-  // is used when Unified Consent is enabled.
-  //
-  // TODO(https://crbug.com/862983): |user_events_separate_pref_group| is only
-  // temporary and should removed once Unified Consent feature is is launched.
-  void SetPreferredDataTypes(ModelTypeSet registered_types,
-                             ModelTypeSet preferred_types,
-                             bool user_events_separate_pref_group);
+  // Changes are still made to the individual data type prefs even if
+  // |keep_everything_synced| is true, but won't be visible until it's set to
+  // false.
+  void SetDataTypesConfiguration(bool keep_everything_synced,
+                                 ModelTypeSet registered_types,
+                                 ModelTypeSet chosen_types);
 
-  // This pref is set outside of sync.
+  // Whether Sync is forced off by enterprise policy. Note that this only covers
+  // one out of two types of policy, "browser" policy. The second kind, "cloud"
+  // policy, is handled directly in ProfileSyncService.
   bool IsManaged() const;
 
   // Use this encryption bootstrap token if we're using an explicit passphrase.
@@ -177,6 +161,16 @@ class SyncPrefs : public CryptoSyncPrefs,
   std::string GetSpareBootstrapToken() const;
   void SetSpareBootstrapToken(const std::string& token);
 #endif
+
+  // Copy of various fields historically owned and persisted by the Directory.
+  // This is a future-proof approach to ultimately replace the Directory once
+  // most users have populated prefs and the Directory is about to be removed.
+  // TODO(crbug.com/923287): Figure out if this is an appropriate place.
+  void SetCacheGuid(const std::string& cache_guid);
+  void SetBirthday(const std::string& birthday);
+  void SetBagOfChips(const std::string& bag_of_chips);
+
+  std::string GetCacheGuidForTesting() const;
 
   // Get/set/clear first sync time of current user. Used to roll back browsing
   // data later when user signs out.
@@ -226,15 +220,14 @@ class SyncPrefs : public CryptoSyncPrefs,
   void GetNigoriSpecificsForPassphraseTransition(
       sync_pb::NigoriSpecifics* nigori_specifics) const override;
 
-  // Gets the local sync backend enabled state and its database location.
+  // Gets the local sync backend enabled state.
   bool IsLocalSyncEnabled() const;
-  base::FilePath GetLocalSyncBackendDir() const;
 
   // Returns a ModelTypeSet based on |types| expanded to include pref groups
   // (see |pref_groups_|), but as a subset of |registered_types|.
-  ModelTypeSet ResolvePrefGroups(ModelTypeSet registered_types,
-                                 ModelTypeSet types,
-                                 bool user_events_separate_pref_group) const;
+  // Exposed for testing.
+  static ModelTypeSet ResolvePrefGroups(ModelTypeSet registered_types,
+                                        ModelTypeSet types);
 
  private:
   static void RegisterDataTypePreferredPref(
@@ -245,8 +238,10 @@ class SyncPrefs : public CryptoSyncPrefs,
   void SetDataTypePreferred(ModelType type, bool is_preferred);
 
   void OnSyncManagedPrefChanged();
+  void OnFirstSetupCompletePrefChange();
+  void OnSyncSuppressedPrefChange();
 
-  // May be null.
+  // Never null.
   PrefService* const pref_service_;
 
   base::ObserverList<SyncPrefObserver>::Unchecked sync_pref_observers_;
@@ -254,6 +249,10 @@ class SyncPrefs : public CryptoSyncPrefs,
   // The preference that controls whether sync is under control by
   // configuration management.
   BooleanPrefMember pref_sync_managed_;
+
+  BooleanPrefMember pref_first_setup_complete_;
+
+  BooleanPrefMember pref_sync_suppressed_;
 
   bool local_sync_enabled_;
 

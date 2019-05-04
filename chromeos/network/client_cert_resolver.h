@@ -9,13 +9,13 @@
 #include <string>
 #include <vector>
 
+#include "base/component_export.h"
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
-#include "chromeos/chromeos_export.h"
 #include "chromeos/network/client_cert_util.h"
 #include "chromeos/network/network_cert_loader.h"
 #include "chromeos/network/network_policy_observer.h"
@@ -39,9 +39,10 @@ struct MatchingCertAndResolveStatus;
 // Observes the known networks. If a network is configured with a client
 // certificate pattern, this class searches for a matching client certificate.
 // Each time it finds a match, it configures the network accordingly.
-class CHROMEOS_EXPORT ClientCertResolver : public NetworkStateHandlerObserver,
-                                           public NetworkCertLoader::Observer,
-                                           public NetworkPolicyObserver {
+class COMPONENT_EXPORT(CHROMEOS_NETWORK) ClientCertResolver
+    : public NetworkStateHandlerObserver,
+      public NetworkCertLoader::Observer,
+      public NetworkPolicyObserver {
  public:
   class Observer {
    public:
@@ -77,12 +78,13 @@ class CHROMEOS_EXPORT ClientCertResolver : public NetworkStateHandlerObserver,
   void SetClockForTesting(base::Clock* clock);
 
   // Returns true and sets the Shill properties that have to be configured in
-  // |shill_properties| if the certificate pattern |pattern| could be resolved.
+  // |shill_properties| if the client certificate could be resolved according to
+  // |client_cert_config|.
   // Returns false otherwise and sets empty Shill properties to clear the
   // certificate configuration.
   // Note that it uses the global clock when checking the certificates for
   // expiration.
-  static bool ResolveCertificatePatternSync(
+  static bool ResolveClientCertificateSync(
       const client_cert::ConfigType client_cert_type,
       const client_cert::ClientCertConfig& client_cert_config,
       base::DictionaryValue* shill_properties);

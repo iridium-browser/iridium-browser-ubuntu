@@ -20,25 +20,29 @@
 #include <CoreServices/CoreServices.h>
 #elif defined(WEBRTC_ANDROID)
 #include <android/log.h>
+
 // Android has a 1024 limit on log inputs. We use 60 chars as an
 // approx for the header/tag portion.
 // See android/system/core/liblog/logd_write.c
 static const int kMaxLogLineSize = 1024 - 60;
 #endif  // WEBRTC_MAC && !defined(WEBRTC_IOS) || WEBRTC_ANDROID
 
+#include <stdio.h>
+#include <string.h>
 #include <time.h>
-
 #include <algorithm>
 #include <cstdarg>
 #include <vector>
 
-#include "rtc_base/criticalsection.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/critical_section.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/platform_thread_types.h"
-#include "rtc_base/stringencode.h"
+#include "rtc_base/string_encode.h"
+#include "rtc_base/string_utils.h"
 #include "rtc_base/strings/string_builder.h"
-#include "rtc_base/stringutils.h"
-#include "rtc_base/timeutils.h"
+#include "rtc_base/thread_annotations.h"
+#include "rtc_base/time_utils.h"
 
 namespace rtc {
 namespace {
@@ -69,7 +73,12 @@ CriticalSection g_log_crit;
 void LogSink::OnLogMessage(const std::string& msg,
                            LoggingSeverity severity,
                            const char* tag) {
-  OnLogMessage(tag + (": " + msg));
+  OnLogMessage(tag + (": " + msg), severity);
+}
+
+void LogSink::OnLogMessage(const std::string& msg,
+                           LoggingSeverity /* severity */) {
+  OnLogMessage(msg);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -202,7 +211,7 @@ LogMessage::~LogMessage() {
 #if defined(WEBRTC_ANDROID)
       kv.first->OnLogMessage(str, severity_, tag_);
 #else
-      kv.first->OnLogMessage(str);
+      kv.first->OnLogMessage(str, severity_);
 #endif
     }
   }
@@ -299,8 +308,6 @@ void LogMessage::ConfigureLogging(const char* params) {
       LogThreads();
 
       // Logging levels
-    } else if (token == "sensitive") {
-      current_level = LS_SENSITIVE;
     } else if (token == "verbose") {
       current_level = LS_VERBOSE;
     } else if (token == "info") {
@@ -318,7 +325,7 @@ void LogMessage::ConfigureLogging(const char* params) {
     }
   }
 
-#if defined(WEBRTC_WIN)
+#if defined(WEBRTC_WIN) && !defined(WINUWP)
   if ((LS_NONE != debug_level) && !::IsDebuggerPresent()) {
     // First, attempt to attach to our parent's console... so if you invoke
     // from the command line, we'll see the output there.  Otherwise, create
@@ -327,7 +334,7 @@ void LogMessage::ConfigureLogging(const char* params) {
     if (!AttachConsole(ATTACH_PARENT_PROCESS))
       ::AllocConsole();
   }
-#endif  // WEBRTC_WIN
+#endif  // defined(WEBRTC_WIN) && !defined(WINUWP)
 
   LogToDebug(debug_level);
 }
@@ -393,13 +400,6 @@ void LogMessage::OutputToDebug(const std::string& str,
   // from the shell.
   int prio;
   switch (severity) {
-    case LS_SENSITIVE:
-      __android_log_write(ANDROID_LOG_INFO, tag, "SENSITIVE");
-      if (log_to_stderr) {
-        fprintf(stderr, "SENSITIVE");
-        fflush(stderr);
-      }
-      return;
     case LS_VERBOSE:
       prio = ANDROID_LOG_VERBOSE;
       break;

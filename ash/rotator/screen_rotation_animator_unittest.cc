@@ -25,6 +25,7 @@
 #include "base/run_loop.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
+#include "ui/compositor/layer_tree_owner.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/display/display.h"
 #include "ui/display/manager/display_manager.h"
@@ -230,10 +231,6 @@ void ScreenRotationAnimatorSmoothAnimationTest::QuitWaitForCopyCallback() {
 
 void ScreenRotationAnimatorSmoothAnimationTest::SetUp() {
   AshTestBase::SetUp();
-  // Resets the commandline will clear all the switches, including
-  // "ash-disable-smooth-screen-rotation", so that we can test the smooth screen
-  // rotation animation. The |animator| is recreated and checking this swtich.
-  ash_test_helper()->reset_commandline();
 
   display_ = display::Screen::GetScreen()->GetPrimaryDisplay();
   run_loop_ = std::make_unique<base::RunLoop>();

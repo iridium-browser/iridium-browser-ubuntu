@@ -7,7 +7,7 @@
 
 #include <stddef.h>
 
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "build/build_config.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -36,7 +36,7 @@ struct SharedMemoryLimits {
 #endif
   }
 
-  int32_t command_buffer_size = 1024 * 1024;
+  uint32_t command_buffer_size = 1024 * 1024;
   uint32_t start_transfer_buffer_size = 64 * 1024;
   uint32_t min_transfer_buffer_size = 64 * 1024;
   uint32_t max_transfer_buffer_size = 16 * 1024 * 1024;

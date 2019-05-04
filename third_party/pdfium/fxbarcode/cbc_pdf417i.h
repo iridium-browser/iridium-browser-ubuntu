@@ -9,7 +9,6 @@
 
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
-#include "core/fxge/fx_dib.h"
 #include "fxbarcode/cbc_codebase.h"
 
 class CBC_PDF417Writer;
@@ -20,7 +19,7 @@ class CBC_PDF417I final : public CBC_CodeBase {
   ~CBC_PDF417I() override;
 
   // CBC_CodeBase:
-  bool Encode(const WideStringView& contents) override;
+  bool Encode(WideStringView contents) override;
   bool RenderDevice(CFX_RenderDevice* device,
                     const CFX_Matrix* matrix) override;
   BC_TYPE GetType() override;

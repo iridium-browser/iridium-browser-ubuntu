@@ -12,6 +12,7 @@
 #include "content/browser/background_fetch/background_fetch_context.h"
 #include "content/browser/background_fetch/background_fetch_metrics.h"
 #include "content/browser/background_fetch/background_fetch_registration_id.h"
+#include "content/browser/background_fetch/background_fetch_registration_notifier.h"
 #include "content/browser/background_fetch/background_fetch_request_match_params.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/storage_partition_impl.h"
@@ -19,7 +20,9 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom.h"
 
 namespace content {
 
@@ -47,7 +50,8 @@ void BackgroundFetchServiceImpl::CreateForWorker(
           WrapRefCounted(static_cast<StoragePartitionImpl*>(
                              render_process_host->GetStoragePartition())
                              ->GetBackgroundFetchContext()),
-          origin, nullptr /* render_frame_host */, std::move(request)));
+          origin, /* render_frame_tree_node_id= */ 0,
+          /* wc_getter= */ base::NullCallback(), std::move(request)));
 }
 
 // static
@@ -62,6 +66,15 @@ void BackgroundFetchServiceImpl::CreateForFrame(
       RenderFrameHost::FromID(render_process_host->GetID(), render_frame_id);
   DCHECK(render_frame_host);
 
+  ResourceRequestInfo::WebContentsGetter wc_getter = base::NullCallback();
+
+  // Permissions need to go through the DownloadRequestLimiter if the fetch
+  // is started from a top-level frame.
+  if (!render_frame_host->GetParent()) {
+    wc_getter = base::BindRepeating(&WebContents::FromFrameTreeNodeId,
+                                    render_frame_host->GetFrameTreeNodeId());
+  }
+
   base::PostTaskWithTraits(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(
@@ -69,7 +82,8 @@ void BackgroundFetchServiceImpl::CreateForFrame(
           WrapRefCounted(static_cast<StoragePartitionImpl*>(
                              render_process_host->GetStoragePartition())
                              ->GetBackgroundFetchContext()),
-          render_frame_host->GetLastCommittedOrigin(), render_frame_host,
+          render_frame_host->GetLastCommittedOrigin(),
+          render_frame_host->GetFrameTreeNodeId(), std::move(wc_getter),
           std::move(request)));
 }
 
@@ -77,23 +91,27 @@ void BackgroundFetchServiceImpl::CreateForFrame(
 void BackgroundFetchServiceImpl::CreateOnIoThread(
     scoped_refptr<BackgroundFetchContext> background_fetch_context,
     url::Origin origin,
-    RenderFrameHost* render_frame_host,
+    int render_frame_tree_node_id,
+    ResourceRequestInfo::WebContentsGetter wc_getter,
     blink::mojom::BackgroundFetchServiceRequest request) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  mojo::MakeStrongBinding(std::make_unique<BackgroundFetchServiceImpl>(
-                              std::move(background_fetch_context),
-                              std::move(origin), render_frame_host),
-                          std::move(request));
+  mojo::MakeStrongBinding(
+      std::make_unique<BackgroundFetchServiceImpl>(
+          std::move(background_fetch_context), std::move(origin),
+          render_frame_tree_node_id, std::move(wc_getter)),
+      std::move(request));
 }
 
 BackgroundFetchServiceImpl::BackgroundFetchServiceImpl(
     scoped_refptr<BackgroundFetchContext> background_fetch_context,
     url::Origin origin,
-    RenderFrameHost* render_frame_host)
+    int render_frame_tree_node_id,
+    ResourceRequestInfo::WebContentsGetter wc_getter)
     : background_fetch_context_(std::move(background_fetch_context)),
       origin_(std::move(origin)),
-      render_frame_host_(render_frame_host) {
+      render_frame_tree_node_id_(render_frame_tree_node_id),
+      wc_getter_(std::move(wc_getter)) {
   DCHECK(background_fetch_context_);
 }
 
@@ -104,18 +122,17 @@ BackgroundFetchServiceImpl::~BackgroundFetchServiceImpl() {
 void BackgroundFetchServiceImpl::Fetch(
     int64_t service_worker_registration_id,
     const std::string& developer_id,
-    const std::vector<ServiceWorkerFetchRequest>& requests,
-    const BackgroundFetchOptions& options,
+    std::vector<blink::mojom::FetchAPIRequestPtr> requests,
+    blink::mojom::BackgroundFetchOptionsPtr options,
     const SkBitmap& icon,
     blink::mojom::BackgroundFetchUkmDataPtr ukm_data,
     FetchCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
   if (!ValidateDeveloperId(developer_id) || !ValidateRequests(requests)) {
     std::move(callback).Run(
         blink::mojom::BackgroundFetchError::INVALID_ARGUMENT,
-        base::nullopt /* registration */);
-    background_fetch::RecordRegistrationCreatedError(
-        blink::mojom::BackgroundFetchError::INVALID_ARGUMENT);
+        /* registration= */ nullptr);
     return;
   }
 
@@ -126,8 +143,9 @@ void BackgroundFetchServiceImpl::Fetch(
                                                 base::GenerateGUID());
 
   background_fetch_context_->StartFetch(
-      registration_id, requests, options, icon, std::move(ukm_data),
-      render_frame_host_, std::move(callback));
+      registration_id, std::move(requests), std::move(options), icon,
+      std::move(ukm_data), render_frame_tree_node_id_, wc_getter_,
+      std::move(callback));
 }
 
 void BackgroundFetchServiceImpl::GetIconDisplaySize(
@@ -140,18 +158,17 @@ void BackgroundFetchServiceImpl::MatchRequests(
     int64_t service_worker_registration_id,
     const std::string& developer_id,
     const std::string& unique_id,
-    const base::Optional<ServiceWorkerFetchRequest>& request_to_match,
+    blink::mojom::FetchAPIRequestPtr request_to_match,
     blink::mojom::QueryParamsPtr cache_query_params,
     bool match_all,
     MatchRequestsCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
   BackgroundFetchRegistrationId registration_id(
       service_worker_registration_id, origin_, developer_id, unique_id);
 
   // Create BackgroundFetchMatchRequestParams.
   auto match_params = std::make_unique<BackgroundFetchRequestMatchParams>(
-      request_to_match, std::move(cache_query_params), match_all);
+      std::move(request_to_match), std::move(cache_query_params), match_all);
 
   background_fetch_context_->MatchRequests(
       registration_id, std::move(match_params), std::move(callback));
@@ -208,7 +225,7 @@ void BackgroundFetchServiceImpl::GetRegistration(
   if (!ValidateDeveloperId(developer_id)) {
     std::move(callback).Run(
         blink::mojom::BackgroundFetchError::INVALID_ARGUMENT,
-        base::nullopt /* registration */);
+        /* registration= */ nullptr);
     return;
   }
 
@@ -257,7 +274,7 @@ bool BackgroundFetchServiceImpl::ValidateUniqueId(
 }
 
 bool BackgroundFetchServiceImpl::ValidateRequests(
-    const std::vector<ServiceWorkerFetchRequest>& requests) {
+    const std::vector<blink::mojom::FetchAPIRequestPtr>& requests) {
   if (requests.empty()) {
     mojo::ReportBadMessage("Invalid requests");
     return false;

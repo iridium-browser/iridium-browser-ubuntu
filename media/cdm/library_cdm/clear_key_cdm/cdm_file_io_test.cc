@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/stl_util.h"
 
 namespace media {
 
@@ -17,13 +17,13 @@ namespace media {
 
 const uint8_t kData[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
                          0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
-const uint32_t kDataSize = arraysize(kData);
+const uint32_t kDataSize = base::size(kData);
 
 const uint8_t kBigData[] = {
     0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa,
     0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
     0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00};
-const uint32_t kBigDataSize = arraysize(kBigData);
+const uint32_t kBigDataSize = base::size(kBigData);
 
 // Must be > kReadSize in cdm_file_io_impl.cc.
 const uint32_t kLargeDataSize = 20 * 1024 + 7;
@@ -38,9 +38,9 @@ const uint32_t kLargeDataSize = 20 * 1024 + 7;
         new FileIOTest(create_file_io_cb_, test_name)); \
     CREATE_FILE_IO  // Create FileIO for each test case.
 
-#define ADD_TEST_STEP(type, status, data, data_size)                    \
-    test_case->AddTestStep(FileIOTest::type, cdm::FileIOClient::status, \
-                          (data), (data_size));
+#define ADD_TEST_STEP(type, status, data, data_size)                          \
+  test_case->AddTestStep(FileIOTest::type, cdm::FileIOClient::Status::status, \
+                         (data), (data_size));
 
 #define END_TEST_CASE                                 \
     remaining_tests_.push_back(std::move(test_case)); \
@@ -573,7 +573,7 @@ bool FileIOTest::MatchesResult(const TestStep& a, const TestStep& b) {
   if (a.type != b.type || a.status != b.status)
     return false;
 
-  if (a.type != RESULT_READ || a.status != cdm::FileIOClient::kSuccess)
+  if (a.type != RESULT_READ || a.status != cdm::FileIOClient::Status::kSuccess)
     return true;
 
   return (a.data_size == b.data_size &&

@@ -39,7 +39,9 @@ std::vector<FrameTreeNode*> GetChildren(FrameTreeNode* node) {
     contents = WebContentsImpl::FromFrameTreeNode(node);
     if (node->IsMainFrame() && contents->GetBrowserPluginEmbedder()) {
       for (auto* inner_contents : contents->GetInnerWebContents()) {
-        children.push_back(inner_contents->GetMainFrame()->frame_tree_node());
+        children.push_back(static_cast<WebContentsImpl*>(inner_contents)
+                               ->GetMainFrame()
+                               ->frame_tree_node());
       }
     }
   }
@@ -200,7 +202,10 @@ class FindRequestManager::FrameObserver : public WebContentsObserver {
 
   void RenderFrameHostChanged(RenderFrameHost* old_host,
                               RenderFrameHost* new_host) override {
-    manager_->RemoveFrame(old_host);
+    // The |old_host| and its children are now pending deletion. Find-in-page
+    // must not interact with them anymore.
+    if (old_host)
+      RemoveFrameRecursively(static_cast<RenderFrameHostImpl*>(old_host));
   }
 
   void FrameDeleted(RenderFrameHost* rfh) override {
@@ -208,6 +213,12 @@ class FindRequestManager::FrameObserver : public WebContentsObserver {
   }
 
  private:
+  void RemoveFrameRecursively(RenderFrameHostImpl* rfh) {
+    for (size_t i = 0; i < rfh->child_count(); ++i)
+      RemoveFrameRecursively(rfh->child_at(i)->current_frame_host());
+    manager_->RemoveFrame(rfh);
+  }
+
   // The FindRequestManager that owns this FrameObserver.
   FindRequestManager* const manager_;
 
@@ -760,7 +771,14 @@ void FindRequestManager::FinalUpdateReceived(int request_id,
                             true /* matches_only */, false /* wrap */);
     }
   }
-  DCHECK(target_rfh);
+  if (!target_rfh) {
+    // Sometimes when the WebContents is deleted/navigated, we got into this
+    // situation. We don't care about this WebContents anyways so it's ok to
+    // just not ask for the active match and return immediately.
+    // TODO(rakina): Understand what leads to this situation.
+    // See: https://crbug.com/884679.
+    return;
+  }
 
   // Forward the find reply without |final_update| set because the active match
   // has not yet been found.

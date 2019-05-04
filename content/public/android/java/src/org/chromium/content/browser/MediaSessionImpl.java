@@ -10,7 +10,7 @@ import org.chromium.base.annotations.JNINamespace;
 import org.chromium.content_public.browser.MediaSession;
 import org.chromium.content_public.browser.MediaSessionObserver;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.common.MediaMetadata;
+import org.chromium.services.media_session.MediaMetadata;
 
 import java.util.HashSet;
 
@@ -59,15 +59,9 @@ public class MediaSessionImpl extends MediaSession {
     }
 
     @Override
-    public void seekForward(long millis) {
-        assert millis >= 0 : "Attempted to seek by a negative number of milliseconds";
-        nativeSeekForward(mNativeMediaSessionAndroid, millis);
-    }
-
-    @Override
-    public void seekBackward(long millis) {
-        assert millis >= 0 : "Attempted to seek by a negative number of milliseconds";
-        nativeSeekBackward(mNativeMediaSessionAndroid, millis);
+    public void seek(long millis) {
+        assert millis == 0 : "Attempted to seek by an unspecified number of milliseconds";
+        nativeSeek(mNativeMediaSessionAndroid, millis);
     }
 
     @Override
@@ -135,8 +129,7 @@ public class MediaSessionImpl extends MediaSession {
     private native void nativeResume(long nativeMediaSessionAndroid);
     private native void nativeSuspend(long nativeMediaSessionAndroid);
     private native void nativeStop(long nativeMediaSessionAndroid);
-    private native void nativeSeekForward(long nativeMediaSessionAndroid, long millis);
-    private native void nativeSeekBackward(long nativeMediaSessionAndroid, long millis);
+    private native void nativeSeek(long nativeMediaSessionAndroid, long millis);
     private native void nativeDidReceiveAction(long nativeMediaSessionAndroid, int action);
     private native void nativeRequestSystemAudioFocus(long nativeMediaSessionAndroid);
     private static native MediaSessionImpl nativeGetMediaSessionFromWebContents(

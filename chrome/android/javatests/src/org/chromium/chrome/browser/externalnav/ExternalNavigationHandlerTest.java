@@ -137,6 +137,7 @@ public class ExternalNavigationHandlerTest {
 
         HashMap<String, Boolean> features = new HashMap<String, Boolean>();
         features.put(ChromeFeatureList.CCT_EXTERNAL_LINK_HANDLING, true);
+        features.put(ChromeFeatureList.INTENT_BLOCK_EXTERNAL_FORM_REDIRECT_NO_GESTURE, true);
         ChromeFeatureList.setTestFeatures(features);
 
         mNativeLibraryTestRule.loadNativeLibraryNoBrowserProcess();
@@ -216,11 +217,13 @@ public class ExternalNavigationHandlerTest {
         checkUrl("market://1234")
                 .withPageTransition(PageTransition.FORM_SUBMIT)
                 .withIsRedirect(true)
+                .withHasUserGesture(true)
                 .expecting(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT,
                         START_OTHER_ACTIVITY);
         checkUrl("http://youtube.com://")
                 .withPageTransition(PageTransition.FORM_SUBMIT)
                 .withIsRedirect(true)
+                .withHasUserGesture(true)
                 .expecting(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT,
                         START_OTHER_ACTIVITY);
 
@@ -229,6 +232,7 @@ public class ExternalNavigationHandlerTest {
                 .withReferrer(YOUTUBE_URL)
                 .withPageTransition(PageTransition.FORM_SUBMIT)
                 .withIsRedirect(true)
+                .withHasUserGesture(true)
                 .expecting(OverrideUrlLoadingResult.NO_OVERRIDE, IGNORE);
 
         // If the page does not match the referrer, then prompt an intent.
@@ -236,6 +240,7 @@ public class ExternalNavigationHandlerTest {
                 .withReferrer("http://google.com")
                 .withPageTransition(PageTransition.FORM_SUBMIT)
                 .withIsRedirect(true)
+                .withHasUserGesture(true)
                 .expecting(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT,
                         START_OTHER_ACTIVITY);
 
@@ -244,7 +249,56 @@ public class ExternalNavigationHandlerTest {
         // an extra data in the intent).
         checkUrl("http://youtube.com://")
                 .withPageTransition(PageTransition.FORM_SUBMIT)
+                .withHasUserGesture(true)
                 .expecting(OverrideUrlLoadingResult.NO_OVERRIDE, IGNORE);
+    }
+
+    @Test
+    @SmallTest
+    public void testRedirectFromFormSubmit_NoUserGesture() {
+        mDelegate.add(new IntentActivity(YOUTUBE_URL, YOUTUBE_PACKAGE_NAME));
+
+        // If the redirect is not associated with a user gesture, then continue loading in Chrome.
+        checkUrl("market://1234")
+                .withPageTransition(PageTransition.FORM_SUBMIT)
+                .withIsRedirect(true)
+                .withHasUserGesture(false)
+                .expecting(OverrideUrlLoadingResult.NO_OVERRIDE, IGNORE);
+        checkUrl("http://youtube.com://")
+                .withPageTransition(PageTransition.FORM_SUBMIT)
+                .withIsRedirect(true)
+                .withHasUserGesture(false)
+                .expecting(OverrideUrlLoadingResult.NO_OVERRIDE, IGNORE);
+    }
+
+    @Test
+    @SmallTest
+    public void testRedirectFromFormSubmit_NoUserGesture_OnIntentRedirectChain() {
+        mDelegate.add(new IntentActivity(YOUTUBE_URL, YOUTUBE_PACKAGE_NAME));
+
+        TabRedirectHandler redirectHandler = new TabRedirectHandler(mContext) {
+            @Override
+            public boolean isOnEffectiveIntentRedirectChain() {
+                return true;
+            }
+        };
+
+        // If the redirect is not associated with a user gesture but came from an incoming intent,
+        // then allow those to launch external intents.
+        checkUrl("market://1234")
+                .withPageTransition(PageTransition.FORM_SUBMIT)
+                .withIsRedirect(true)
+                .withHasUserGesture(false)
+                .withRedirectHandler(redirectHandler)
+                .expecting(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT,
+                        START_OTHER_ACTIVITY);
+        checkUrl("http://youtube.com://")
+                .withPageTransition(PageTransition.FORM_SUBMIT)
+                .withIsRedirect(true)
+                .withHasUserGesture(false)
+                .withRedirectHandler(redirectHandler)
+                .expecting(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT,
+                        START_OTHER_ACTIVITY);
     }
 
     @Test
@@ -1162,6 +1216,7 @@ public class ExternalNavigationHandlerTest {
                 .withReferrer(referrer)
                 .withPageTransition(PageTransition.FORM_SUBMIT)
                 .withIsRedirect(true)
+                .withHasUserGesture(true)
                 .expecting(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT,
                         START_OTHER_ACTIVITY);
         Assert.assertEquals(Uri.parse(referrer),
@@ -1480,7 +1535,7 @@ public class ExternalNavigationHandlerTest {
 
     private static WebappInfo newWebappInfoFromScope(String scope) {
         return WebappInfo.create("", "", scope, null, null, null, WebDisplayMode.STANDALONE, 0, 0,
-                0, 0, null, false, false);
+                0, 0, null, false, false, false);
     }
 
     private static class IntentActivity {
@@ -1583,7 +1638,7 @@ public class ExternalNavigationHandlerTest {
         }
 
         @Override
-        public int countSpecializedHandlers(List<ResolveInfo> infos, Intent intent) {
+        public int countSpecializedHandlers(List<ResolveInfo> infos) {
             int count = 0;
             List<IntentActivity> matchingIntentActivities = findMatchingIntentActivities(infos);
             for (IntentActivity intentActivity : matchingIntentActivities) {
@@ -1595,7 +1650,7 @@ public class ExternalNavigationHandlerTest {
         }
 
         @Override
-        public String findWebApkPackageName(List<ResolveInfo> infos) {
+        public String findFirstWebApkPackageName(List<ResolveInfo> infos) {
             List<IntentActivity> matchingIntentActivities = findMatchingIntentActivities(infos);
             for (IntentActivity intentActivity : matchingIntentActivities) {
                 if (intentActivity.isWebApk()) {
@@ -1824,6 +1879,11 @@ public class ExternalNavigationHandlerTest {
 
         public ExternalNavigationTestParams withIsRedirect(boolean isRedirect) {
             mIsRedirect = isRedirect;
+            return this;
+        }
+
+        public ExternalNavigationTestParams withHasUserGesture(boolean hasGesture) {
+            mHasUserGesture = hasGesture;
             return this;
         }
 

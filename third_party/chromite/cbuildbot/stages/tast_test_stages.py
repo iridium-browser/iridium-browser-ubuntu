@@ -85,12 +85,10 @@ class TastVMTestStage(generic_stages.BoardSpecificBuilderStage,
   """Runs Tast integration tests in a virtual machine."""
 
   category = constants.TEST_INFRA_STAGE
-  # Time allotted to cros_run_tast_vm_test to clean up (i.e. shut down the
-  # VM) after receiving SIGTERM. After this, SIGKILL is sent.
-  CLEANUP_TIMEOUT_SEC = 30 * 60
 
-  # Path within src/scripts to start/stop VM and run tests.
-  SCRIPT_PATH = 'bin/cros_run_tast_vm_test'
+  # Time allotted to cros_run_vm_test to clean up (i.e. shut down the VM) after
+  # receiving SIGTERM. After this, SIGKILL is sent.
+  CLEANUP_TIMEOUT_SEC = 10 * 60
 
   # These magic attributes can be used to turn off the stage via the build
   # config. See generic_stages.BuilderStage.
@@ -133,7 +131,7 @@ class TastVMTestStage(generic_stages.BoardSpecificBuilderStage,
       String containing chroot suffixed by path.
     """
     # When os.path.join encounters an absolute path, it throws away everything
-    # it's alredy seen.
+    # it's already seen.
     return os.path.join(self._build_root, constants.DEFAULT_CHROOT_DIR,
                         path.lstrip('/'))
 
@@ -173,21 +171,16 @@ class TastVMTestStage(generic_stages.BoardSpecificBuilderStage,
     Raises:
       failures_lib.TestFailure if an internal error is encountered.
     """
-    image = os.path.join(self.GetImageDirSymlink(), constants.TEST_IMAGE_BIN)
-    ssh_key = os.path.join(self.GetImageDirSymlink(),
-                           constants.TEST_KEY_PRIVATE)
-    cmd = [TastVMTestStage.SCRIPT_PATH,
-           '--board=' + self._current_board,
-           '--image_path=' + image,
-           '--ssh_private_key=' + ssh_key,
-           '--no_graphics',
-           '--results_dir=' + suite_chroot_results_dir,
-          ]
-    cmd += test_exprs
+    vm_path = os.path.join(self.GetImageDirSymlink(), constants.VM_IMAGE_BIN)
+    results_dir = self._MakeChrootPathAbsolute(suite_chroot_results_dir)
+    cmd = ['./cros_run_vm_test', '--no-display', '--copy-on-write', '--debug',
+           '--board=%s' % self._current_board, '--image-path=%s' % vm_path,
+           '--results-dir=%s' % results_dir, '--tast'] + test_exprs
 
     result = cros_build_lib.RunCommand(
-        cmd, cwd=os.path.join(self._build_root, 'src/scripts'),
-        error_code_ok=True, kill_timeout=TastVMTestStage.CLEANUP_TIMEOUT_SEC)
+        cmd, error_code_ok=True, cwd=constants.CHROMITE_BIN_DIR,
+        kill_timeout=TastVMTestStage.CLEANUP_TIMEOUT_SEC
+    )
     if result.returncode:
       raise failures_lib.TestFailure(FAILURE_EXIT_CODE % result.returncode)
 

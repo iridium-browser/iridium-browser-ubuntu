@@ -742,7 +742,7 @@ my %globals;
 				    }
 				    last;
 				  };
-		/\.rva|\.long|\.quad/
+		/\.rva|\.long|\.quad|\.byte/
 			    && do { $$line =~ s/([_a-z][_a-z0-9]*)/$globals{$1} or $1/gei;
 				    $$line =~ s/\.L/$decor/g;
 				    last;
@@ -1122,6 +1122,16 @@ my $endbranch = sub {
 };
 
 ########################################################################
+
+{
+  my $comment = "#";
+  $comment = ";" if ($masm || $nasm);
+  print <<___;
+$comment This file is generated from a similarly-named Perl script in the BoringSSL
+$comment source tree. Do not edit by hand.
+
+___
+}
 
 if ($nasm) {
     print <<___;

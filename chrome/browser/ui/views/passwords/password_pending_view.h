@@ -16,7 +16,6 @@ class Label;
 class ToggleImageButton;
 }  // namespace views
 
-class DesktopIOSPromotionBubbleView;
 class PasswordSignInPromoView;
 
 // A view offering the user the ability to save or update credentials (depending
@@ -58,6 +57,9 @@ class PasswordPendingView : public PasswordBubbleViewBase,
   bool Cancel() override;
   bool Close() override;
 
+  // View:
+  void AddedToWidget() override;
+
   void TogglePasswordVisibility();
   void UpdateUsernameAndPasswordInModel();
   void ReplaceWithPromo();
@@ -70,7 +72,6 @@ class PasswordPendingView : public PasswordBubbleViewBase,
   // across devices. One of these are non-null when the promotion dialog is
   // active.
   PasswordSignInPromoView* sign_in_promo_;
-  DesktopIOSPromotionBubbleView* desktop_ios_promo_;
 
   views::View* username_field_;
   views::ToggleImageButton* password_view_button_;

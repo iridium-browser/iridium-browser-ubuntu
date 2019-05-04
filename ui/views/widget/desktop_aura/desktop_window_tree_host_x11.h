@@ -86,7 +86,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   static void CleanUpWindowList(void (*func)(aura::Window* window));
 
   // Disables event listening to make |dialog| modal.
-  std::unique_ptr<base::OnceClosure> DisableEventListening();
+  std::unique_ptr<base::Closure> DisableEventListening();
 
   // Returns a map of KeyboardEvent code to KeyboardEvent key values.
   base::flat_map<std::string, std::string> GetKeyboardLayoutMap() override;
@@ -165,9 +165,10 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   void ShowImpl() override;
   void HideImpl() override;
   gfx::Rect GetBoundsInPixels() const override;
-  void SetBoundsInPixels(const gfx::Rect& requested_bounds_in_pixels,
-                         const viz::LocalSurfaceId& local_surface_id =
-                             viz::LocalSurfaceId()) override;
+  void SetBoundsInPixels(
+      const gfx::Rect& requested_bounds_in_pixels,
+      const viz::LocalSurfaceIdAllocation& local_surface_id_allocation =
+          viz::LocalSurfaceIdAllocation()) override;
   gfx::Point GetLocationOnScreenInPixels() const override;
   void SetCapture() override;
   void ReleaseCapture() override;

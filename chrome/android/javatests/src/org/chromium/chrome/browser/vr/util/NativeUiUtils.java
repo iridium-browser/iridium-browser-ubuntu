@@ -8,6 +8,7 @@ import static org.chromium.chrome.browser.vr.XrTestFramework.POLL_TIMEOUT_SHORT_
 
 import android.graphics.PointF;
 import android.graphics.Rect;
+import android.support.annotation.IntDef;
 import android.view.Choreographer;
 import android.view.View;
 import android.view.ViewGroup;
@@ -31,6 +32,8 @@ import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.DOMUtils;
 
 import java.io.File;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeoutException;
 
@@ -39,11 +42,41 @@ import java.util.concurrent.TimeoutException;
  * omnibox or back button.
  */
 public class NativeUiUtils {
+    @IntDef({ScrollDirection.UP, ScrollDirection.DOWN, ScrollDirection.LEFT, ScrollDirection.RIGHT})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface ScrollDirection {
+        int UP = 0;
+        int DOWN = 1;
+        int LEFT = 2;
+        int RIGHT = 3;
+    }
+
     // How many frames to wait after entering text in the omnibox before we can assume that
     // suggestions are updated. This should only be used if the workaround of inputting text and
     // waiting for the suggestion box to appear doesn't work, e.g. if you need to input text, wait
     // for autocomplete, then input more text before committing. 20 is arbitrary, but stable.
     public static final int NUM_FRAMES_FOR_SUGGESTION_UPDATE = 20;
+    // Arbitrary number of interpolated steps to perform within a scroll to consistently trigger
+    // either fling or non-fling scrolling.
+    public static final int NUM_STEPS_NON_FLING_SCROLL = 60;
+    public static final int NUM_STEPS_FLING_SCROLL = 6;
+    // Number of frames to wait after queueing a non-fling scroll before we can be sure that all the
+    // scroll actions have been processed. The +2 comes from scrolls always having a touch down and
+    // up action with NUM_STEPS_*_SCROLL additional actions in between.
+    public static final int NUM_FRAMES_NON_FLING_SCROLL = NUM_STEPS_NON_FLING_SCROLL + 2;
+    // The number of frames after queueing a fling scroll before we can be sure that all the scroll
+    // actions have been processed AND we should still be scrolling due to the fling. The 10 is
+    // arbitrary, but 1/6 of a second is a reasonable amount of time to wait and still expect to be
+    // flinging, and is stable.
+    public static final int NUM_FRAMES_FLING_SCROLL = NUM_STEPS_FLING_SCROLL + 2 + 10;
+    // Arbitrary number of frames to wait before sending a touch up event in order to ensure that a
+    // fast scroll does not become a fling scroll.
+    public static final int NUM_FRAMES_DELAY_TO_PREVENT_FLING = 60;
+    public static final String FRAME_BUFFER_SUFFIX_WEB_XR_OVERLAY = "_WebXrOverlay";
+    public static final String FRAME_BUFFER_SUFFIX_WEB_XR_CONTENT = "_WebXrContent";
+    public static final String FRAME_BUFFER_SUFFIX_BROWSER_UI = "_BrowserUi";
+    public static final String FRAME_BUFFER_SUFFIX_BROWSER_CONTENT = "_BrowserContent";
+
     // Arbitrary but reasonable amount of time to expect the UI to stop updating after interacting
     // with an element.
     private static final int DEFAULT_UI_QUIESCENCE_TIMEOUT_MS = 2000;
@@ -77,7 +110,44 @@ public class NativeUiUtils {
      */
     public static void clickElement(int elementName, PointF position) {
         TestVrShellDelegate.getInstance().performControllerActionForTesting(
-                elementName, VrControllerTestAction.CLICK, position);
+                elementName, VrControllerTestAction.CLICK_DOWN, position);
+        TestVrShellDelegate.getInstance().performControllerActionForTesting(
+                elementName, VrControllerTestAction.CLICK_UP, position);
+    }
+
+    /**
+     * Clicks the app button while pointed at a UI element.
+     * @param elementName The UserFriendlyElementName that will be pointed at.
+     * @param position A PointF specifying where on the element to point at relative to a unit
+     *        square centered on (0, 0).
+     */
+    public static void clickAppButton(int elementName, PointF position) {
+        TestVrShellDelegate.getInstance().performControllerActionForTesting(
+                elementName, VrControllerTestAction.APP_DOWN, position);
+        TestVrShellDelegate.getInstance().performControllerActionForTesting(
+                elementName, VrControllerTestAction.APP_UP, position);
+    }
+
+    /**
+     * Presses the app button down while pointed at a UI element.
+     * @param elementName The UserFriendlyElementName that will be pointed at.
+     * @param position A PointF specifying where on the element to point at relative to a unit
+     *        square centered on (0, 0).
+     */
+    public static void pressAppButton(int elementName, PointF position) {
+        TestVrShellDelegate.getInstance().performControllerActionForTesting(
+                elementName, VrControllerTestAction.APP_DOWN, position);
+    }
+
+    /**
+     * Releases the app button while pointed at a UI element.
+     * @param elementName The UserFriendlyElementName that will be pointed at.
+     * @param position A PointF specifying where on the element to point at relative to a unit
+     *        square centered on (0, 0).
+     */
+    public static void releaseAppButton(int elementName, PointF position) {
+        TestVrShellDelegate.getInstance().performControllerActionForTesting(
+                elementName, VrControllerTestAction.APP_UP, position);
     }
 
     /**
@@ -117,6 +187,70 @@ public class NativeUiUtils {
                 clickElement(UserFriendlyElementName.CONTENT_QUAD, clickCoordinates);
             }
         });
+    }
+
+    /**
+     * Helper function for performing a non-fling scroll.
+     *
+     * @param direction the ScrollDirection to scroll in.
+     */
+    public static void scrollNonFling(@ScrollDirection int direction) throws InterruptedException {
+        scroll(directionToStartPoint(direction), directionToEndPoint(direction),
+                NUM_STEPS_NON_FLING_SCROLL, false /* delayTouchUp */);
+    }
+
+    /**
+     * Helper function for performing a fling scroll.
+     *
+     * @param direction the ScrollDirection to scroll in.
+     */
+    public static void scrollFling(@ScrollDirection int direction) throws InterruptedException {
+        scroll(directionToStartPoint(direction), directionToEndPoint(direction),
+                NUM_STEPS_FLING_SCROLL, false /* delayTouchUp */);
+    }
+
+    /**
+     * Helper function to perform the same action as a fling scroll, but delay the touch up event.
+     * This results in a fast, non-fling scroll that's useful for ensuring that an actual fling
+     * scroll works by asserting the actual fling scroll goes further.
+     *
+     * @param direction the ScrollDirection to scroll in.
+     */
+    public static void scrollNonFlingFast(@ScrollDirection int direction)
+            throws InterruptedException {
+        scroll(directionToStartPoint(direction), directionToEndPoint(direction),
+                NUM_STEPS_FLING_SCROLL, true /* delayTouchUp */);
+    }
+
+    /**
+     * Perform a touchpad drag to scroll.
+     *
+     * @param start the position on the touchpad to start the drag.
+     * @param end the position on the touchpad to end the drag.
+     * @param numSteps the number of steps to interpolate between the two points, one step per
+     *        frame.
+     * @param delayTouchUp whether to significantly delay the final touch up event, which should
+     *        prevent fling scrolls regardless of scroll speed.
+     */
+    public static void scroll(PointF start, PointF end, int numSteps, boolean delayTouchUp)
+            throws InterruptedException {
+        PointF stepIncrement =
+                new PointF((end.x - start.x) / numSteps, (end.y - start.y) / numSteps);
+        PointF currentPosition = new PointF(start.x, start.y);
+        TestVrShellDelegate.getInstance().performControllerActionForTesting(
+                UserFriendlyElementName.NONE /* unused */, VrControllerTestAction.TOUCH_DOWN,
+                currentPosition);
+        for (int i = 0; i < numSteps; ++i) {
+            currentPosition.offset(stepIncrement.x, stepIncrement.y);
+            TestVrShellDelegate.getInstance().performControllerActionForTesting(
+                    UserFriendlyElementName.NONE /* unused */, VrControllerTestAction.TOUCH_DOWN,
+                    currentPosition);
+        }
+        if (delayTouchUp) {
+            waitNumFrames(NUM_FRAMES_DELAY_TO_PREVENT_FLING);
+        }
+        TestVrShellDelegate.getInstance().performControllerActionForTesting(
+                UserFriendlyElementName.NONE /* unused */, VrControllerTestAction.TOUCH_UP, end);
     }
 
     /**
@@ -215,26 +349,34 @@ public class NativeUiUtils {
     }
 
     /**
-     * Runs the given Runnable and waits until the native UI reports that it is quiescent.
+     * Runs the given Runnable and waits until the native UI reports that it is quiescent. The
+     * provided Runnable is expected to cause a UI change of some sort, so the quiescence wait will
+     * fail if no change is detected within the allotted time.
      *
      * @param action A Runnable containing the action to perform.
      */
-    public static void performActionAndWaitForUiQuiescence(Runnable action)
-            throws InterruptedException {
+    public static void performActionAndWaitForUiQuiescence(Runnable action) {
         final TestVrShellDelegate instance = TestVrShellDelegate.getInstance();
         final CountDownLatch resultLatch = new CountDownLatch(1);
+        final VrShell.UiOperationData operationData = new VrShell.UiOperationData();
+        operationData.actionType = UiTestOperationType.UI_ACTIVITY_RESULT;
+        operationData.resultCallback = () -> {
+            resultLatch.countDown();
+        };
+        operationData.timeoutMs = DEFAULT_UI_QUIESCENCE_TIMEOUT_MS;
         // Run on the UI thread to prevent issues with registering a new callback before
         // ReportUiOperationResultForTesting has finished.
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            instance.registerUiOperationCallbackForTesting(
-                    UiTestOperationType.UI_ACTIVITY_RESULT, () -> {
-                        resultLatch.countDown();
-                    }, DEFAULT_UI_QUIESCENCE_TIMEOUT_MS, 0 /* unused */);
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> { instance.registerUiOperationCallbackForTesting(operationData); });
         action.run();
 
-        // Wait for any outstanding animations to finish.
-        resultLatch.await();
+        // Wait for any outstanding animations to finish. Catch the interrupted exception so we
+        // don't have to try/catch anytime we chain multiple actions.
+        try {
+            resultLatch.await();
+        } catch (InterruptedException e) {
+            Assert.fail("Interrupted while waiting for UI quiescence: " + e.toString());
+        }
         int uiResult =
                 instance.getLastUiOperationResultForTesting(UiTestOperationType.UI_ACTIVITY_RESULT);
         Assert.assertEquals("UI reported non-quiescent result '"
@@ -243,32 +385,77 @@ public class NativeUiUtils {
     }
 
     /**
-     * Runs the given Runnable and waits until the specified element changes its visibility.
-     *
-     * @param elementName The UserFriendlyElementName to wait on to change visibility.
-     * @param action A Runnable containing the action to perform.
+     * Waits until either the UI reports quiescence or a timeout is reached. Unlike
+     * performActionAndWaitForUiQuiescence, this does not fail if no UI change is detected within
+     * the allotted time, so it can be used when it is unsure whether the UI is already quiescent
+     * or not, e.g. when initally entering the VR browser.
      */
-    public static void performActionAndWaitForVisibilityChange(
-            final int elementName, Runnable action) throws InterruptedException {
+    public static void waitForUiQuiescence() {
         final TestVrShellDelegate instance = TestVrShellDelegate.getInstance();
         final CountDownLatch resultLatch = new CountDownLatch(1);
+        final VrShell.UiOperationData operationData = new VrShell.UiOperationData();
+        operationData.actionType = UiTestOperationType.UI_ACTIVITY_RESULT;
+        operationData.resultCallback = () -> {
+            resultLatch.countDown();
+        };
+        operationData.timeoutMs = DEFAULT_UI_QUIESCENCE_TIMEOUT_MS;
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> { instance.registerUiOperationCallbackForTesting(operationData); });
+        // Catch the interrupted exception so we don't have to try/catch anytime we chain multiple
+        // actions.
+        try {
+            resultLatch.await();
+        } catch (InterruptedException e) {
+            Assert.fail("Interrupted while waiting for UI quiescence: " + e.toString());
+        }
+
+        int uiResult =
+                instance.getLastUiOperationResultForTesting(UiTestOperationType.UI_ACTIVITY_RESULT);
+        Assert.assertTrue("UI reported non-quiescent result '"
+                        + uiTestOperationResultToString(uiResult) + "'",
+                uiResult == UiTestOperationResult.QUIESCENT
+                        || uiResult == UiTestOperationResult.TIMEOUT_NO_START);
+    }
+
+    /**
+     * Runs the given Runnable and waits until the specified element matches the requested
+     * visibility.
+     *
+     * @param elementName The UserFriendlyElementName to wait on to change visibility.
+     * @param status The visibility status to wait for.
+     * @param action A Runnable containing the action to perform.
+     */
+    public static void performActionAndWaitForVisibilityStatus(
+            final int elementName, final boolean visible, Runnable action) {
+        final TestVrShellDelegate instance = TestVrShellDelegate.getInstance();
+        final CountDownLatch resultLatch = new CountDownLatch(1);
+        final VrShell.UiOperationData operationData = new VrShell.UiOperationData();
+        operationData.actionType = UiTestOperationType.ELEMENT_VISIBILITY_STATUS;
+        operationData.resultCallback = () -> {
+            resultLatch.countDown();
+        };
+        operationData.timeoutMs = DEFAULT_UI_QUIESCENCE_TIMEOUT_MS;
+        operationData.elementName = elementName;
+        operationData.visibility = visible;
         // Run on the UI thread to prevent issues with registering a new callback before
         // ReportUiOperationResultForTesting has finished.
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            instance.registerUiOperationCallbackForTesting(
-                    UiTestOperationType.ELEMENT_VISIBILITY_CHANGE, () -> {
-                        resultLatch.countDown();
-                    }, DEFAULT_UI_QUIESCENCE_TIMEOUT_MS, elementName);
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> { instance.registerUiOperationCallbackForTesting(operationData); });
         action.run();
 
-        // Wait for the result to be reported.
-        resultLatch.await();
+        // Wait for the result to be reported. Catch the interrupted exception so we don't have to
+        // try/catch anytime we chain multiple actions.
+        try {
+            resultLatch.await();
+        } catch (InterruptedException e) {
+            Assert.fail("Interrupted while waiting for visibility status: " + e.toString());
+        }
+
         int result = instance.getLastUiOperationResultForTesting(
-                UiTestOperationType.ELEMENT_VISIBILITY_CHANGE);
+                UiTestOperationType.ELEMENT_VISIBILITY_STATUS);
         Assert.assertEquals("UI reported non-visibility-changed result '"
                         + uiTestOperationResultToString(result) + "'",
-                UiTestOperationResult.VISIBILITY_CHANGE, result);
+                UiTestOperationResult.VISIBILITY_MATCH, result);
     }
 
     /**
@@ -301,8 +488,9 @@ public class NativeUiUtils {
      */
     public static void dumpNextFramesFrameBuffers(String filepathBase) throws InterruptedException {
         // Clear out any existing images with the names of the files that may be created.
-        for (String suffix :
-                new String[] {"_WebXrOverlay", "_WebXrContent", "_BrowserUi", "_BrowserContent"}) {
+        for (String suffix : new String[] {FRAME_BUFFER_SUFFIX_WEB_XR_OVERLAY,
+                     FRAME_BUFFER_SUFFIX_WEB_XR_CONTENT, FRAME_BUFFER_SUFFIX_BROWSER_UI,
+                     FRAME_BUFFER_SUFFIX_BROWSER_CONTENT}) {
             File dumpFile = new File(filepathBase, suffix + ".png");
             Assert.assertFalse("Failed to delete existing screenshot",
                     dumpFile.exists() && !dumpFile.delete());
@@ -310,13 +498,16 @@ public class NativeUiUtils {
 
         final TestVrShellDelegate instance = TestVrShellDelegate.getInstance();
         final CountDownLatch resultLatch = new CountDownLatch(1);
+        final VrShell.UiOperationData operationData = new VrShell.UiOperationData();
+        operationData.actionType = UiTestOperationType.FRAME_BUFFER_DUMPED;
+        operationData.resultCallback = () -> {
+            resultLatch.countDown();
+        };
 
         // Run on the UI thread to prevent issues with registering a new callback before
         // ReportUiOperationResultForTesting has finished.
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            instance.registerUiOperationCallbackForTesting(UiTestOperationType.FRAME_BUFFER_DUMPED,
-                    () -> { resultLatch.countDown(); }, 0 /* unused */, 0 /* unused */);
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> { instance.registerUiOperationCallbackForTesting(operationData); });
         instance.saveNextFrameBufferToDiskForTesting(filepathBase);
         resultLatch.await();
     }
@@ -372,12 +563,38 @@ public class NativeUiUtils {
                 return "Timeout (UI activity not started)";
             case UiTestOperationResult.TIMEOUT_NO_END:
                 return "Timeout (UI activity not stopped)";
-            case UiTestOperationResult.VISIBILITY_CHANGE:
-                return "Visibility change";
-            case UiTestOperationResult.TIMEOUT_NO_CHANGE:
-                return "Timeout (Element visibility did not change)";
+            case UiTestOperationResult.VISIBILITY_MATCH:
+                return "Visibility match";
+            case UiTestOperationResult.TIMEOUT_NO_VISIBILITY_MATCH:
+                return "Timeout (Element visibility did not match)";
             default:
                 return "Unknown result";
+        }
+    }
+
+    private static PointF directionToStartPoint(@ScrollDirection int direction) {
+        switch (direction) {
+            case ScrollDirection.UP:
+                return new PointF(0.5f, 0.05f);
+            case ScrollDirection.DOWN:
+                return new PointF(0.5f, 0.95f);
+            case ScrollDirection.LEFT:
+                return new PointF(0.05f, 0.5f);
+            default:
+                return new PointF(0.95f, 0.5f);
+        }
+    }
+
+    private static PointF directionToEndPoint(@ScrollDirection int direction) {
+        switch (direction) {
+            case ScrollDirection.UP:
+                return new PointF(0.5f, 0.95f);
+            case ScrollDirection.DOWN:
+                return new PointF(0.5f, 0.05f);
+            case ScrollDirection.LEFT:
+                return new PointF(0.95f, 0.5f);
+            default:
+                return new PointF(0.05f, 0.5f);
         }
     }
 }

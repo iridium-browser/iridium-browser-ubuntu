@@ -28,8 +28,8 @@
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style/data_ref.h"
 #include "third_party/blink/renderer/core/style/svg_computed_style_defs.h"
+#include "third_party/blink/renderer/platform/geometry/length.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
-#include "third_party/blink/renderer/platform/length.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 
@@ -232,7 +232,7 @@ class SVGComputedStyle : public RefCounted<SVGComputedStyle> {
       stops.Access()->opacity = obj;
   }
 
-  void SetStopColor(const Color& obj) {
+  void SetStopColor(const StyleColor& obj) {
     if (!(stops->color == obj))
       stops.Access()->color = obj;
   }
@@ -320,7 +320,7 @@ class SVGComputedStyle : public RefCounted<SVGComputedStyle> {
   const UnzoomedLength& StrokeWidth() const { return stroke->width; }
   const Length& StrokeDashOffset() const { return stroke->dash_offset; }
   float StopOpacity() const { return stops->opacity; }
-  const Color& StopColor() const { return stops->color; }
+  const StyleColor& StopColor() const { return stops->color; }
   float FloodOpacity() const { return misc->flood_opacity; }
   StyleColor FloodColor() const {
     return misc->flood_color_is_current_color ? StyleColor::CurrentColor()

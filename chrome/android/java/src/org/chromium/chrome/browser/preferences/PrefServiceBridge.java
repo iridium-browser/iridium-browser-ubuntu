@@ -16,7 +16,6 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.download.DownloadPromptStatus;
 import org.chromium.chrome.browser.preferences.languages.LanguageItem;
-import org.chromium.chrome.browser.preferences.website.ContentSetting;
 import org.chromium.chrome.browser.preferences.website.ContentSettingException;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 
@@ -183,14 +182,10 @@ public class PrefServiceBridge {
     }
 
     @CalledByNative
-    private static void addContentSettingExceptionToList(
-            ArrayList<ContentSettingException> list,
-            int contentSettingsType,
-            String pattern,
-            int contentSetting,
-            String source) {
-        ContentSettingException exception = new ContentSettingException(
-                contentSettingsType, pattern, ContentSetting.fromInt(contentSetting), source);
+    private static void addContentSettingExceptionToList(ArrayList<ContentSettingException> list,
+            int contentSettingsType, String pattern, int contentSetting, String source) {
+        ContentSettingException exception =
+                new ContentSettingException(contentSettingsType, pattern, contentSetting, source);
         list.add(exception);
     }
 
@@ -447,13 +442,6 @@ public class PrefServiceBridge {
     public void setContextualSearchState(boolean enabled) {
         setContextualSearchPreference(enabled
                 ? CONTEXTUAL_SEARCH_ENABLED : CONTEXTUAL_SEARCH_DISABLED);
-    }
-
-    /**
-     * @return Whether the active Safe Browsing Extended Reporting pref is the new Scout pref.
-     */
-    public boolean isSafeBrowsingScoutReportingActive() {
-        return nativeIsScoutExtendedReportingActive();
     }
 
     /**
@@ -1155,7 +1143,6 @@ public class PrefServiceBridge {
     private native void nativeSetSearchSuggestEnabled(boolean enabled);
     private native boolean nativeGetSearchSuggestManaged();
     private native boolean nativeGetSafeBrowsingExtendedReportingEnabled();
-    private native boolean nativeIsScoutExtendedReportingActive();
     private native void nativeSetSafeBrowsingExtendedReportingEnabled(boolean enabled);
     private native boolean nativeGetSafeBrowsingExtendedReportingManaged();
     private native boolean nativeGetSafeBrowsingEnabled();

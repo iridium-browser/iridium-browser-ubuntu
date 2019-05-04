@@ -52,7 +52,7 @@ CPDF_ContentParser::CPDF_ContentParser(CPDF_Page* pPage)
     return;
   }
 
-  m_nStreams = pArray->GetCount();
+  m_nStreams = pArray->size();
   if (m_nStreams == 0) {
     m_CurrentStage = Stage::kComplete;
     return;
@@ -81,9 +81,9 @@ CPDF_ContentParser::CPDF_ContentParser(CPDF_Form* pForm,
     ClipPath.Emplace();
     ClipPath.AppendRect(form_bbox.left, form_bbox.bottom, form_bbox.right,
                         form_bbox.top);
-    ClipPath.Transform(&form_matrix);
+    ClipPath.Transform(form_matrix);
     if (pParentMatrix)
-      ClipPath.Transform(pParentMatrix);
+      ClipPath.Transform(*pParentMatrix);
 
     form_bbox = form_matrix.TransformRect(form_bbox);
     if (pParentMatrix)
@@ -103,7 +103,7 @@ CPDF_ContentParser::CPDF_ContentParser(CPDF_Form* pForm,
   }
   if (pForm->GetTransparency().IsGroup()) {
     CPDF_GeneralState* pState = &m_pParser->GetCurStates()->m_GeneralState;
-    pState->SetBlendType(FXDIB_BLEND_NORMAL);
+    pState->SetBlendType(BlendMode::kNormal);
     pState->SetStrokeAlpha(1.0f);
     pState->SetFillAlpha(1.0f);
     pState->SetSoftMask(nullptr);

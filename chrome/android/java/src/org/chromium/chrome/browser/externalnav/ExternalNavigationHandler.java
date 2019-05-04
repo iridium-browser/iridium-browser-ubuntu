@@ -24,6 +24,7 @@ import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.UrlConstants;
@@ -311,6 +312,20 @@ public class ExternalNavigationHandler {
                 if (DEBUG) Log.i(TAG, "NO_OVERRIDE: Incoming intent (not a redirect)");
                 return OverrideUrlLoadingResult.NO_OVERRIDE;
             }
+            // http://crbug.com/839751: Require user gestures for form submits to external
+            //                          protocols.
+            // TODO(tedchoc): Remove the ChromeFeatureList check once we verify this change does
+            //                not break the world.
+            if (isRedirectFromFormSubmit && !incomingIntentRedirect && !params.hasUserGesture()
+                    && ChromeFeatureList.isEnabled(
+                            ChromeFeatureList.INTENT_BLOCK_EXTERNAL_FORM_REDIRECT_NO_GESTURE)) {
+                if (DEBUG) {
+                    Log.i(TAG,
+                            "NO_OVERRIDE: Incoming form intent attempting to redirect without "
+                                    + "user gesture");
+                }
+                return OverrideUrlLoadingResult.NO_OVERRIDE;
+            }
             if (params.getRedirectHandler() != null
                     && params.getRedirectHandler().isNavigationFromUserTyping()) {
                 if (DEBUG) Log.i(TAG, "NO_OVERRIDE: Navigation from user typing");
@@ -464,7 +479,7 @@ public class ExternalNavigationHandler {
         // handlers. If webkit can't handle it internally, we need to call
         // startActivityIfNeeded or startActivity.
         if (!isExternalProtocol) {
-            if (mDelegate.countSpecializedHandlers(resolvingInfos, intent) == 0) {
+            if (mDelegate.countSpecializedHandlers(resolvingInfos) == 0) {
                 if (incomingIntentRedirect
                         && mDelegate.maybeLaunchInstantApp(
                                    params.getUrl(), params.getReferrerUrl(), true)) {
@@ -590,7 +605,7 @@ public class ExternalNavigationHandler {
 
         // If the only specialized intent handler is a WebAPK, set the intent's package to
         // launch the WebAPK without showing the intent picker.
-        String targetWebApkPackageName = mDelegate.findWebApkPackageName(resolvingInfos);
+        String targetWebApkPackageName = mDelegate.findFirstWebApkPackageName(resolvingInfos);
 
         // We can't rely on this falling through to startActivityIfNeeded and behaving
         // correctly for WebAPKs. This is because the target of the intent is the WebApk's main
@@ -604,7 +619,7 @@ public class ExternalNavigationHandler {
         }
 
         if (targetWebApkPackageName != null
-                && mDelegate.countSpecializedHandlers(resolvingInfos, null) == 1) {
+                && mDelegate.countSpecializedHandlers(resolvingInfos) == 1) {
             intent.setPackage(targetWebApkPackageName);
         }
 
@@ -786,8 +801,7 @@ public class ExternalNavigationHandler {
         } catch (URISyntaxException ex) {
             return false;
         }
-        return ExternalNavigationDelegateImpl
-                       .getSpecializedHandlersWithFilter(handlers, appId, null)
+        return ExternalNavigationDelegateImpl.getSpecializedHandlersWithFilter(handlers, appId)
                        .size()
                 > 0;
     }

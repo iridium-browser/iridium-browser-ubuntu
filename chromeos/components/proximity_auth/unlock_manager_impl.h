@@ -16,6 +16,7 @@
 #include "chromeos/components/proximity_auth/remote_status_update.h"
 #include "chromeos/components/proximity_auth/screenlock_bridge.h"
 #include "chromeos/components/proximity_auth/screenlock_state.h"
+#include "chromeos/components/proximity_auth/smart_lock_metrics_recorder.h"
 #include "chromeos/components/proximity_auth/unlock_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/services/secure_channel/public/mojom/secure_channel.mojom.h"
@@ -33,7 +34,6 @@ class ProximityMonitor;
 class UnlockManagerImpl : public UnlockManager,
                           public MessengerObserver,
                           public ProximityMonitorObserver,
-                          public ScreenlockBridge::Observer,
                           chromeos::PowerManagerClient::Observer,
                           public device::BluetoothAdapter::Observer {
  public:
@@ -49,6 +49,7 @@ class UnlockManagerImpl : public UnlockManager,
   void SetRemoteDeviceLifeCycle(RemoteDeviceLifeCycle* life_cycle) override;
   void OnLifeCycleStateChanged() override;
   void OnAuthAttempted(mojom::AuthType auth_type) override;
+  void CancelConnectionAttempt() override;
 
  protected:
   // Creates a ProximityMonitor instance for the given |connection|.
@@ -75,13 +76,6 @@ class UnlockManagerImpl : public UnlockManager,
 
   // ProximityMonitorObserver:
   void OnProximityStateChanged() override;
-
-  // ScreenlockBridge::Observer
-  void OnScreenDidLock(
-      ScreenlockBridge::LockHandler::ScreenType screen_type) override;
-  void OnScreenDidUnlock(
-      ScreenlockBridge::LockHandler::ScreenType screen_type) override;
-  void OnFocusedUserChanged(const AccountId& account_id) override;
 
   // Called when the screenlock state changes.
   void OnScreenLockedOrUnlocked(bool is_locked);
@@ -133,9 +127,15 @@ class UnlockManagerImpl : public UnlockManager,
   // Sets waking up state.
   void SetWakingUpState(bool is_waking_up);
 
-  // Accepts or rejects the current auth attempt according to |should_accept|.
-  // If the auth attempt is accepted, unlocks the screen.
-  void AcceptAuthAttempt(bool should_accept);
+  // Accepts or rejects the current auth attempt according to |error|. Accepts
+  // if and only if |error| is empty. If the auth attempt is accepted, unlocks
+  // the screen.
+  void FinalizeAuthAttempt(
+      const base::Optional<
+          SmartLockMetricsRecorder::SmartLockAuthResultFailureReason>& error);
+
+  // Failed to create a connection to the host.
+  void OnConnectionAttemptTimeOut();
 
   // Returns the screen lock state corresponding to the given remote |status|
   // update.
@@ -167,9 +167,6 @@ class UnlockManagerImpl : public UnlockManager,
 
   // Used to access the common prefs. Expected to outlive |this| instance.
   ProximityAuthPrefManager* pref_manager_;
-
-  // Whether the screen is currently locked.
-  bool is_locked_;
 
   // True if the manager is currently processing a user-initiated authentication
   // attempt, which is initiated when the user pod is clicked.

@@ -8,6 +8,7 @@ Quick descriptions of the scripts in tracing/bin/:
  * `histograms2html`: Vulcanizes results.html. Optionally copies HistogramSet
    JSON from existing results.html and/or histograms.json file.
  * `html2trace`: Extracts trace JSON from a vulcanized trace HTML file.
+ * `label_histograms`: Add a label to Histograms in an HTML or JSON file.
  * `map_traces`: Runs a trace map function over multiple traces. See also
    `run_metric`.
  * `memory_infra_remote_dump`: Extracts before/after memory dumps from a
@@ -31,7 +32,7 @@ Quick descriptions of the scripts in tracing/bin/:
  * `symbolize_trace`: Modifies trace JSON to symbolize symbols using a Chromium
    Debug build output directory.
  * `trace2html`: Vulcanizes trace data from a JSON file to an HTML file.
- * `update_gypi`: Updates `trace_viewer.gypi`.
+ * `update_gni`: Updates `trace_viewer.gni`.
  * `validate_all_diagnostics`: Checks that all Diagnostic classes in
    `tracing/tracing/value/diagnostics/` are registered correctly.
  * `validate_all_metrics`: Checks that all metric functions in

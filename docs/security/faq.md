@@ -62,13 +62,19 @@ track the latest stable branches, and we support only the latest stable branch.
 ## How does the Chrome team determine severity of security bugs?
 
 See the [severity guidelines](severity-guidelines.md) for more information.
+Only security issues are considered under the security vulnerability rewards
+program. Other types of bugs, which we call "functional bugs", are not.
 
 <a name="TOC-Are-privacy-issues-considered-security-bugs-"></a>
 ## Are privacy issues considered security bugs?
 
-Privacy bugs, such as leaking information from Incognito, fingerprinting, and
-bugs related to deleting browsing data are not considered under the security
-VRP. The Chrome Privacy team tracks them as functional bugs.
+No. The Chrome Privacy team treats privacy issues, such as leaking information
+from Incognito, fingerprinting, and bugs related to deleting browsing data as
+functional bugs.
+
+Privacy issues are not considered under the security vulnerability rewards
+program; the [severity guidelines](severity-guidelines.md) outline the types of
+bugs that are considered security vulnerabilities in more detail.
 
 <a name="TOC-Timing-Attacks"></a>
 ## Are timing attacks considered security vulnerabilities?
@@ -126,8 +132,8 @@ some previously-stored state, such as browsing history.
 <a name="TOC-Are-denial-of-service-issues-considered-security-bugs-"></a>
 ## Are denial of service issues considered security bugs?
 
-Denial of Service (DoS) issues are treated as **abuse** or **stability** issues
-rather than security vulnerabilities.
+No. Denial of Service (DoS) issues are treated as **abuse** or **stability**
+issues rather than security vulnerabilities.
 
 *    If you find a reproducible crash, we encourage you to [report
      it](https://bugs.chromium.org/p/chromium/issues/entry?template=Crash%20Report).
@@ -167,6 +173,10 @@ case in an HTML context that it will never be able to cover. Among
 these are:
 *    Multiple unsanitized variables injected into the page.
 *    Unexpected server side transformation or decoding of the payload.
+
+XSSAuditor bypasses are not considered under the security vulnerability rewards
+program; the [severity guidelines](severity-guidelines.md) outline the types of
+bugs that are considered security vulnerabilities in more detail.
 
 <a name="TOC-Why-aren-t-physically-local-attacks-in-Chrome-s-threat-model-"></a>
 ## Why aren't physically-local attacks in Chrome's threat model?
@@ -389,10 +399,10 @@ that the current server is not the true server.
 ## How does key pinning interact with local proxies and filters?
 
 To enable certificate chain validation, Chrome has access to two stores of trust
-anchors: certificates that are empowered as issuers. One trust anchor store is
-the system or public trust anchor store, and the other other is the local or
-private trust anchor store. The public store is provided as part of the
-operating system, and intended to authenticate public internet servers. The
+anchors (i.e. certificates that are empowered as issuers). One trust anchor
+store is the system or public trust anchor store, and the other other is the
+local or private trust anchor store. The public store is provided as part of
+the operating system, and intended to authenticate public internet servers. The
 private store contains certificates installed by the user or the administrator
 of the client machine. Private intranet servers should authenticate themselves
 with certificates issued by a private trust anchor.
@@ -420,6 +430,31 @@ certificate — that is, the client is already under the control of the person w
 controls the proxy (e.g. the enterprise’s IT administrator). If the client does
 not trust the private trust anchor, the proxy’s attempt to mediate the
 connection will fail as it should.
+
+<a name="TOC-When-is-key-pinning-enabled-"></a>
+## When is key pinning enabled?
+
+Key pinning is enabled for Chrome-branded, non-mobile builds when the local
+clock is within ten weeks of the embedded build timestamp. Key pinning is a
+useful security measure but it tightly couples client and server configurations
+and completely breaks when those configurations are out of sync. In order to
+manage that risk we need to ensure that we can promptly update pinning clients
+an in emergency and ensure that non-emergency changes can be deployed in a
+reasonable timeframe.
+
+Each of the conditions listed above helps ensure those properties:
+Chrome-branded builds are those that Google provides and they all have an
+auto-update mechanism that can be used in an emergency. However, auto-update on
+mobile devices is significantly less effective thus they are excluded. Even in
+cases where auto-update is generally effective, there are still non-trivial
+populations of stragglers for various reasons. The ten-week timeout prevents
+those stragglers from causing problems for regular, non-emergency changes and
+allows stuck users to still, for example, conduct searches and access Chrome's
+homepage to hopefully get unstuck.
+
+In order to determine whether key pinning is active, try loading
+[https://pinningtest.appspot.com](https://pinningtest.appspot.com). If key
+pinning is active the load will _fail_ with a pinning error.
 
 <a name="TOC-How-does-certificate-transparency-interact-with-local-proxies-and-filters-"></a>
 ## How does Certificate Transparency interact with local proxies and filters?

@@ -9,15 +9,17 @@
 
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/accelerators/accelerator_table.h"
+#include "ash/app_list/app_list_controller_impl.h"
+#include "ash/app_list/home_launcher_gesture_handler.h"
 #include "ash/app_list/test/app_list_test_helper.h"
 #include "ash/focus_cycler.h"
-#include "ash/public/cpp/app_list/app_list_features.h"
-#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/immersive/immersive_fullscreen_controller_test_api.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/public/cpp/window_properties.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
+#include "ash/shelf/app_list_button.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_layout_manager_observer.h"
@@ -27,17 +29,15 @@
 #include "ash/shell_test_api.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/status_area_widget_test_helper.h"
-#include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_item.h"
-#include "ash/system/tray/test_system_tray_item.h"
 #include "ash/system/unified/unified_system_tray.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wallpaper/wallpaper_controller.h"
 #include "ash/window_factory.h"
 #include "ash/wm/lock_state_controller.h"
-#include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/splitview/split_view_controller.h"
-#include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "ash/wm/splitview/split_view_divider.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller_test_api.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
@@ -150,6 +150,17 @@ class ShelfDragCallback {
   virtual ~ShelfDragCallback() = default;
 
   void ProcessScroll(ui::EventType type, const gfx::Vector2dF& delta) {
+    ProcessScrollInternal(type, delta, true);
+  }
+
+  void ProcessScrollNoBoundsCheck(ui::EventType type,
+                                  const gfx::Vector2dF& delta) {
+    ProcessScrollInternal(type, delta, false);
+  }
+
+  void ProcessScrollInternal(ui::EventType type,
+                             const gfx::Vector2dF& delta,
+                             bool bounds_check) {
     if (GetShelfLayoutManager()->visibility_state() == SHELF_HIDDEN)
       return;
 
@@ -199,23 +210,30 @@ class ShelfDragCallback {
       }
     } else {
       // The shelf is invisible at the start of the drag.
-      if (increasing_drag) {
+      if (increasing_drag && bounds_check) {
+        constexpr float kEpsilon = 1.f;
         // Moving the shelf into the screen.
         if (std::abs(scroll_delta) < shelf_size) {
           // Tests that the shelf sticks with the touch point during the drag
           // until the shelf is completely visible.
           if (SHELF_ALIGNMENT_BOTTOM == shelf->alignment()) {
-            EXPECT_EQ(shelf_bounds.y(), auto_hidden_shelf_bounds_.y() +
-                                            kHiddenShelfInScreenPortion -
-                                            std::abs(scroll_delta));
+            EXPECT_NEAR(shelf_bounds.y(),
+                        auto_hidden_shelf_bounds_.y() +
+                            kHiddenShelfInScreenPortion -
+                            std::abs(scroll_delta),
+                        kEpsilon);
           } else if (SHELF_ALIGNMENT_LEFT == shelf->alignment()) {
-            EXPECT_EQ(shelf_bounds.x(), auto_hidden_shelf_bounds_.x() -
-                                            kHiddenShelfInScreenPortion +
-                                            std::abs(scroll_delta));
+            EXPECT_NEAR(shelf_bounds.x(),
+                        auto_hidden_shelf_bounds_.x() -
+                            kHiddenShelfInScreenPortion +
+                            std::abs(scroll_delta),
+                        kEpsilon);
           } else if (SHELF_ALIGNMENT_RIGHT == shelf->alignment()) {
-            EXPECT_EQ(shelf_bounds.x(), auto_hidden_shelf_bounds_.x() +
-                                            kHiddenShelfInScreenPortion -
-                                            std::abs(scroll_delta));
+            EXPECT_NEAR(shelf_bounds.x(),
+                        auto_hidden_shelf_bounds_.x() +
+                            kHiddenShelfInScreenPortion -
+                            std::abs(scroll_delta),
+                        kEpsilon);
           }
         } else {
           // Tests that after the shelf is completely visible, the shelf starts
@@ -334,20 +352,28 @@ class ShelfLayoutManagerTest : public AshTestBase {
     return widget;
   }
 
-  void RunGestureDragTests(gfx::Vector2d);
+  void RunGestureDragTests(const gfx::Point& shown, const gfx::Point& hidden);
+  void TestHomeLauncherGestureHandler(bool autohide_shelf);
+
+  gfx::Rect GetVisibleShelfWidgetBoundsInScreen() {
+    gfx::Rect bounds = GetShelfWidget()->GetWindowBoundsInScreen();
+    bounds.Intersect(
+        display::Screen::GetScreen()->GetPrimaryDisplay().bounds());
+    return bounds;
+  }
 
   // Turn on the lock screen.
   void LockScreen() {
     mojom::SessionInfoPtr info = mojom::SessionInfo::New();
     info->state = session_manager::SessionState::LOCKED;
-    ash::Shell::Get()->session_controller()->SetSessionInfo(std::move(info));
+    Shell::Get()->session_controller()->SetSessionInfo(std::move(info));
   }
 
   // Turn off the lock screen.
   void UnlockScreen() {
     mojom::SessionInfoPtr info = mojom::SessionInfo::New();
     info->state = session_manager::SessionState::ACTIVE;
-    ash::Shell::Get()->session_controller()->SetSessionInfo(std::move(info));
+    Shell::Get()->session_controller()->SetSessionInfo(std::move(info));
   }
 
   int64_t GetPrimaryDisplayId() {
@@ -401,6 +427,17 @@ class ShelfLayoutManagerTest : public AshTestBase {
         ->layer();
   }
 
+  // If |layout_manager->auto_hide_timer_| is running, stops it, runs its task,
+  // and returns true. Otherwise, returns false.
+  bool TriggerAutoHideTimeout() const {
+    ShelfLayoutManager* layout_manager = GetShelfLayoutManager();
+    if (!layout_manager->auto_hide_timer_.IsRunning())
+      return false;
+
+    layout_manager->auto_hide_timer_.FireNow();
+    return true;
+  }
+
  private:
   base::TimeTicks timestamp_;
   gfx::Point current_point_;
@@ -408,7 +445,13 @@ class ShelfLayoutManagerTest : public AshTestBase {
   DISALLOW_COPY_AND_ASSIGN(ShelfLayoutManagerTest);
 };
 
-void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
+void ShelfLayoutManagerTest::RunGestureDragTests(
+    const gfx::Point& edge_to_hide,
+    const gfx::Point& edge_to_show) {
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  display::Display display = display::Screen::GetScreen()->GetPrimaryDisplay();
+  generator->MoveMouseTo(display.bounds().CenterPoint());
+
   Shelf* shelf = GetPrimaryShelf();
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
 
@@ -437,19 +480,17 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
   layout_manager->LayoutShelf();
 
-  ui::test::EventGenerator* generator = GetEventGenerator();
   const int kNumScrollSteps = 4;
   ShelfDragCallback handler(shelf_hidden, shelf_shown);
 
-  // Swipe up on the always shown shelf should not change any state.
-  gfx::Point start = GetShelfWidget()->GetWindowBoundsInScreen().CenterPoint();
-  gfx::Point end = start + delta;
-
   // Swipe down on the always shown shelf should not auto-hide it.
-  generator->GestureScrollSequenceWithCallback(
-      start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_DOWN_ALWAYS_SHOWN");
+    generator->GestureScrollSequenceWithCallback(
+        edge_to_hide, edge_to_show, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
   EXPECT_EQ(window_bounds_with_shelf.ToString(), window->bounds().ToString());
@@ -461,20 +502,22 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
   widget->SetFullscreen(true);
   wm::WindowState* window_state = wm::GetWindowState(window);
   window_state->SetHideShelfWhenFullscreen(false);
-  window_state->SetInImmersiveFullscreen(true);
+  window->SetProperty(kImmersiveIsActive, true);
   layout_manager->UpdateVisibilityState();
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
 
   // Swiping up should show the shelf if shelf is hidden in fullscreen mode.
-  generator->GestureScrollSequence(end, start, kTimeDelta, kNumScrollSteps);
+  generator->GestureScrollSequence(edge_to_hide, edge_to_show, kTimeDelta,
+                                   kNumScrollSteps);
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
 
   // Swiping down should hide the shelf.
-  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
+  generator->GestureScrollSequence(edge_to_show, edge_to_hide, kTimeDelta,
+                                   kNumScrollSteps);
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
@@ -496,10 +539,13 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
 
   // Swipe up the auto-hide shelf should show it.
-  generator->GestureScrollSequenceWithCallback(
-      end, start, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_UP_AUTO_HIDE_SHOW");
+    generator->GestureScrollSequenceWithCallback(
+        edge_to_hide, edge_to_show, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
   // Gesture drag should not change the auto hide behavior of shelf, even though
@@ -512,14 +558,18 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 
   // Swipe down very little. It shouldn't change any state.
-  end = start + delta;
+  gfx::Point new_point(edge_to_show);
+  gfx::Vector2d diff = edge_to_hide - edge_to_show;
+  new_point.Offset(diff.x() * 3 / 10, diff.y() * 3 / 10);
+  /*
   if (shelf->IsHorizontalAlignment())
     end.set_y(start.y() + shelf_shown.height() * 3 / 10);
   else if (SHELF_ALIGNMENT_LEFT == shelf->alignment())
     end.set_x(start.x() - shelf_shown.width() * 3 / 10);
   else if (SHELF_ALIGNMENT_RIGHT == shelf->alignment())
     end.set_x(start.x() + shelf_shown.width() * 3 / 10);
-  generator->GestureScrollSequence(start, end, kTimeDelta, 5);
+  */
+  generator->GestureScrollSequence(edge_to_show, new_point, kTimeDelta, 5);
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
@@ -527,12 +577,13 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
   EXPECT_EQ(shelf_shown.ToString(),
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 
-  // Swipe down to hide the shelf.
-  end = start + delta;
-  generator->GestureScrollSequenceWithCallback(
-      start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_DOWN_AUTO_HIDE_1");
+    generator->GestureScrollSequenceWithCallback(
+        edge_to_show, edge_to_hide, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
@@ -541,7 +592,7 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 
   // Swipe up in extended hit region to show it.
-  gfx::Point extended_start = start;
+  gfx::Point extended_start = edge_to_show;
   if (shelf->IsHorizontalAlignment())
     extended_start.set_y(GetShelfWidget()->GetWindowBoundsInScreen().y() - 1);
   else if (SHELF_ALIGNMENT_LEFT == shelf->alignment())
@@ -549,11 +600,14 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
                          1);
   else if (SHELF_ALIGNMENT_RIGHT == shelf->alignment())
     extended_start.set_x(GetShelfWidget()->GetWindowBoundsInScreen().x() - 1);
-  end = extended_start - delta;
-  generator->GestureScrollSequenceWithCallback(
-      extended_start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_UP_EXTENDED_HIT");
+    generator->GestureScrollSequenceWithCallback(
+        extended_start, edge_to_show, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+  }
+
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
@@ -562,11 +616,13 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 
   // Swipe down again to hide.
-  end = start + delta;
-  generator->GestureScrollSequenceWithCallback(
-      start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_DOWN_AUTO_HIDE_2");
+    generator->GestureScrollSequenceWithCallback(
+        edge_to_show, edge_to_hide, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
@@ -576,31 +632,27 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
 
   // Swipe up outside the hit area. This should not change anything.
   gfx::Point outside_start =
-      gfx::Point((GetShelfWidget()->GetWindowBoundsInScreen().x() +
-                  GetShelfWidget()->GetWindowBoundsInScreen().right()) /
-                     2,
-                 GetShelfWidget()->GetWindowBoundsInScreen().y() - 50);
-  end = outside_start + delta;
-  generator->GestureScrollSequence(outside_start, end, kTimeDelta,
-                                   kNumScrollSteps);
+      GetShelfWidget()->GetWindowBoundsInScreen().top_center();
+  outside_start.set_y(outside_start.y() - 50);
+  gfx::Vector2d delta = edge_to_hide - edge_to_show;
+  generator->GestureScrollSequence(outside_start, outside_start + delta,
+                                   kTimeDelta, kNumScrollSteps);
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
   EXPECT_EQ(window_bounds_with_noshelf.ToString(), window->bounds().ToString());
   EXPECT_EQ(shelf_hidden.ToString(),
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
-
   // Swipe up from below the shelf where a bezel would be, this should show the
   // shelf.
-  gfx::Point below_start = start;
+  gfx::Point below_start = edge_to_hide;
   if (shelf->IsHorizontalAlignment())
-    below_start.set_y(GetShelfWidget()->GetWindowBoundsInScreen().bottom() + 1);
+    below_start.set_y(GetShelfWidget()->GetWindowBoundsInScreen().bottom() - 1);
   else if (SHELF_ALIGNMENT_LEFT == shelf->alignment())
-    below_start.set_x(GetShelfWidget()->GetWindowBoundsInScreen().x() - 1);
+    below_start.set_x(GetShelfWidget()->GetWindowBoundsInScreen().x());
   else if (SHELF_ALIGNMENT_RIGHT == shelf->alignment())
-    below_start.set_x(GetShelfWidget()->GetWindowBoundsInScreen().right() + 1);
-  end = below_start - delta;
-  generator->GestureScrollSequence(below_start, end, kTimeDelta,
+    below_start.set_x(GetShelfWidget()->GetWindowBoundsInScreen().right() - 1);
+  generator->GestureScrollSequence(below_start, edge_to_show, kTimeDelta,
                                    kNumScrollSteps);
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
@@ -610,11 +662,13 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 
   // Swipe down again to hide.
-  end = start + delta;
-  generator->GestureScrollSequenceWithCallback(
-      start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_DOWN_AUTO_HIDE_3");
+    generator->GestureScrollSequenceWithCallback(
+        edge_to_show, edge_to_hide, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
@@ -635,11 +689,15 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
             window_bounds_fullscreen.ToString());
 
   // Swipe up. This should show the shelf.
-  end = below_start - delta;
-  generator->GestureScrollSequenceWithCallback(
-      below_start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_UP_AUTO_HIDE_1");
+    // Do not check bounds because the events outside of the bounds
+    // will be clipped.
+    generator->GestureScrollSequenceWithCallback(
+        below_start, edge_to_show, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScrollNoBoundsCheck,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
@@ -648,11 +706,13 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
   EXPECT_EQ(window_bounds_fullscreen.ToString(), window->bounds().ToString());
 
   // Swipe down to hide the shelf.
-  end = start + delta;
-  generator->GestureScrollSequenceWithCallback(
-      start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_DOWN_AUTO_HIDE_4");
+    generator->GestureScrollSequenceWithCallback(
+        edge_to_show, edge_to_hide, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
@@ -669,19 +729,21 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
 
   // Swipe-up. This should not change anything.
-  end = start - delta;
-  generator->GestureScrollSequenceWithCallback(
-      below_start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
-  EXPECT_EQ(SHELF_HIDDEN, shelf->GetVisibilityState());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
-  EXPECT_EQ(window_bounds_fullscreen.ToString(), window->bounds().ToString());
+  {
+    SCOPED_TRACE("SWIPE_UP_NO_CHANGE");
+    generator->GestureScrollSequenceWithCallback(
+        below_start, edge_to_show, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+    EXPECT_EQ(SHELF_HIDDEN, shelf->GetVisibilityState());
+    EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
+    EXPECT_EQ(window_bounds_fullscreen.ToString(), window->bounds().ToString());
+  }
 
   // Minimize actually, otherwise further event may be affected since widget
   // is fullscreen status.
   widget->Minimize();
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(layout_manager->HasVisibleWindow());
 
   // The shelf should be shown because there are no more visible windows.
@@ -691,11 +753,13 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
 
   // Swipe-down to hide. This should have no effect because there are no visible
   // windows.
-  end = start + delta;
-  generator->GestureScrollSequenceWithCallback(
-      start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_DOWN_AUTO_HIDE_5");
+    generator->GestureScrollSequenceWithCallback(
+        edge_to_show, edge_to_hide, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
@@ -703,33 +767,39 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 
   widget->Restore();
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(layout_manager->HasVisibleWindow());
 
   // Swipe up on the shelf. This should show the shelf but should not change the
   // auto-hide behavior, since auto-hide behavior can only be changed through
   // context menu of the shelf.
-  end = below_start - delta;
-  generator->GestureScrollSequenceWithCallback(
-      below_start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_UP_AUTO_HIDE_2");
+    // Do not check bounds because the events outside of the bounds
+    // will be clipped.
+    generator->GestureScrollSequenceWithCallback(
+        below_start, edge_to_show, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScrollNoBoundsCheck,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
   EXPECT_EQ(shelf_shown.ToString(),
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 
   widget->Close();
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(layout_manager->HasVisibleWindow());
 
   // Swipe-down to hide. This should have no effect because there are no visible
   // windows.
-  end = start + delta;
-  generator->GestureScrollSequenceWithCallback(
-      start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_DOWN_AUTO_HIDE_6");
+    generator->GestureScrollSequenceWithCallback(
+        edge_to_show, edge_to_hide, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
   EXPECT_EQ(shelf_shown.ToString(),
@@ -737,33 +807,113 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
 
   // Swipe up again on AUTO_HIDE_SHOWN shelf shouldn't change any state.
   // Swipe up on auto-hide shown shelf should still keep shelf shown.
-  end = start - delta;
-  generator->GestureScrollSequenceWithCallback(
-      start, end, kTimeDelta, kNumScrollSteps,
-      base::Bind(&ShelfDragCallback::ProcessScroll,
-                 base::Unretained(&handler)));
+  {
+    SCOPED_TRACE("SWIPE_UP_AUTO_HIDE_4");
+    generator->GestureScrollSequenceWithCallback(
+        edge_to_hide, edge_to_show, kTimeDelta, kNumScrollSteps,
+        base::BindRepeating(&ShelfDragCallback::ProcessScroll,
+                            base::Unretained(&handler)));
+  }
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
   EXPECT_EQ(shelf_shown.ToString(),
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 }
 
-class ShelfLayoutManagerNonHomeLauncherTest : public ShelfLayoutManagerTest {
- public:
-  ShelfLayoutManagerNonHomeLauncherTest() = default;
-  ~ShelfLayoutManagerNonHomeLauncherTest() override = default;
+void ShelfLayoutManagerTest::TestHomeLauncherGestureHandler(
+    bool autohide_shelf) {
+  // Home launcher is only available in tablet mode.
+  TabletModeControllerTestApi().EnterTabletMode();
 
-  void SetUp() override {
-    scoped_feature_list_.InitWithFeatures(
-        {}, {app_list_features::kEnableHomeLauncher});
-    ShelfLayoutManagerTest::SetUp();
+  Shelf* shelf = GetPrimaryShelf();
+  if (autohide_shelf)
+    shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+
+  // Create more than one window to prepare for the possibly window stacking
+  // change during drag.
+  std::unique_ptr<aura::Window> extra_window =
+      AshTestBase::CreateTestWindow(gfx::Rect(100, 10, 100, 100));
+  std::unique_ptr<aura::Window> window =
+      AshTestBase::CreateTestWindow(gfx::Rect(0, 0, 400, 400));
+  wm::ActivateWindow(window.get());
+
+  if (autohide_shelf) {
+    gfx::Rect display_bounds =
+        display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
+    const gfx::Point start(display_bounds.bottom_center());
+    const gfx::Point end(start + gfx::Vector2d(0, -80));
+    const base::TimeDelta kTimeDelta = base::TimeDelta::FromMilliseconds(100);
+    const int kNumScrollSteps = 4;
+    // Swipe up to show the auto-hide shelf.
+    GetEventGenerator()->GestureScrollSequence(start, end, kTimeDelta,
+                                               kNumScrollSteps);
+    EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
   }
 
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
+  const gfx::Point shelf_center =
+      GetVisibleShelfWidgetBoundsInScreen().CenterPoint();
 
-  DISALLOW_COPY_AND_ASSIGN(ShelfLayoutManagerNonHomeLauncherTest);
-};
+  // Helper to create a scroll event for this test.
+  auto create_scroll_event = [&shelf_center](ui::EventType type,
+                                             float scroll_y) {
+    ui::GestureEventDetails details =
+        type == ui::ET_GESTURE_SCROLL_END
+            ? ui::GestureEventDetails(type)
+            : ui::GestureEventDetails(type, 0, scroll_y);
+    return ui::GestureEvent(shelf_center.x(), shelf_center.y(), 0,
+                            base::TimeTicks(), details);
+  };
+
+  // The home launcher gesture handler should not be handling any window
+  // initially.
+  HomeLauncherGestureHandler* gesture_handler =
+      Shell::Get()->app_list_controller()->home_launcher_gesture_handler();
+  ASSERT_TRUE(gesture_handler);
+  ASSERT_FALSE(gesture_handler->GetWindow1());
+
+  // Tests that after scrolling up on the shelf, the home launcher gesture
+  // handler will be acting on |window|, and the shelf becomes transparent.
+  ShelfLayoutManager* manager = GetShelfLayoutManager();
+  manager->ProcessGestureEvent(
+      create_scroll_event(ui::ET_GESTURE_SCROLL_BEGIN, -1.f));
+  EXPECT_EQ(window.get(), gesture_handler->GetWindow1());
+  EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
+  if (autohide_shelf) {
+    // Auto-hide shelf should keep visible after scrolling up on it.
+    EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+  }
+
+  // Tests that since the initial scroll event was scrolled up, the home
+  // launcher gesture handler will continue to act on |window| regardless of
+  // direction of scroll updates.
+  manager->ProcessGestureEvent(
+      create_scroll_event(ui::ET_GESTURE_SCROLL_UPDATE, -1.f));
+  EXPECT_EQ(window.get(), gesture_handler->GetWindow1());
+  EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
+
+  manager->ProcessGestureEvent(
+      create_scroll_event(ui::ET_GESTURE_SCROLL_UPDATE, 1.f));
+  EXPECT_EQ(window.get(), gesture_handler->GetWindow1());
+  EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
+  if (autohide_shelf)
+    EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // End the scroll.
+  manager->ProcessGestureEvent(
+      create_scroll_event(ui::ET_GESTURE_SCROLL_END, 1.f));
+  ASSERT_FALSE(gesture_handler->GetWindow1());
+  if (autohide_shelf)
+    EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Tests that if the initial scroll event is directed downwards, the home
+  // launcher gesture handler will not act on |window|.
+  manager->ProcessGestureEvent(
+      create_scroll_event(ui::ET_GESTURE_SCROLL_BEGIN, 1.f));
+  EXPECT_FALSE(gesture_handler->GetWindow1());
+  manager->ProcessGestureEvent(
+      create_scroll_event(ui::ET_GESTURE_SCROLL_UPDATE, -1.f));
+  EXPECT_FALSE(gesture_handler->GetWindow1());
+}
 
 // Makes sure SetVisible updates work area and widget appropriately.
 TEST_F(ShelfLayoutManagerTest, SetVisible) {
@@ -778,6 +928,7 @@ TEST_F(ShelfLayoutManagerTest, SetVisible) {
   gfx::Rect shelf_bounds(shelf_widget->GetWindowBoundsInScreen());
   int shelf_height = manager->GetIdealBounds().height();
   display::Display display = display::Screen::GetScreen()->GetPrimaryDisplay();
+  const gfx::Rect stable_work_area = display.work_area();
   ASSERT_NE(-1, display.id());
   // Bottom inset should be the max of widget heights.
   EXPECT_EQ(shelf_height, display.GetWorkAreaInsets().bottom());
@@ -796,6 +947,7 @@ TEST_F(ShelfLayoutManagerTest, SetVisible) {
             display.bounds().bottom());
   EXPECT_GE(shelf_widget->status_area_widget()->GetNativeView()->bounds().y(),
             display.bounds().bottom());
+  EXPECT_EQ(stable_work_area, GetShelfLayoutManager()->ComputeStableWorkArea());
 
   // And show it again.
   SetState(manager, SHELF_VISIBLE);
@@ -805,6 +957,7 @@ TEST_F(ShelfLayoutManagerTest, SetVisible) {
   EXPECT_EQ(SHELF_VISIBLE, manager->visibility_state());
   display = display::Screen::GetScreen()->GetPrimaryDisplay();
   EXPECT_EQ(shelf_height, display.GetWorkAreaInsets().bottom());
+  EXPECT_EQ(stable_work_area, GetShelfLayoutManager()->ComputeStableWorkArea());
 
   // Make sure the bounds of the two widgets changed.
   shelf_bounds = shelf_widget->GetNativeView()->bounds();
@@ -880,6 +1033,9 @@ TEST_F(ShelfLayoutManagerTest, ShelfUpdatedWhenStatusAreaChangesSize) {
 TEST_F(ShelfLayoutManagerTest, AutoHide) {
   ui::test::EventGenerator* generator = GetEventGenerator();
 
+  const gfx::Rect stable_work_area =
+      display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
+
   Shelf* shelf = GetPrimaryShelf();
   ShelfLayoutManager* layout_manager = GetShelfLayoutManager();
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
@@ -888,15 +1044,17 @@ TEST_F(ShelfLayoutManagerTest, AutoHide) {
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
 
+  display::Display display = display::Screen::GetScreen()->GetPrimaryDisplay();
+
   // LayoutShelf() forces the animation to completion, at which point the
   // shelf should go off the screen.
   layout_manager->LayoutShelf();
 
-  display::Display display = display::Screen::GetScreen()->GetPrimaryDisplay();
   const int display_bottom = display.bounds().bottom();
   EXPECT_EQ(display_bottom - kHiddenShelfInScreenPortion,
             GetShelfWidget()->GetWindowBoundsInScreen().y());
   EXPECT_EQ(display_bottom, display.work_area().bottom());
+  EXPECT_EQ(stable_work_area, GetShelfLayoutManager()->ComputeStableWorkArea());
 
   // Move the mouse to the bottom of the screen.
   generator->MoveMouseTo(0, display_bottom - 1);
@@ -908,17 +1066,12 @@ TEST_F(ShelfLayoutManagerTest, AutoHide) {
   EXPECT_EQ(display_bottom - layout_manager->GetIdealBounds().height(),
             GetShelfWidget()->GetWindowBoundsInScreen().y());
   EXPECT_EQ(display_bottom, display.work_area().bottom());
+  EXPECT_EQ(stable_work_area, GetShelfLayoutManager()->ComputeStableWorkArea());
 
   // Tap the system tray when shelf is shown should open the system tray menu.
-  if (features::IsSystemTrayUnifiedEnabled()) {
-    generator->GestureTapAt(
-        GetPrimaryUnifiedSystemTray()->GetBoundsInScreen().CenterPoint());
-    EXPECT_TRUE(GetPrimaryUnifiedSystemTray()->IsBubbleShown());
-  } else {
-    generator->GestureTapAt(
-        GetPrimarySystemTray()->GetBoundsInScreen().CenterPoint());
-    EXPECT_TRUE(GetPrimarySystemTray()->HasSystemBubble());
-  }
+  generator->GestureTapAt(
+      GetPrimaryUnifiedSystemTray()->GetBoundsInScreen().CenterPoint());
+  EXPECT_TRUE(GetPrimaryUnifiedSystemTray()->IsBubbleShown());
 
   // Move mouse back up and click to dismiss the opened system tray menu.
   generator->MoveMouseTo(0, 0);
@@ -928,6 +1081,7 @@ TEST_F(ShelfLayoutManagerTest, AutoHide) {
   layout_manager->LayoutShelf();
   EXPECT_EQ(display_bottom - kHiddenShelfInScreenPortion,
             GetShelfWidget()->GetWindowBoundsInScreen().y());
+  EXPECT_EQ(stable_work_area, GetShelfLayoutManager()->ComputeStableWorkArea());
 
   // Drag mouse to bottom of screen.
   generator->PressLeftButton();
@@ -943,6 +1097,13 @@ TEST_F(ShelfLayoutManagerTest, AutoHide) {
   generator->MoveMouseTo(1, display_bottom - 1);
   UpdateAutoHideStateNow();
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Switch to tablet mode should hide the AUTO_HIDE_SHOWN shelf even the mouse
+  // cursor is inside the shelf area.
+  EXPECT_FALSE(TabletModeControllerTestApi().IsTabletModeStarted());
+  TabletModeControllerTestApi().EnterTabletMode();
+  EXPECT_TRUE(TabletModeControllerTestApi().IsTabletModeStarted());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
 }
 
 // Test the behavior of the shelf when it is auto hidden and it is on the
@@ -1094,7 +1255,7 @@ TEST_F(ShelfLayoutManagerTest, VisibleWhenLockScreenShowing) {
 
   UnlockScreen();
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
-  EXPECT_EQ(SHELF_BACKGROUND_OVERLAP, GetShelfWidget()->GetBackgroundType());
+  EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
 }
 
 // Tests that the shelf should be visible when in overview mode.
@@ -1113,17 +1274,15 @@ TEST_F(ShelfLayoutManagerTest, VisibleInOverview) {
   EXPECT_EQ(display.bounds().bottom() - kHiddenShelfInScreenPortion,
             GetShelfWidget()->GetWindowBoundsInScreen().y());
 
-  WindowSelectorController* window_selector_controller =
-      Shell::Get()->window_selector_controller();
-  // Tests that the shelf is visible when in overview mode and its color is
-  // overlap.
-  window_selector_controller->ToggleOverview();
+  OverviewController* overview_controller = Shell::Get()->overview_controller();
+  // Tests that the shelf is visible when in overview mode
+  overview_controller->ToggleOverview();
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
-  EXPECT_EQ(SHELF_BACKGROUND_OVERLAP, GetShelfWidget()->GetBackgroundType());
+  EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
 
   // Test that on exiting overview mode, the shelf returns to auto hide state.
-  window_selector_controller->ToggleOverview();
+  overview_controller->ToggleOverview();
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
 }
@@ -1493,6 +1652,8 @@ TEST_F(ShelfLayoutManagerTest, SetAlignment) {
   EXPECT_GE(shelf_bounds.width(),
             GetShelfWidget()->GetContentsView()->GetPreferredSize().width());
   EXPECT_EQ(SHELF_ALIGNMENT_LEFT, GetPrimaryShelf()->alignment());
+  EXPECT_EQ(display.work_area(), layout_manager->ComputeStableWorkArea());
+
   StatusAreaWidget* status_area_widget = GetShelfWidget()->status_area_widget();
   gfx::Rect status_bounds(status_area_widget->GetWindowBoundsInScreen());
   // TODO(estade): Re-enable this check. See crbug.com/660928.
@@ -1522,6 +1683,8 @@ TEST_F(ShelfLayoutManagerTest, SetAlignment) {
   EXPECT_GE(shelf_bounds.width(),
             GetShelfWidget()->GetContentsView()->GetPreferredSize().width());
   EXPECT_EQ(SHELF_ALIGNMENT_RIGHT, GetPrimaryShelf()->alignment());
+  EXPECT_EQ(display.work_area(), layout_manager->ComputeStableWorkArea());
+
   status_bounds = gfx::Rect(status_area_widget->GetWindowBoundsInScreen());
   // TODO(estade): Re-enable this check. See crbug.com/660928.
   //  EXPECT_GE(
@@ -1535,10 +1698,15 @@ TEST_F(ShelfLayoutManagerTest, SetAlignment) {
   EXPECT_EQ(display.work_area().right(), shelf_bounds.x());
   EXPECT_EQ(display.bounds().y(), shelf_bounds.y());
   EXPECT_EQ(display.bounds().height(), shelf_bounds.height());
+
+  const gfx::Rect stable_work_area =
+      display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
+
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
   display = display::Screen::GetScreen()->GetPrimaryDisplay();
   EXPECT_EQ(0, display.GetWorkAreaInsets().right());
   EXPECT_EQ(0, display.bounds().right() - display.work_area().right());
+  EXPECT_EQ(stable_work_area, layout_manager->ComputeStableWorkArea());
 }
 
 TEST_F(ShelfLayoutManagerTest, GestureDrag) {
@@ -1550,28 +1718,35 @@ TEST_F(ShelfLayoutManagerTest, GestureDrag) {
   {
     SCOPED_TRACE("BOTTOM");
     shelf->SetAlignment(SHELF_ALIGNMENT_BOTTOM);
-    RunGestureDragTests(gfx::Vector2d(0, 120));
+    gfx::Rect shelf_bounds = GetVisibleShelfWidgetBoundsInScreen();
+    gfx::Point bottom_center = shelf_bounds.bottom_center();
+    bottom_center.Offset(0, -1);  // Make sure the point is inside shelf.
+    RunGestureDragTests(bottom_center, shelf_bounds.top_center());
     GetAppListTestHelper()->WaitUntilIdle();
   }
-
   {
     SCOPED_TRACE("LEFT");
     shelf->SetAlignment(SHELF_ALIGNMENT_LEFT);
-    RunGestureDragTests(gfx::Vector2d(-120, 0));
+    gfx::Rect shelf_bounds = GetVisibleShelfWidgetBoundsInScreen();
+    gfx::Point right_center = shelf_bounds.right_center();
+    right_center.Offset(-1, 0);  // Make sure the point is inside shelf.
+    RunGestureDragTests(shelf_bounds.left_center(), right_center);
     GetAppListTestHelper()->WaitUntilIdle();
   }
-
   {
     SCOPED_TRACE("RIGHT");
     shelf->SetAlignment(SHELF_ALIGNMENT_RIGHT);
-    RunGestureDragTests(gfx::Vector2d(120, 0));
+    gfx::Rect shelf_bounds = GetVisibleShelfWidgetBoundsInScreen();
+    gfx::Point right_center = shelf_bounds.right_center();
+    right_center.Offset(-1, 0);  // Make sure the point is inside shelf.
+    RunGestureDragTests(right_center, shelf_bounds.left_center());
     GetAppListTestHelper()->WaitUntilIdle();
   }
 }
 
 // If swiping up on shelf ends with fling event, the app list state should
 // depends on the fling velocity.
-TEST_F(ShelfLayoutManagerTest, FlingUpOnShelfForFullscreenAppList) {
+TEST_F(ShelfLayoutManagerTest, FlingUpOnShelfForAppList) {
   Shelf* shelf = GetPrimaryShelf();
   EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
@@ -1579,9 +1754,7 @@ TEST_F(ShelfLayoutManagerTest, FlingUpOnShelfForFullscreenAppList) {
 
   // Starts the drag from the center of the shelf's bottom.
   gfx::Rect shelf_widget_bounds = GetShelfWidget()->GetWindowBoundsInScreen();
-  gfx::Point start =
-      gfx::Point(shelf_widget_bounds.x() + shelf_widget_bounds.width() / 2,
-                 shelf_widget_bounds.bottom());
+  gfx::Point start = shelf_widget_bounds.bottom_center();
 
   // Fling up that exceeds the velocity threshold should show the fullscreen app
   // list.
@@ -1682,123 +1855,7 @@ TEST_F(ShelfLayoutManagerTest, ChangeShelfAlignmentDuringAppListDragging) {
   GetAppListTestHelper()->CheckVisibility(false);
 }
 
-TEST_F(ShelfLayoutManagerNonHomeLauncherTest,
-       SwipingUpOnShelfInTabletModeForFullscreenAppList) {
-  // Animations triggered by immersive mode cause this test to fail.
-  ImmersiveFullscreenControllerTestApi::GlobalAnimationDisabler
-      animation_disabler;
-  Shell* shell = Shell::Get();
-  shell->tablet_mode_controller()->EnableTabletModeWindowManager(true);
-  Shelf* shelf = GetPrimaryShelf();
-  GetShelfLayoutManager()->LayoutShelf();
-  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
-  EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
-
-  // Note: A window must be visible in order to hide the shelf. The test will
-  // make the window fullscreened, so make the window resizeable and
-  // maximizable.
-  std::unique_ptr<aura::Window> window(
-      AshTestBase::CreateTestWindow(gfx::Rect(0, 0, 400, 400)));
-  window->SetProperty(aura::client::kResizeBehaviorKey,
-                      ws::mojom::kResizeBehaviorCanResize |
-                          ws::mojom::kResizeBehaviorCanMaximize);
-  wm::ActivateWindow(window.get());
-
-  ui::test::EventGenerator* generator = GetEventGenerator();
-  constexpr base::TimeDelta kTimeDelta = base::TimeDelta::FromMilliseconds(100);
-  constexpr int kNumScrollSteps = 4;
-
-  // Starts the drag from the center of the shelf's bottom.
-  gfx::Rect shelf_widget_bounds = GetShelfWidget()->GetWindowBoundsInScreen();
-  gfx::Point start =
-      gfx::Point(shelf_widget_bounds.x() + shelf_widget_bounds.width() / 2,
-                 shelf_widget_bounds.bottom());
-  gfx::Vector2d delta;
-
-  // Swiping up more than the threshold should show the app list.
-  delta.set_y(ShelfLayoutManager::kAppListDragSnapToFullscreenThreshold + 10);
-  gfx::Point end = start - delta;
-  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
-  GetAppListTestHelper()->WaitUntilIdle();
-  GetAppListTestHelper()->CheckVisibility(true);
-  GetAppListTestHelper()->CheckState(
-      app_list::AppListViewState::FULLSCREEN_ALL_APPS);
-  EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
-
-  // Closing the app list.
-  GetAppListTestHelper()->DismissAndRunLoop();
-  GetAppListTestHelper()->CheckVisibility(false);
-  GetAppListTestHelper()->CheckState(app_list::AppListViewState::CLOSED);
-
-  // Swiping up less or equal to the threshold should dismiss the app list.
-  delta.set_y(ShelfLayoutManager::kAppListDragSnapToFullscreenThreshold - 10);
-  end = start - delta;
-  // TODO(minch): investigate failure without EnableMaximizeMode again here.
-  // http://crbug.com/746481.
-  shell->tablet_mode_controller()->EnableTabletModeWindowManager(true);
-  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
-  GetAppListTestHelper()->WaitUntilIdle();
-  GetAppListTestHelper()->CheckVisibility(false);
-  GetAppListTestHelper()->CheckState(app_list::AppListViewState::CLOSED);
-  GetShelfLayoutManager()->UpdateVisibilityState();
-  EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
-
-  // Swiping down on the shelf should do nothing as always shown shelf can not
-  // be dragged down to hide.
-  end = start + delta;
-  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
-  EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
-
-  // Verify that the shelf can still enter auto hide if the window requests to
-  // be fullscreened.
-  wm::WindowState* window_state = wm::GetWindowState(window.get());
-  const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
-  window_state->OnWMEvent(&event);
-  window_state->SetHideShelfWhenFullscreen(false);
-  window_state->SetInImmersiveFullscreen(true);
-  GetShelfLayoutManager()->UpdateVisibilityState();
-  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
-  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
-
-  // Swiping up should show the shelf but not the app list if shelf is hidden.
-  generator->GestureScrollSequence(end, start, kTimeDelta, kNumScrollSteps);
-  GetAppListTestHelper()->WaitUntilIdle();
-  GetAppListTestHelper()->CheckVisibility(false);
-  GetAppListTestHelper()->CheckState(app_list::AppListViewState::CLOSED);
-  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
-  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
-
-  // Swiping down should hide the shelf.
-  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
-  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
-  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
-
-  // Verify that after toggling fullscreen to off, the shelf is visible.
-  window_state->OnWMEvent(&event);
-  EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
-
-  // Minimize the visible window, the shelf should be shown if there are no
-  // visible windows, even in auto-hide mode.
-  window_state->Minimize();
-  EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
-
-  // Swiping up on the shelf in this state should open the app list.
-  delta.set_y(ShelfLayoutManager::kAppListDragSnapToFullscreenThreshold + 10);
-  end = start - delta;
-  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
-  GetAppListTestHelper()->WaitUntilIdle();
-  GetAppListTestHelper()->CheckVisibility(true);
-  GetAppListTestHelper()->CheckState(
-      app_list::AppListViewState::FULLSCREEN_ALL_APPS);
-}
-
-TEST_F(ShelfLayoutManagerTest,
-       SwipingUpOnShelfInLaptopModeForFullscreenAppList) {
+TEST_F(ShelfLayoutManagerTest, SwipingUpOnShelfInLaptopModeForAppList) {
   Shelf* shelf = GetPrimaryShelf();
   EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
@@ -1809,10 +1866,8 @@ TEST_F(ShelfLayoutManagerTest,
   constexpr int kNumScrollSteps = 4;
 
   // Starts the drag from the center of the shelf's bottom.
-  gfx::Rect shelf_widget_bounds = GetShelfWidget()->GetWindowBoundsInScreen();
-  gfx::Point start =
-      gfx::Point(shelf_widget_bounds.x() + shelf_widget_bounds.width() / 2,
-                 shelf_widget_bounds.bottom());
+  gfx::Rect shelf_bounds = GetVisibleShelfWidgetBoundsInScreen();
+  gfx::Point start = shelf_bounds.bottom_center();
   gfx::Vector2d delta;
 
   // Swiping up less than the close threshold should close the app list.
@@ -1849,15 +1904,42 @@ TEST_F(ShelfLayoutManagerTest,
   GetAppListTestHelper()->CheckVisibility(true);
   GetAppListTestHelper()->CheckState(
       app_list::AppListViewState::FULLSCREEN_ALL_APPS);
+
+  // Closing the app list.
+  GetAppListTestHelper()->DismissAndRunLoop();
+  GetAppListTestHelper()->CheckVisibility(false);
+  GetAppListTestHelper()->CheckState(app_list::AppListViewState::CLOSED);
+
+  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  // Create a normal unmaximized window, the auto-hide shelf should be hidden.
+  aura::Window* window = CreateTestWindow();
+  window->SetBounds(gfx::Rect(0, 0, 100, 100));
+  window->Show();
+  GetAppListTestHelper()->CheckVisibility(false);
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
+
+  // Swiping up to show the auto-hide shelf.
+  end = shelf_bounds.top_center();
+  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Swiping up on the auto-hide shelf to drag up the app list. Close the app
+  // list on drag ended since the short drag distance but keep the previous
+  // shown auto-hide shelf still visible.
+  delta.set_y(ShelfLayoutManager::kAppListDragSnapToClosedThreshold - 10);
+  end = start - delta;
+  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
+  GetAppListTestHelper()->WaitUntilIdle();
+  GetAppListTestHelper()->CheckVisibility(false);
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
 }
 
 // Swiping on shelf when fullscreen app list is opened should have no effect.
-TEST_F(ShelfLayoutManagerTest, SwipingOnShelfIfFullscreenAppListOpened) {
+TEST_F(ShelfLayoutManagerTest, SwipingOnShelfIfAppListOpened) {
   Shelf* shelf = GetPrimaryShelf();
   ShelfLayoutManager* layout_manager = GetShelfLayoutManager();
-  aura::Window* root_window =
-      RootWindowController::ForTargetRootWindow()->GetRootWindow();
-  layout_manager->OnAppListVisibilityChanged(true, root_window);
+  layout_manager->OnAppListVisibilityChanged(true, GetPrimaryDisplayId());
   EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
   EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
@@ -2126,10 +2208,7 @@ TEST_F(ShelfLayoutManagerTest, ShelfFlickerOnTrayActivation) {
       TOGGLE_SYSTEM_TRAY_BUBBLE);
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
-  if (features::IsSystemTrayUnifiedEnabled())
-    EXPECT_TRUE(GetPrimaryUnifiedSystemTray()->IsBubbleShown());
-  else
-    EXPECT_TRUE(GetPrimarySystemTray()->HasSystemBubble());
+  EXPECT_TRUE(GetPrimaryUnifiedSystemTray()->IsBubbleShown());
 }
 
 TEST_F(ShelfLayoutManagerTest, WorkAreaChangeWorkspace) {
@@ -2191,10 +2270,9 @@ TEST_F(ShelfLayoutManagerTest, WorkspaceMask) {
   EXPECT_EQ(wm::WORKSPACE_WINDOW_STATE_DEFAULT, GetWorkspaceWindowState());
   EXPECT_TRUE(GetNonLockScreenContainersContainerLayer()->GetMasksToBounds());
 
-  // Overlaps with shelf.
+  // Overlaps with shelf should not cause any specific behavior.
   w1->SetBounds(GetShelfLayoutManager()->GetIdealBounds());
-  EXPECT_EQ(wm::WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF,
-            GetWorkspaceWindowState());
+  EXPECT_EQ(wm::WORKSPACE_WINDOW_STATE_DEFAULT, GetWorkspaceWindowState());
   EXPECT_TRUE(GetNonLockScreenContainersContainerLayer()->GetMasksToBounds());
 
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
@@ -2207,8 +2285,7 @@ TEST_F(ShelfLayoutManagerTest, WorkspaceMask) {
 
   std::unique_ptr<aura::Window> w2(CreateTestWindow());
   w2->Show();
-  EXPECT_EQ(wm::WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF,
-            GetWorkspaceWindowState());
+  EXPECT_EQ(wm::WORKSPACE_WINDOW_STATE_DEFAULT, GetWorkspaceWindowState());
   EXPECT_TRUE(GetNonLockScreenContainersContainerLayer()->GetMasksToBounds());
 
   w2.reset();
@@ -2216,8 +2293,7 @@ TEST_F(ShelfLayoutManagerTest, WorkspaceMask) {
   EXPECT_FALSE(GetNonLockScreenContainersContainerLayer()->GetMasksToBounds());
 
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
-  EXPECT_EQ(wm::WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF,
-            GetWorkspaceWindowState());
+  EXPECT_EQ(wm::WORKSPACE_WINDOW_STATE_DEFAULT, GetWorkspaceWindowState());
   EXPECT_TRUE(GetNonLockScreenContainersContainerLayer()->GetMasksToBounds());
 }
 
@@ -2241,7 +2317,7 @@ TEST_F(ShelfLayoutManagerTest, ShelfBackgroundColor) {
   EXPECT_EQ(SHELF_BACKGROUND_MAXIMIZED, GetShelfWidget()->GetBackgroundType());
 
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MINIMIZED);
-  EXPECT_EQ(SHELF_BACKGROUND_OVERLAP, GetShelfWidget()->GetBackgroundType());
+  EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
   w2->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MINIMIZED);
   EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
 
@@ -2281,7 +2357,7 @@ TEST_F(ShelfLayoutManagerTest, TabletModeTransitionWithAppListVisible) {
   GetAppListTestHelper()->ShowAndRunLoop(GetPrimaryDisplayId());
 
   // Transition to tablet mode.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  TabletModeControllerTestApi().EnterTabletMode();
 
   // |window| should be maximized, and the shelf background should match the
   // maximized state.
@@ -2292,7 +2368,7 @@ TEST_F(ShelfLayoutManagerTest, TabletModeTransitionWithAppListVisible) {
 // Test the background color for split view mode.
 TEST_F(ShelfLayoutManagerTest, ShelfBackgroundColorInSplitView) {
   // Split view is only enabled in tablet mode.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  TabletModeControllerTestApi().EnterTabletMode();
 
   std::unique_ptr<aura::Window> window1(CreateTestWindow());
   window1->SetProperty(aura::client::kResizeBehaviorKey,
@@ -2313,8 +2389,25 @@ TEST_F(ShelfLayoutManagerTest, ShelfBackgroundColorInSplitView) {
   split_view_controller->SnapWindow(window2.get(), SplitViewController::RIGHT);
   EXPECT_EQ(SHELF_BACKGROUND_SPLIT_VIEW, GetShelfWidget()->GetBackgroundType());
 
-  // Ending split view mode will maximize the two windows.
-  split_view_controller->EndSplitView();
+  // Should still keep SHELF_BACKGROUND_SPLIT_VIEW when both overview and
+  // splitview are active.
+  wm::WMEvent minimize_event(wm::WM_EVENT_MINIMIZE);
+  wm::GetWindowState(window1.get())->OnWMEvent(&minimize_event);
+  EXPECT_EQ(split_view_controller->IsSplitViewModeActive(), true);
+  EXPECT_EQ(split_view_controller->state(), SplitViewController::RIGHT_SNAPPED);
+  EXPECT_TRUE(Shell::Get()->overview_controller()->IsSelecting());
+  EXPECT_EQ(SHELF_BACKGROUND_SPLIT_VIEW, GetShelfWidget()->GetBackgroundType());
+
+  // Drag the divider to left to end split view mode, which will maximize the
+  // the right snapped window.
+  gfx::Point drag_point = split_view_controller->split_view_divider()
+                              ->GetDividerBoundsInScreen(false)
+                              .CenterPoint();
+  split_view_controller->StartResize(drag_point);
+  drag_point.set_x(0);
+  split_view_controller->EndResize(drag_point);
+
+  EXPECT_FALSE(Shell::Get()->overview_controller()->IsSelecting());
   EXPECT_EQ(SHELF_BACKGROUND_MAXIMIZED, GetShelfWidget()->GetBackgroundType());
 }
 
@@ -2327,9 +2420,9 @@ TEST_F(ShelfLayoutManagerTest, ShelfBackgroundColorAutoHide) {
   std::unique_ptr<aura::Window> w1(CreateTestWindow());
   w1->Show();
   wm::ActivateWindow(w1.get());
-  EXPECT_EQ(SHELF_BACKGROUND_OVERLAP, GetShelfWidget()->GetBackgroundType());
+  EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
-  EXPECT_EQ(SHELF_BACKGROUND_OVERLAP, GetShelfWidget()->GetBackgroundType());
+  EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
 }
 
 // Verify the hit bounds of the status area extend to the edge of the shelf.
@@ -2419,6 +2512,156 @@ TEST_F(ShelfLayoutManagerTest, ShelfLayoutInUnifiedDesktop) {
   gfx::Rect status_area_bounds(status_area_widget->GetWindowBoundsInScreen());
   EXPECT_TRUE(gfx::Rect(0, 0, 500, 400).Contains(status_area_bounds));
   EXPECT_EQ(gfx::Point(500, 400), status_area_bounds.bottom_right());
+}
+
+// Tests that the always shown shelf forwards the appropriate events to the home
+// launcher gesture handler to handle.
+TEST_F(ShelfLayoutManagerTest, HomeLauncherGestureHandler) {
+  TestHomeLauncherGestureHandler(/*autohide_shelf=*/false);
+}
+
+// Tests that the auto-hide shelf keeps visible and forwards the appropriate
+// events to the home launcher gesture handler to handle.
+TEST_F(ShelfLayoutManagerTest, HomeLauncherGestureHandlerAutoHideShelf) {
+  TestHomeLauncherGestureHandler(/*autohide_shelf=*/true);
+}
+
+// Tests that tap outside of the AUTO_HIDE_SHOWN shelf should hide it.
+TEST_F(ShelfLayoutManagerTest, TapOutsideOfAutoHideShownShelf) {
+  views::Widget* widget = CreateTestWidget();
+  Shelf* shelf = GetPrimaryShelf();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+
+  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  ShelfLayoutManager* layout_manager = GetShelfLayoutManager();
+  layout_manager->LayoutShelf();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
+
+  aura::Window* window = widget->GetNativeWindow();
+  gfx::Rect window_bounds = window->GetBoundsInScreen();
+  gfx::Rect display_bounds =
+      display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
+  const gfx::Point start(display_bounds.bottom_center());
+  const gfx::Point end(start + gfx::Vector2d(0, -80));
+  const base::TimeDelta kTimeDelta = base::TimeDelta::FromMilliseconds(100);
+  const int kNumScrollSteps = 4;
+  // Swipe up to show the auto-hide shelf.
+  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Tap outside the window and AUTO_HIDE_SHOWN shelf should hide the shelf.
+  gfx::Point tap_location =
+      window_bounds.bottom_right() + gfx::Vector2d(10, 10);
+  generator->GestureTapAt(tap_location);
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
+
+  // Swipe up to show the auto-hide shelf again.
+  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Tap inside the AUTO_HIDE_SHOWN shelf should not hide the shelf.
+  gfx::Rect shelf_bounds = GetShelfWidget()->GetWindowBoundsInScreen();
+  tap_location = gfx::Point(shelf_bounds.CenterPoint());
+  generator->GestureTapAt(tap_location);
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Tap inside the window should still hide the shelf.
+  tap_location = window_bounds.origin() + gfx::Vector2d(10, 10);
+  generator->GestureTapAt(tap_location);
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
+
+  // Swipe up to show the auto-hide shelf again.
+  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Tap the system tray that inside the status area should not hide the shelf
+  // but open the systrem tray bubble.
+  generator->GestureTapAt(
+      GetPrimaryUnifiedSystemTray()->GetBoundsInScreen().CenterPoint());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+  EXPECT_TRUE(GetPrimaryUnifiedSystemTray()->IsBubbleShown());
+}
+
+// Tests the auto-hide shelf status with mouse events.
+TEST_F(ShelfLayoutManagerTest, AutoHideShelfOnMouseEvents) {
+  views::Widget* widget = CreateTestWidget();
+  widget->Maximize();
+  Shelf* shelf = GetPrimaryShelf();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(0, 0);
+
+  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  ShelfLayoutManager* layout_manager = GetShelfLayoutManager();
+  layout_manager->LayoutShelf();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
+
+  gfx::Rect display_bounds =
+      display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
+  const gfx::Point start(display_bounds.bottom_center());
+  const gfx::Point end(start + gfx::Vector2d(0, -80));
+  const base::TimeDelta kTimeDelta = base::TimeDelta::FromMilliseconds(100);
+  const int kNumScrollSteps = 4;
+  // Swipe up to show the auto-hide shelf.
+  generator->GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Move the mouse should not hide the AUTO_HIDE_SHOWN shelf.
+  generator->MoveMouseTo(5, 5);
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Mouse press outside the shelf should hide the AUTO_HIDE_SHOWN shelf.
+  generator->PressLeftButton();
+  generator->ReleaseLeftButton();
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
+
+  // Move the mouse to the position which is contained by the bounds of the
+  // shelf when it is visible should show the auto-hide shelf.
+  display::Display display = display::Screen::GetScreen()->GetPrimaryDisplay();
+  const int display_bottom = display.bounds().bottom();
+  generator->MoveMouseTo(1, display_bottom - 1);
+  ASSERT_TRUE(TriggerAutoHideTimeout());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Mouse press inside the shelf should not hide the AUTO_HIDE_SHOWN shelf.
+  generator->MoveMouseTo(
+      GetShelfWidget()->GetWindowBoundsInScreen().CenterPoint());
+  generator->PressLeftButton();
+  generator->ReleaseLeftButton();
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Mouse press the system tray should open the system tray bubble.
+  generator->MoveMouseTo(
+      GetPrimaryUnifiedSystemTray()->GetBoundsInScreen().CenterPoint());
+  generator->PressLeftButton();
+  generator->ReleaseLeftButton();
+  EXPECT_TRUE(GetPrimaryUnifiedSystemTray()->IsBubbleShown());
+}
+
+// Tests that tap shelf item in auto-hide shelf should do nothing.
+TEST_F(ShelfLayoutManagerTest, TapShelfItemInAutoHideShelf) {
+  Shelf* shelf = GetPrimaryShelf();
+  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+
+  // Create a normal unmaximized window; the shelf should be hidden.
+  aura::Window* window = CreateTestWindow();
+  window->SetBounds(gfx::Rect(0, 0, 100, 100));
+  window->Show();
+  GetAppListTestHelper()->CheckVisibility(false);
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
+
+  // Tap app list button should not open the app list and shelf should keep
+  // hidden.
+  gfx::Rect app_list_button_bounds =
+      shelf->GetShelfViewForTesting()->GetAppListButton()->GetBoundsInScreen();
+  gfx::Rect display_bounds =
+      display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
+  app_list_button_bounds.Intersect(display_bounds);
+  GetEventGenerator()->GestureTapAt(app_list_button_bounds.CenterPoint());
+  GetAppListTestHelper()->CheckVisibility(false);
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
 }
 
 class ShelfLayoutManagerKeyboardTest : public AshTestBase {

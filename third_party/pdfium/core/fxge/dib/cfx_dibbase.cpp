@@ -854,7 +854,7 @@ int CFX_DIBBase::FindPalette(uint32_t color) const {
   return -1;
 }
 
-void CFX_DIBBase::GetOverlapRect(int& dest_left,
+bool CFX_DIBBase::GetOverlapRect(int& dest_left,
                                  int& dest_top,
                                  int& width,
                                  int& height,
@@ -864,13 +864,15 @@ void CFX_DIBBase::GetOverlapRect(int& dest_left,
                                  int& src_top,
                                  const CFX_ClipRgn* pClipRgn) {
   if (width == 0 || height == 0)
-    return;
+    return false;
 
-  ASSERT(width > 0 && height > 0);
+  ASSERT(width > 0);
+  ASSERT(height > 0);
+
   if (dest_left > m_Width || dest_top > m_Height) {
     width = 0;
     height = 0;
-    return;
+    return false;
   }
   int x_offset = dest_left - src_left;
   int y_offset = dest_top - src_top;
@@ -885,10 +887,22 @@ void CFX_DIBBase::GetOverlapRect(int& dest_left,
     dest_rect.Intersect(pClipRgn->GetBox());
   dest_left = dest_rect.left;
   dest_top = dest_rect.top;
-  src_left = dest_left - x_offset;
-  src_top = dest_top - y_offset;
+
+  pdfium::base::CheckedNumeric<int> safe_src_left = dest_left;
+  safe_src_left -= x_offset;
+  if (!safe_src_left.IsValid())
+    return false;
+  src_left = safe_src_left.ValueOrDie();
+
+  pdfium::base::CheckedNumeric<int> safe_src_top = dest_top;
+  safe_src_top -= y_offset;
+  if (!safe_src_top.IsValid())
+    return false;
+  src_top = safe_src_top.ValueOrDie();
+
   width = dest_rect.right - dest_rect.left;
   height = dest_rect.bottom - dest_rect.top;
+  return width != 0 && height != 0;
 }
 
 void CFX_DIBBase::SetPalette(const uint32_t* pSrc) {
@@ -905,7 +919,9 @@ void CFX_DIBBase::SetPalette(const uint32_t* pSrc) {
 }
 
 void CFX_DIBBase::GetPalette(uint32_t* pal, int alpha) const {
-  ASSERT(GetBPP() <= 8 && !IsCmykImage());
+  ASSERT(GetBPP() <= 8);
+  ASSERT(!IsCmykImage());
+
   if (GetBPP() == 1) {
     pal[0] = ((m_pPalette ? m_pPalette.get()[0] : 0xff000000) & 0xffffff) |
              (alpha << 24);
@@ -1056,7 +1072,7 @@ RetainPtr<CFX_DIBitmap> CFX_DIBBase::CloneConvert(FXDIB_Format dest_format) {
   if (dest_format & 0x0200) {
     bool ret;
     if (dest_format == FXDIB_Argb) {
-      ret = pSrcAlpha ? pClone->LoadChannel(FXDIB_Alpha, pSrcAlpha, FXDIB_Alpha)
+      ret = pSrcAlpha ? pClone->LoadChannelFromAlpha(FXDIB_Alpha, pSrcAlpha)
                       : pClone->LoadChannel(FXDIB_Alpha, 0xff);
     } else {
       ret = pClone->SetAlphaMask(pSrcAlpha, nullptr);
@@ -1167,21 +1183,23 @@ RetainPtr<CFX_DIBitmap> CFX_DIBBase::SwapXY(bool bXFlip, bool bYFlip) const {
   return pTransBitmap;
 }
 
-RetainPtr<CFX_DIBitmap> CFX_DIBBase::TransformTo(const CFX_Matrix* pDestMatrix,
+RetainPtr<CFX_DIBitmap> CFX_DIBBase::TransformTo(const CFX_Matrix& mtDest,
                                                  int* result_left,
                                                  int* result_top) {
   RetainPtr<CFX_DIBBase> holder(this);
-  CFX_ImageTransformer transformer(holder, pDestMatrix, 0, nullptr);
+  CFX_ImageTransformer transformer(holder, mtDest, FXDIB_ResampleOptions(),
+                                   nullptr);
   transformer.Continue(nullptr);
   *result_left = transformer.result().left;
   *result_top = transformer.result().top;
   return transformer.DetachBitmap();
 }
 
-RetainPtr<CFX_DIBitmap> CFX_DIBBase::StretchTo(int dest_width,
-                                               int dest_height,
-                                               uint32_t flags,
-                                               const FX_RECT* pClip) {
+RetainPtr<CFX_DIBitmap> CFX_DIBBase::StretchTo(
+    int dest_width,
+    int dest_height,
+    const FXDIB_ResampleOptions& options,
+    const FX_RECT* pClip) {
   RetainPtr<CFX_DIBBase> holder(this);
   FX_RECT clip_rect(0, 0, abs(dest_width), abs(dest_height));
   if (pClip)
@@ -1195,7 +1213,7 @@ RetainPtr<CFX_DIBitmap> CFX_DIBBase::StretchTo(int dest_width,
 
   CFX_BitmapStorer storer;
   CFX_ImageStretcher stretcher(&storer, holder, dest_width, dest_height,
-                               clip_rect, flags);
+                               clip_rect, options);
   if (stretcher.Start())
     stretcher.Continue(nullptr);
 

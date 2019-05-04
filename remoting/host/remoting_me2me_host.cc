@@ -100,7 +100,7 @@
 #include "remoting/signaling/push_notification_subscriber.h"
 #include "remoting/signaling/xmpp_signal_strategy.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
-#include "third_party/webrtc/rtc_base/scoped_ref_ptr.h"
+#include "third_party/webrtc/api/scoped_refptr.h"
 
 #if defined(OS_POSIX)
 #include <signal.h>
@@ -112,7 +112,9 @@
 #endif  // defined(OS_POSIX)
 
 #if defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
+#include "remoting/host/mac/permission_utils.h"
 #endif  // defined(OS_MACOSX)
 
 #if defined(OS_LINUX)
@@ -1568,6 +1570,19 @@ void HostProcess::StartHost() {
   host_event_logger_ =
       HostEventLogger::Create(host_->status_monitor(), kApplicationName);
 #endif  // !defined(REMOTING_MULTI_PROCESS)
+
+#if defined(OS_MACOSX)
+  // Ensure we are not running as root (i.e. at the login screen).
+  DCHECK_NE(getuid(), 0U);
+
+  // MacOs 10.14+ requires an addition, runtime permission for injecting input
+  // using CGEventPost (we use this in our input injector for Mac).  This method
+  // will request that the user enable this permission for us if they are on an
+  // affected platform and the permission has not already been approved.
+  if (base::mac::IsAtLeastOS10_14()) {
+    mac::PromptUserToChangeTrustStateIfNeeded(context_->ui_task_runner());
+  }
+#endif
 
   host_->Start(host_owner_email_);
 

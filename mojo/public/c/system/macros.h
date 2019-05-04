@@ -27,13 +27,7 @@
   (sizeof(void*) == 4 ? 32 : 0)
 
 // Like the C++11 |alignof| operator.
-#if defined(__GNUC__) && __GNUC__ >= 8
-// GCC 8 has changed the alignof operator to return the minimal alignment
-// required by the target ABI, instead of the preferred alignment.
-// This means that on 32-bit x86, it will return 4 instead of 8.
-// Use __alignof__ instead to avoid this.
-#define MOJO_ALIGNOF(type) __alignof__(type)
-#elif __cplusplus >= 201103L
+#if __cplusplus >= 201103L
 #define MOJO_ALIGNOF(type) alignof(type)
 #elif defined(__GNUC__)
 #define MOJO_ALIGNOF(type) __alignof__(type)

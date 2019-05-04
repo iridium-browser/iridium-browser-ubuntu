@@ -30,6 +30,7 @@
 #include "base/auto_reset.h"
 #include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/display_lock/display_lock_context.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -100,6 +101,12 @@ enum MarkingBehavior {
 };
 
 enum ScheduleRelayoutBehavior { kScheduleRelayout, kDontScheduleRelayout };
+
+enum {
+  kBackgroundPaintInGraphicsLayer = 1 << 0,
+  kBackgroundPaintInScrollingContents = 1 << 1
+};
+using BackgroundPaintLocation = uint8_t;
 
 struct AnnotatedRegionValue {
   DISALLOW_NEW();
@@ -332,12 +339,15 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   LayoutBox* EnclosingScrollableBox() const;
 
-  // Returns |EnclosingBox()| if it's a LayoutNGBlockFlow, or nullptr otherwise.
-  LayoutBlockFlow* EnclosingNGBlockFlow() const;
+  // Returns the containing block flow if it's a LayoutNGBlockFlow, or nullptr
+  // otherwise. Note that the semantics is different from |EnclosingBox| for
+  // atomic inlines that this function returns the container, while
+  // |EnclosingBox| returns the atomic inline itself.
+  LayoutBlockFlow* ContainingNGBlockFlow() const;
 
-  // Returns |NGPhysicalBoxFragment| for |EnclosingNGBlockFlow()| or nullptr
+  // Returns |NGPhysicalBoxFragment| for |ContainingNGBlockFlow()| or nullptr
   // otherwise.
-  const NGPhysicalBoxFragment* EnclosingBlockFlowFragment() const;
+  const NGPhysicalBoxFragment* ContainingBlockFlowFragment() const;
 
   // Function to return our enclosing flow thread if we are contained inside
   // one. This function follows the containing block chain.
@@ -364,21 +374,24 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   void AssertLaidOut() const {
 #ifndef NDEBUG
-    if (NeedsLayout())
+    if (NeedsLayout() && !LayoutBlockedByDisplayLock())
       ShowLayoutTreeForThis();
 #endif
-    SECURITY_DCHECK(!NeedsLayout());
+    SECURITY_DCHECK(!NeedsLayout() || LayoutBlockedByDisplayLock());
   }
 
   void AssertSubtreeIsLaidOut() const {
     for (const LayoutObject* layout_object = this; layout_object;
-         layout_object = layout_object->NextInPreOrder())
+         layout_object = layout_object->LayoutBlockedByDisplayLock()
+                             ? layout_object->NextInPreOrderAfterChildren()
+                             : layout_object->NextInPreOrder()) {
       layout_object->AssertLaidOut();
+    }
   }
 
   void AssertClearedPaintInvalidationFlags() const {
 #ifndef NDEBUG
-    if (PaintInvalidationStateIsDirty()) {
+    if (PaintInvalidationStateIsDirty() && !PrePaintBlockedByDisplayLock()) {
       ShowLayoutTreeForThis();
       NOTREACHED();
     }
@@ -387,8 +400,11 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   void AssertSubtreeClearedPaintInvalidationFlags() const {
     for (const LayoutObject* layout_object = this; layout_object;
-         layout_object = layout_object->NextInPreOrder())
+         layout_object = layout_object->PrePaintBlockedByDisplayLock()
+                             ? layout_object->NextInPreOrderAfterChildren()
+                             : layout_object->NextInPreOrder()) {
       layout_object->AssertClearedPaintInvalidationFlags();
+    }
   }
 
 #endif
@@ -464,6 +480,13 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     return StyleRef().ContainsSize() &&
            (!IsInline() || IsAtomicInlineLevel()) && !IsRubyText() &&
            (!IsTablePart() || IsTableCaption()) && !IsTable();
+  }
+  inline bool ShouldApplyStyleContainment() const {
+    return StyleRef().ContainsStyle();
+  }
+  inline bool ShouldApplyContentContainment() const {
+    return ShouldApplyPaintContainment() && ShouldApplyLayoutContainment() &&
+           ShouldApplyStyleContainment();
   }
 
  private:
@@ -639,8 +662,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   }
   // isBody is called from LayoutBox::styleWillChange and is thus quite hot.
   bool IsBody() const {
-    return GetNode() && GetNode()->HasTagName(HTMLNames::bodyTag);
+    return GetNode() && GetNode()->HasTagName(html_names::kBodyTag);
   }
+
   bool IsHR() const;
 
   bool IsTablePart() const {
@@ -685,9 +709,10 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   }
   void SetAncestorLineBoxDirty(bool value = true) {
     bitfields_.SetAncestorLineBoxDirty(value);
-    if (value)
+    if (value) {
       SetNeedsLayoutAndFullPaintInvalidation(
-          LayoutInvalidationReason::kLineBoxesChanged);
+          layout_invalidation_reason::kLineBoxesChanged);
+    }
   }
 
   void SetIsInsideFlowThreadIncludingDescendants(bool);
@@ -746,8 +771,8 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   bool IsBlendingAllowed() const {
     return !IsSVG() || IsSVGShape() || IsSVGImage() || IsSVGText() ||
            IsSVGInline() || IsSVGRoot() || IsSVGForeignObject() ||
-           // TODO(pdr): According to the current spec, blending should apply to
-           // hidden containers (e.g. pattern).
+           // Blending does not apply to non-renderable elements such as
+           // patterns (see: https://github.com/w3c/fxtf-drafts/issues/309).
            (IsSVGContainer() && !IsSVGHiddenContainer());
   }
   virtual bool HasNonIsolatedBlendingDescendants() const {
@@ -878,6 +903,14 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
            bitfields_.NeedsPositionedMovementLayout();
   }
 
+  bool NeedsPositionedMovementLayoutOnly() const {
+    return bitfields_.NeedsPositionedMovementLayout() &&
+           !bitfields_.SelfNeedsLayout() &&
+           !bitfields_.NormalChildNeedsLayout() &&
+           !bitfields_.PosChildNeedsLayout() &&
+           !bitfields_.NeedsSimplifiedNormalFlowLayout();
+  }
+
   bool SelfNeedsLayout() const { return bitfields_.SelfNeedsLayout(); }
   bool NeedsPositionedMovementLayout() const {
     return bitfields_.NeedsPositionedMovementLayout();
@@ -894,18 +927,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   bool PreferredLogicalWidthsDirty() const {
     return bitfields_.PreferredLogicalWidthsDirty();
-  }
-
-  bool NeedsOverflowRecalc() const {
-    return SelfNeedsOverflowRecalc() || ChildNeedsOverflowRecalc();
-  }
-  bool SelfNeedsOverflowRecalc() const {
-    return bitfields_.SelfNeedsLayoutOverflowRecalc() ||
-           bitfields_.SelfNeedsVisualOverflowRecalc();
-  }
-  bool ChildNeedsOverflowRecalc() const {
-    return bitfields_.ChildNeedsLayoutOverflowRecalc() ||
-           bitfields_.ChildNeedsVisualOverflowRecalc();
   }
 
   bool NeedsLayoutOverflowRecalc() const {
@@ -929,29 +950,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   }
   void ClearChildNeedsLayoutOverflowRecalc() {
     bitfields_.SetChildNeedsLayoutOverflowRecalc(false);
-  }
-
-  bool NeedsVisualOverflowRecalc() const {
-    return bitfields_.SelfNeedsVisualOverflowRecalc() ||
-           bitfields_.ChildNeedsVisualOverflowRecalc();
-  }
-  bool SelfNeedsVisualOverflowRecalc() const {
-    return bitfields_.SelfNeedsVisualOverflowRecalc();
-  }
-  bool ChildNeedsVisualOverflowRecalc() const {
-    return bitfields_.ChildNeedsVisualOverflowRecalc();
-  }
-  void SetSelfNeedsVisualOverflowRecalc() {
-    bitfields_.SetSelfNeedsVisualOverflowRecalc(true);
-  }
-  void SetChildNeedsVisualOverflowRecalc() {
-    bitfields_.SetChildNeedsVisualOverflowRecalc(true);
-  }
-  void ClearSelfNeedsVisualOverflowRecalc() {
-    bitfields_.SetSelfNeedsVisualOverflowRecalc(false);
-  }
-  void ClearChildNeedsVisualOverflowRecalc() {
-    bitfields_.SetChildNeedsVisualOverflowRecalc(false);
   }
 
   // CSS clip only applies when position is absolute or fixed. Prefer this check
@@ -992,6 +990,12 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // document lifecycle phase.
   bool IsEffectiveRootScroller() const {
     return bitfields_.IsEffectiveRootScroller();
+  }
+
+  // Returns true if the given object is the global root scroller. See
+  // |global root scroller| in page/scrolling/README.md.
+  bool IsGlobalRootScroller() const {
+    return bitfields_.IsGlobalRootScroller();
   }
 
   // Return true if this is the "rendered legend" of a fieldset. They get
@@ -1231,10 +1235,16 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   void SetIsEffectiveRootScroller(bool is_effective_root_scroller) {
     bitfields_.SetIsEffectiveRootScroller(is_effective_root_scroller);
   }
+  void SetIsGlobalRootScroller(bool is_global_root_scroller) {
+    bitfields_.SetIsGlobalRootScroller(is_global_root_scroller);
+  }
 
   virtual void Paint(const PaintInfo&) const;
 
-  virtual bool RecalcOverflow();
+  virtual bool RecalcLayoutOverflow();
+  // Recalculates visual overflow for this object and non-self-painting
+  // PaintLayer descendants.
+  virtual void RecalcVisualOverflow();
 
   // Subclasses must reimplement this method to compute the size and position
   // of this object and all its descendants.
@@ -1330,9 +1340,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   void SetStyleWithWritingModeOf(scoped_refptr<ComputedStyle>,
                                  LayoutObject* parent);
   void SetStyleWithWritingModeOfParent(scoped_refptr<ComputedStyle>);
-
-  void FirstLineStyleDidChange(const ComputedStyle& old_style,
-                               const ComputedStyle& new_style);
 
   void ClearBaseComputedStyle();
 
@@ -1679,9 +1686,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // -webkit-flex).
   virtual bool IsFlexibleBox() const { return false; }
 
-  bool IsFlexibleBoxIncludingDeprecated() const {
-    return IsFlexibleBox() || IsDeprecatedFlexibleBox();
-  }
+  virtual bool IsFlexibleBoxIncludingDeprecatedAndNG() const { return false; }
+
+  virtual bool IsFlexibleBoxIncludingNG() const { return false; }
 
   bool IsListItemIncludingNG() const {
     return IsListItem() || IsLayoutNGListItem();
@@ -1762,6 +1769,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                                const LayoutPoint& additional_offset,
                                NGOutlineType) const {}
 
+  Vector<LayoutRect> PhysicalOutlineRects(const LayoutPoint& additional_offset,
+                                          NGOutlineType) const;
+
   // For history and compatibility reasons, we draw outline:auto (for focus
   // rings) and normal style outline differently.
   // Focus rings enclose block visual overflows (of line boxes and descendants),
@@ -1772,17 +1782,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                : NGOutlineType::kDontIncludeBlockVisualOverflow;
   }
 
-  // Collects rectangles enclosing visual overflows of the DOM subtree under
-  // this object.
-  // The rects also cover continuations which may be not in the layout subtree
-  // of this object.
-  // TODO(crbug.com/614781): Currently the result rects don't cover list markers
-  // and outlines.
-  void AddElementVisualOverflowRects(
-      Vector<LayoutRect>& rects,
-      const LayoutPoint& additional_offset) const {
-    AddOutlineRects(rects, additional_offset,
-                    NGOutlineType::kIncludeBlockVisualOverflow);
+  // Only public for LayoutNG.
+  void SetContainsInlineWithOutlineAndContinuation(bool b) {
+    bitfields_.SetContainsInlineWithOutlineAndContinuation(b);
   }
 
   // Compute a list of hit-test rectangles per layer rooted at this
@@ -1814,6 +1816,16 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     }
     return false;
   }
+  // Indicates that the paint of the object should be fully invalidated.
+  // We will repaint the object, and reraster the area on the composited layer
+  // where the object shows. Note that this function doesn't automatically
+  // cause invalidation of background painted on the scrolling contents layer
+  // because we don't want to invalidate the whole scrolling contents layer on
+  // non-background changes. It's also not safe to specially handle
+  // PaintInvalidationReason::kBackground in paint invalidator because we don't
+  // track paint invalidation reasons separately. To indicate that the
+  // background needs full invalidation, use
+  // SetBackgroundNeedsFullPaintInvalidation().
   void SetShouldDoFullPaintInvalidation(
       PaintInvalidationReason = PaintInvalidationReason::kFull);
   void SetShouldDoFullPaintInvalidationWithoutGeometryChange(
@@ -1915,6 +1927,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
       return TouchAction::kTouchActionNone;
     return StyleRef().GetEffectiveTouchAction();
   }
+  bool HasEffectiveWhitelistedTouchAction() const {
+    return EffectiveWhitelistedTouchAction() != TouchAction::kTouchActionAuto;
+  }
 
   // Whether this object's Node has a blocking touch event handler on itself
   // or an ancestor.
@@ -1964,8 +1979,8 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
       layout_object_.SetShouldDoFullPaintInvalidationWithoutGeometryChange(
           reason);
     }
-    void SetBackgroundChangedSinceLastPaintInvalidation() {
-      layout_object_.SetBackgroundChangedSinceLastPaintInvalidation();
+    void SetBackgroundNeedsFullPaintInvalidation() {
+      layout_object_.SetBackgroundNeedsFullPaintInvalidation();
     }
     void SetShouldDelayFullPaintInvalidation() {
       layout_object_.SetShouldDelayFullPaintInvalidation();
@@ -1985,7 +2000,10 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     }
 
     void SetPreviousBackgroundObscured(bool b) {
-      layout_object_.SetPreviousBackgroundObscured(b);
+      layout_object_.bitfields_.SetPreviousBackgroundObscured(b);
+    }
+    void SetPreviousBackgroundPaintLocation(BackgroundPaintLocation location) {
+      layout_object_.bitfields_.SetPreviousBackgroundPaintLocation(location);
     }
     void UpdatePreviousOutlineMayBeAffectedByDescendants() {
       layout_object_.SetPreviousOutlineMayBeAffectedByDescendants(
@@ -2035,9 +2053,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     friend class PaintPropertyTreeBuilder;
     friend class PrePaintTreeWalk;
     FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,
-                             canStartElementOnCompositorTransformSPv2);
+                             canStartElementOnCompositorTransformCAP);
     FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,
-                             canStartElementOnCompositorEffectSPv2);
+                             canStartElementOnCompositorEffectCAP);
     FRIEND_TEST_ALL_PREFIXES(PrePaintTreeWalkTest, ClipRects);
     FRIEND_TEST_ALL_PREFIXES(LayoutObjectTest, VisualRect);
     FRIEND_TEST_ALL_PREFIXES(BoxPaintInvalidatorTest,
@@ -2100,19 +2118,22 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   bool PreviousBackgroundObscured() const {
     return bitfields_.PreviousBackgroundObscured();
   }
-  void SetPreviousBackgroundObscured(bool b) {
-    bitfields_.SetPreviousBackgroundObscured(b);
+  BackgroundPaintLocation PreviousBackgroundPaintLocation() const {
+    return bitfields_.PreviousBackgroundPaintLocation();
   }
 
   bool IsBackgroundAttachmentFixedObject() const {
     return bitfields_.IsBackgroundAttachmentFixedObject();
   }
 
-  bool BackgroundChangedSinceLastPaintInvalidation() const {
-    return bitfields_.BackgroundChangedSinceLastPaintInvalidation();
+  bool BackgroundNeedsFullPaintInvalidation() const {
+    return !ShouldDelayFullPaintInvalidation() &&
+           bitfields_.BackgroundNeedsFullPaintInvalidation();
   }
-  void SetBackgroundChangedSinceLastPaintInvalidation() {
-    bitfields_.SetBackgroundChangedSinceLastPaintInvalidation(true);
+  void SetBackgroundNeedsFullPaintInvalidation() {
+    SetShouldDoFullPaintInvalidationWithoutGeometryChange(
+        PaintInvalidationReason::kBackground);
+    bitfields_.SetBackgroundNeedsFullPaintInvalidation(true);
   }
 
   bool OutlineMayBeAffectedByDescendants() const {
@@ -2137,6 +2158,31 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   void SetOutlineMayBeAffectedByDescendants(bool b) {
     bitfields_.SetOutlineMayBeAffectedByDescendants(b);
+  }
+
+  bool LayoutBlockedByDisplayLock() const {
+    auto* context = GetDisplayLockContext();
+    return context && !context->ShouldLayout();
+  }
+
+  bool PrePaintBlockedByDisplayLock() const {
+    auto* context = GetDisplayLockContext();
+    return context && !context->ShouldPrePaint();
+  }
+
+  bool PaintBlockedByDisplayLock() const {
+    auto* context = GetDisplayLockContext();
+    return context && !context->ShouldPaint();
+  }
+
+  void NotifyDisplayLockDidPrePaint() const {
+    if (auto* context = GetDisplayLockContext())
+      context->DidPrePaint();
+  }
+
+  void NotifyDisplayLockDidPaint() const {
+    if (auto* context = GetDisplayLockContext())
+      context->DidPaint();
   }
 
  protected:
@@ -2302,10 +2348,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // LayoutFlowThread.
   void RemoveFromLayoutFlowThread();
 
-  void SetContainsInlineWithOutlineAndContinuation(bool b) {
-    bitfields_.SetContainsInlineWithOutlineAndContinuation(b);
-  }
-
   void SetPreviousOutlineMayBeAffectedByDescendants(bool b) {
     bitfields_.SetPreviousOutlineMayBeAffectedByDescendants(b);
   }
@@ -2320,6 +2362,19 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
       bool ignore_scroll_offset) const;
   LayoutSize OffsetFromScrollableContainer(const LayoutObject*,
                                            bool ignore_scroll_offset) const;
+
+  void NotifyDisplayLockDidLayout() {
+    if (auto* context = GetDisplayLockContext())
+      context->DidLayout();
+  }
+
+  DisplayLockContext* GetDisplayLockContext() const {
+    if (!RuntimeEnabledFeatures::DisplayLockingEnabled())
+      return nullptr;
+    if (!GetNode() || !GetNode()->IsElementNode())
+      return nullptr;
+    return ToElement(GetNode())->GetDisplayLockContext();
+  }
 
  private:
   // Used only by applyFirstLineChanges to get a first line style based off of a
@@ -2341,15 +2396,18 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   bool IsInert() const;
 
-  void UpdateImage(StyleImage*, StyleImage*);
-
   void ScheduleRelayout();
 
+  void AddAsImageObserver(StyleImage*);
+  void RemoveAsImageObserver(StyleImage*);
+
+  void UpdateImage(StyleImage*, StyleImage*);
   void UpdateShapeImage(const ShapeValue*, const ShapeValue*);
   void UpdateFillImages(const FillLayer* old_layers,
-                        const FillLayer& new_layers);
+                        const FillLayer* new_layers);
   void UpdateCursorImages(const CursorList* old_cursors,
                           const CursorList* new_cursors);
+
   void CheckCounterChanges(const ComputedStyle* old_style,
                            const ComputedStyle* new_style);
 
@@ -2371,9 +2429,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   const ComputedStyle* CachedFirstLineStyle() const;
   StyleDifference AdjustStyleDifference(StyleDifference) const;
 
-  void RemoveShapeImageClient(ShapeValue*);
-  void RemoveCursorImageClient(const CursorList*);
-
   // These are helper functions for AbsoluteBoudingBoxRectHandlingEmptyAnchor()
   // and AbsoluteBoundingBoxRectForScrollIntoView().
   enum class ExpandScrollMargin { kExpand, kIgnore };
@@ -2393,8 +2448,13 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // LayoutView to return the owning LayoutObject in the containing frame.
   inline LayoutObject* ParentCrossingFrames() const;
 
-  void ApplyPseudoStyleChanges(const ComputedStyle& old_style);
-  void ApplyFirstLineChanges(const ComputedStyle& old_style);
+  void UpdateImageObservers(const ComputedStyle* old_style,
+                            const ComputedStyle* new_style);
+  void UpdateFirstLineImageObservers(const ComputedStyle* old_style,
+                                     const ComputedStyle* new_style);
+
+  void ApplyPseudoStyleChanges(const ComputedStyle* old_style);
+  void ApplyFirstLineChanges(const ComputedStyle* old_style);
 
   LayoutRect VisualRectForInlineBox() const {
     return AdjustVisualRectForInlineBox(VisualRect());
@@ -2424,6 +2484,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 #if DCHECK_IS_ON()
   unsigned has_ax_object_ : 1;
   unsigned set_needs_layout_forbidden_ : 1;
+  unsigned as_image_observer_count_ : 20;
 #endif
 
 #define ADD_BOOLEAN_BITFIELD(field_name_, MethodNameBase) \
@@ -2469,8 +2530,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
           needs_simplified_normal_flow_layout_(false),
           self_needs_layout_overflow_recalc_(false),
           child_needs_layout_overflow_recalc_(false),
-          self_needs_visual_overflow_recalc_(false),
-          child_needs_visual_overflow_recalc_(false),
           preferred_logical_widths_dirty_(false),
           needs_collect_inlines_(false),
           should_check_for_paint_invalidation_(true),
@@ -2512,7 +2571,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
           is_scroll_anchor_object_(false),
           scroll_anchor_disabling_style_changed_(false),
           has_box_decoration_background_(false),
-          background_changed_since_last_paint_invalidation_(true),
+          background_needs_full_paint_invalidation_(true),
           outline_may_be_affected_by_descendants_(false),
           previous_outline_may_be_affected_by_descendants_(false),
           is_truncated_(false),
@@ -2520,11 +2579,14 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
           effective_whitelisted_touch_action_changed_(true),
           descendant_effective_whitelisted_touch_action_changed_(false),
           is_effective_root_scroller_(false),
+          is_global_root_scroller_(false),
+          pending_update_first_line_image_observers_(false),
           positioned_state_(kIsStaticallyPositioned),
           selection_state_(static_cast<unsigned>(SelectionState::kNone)),
           background_obscuration_state_(kBackgroundObscurationStatusInvalid),
           subtree_paint_property_update_reasons_(
-              static_cast<unsigned>(SubtreePaintPropertyUpdateReason::kNone)) {}
+              static_cast<unsigned>(SubtreePaintPropertyUpdateReason::kNone)),
+          previous_background_paint_location_(0) {}
 
     // Self needs layout means that this layout object is marked for a full
     // layout. This is the default layout but it is expensive as it recomputes
@@ -2567,12 +2629,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
     ADD_BOOLEAN_BITFIELD(child_needs_layout_overflow_recalc_,
                          ChildNeedsLayoutOverflowRecalc);
-
-    ADD_BOOLEAN_BITFIELD(self_needs_visual_overflow_recalc_,
-                         SelfNeedsVisualOverflowRecalc);
-
-    ADD_BOOLEAN_BITFIELD(child_needs_visual_overflow_recalc_,
-                         ChildNeedsVisualOverflowRecalc);
 
     // This boolean marks preferred logical widths for lazy recomputation.
     //
@@ -2724,8 +2780,8 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     ADD_BOOLEAN_BITFIELD(has_box_decoration_background_,
                          HasBoxDecorationBackground);
 
-    ADD_BOOLEAN_BITFIELD(background_changed_since_last_paint_invalidation_,
-                         BackgroundChangedSinceLastPaintInvalidation);
+    ADD_BOOLEAN_BITFIELD(background_needs_full_paint_invalidation_,
+                         BackgroundNeedsFullPaintInvalidation);
 
     // Whether shape of outline may be affected by any descendants. This is
     // updated before paint invalidation, checked during paint invalidation.
@@ -2756,7 +2812,16 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     ADD_BOOLEAN_BITFIELD(descendant_effective_whitelisted_touch_action_changed_,
                          DescendantEffectiveWhitelistedTouchActionChanged);
 
+    // See page/scrolling/README.md for an explanation of root scroller and how
+    // it works.
     ADD_BOOLEAN_BITFIELD(is_effective_root_scroller_, IsEffectiveRootScroller);
+    ADD_BOOLEAN_BITFIELD(is_global_root_scroller_, IsGlobalRootScroller);
+
+    // First line style is resolvable only after the object is inserted into
+    // the tree, so we should set this flag when the object set a style having
+    // first line style before it is inserted into the tree.
+    ADD_BOOLEAN_BITFIELD(pending_update_first_line_image_observers_,
+                         PendingUpdateFirstLineImageObservers);
 
    private:
     // This is the cached 'position' value of this object
@@ -2770,6 +2835,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     // Reasons for the full subtree invalidation.
     unsigned subtree_paint_property_update_reasons_
         : kSubtreePaintPropertyUpdateReasonsBitfieldWidth;
+
+    // BackgroundPaintLocation of previous paint invalidation.
+    unsigned previous_background_paint_location_ : 2;
 
    public:
     bool IsOutOfFlowPositioned() const {
@@ -2845,6 +2913,17 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
         BackgroundObscurationState s) const {
       background_obscuration_state_ = s;
     }
+
+    ALWAYS_INLINE BackgroundPaintLocation
+    PreviousBackgroundPaintLocation() const {
+      return static_cast<BackgroundPaintLocation>(
+          previous_background_paint_location_);
+    }
+    ALWAYS_INLINE void SetPreviousBackgroundPaintLocation(
+        BackgroundPaintLocation location) {
+      previous_background_paint_location_ = static_cast<unsigned>(location);
+      DCHECK_EQ(location, PreviousBackgroundPaintLocation());
+    }
   };
 
 #undef ADD_BOOLEAN_BITFIELD
@@ -2916,12 +2995,13 @@ inline void LayoutObject::SetNeedsLayout(
 #endif
   bool already_needed_layout = bitfields_.SelfNeedsLayout();
   SetSelfNeedsLayout(true);
+  SetNeedsOverflowRecalc();
   MarkContainerNeedsCollectInlines();
   if (!already_needed_layout) {
     TRACE_EVENT_INSTANT1(
         TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"),
         "LayoutInvalidationTracking", TRACE_EVENT_SCOPE_THREAD, "data",
-        InspectorLayoutInvalidationTrackingEvent::Data(this, reason));
+        inspector_layout_invalidation_tracking_event::Data(this, reason));
     if (mark_parents == kMarkContainerChain &&
         (!layouter || layouter->Root() != this))
       MarkContainerChainForLayout(!layouter, layouter);
@@ -2962,6 +3042,7 @@ inline void LayoutObject::SetChildNeedsLayout(MarkingBehavior mark_parents,
   DCHECK(!IsSetNeedsLayoutForbidden());
 #endif
   bool already_needed_layout = NormalChildNeedsLayout();
+  SetNeedsOverflowRecalc();
   SetNormalChildNeedsLayout(true);
   MarkContainerNeedsCollectInlines();
   // FIXME: Replace MarkOnlyThis with the SubtreeLayoutScope code path and
@@ -2973,6 +3054,7 @@ inline void LayoutObject::SetChildNeedsLayout(MarkingBehavior mark_parents,
 
 inline void LayoutObject::SetNeedsPositionedMovementLayout() {
   bool already_needed_layout = NeedsPositionedMovementLayout();
+  SetNeedsOverflowRecalc();
   SetNeedsPositionedMovementLayout(true);
 #if DCHECK_IS_ON()
   DCHECK(!IsSetNeedsLayoutForbidden());

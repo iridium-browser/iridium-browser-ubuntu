@@ -43,6 +43,11 @@ class SearchBoxView;
 class SearchModel;
 class TransitionAnimationObserver;
 
+namespace {
+// The background corner radius in peeking and fullscreen state.
+constexpr int kAppListBackgroundRadius = 28;
+}
+
 // AppListView is the top-level view and controller of app list UI. It creates
 // and hosts a AppsGridView and passes AppListModel to it for display.
 // TODO(newcomer|weidongg): Organize the cc file to match the order of
@@ -125,17 +130,12 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView {
   // Performs the 'back' action for the active page.
   void Back();
 
-  // Enables/disables a semi-transparent overlay over the app list (good for
-  // hiding the app list when a modal dialog is being shown).
-  void SetAppListOverlayVisible(bool visible);
-
   // views::View:
   void OnPaint(gfx::Canvas* canvas) override;
   const char* GetClassName() const override;
   bool CanProcessEventsWithinSubtree() const override;
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
   void Layout() override;
-  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
   // WidgetDelegate:
   ax::mojom::Role GetAccessibleWindowRole() const override;
@@ -153,7 +153,7 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView {
   void OnWallpaperColorsChanged();
 
   // Handles scroll events from various sources.
-  bool HandleScroll(int offset, ui::EventType type);
+  bool HandleScroll(const gfx::Vector2d& offset, ui::EventType type);
 
   // Changes the app list state.
   void SetState(AppListViewState new_state);
@@ -246,13 +246,13 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView {
     onscreen_keyboard_shown_ = onscreen_keyboard_shown;
   }
 
-  // Returns true if the home launcher is enabled in tablet mode.
-  bool IsHomeLauncherEnabledInTabletMode() const;
-
-  // Returns true if the home_launcher feature is enabled.
-  bool is_home_launcher_enabled() const { return is_home_launcher_enabled_; }
+  int get_background_radius_for_test() const {
+    return kAppListBackgroundRadius;
+  }
 
   views::View* GetAppListBackgroundShieldForTest();
+
+  SkColor GetAppListBackgroundShieldColorForTest();
 
  private:
   // A widget observer that is responsible for keeping the AppListView state up
@@ -377,8 +377,10 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView {
   // Y position of the app list in screen space coordinate during dragging.
   int app_list_y_position_in_screen_ = 0;
 
-  // The opacity of app list background during dragging.
-  float background_opacity_ = 0.f;
+  // The opacity of app list background during dragging. This ensures a gradual
+  // opacity shift from the shelf opacity while dragging to show the AppListView
+  // from the shelf.
+  float background_opacity_in_drag_ = 0.f;
 
   // The location of initial gesture event in screen coordinates.
   gfx::Point initial_drag_point_;
@@ -397,10 +399,6 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView {
   // closed.
   std::unique_ptr<FullscreenWidgetObserver> widget_observer_;
 
-  // A semi-transparent white overlay that covers the app list while dialogs
-  // are open.
-  views::View* overlay_view_ = nullptr;
-
   std::unique_ptr<HideViewAnimationObserver> hide_view_animation_observer_;
 
   std::unique_ptr<TransitionAnimationObserver> transition_animation_observer_;
@@ -414,12 +412,6 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView {
   // True if the dragging started from PEEKING state.
   bool drag_started_from_peeking_ = false;
 
-  // Accessibility announcement dialogue.
-  base::string16 state_announcement_;
-
-  // Whether FocusManager can handle arrow key before this class is constructed.
-  const bool previous_arrow_key_traversal_enabled_;
-
   // Metric reporter for state change animations.
   const std::unique_ptr<ui::AnimationMetricsReporter>
       state_animation_metrics_reporter_;
@@ -427,11 +419,8 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView {
   // Whether the on-screen keyboard is shown.
   bool onscreen_keyboard_shown_ = false;
 
-  // Whether the home launcher feature is enabled.
-  const bool is_home_launcher_enabled_;
-
-  // True if new style launcher feature is enabled.
-  const bool is_new_style_launcher_enabled_;
+  // View used to announce the state transition for peeking and fullscreen.
+  views::View* announcement_view_;  // Owned by AppListView.
 
   base::WeakPtrFactory<AppListView> weak_ptr_factory_;
 

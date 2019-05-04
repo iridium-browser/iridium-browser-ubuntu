@@ -9,12 +9,12 @@
 
 #include "base/macros.h"
 #include "chromecast/graphics/cast_window_manager.h"
+#include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/window_parenting_client.h"
 #include "ui/aura/window_tree_host_platform.h"
 
 namespace aura {
 namespace client {
-class DefaultCaptureClient;
 class ScreenPositionClient;
 }  // namespace client
 }  // namespace aura
@@ -31,7 +31,8 @@ class SideSwipeDetector;
 // An aura::WindowTreeHost that correctly converts input events.
 class CastWindowTreeHost : public aura::WindowTreeHostPlatform {
  public:
-  CastWindowTreeHost(bool enable_input, const gfx::Rect& bounds);
+  CastWindowTreeHost(bool enable_input,
+                     ui::PlatformWindowInitProperties properties);
   ~CastWindowTreeHost() override;
 
   // aura::WindowTreeHostPlatform implementation:
@@ -53,6 +54,10 @@ class CastWindowManagerAura : public CastWindowManager,
   explicit CastWindowManagerAura(bool enable_input);
   ~CastWindowManagerAura() override;
 
+  aura::client::CaptureClient* capture_client() const {
+    return capture_client_.get();
+  }
+
   void Setup();
 
   // CastWindowManager implementation:
@@ -69,8 +74,6 @@ class CastWindowManagerAura : public CastWindowManager,
   void AddGestureHandler(CastGestureHandler* handler) override;
 
   void RemoveGestureHandler(CastGestureHandler* handler) override;
-
-  void SetColorInversion(bool enable) override;
 
   CastWindowTreeHost* window_tree_host() const;
 

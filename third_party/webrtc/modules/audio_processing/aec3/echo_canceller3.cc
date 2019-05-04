@@ -9,9 +9,12 @@
  */
 #include "modules/audio_processing/aec3/echo_canceller3.h"
 
+#include <algorithm>
+#include <utility>
+
+#include "modules/audio_processing/aec3/aec3_common.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
-#include "rtc_base/atomicops.h"
-#include "rtc_base/logging.h"
+#include "rtc_base/atomic_ops.h"
 #include "system_wrappers/include/field_trial.h"
 
 namespace webrtc {
@@ -41,19 +44,6 @@ bool EnableReverbModelling() {
   return !field_trial::IsEnabled("WebRTC-Aec3ReverbModellingKillSwitch");
 }
 
-bool EnableSuppressorNearendAveraging() {
-  return !field_trial::IsEnabled(
-      "WebRTC-Aec3SuppressorNearendAveragingKillSwitch");
-}
-
-bool EnableSlowFilterAdaptation() {
-  return !field_trial::IsEnabled("WebRTC-Aec3SlowFilterAdaptationKillSwitch");
-}
-
-bool EnableShadowFilterJumpstart() {
-  return !field_trial::IsEnabled("WebRTC-Aec3ShadowFilterJumpstartKillSwitch");
-}
-
 bool EnableUnityInitialRampupGain() {
   return field_trial::IsEnabled("WebRTC-Aec3EnableUnityInitialRampupGain");
 }
@@ -78,14 +68,20 @@ bool UseLegacyNormalSuppressorTuning() {
   return field_trial::IsEnabled("WebRTC-Aec3UseLegacyNormalSuppressorTuning");
 }
 
-bool DeactivateStationarityProperties() {
-  return field_trial::IsEnabled(
-      "WebRTC-Aec3UseStationarityPropertiesKillSwitch");
+bool ActivateStationarityProperties() {
+  return field_trial::IsEnabled("WebRTC-Aec3UseStationarityProperties");
 }
 
-bool DeactivateStationarityPropertiesAtInit() {
-  return field_trial::IsEnabled(
-      "WebRTC-Aec3UseStationarityPropertiesAtInitKillSwitch");
+bool ActivateStationarityPropertiesAtInit() {
+  return field_trial::IsEnabled("WebRTC-Aec3UseStationarityPropertiesAtInit");
+}
+
+bool EnableNewRenderBuffering() {
+  return !field_trial::IsEnabled("WebRTC-Aec3NewRenderBufferingKillSwitch");
+}
+
+bool UseEarlyDelayDetection() {
+  return !field_trial::IsEnabled("WebRTC-Aec3EarlyDelayDetectionKillSwitch");
 }
 
 // Method for adjusting config parameter dependencies..
@@ -102,32 +98,15 @@ EchoCanceller3Config AdjustConfig(const EchoCanceller3Config& config) {
         std::min(adjusted_cfg.delay.num_filters, static_cast<size_t>(5));
   }
 
+  bool use_new_render_buffering =
+      EnableNewRenderBuffering() && config.buffering.use_new_render_buffering;
+  // Old render buffering needs one more filter to cover the same delay.
+  if (!use_new_render_buffering) {
+    adjusted_cfg.delay.num_filters += 1;
+  }
+
   if (EnableReverbBasedOnRender() == false) {
     adjusted_cfg.ep_strength.reverb_based_on_render = false;
-  }
-
-  if (!EnableSuppressorNearendAveraging()) {
-    adjusted_cfg.suppressor.nearend_average_blocks = 1;
-  }
-
-  if (!EnableSlowFilterAdaptation()) {
-    if (!EnableShadowFilterJumpstart()) {
-      adjusted_cfg.filter.main.leakage_converged = 0.005f;
-      adjusted_cfg.filter.main.leakage_diverged = 0.1f;
-    }
-    adjusted_cfg.filter.main_initial.leakage_converged = 0.05f;
-    adjusted_cfg.filter.main_initial.leakage_diverged = 5.f;
-  }
-
-  if (!EnableShadowFilterJumpstart()) {
-    if (EnableSlowFilterAdaptation()) {
-      adjusted_cfg.filter.main.leakage_converged = 0.0005f;
-      adjusted_cfg.filter.main.leakage_diverged = 0.01f;
-    } else {
-      adjusted_cfg.filter.main.leakage_converged = 0.005f;
-      adjusted_cfg.filter.main.leakage_diverged = 0.1f;
-    }
-    adjusted_cfg.filter.main.error_floor = 0.001f;
   }
 
   if (!EnableNewFilterParams()) {
@@ -168,20 +147,21 @@ EchoCanceller3Config AdjustConfig(const EchoCanceller3Config& config) {
             EchoCanceller3Config::Suppressor::MaskingThresholds(.07f, .1f, .3f),
             2.0f, 0.25f);
 
-    adjusted_cfg.suppressor.dominant_nearend_detection.enr_threshold = 10.f;
+    adjusted_cfg.suppressor.dominant_nearend_detection.enr_threshold = 0.1f;
     adjusted_cfg.suppressor.dominant_nearend_detection.snr_threshold = 10.f;
     adjusted_cfg.suppressor.dominant_nearend_detection.hold_duration = 25;
   }
 
-  // TODO(peah): Clean this up once upstream dependencies that forces this to
-  // zero are resolved.
-  adjusted_cfg.echo_audibility.use_stationary_properties = true;
-  if (DeactivateStationarityProperties()) {
-    adjusted_cfg.echo_audibility.use_stationary_properties = false;
+  if (ActivateStationarityProperties()) {
+    adjusted_cfg.echo_audibility.use_stationary_properties = true;
   }
 
-  if (DeactivateStationarityPropertiesAtInit()) {
-    adjusted_cfg.echo_audibility.use_stationarity_properties_at_init = false;
+  if (ActivateStationarityPropertiesAtInit()) {
+    adjusted_cfg.echo_audibility.use_stationarity_properties_at_init = true;
+  }
+
+  if (!UseEarlyDelayDetection()) {
+    adjusted_cfg.delay.delay_selection_thresholds = {25, 25};
   }
 
   return adjusted_cfg;
@@ -367,12 +347,16 @@ int EchoCanceller3::instance_count_ = 0;
 EchoCanceller3::EchoCanceller3(const EchoCanceller3Config& config,
                                int sample_rate_hz,
                                bool use_highpass_filter)
-    : EchoCanceller3(
-          AdjustConfig(config),
-          sample_rate_hz,
-          use_highpass_filter,
-          std::unique_ptr<BlockProcessor>(
-              BlockProcessor::Create(AdjustConfig(config), sample_rate_hz))) {}
+    : EchoCanceller3(AdjustConfig(config),
+                     sample_rate_hz,
+                     use_highpass_filter,
+                     std::unique_ptr<BlockProcessor>(
+                         EnableNewRenderBuffering() &&
+                                 config.buffering.use_new_render_buffering
+                             ? BlockProcessor::Create2(AdjustConfig(config),
+                                                       sample_rate_hz)
+                             : BlockProcessor::Create(AdjustConfig(config),
+                                                      sample_rate_hz))) {}
 EchoCanceller3::EchoCanceller3(const EchoCanceller3Config& config,
                                int sample_rate_hz,
                                bool use_highpass_filter,
@@ -462,6 +446,10 @@ void EchoCanceller3::ProcessCapture(AudioBuffer* capture, bool level_change) {
   data_dumper_->DumpRaw("aec3_call_order",
                         static_cast<int>(EchoCanceller3ApiCall::kCapture));
 
+  // Report capture call in the metrics and periodically update API call
+  // metrics.
+  api_call_metrics_.ReportCaptureCall();
+
   // Optionally delay the capture signal.
   if (config_.delay.fixed_capture_delay_samples > 0) {
     block_delay_buffer_.DelaySignal(capture);
@@ -516,6 +504,9 @@ void EchoCanceller3::EmptyRenderQueue() {
   bool frame_to_buffer =
       render_transfer_queue_.Remove(&render_queue_output_frame_);
   while (frame_to_buffer) {
+    // Report render call in the metrics.
+    api_call_metrics_.ReportRenderCall();
+
     BufferRenderFrameContent(&render_queue_output_frame_, 0, &render_blocker_,
                              block_processor_.get(), &block_, &sub_frame_view_);
 

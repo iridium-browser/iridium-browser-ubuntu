@@ -12,15 +12,16 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
-#include "base/macros.h"
 #include "base/path_service.h"
+#include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/extensions/default_web_app_ids.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/app_list/page_break_constants.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chromeos/chromeos_paths.h"
+#include "chromeos/constants/chromeos_paths.h"
 #include "extensions/common/constants.h"
 
 namespace chromeos {
@@ -65,10 +66,13 @@ const char* const kDefaultAppOrder[] = {
     app_list::kInternalAppIdDiscover,
     extension_misc::kGeniusAppId,
     extension_misc::kCalculatorAppId,
+    default_web_apps::kCanvasAppId,
     extension_misc::kTextEditorAppId,
     arc::kGoogleDuo,
+    default_web_apps::kYoutubeTVAppId,
     arc::kLightRoom,
     arc::kInfinitePainter,
+    default_web_apps::kShowtimeAppId,
     extension_misc::kGooglePlusAppId,
     extension_misc::kChromeRemoteDesktopAppId,
     extensions::kWebStoreAppId,
@@ -128,13 +132,13 @@ std::string GetLocaleSpecificStringImpl(
 
 // Gets built-in default app order.
 void GetDefault(std::vector<std::string>* app_ids) {
-  for (size_t i = 0; i < arraysize(kDefaultAppOrder); ++i)
+  for (size_t i = 0; i < base::size(kDefaultAppOrder); ++i)
     app_ids->push_back(std::string(kDefaultAppOrder[i]));
 }
 
 }  // namespace
 
-const size_t kDefaultAppOrderCount = arraysize(kDefaultAppOrder);
+const size_t kDefaultAppOrderCount = base::size(kDefaultAppOrder);
 
 ExternalLoader::ExternalLoader(bool async)
     : loaded_(base::WaitableEvent::ResetPolicy::MANUAL,

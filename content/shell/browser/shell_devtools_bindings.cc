@@ -77,9 +77,9 @@ class ShellDevToolsBindings::NetworkResourceLoader
         request_id_(request_id),
         bindings_(bindings),
         loader_(std::move(loader)) {
-    loader_->DownloadAsStream(url_loader_factory, this);
     loader_->SetOnResponseStartedCallback(base::BindOnce(
         &NetworkResourceLoader::OnResponseStarted, base::Unretained(this)));
+    loader_->DownloadAsStream(url_loader_factory, this);
   }
 
  private:
@@ -160,10 +160,10 @@ void ShellDevToolsBindings::ReadyToCommitNavigation(
 #if !defined(OS_ANDROID)
   content::RenderFrameHost* frame = navigation_handle->GetRenderFrameHost();
   if (navigation_handle->IsInMainFrame()) {
-    frontend_host_.reset(DevToolsFrontendHost::Create(
+    frontend_host_ = DevToolsFrontendHost::Create(
         frame,
         base::Bind(&ShellDevToolsBindings::HandleMessageFromDevToolsFrontend,
-                   base::Unretained(this))));
+                   base::Unretained(this)));
     return;
   }
   std::string origin = navigation_handle->GetURL().GetOrigin().spec();
@@ -264,6 +264,9 @@ void ShellDevToolsBindings::HandleMessageFromDevToolsFrontend(
 
     auto resource_request = std::make_unique<network::ResourceRequest>();
     resource_request->url = gurl;
+    // TODO(caseq): this preserves behavior of URLFetcher-based implementation.
+    // We really need to pass proper first party origin from the front-end.
+    resource_request->site_for_cookies = gurl;
     resource_request->headers.AddHeadersFromString(headers);
 
     auto* partition = content::BrowserContext::GetStoragePartitionForSite(

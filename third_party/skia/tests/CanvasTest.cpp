@@ -52,7 +52,6 @@
 #include "SkClipOp.h"
 #include "SkClipOpPriv.h"
 #include "SkColor.h"
-#include "SkFlattenablePriv.h"
 #include "SkImageFilter.h"
 #include "SkImageInfo.h"
 #include "SkMalloc.h"
@@ -563,7 +562,7 @@ TEST_STEP(NestedSaveRestoreWithFlush, NestedSaveRestoreWithFlushTestStep);
 
 static void TestPdfDevice(skiatest::Reporter* reporter, const TestData& d, CanvasTestStep* step) {
     SkDynamicMemoryWStream outStream;
-    sk_sp<SkDocument> doc(SkPDF::MakeDocument(&outStream));
+    auto doc = SkPDF::MakeDocument(&outStream);
     if (!doc) {
         INFOF(reporter, "PDF disabled; TestPdfDevice test skipped.");
         return;
@@ -814,8 +813,8 @@ DEF_TEST(CanvasClipType, r) {
 
 #ifdef SK_BUILD_FOR_ANDROID_FRAMEWORK
 DEF_TEST(Canvas_LegacyColorBehavior, r) {
-    sk_sp<SkColorSpace> cs = SkColorSpace::MakeRGB(SkColorSpace::kSRGB_RenderTargetGamma,
-                                                   SkColorSpace::kAdobeRGB_Gamut);
+    sk_sp<SkColorSpace> cs = SkColorSpace::MakeRGB(SkNamedTransferFn::kSRGB,
+                                                   SkNamedGamut::kAdobeRGB);
 
     // Make a Adobe RGB bitmap.
     SkBitmap bitmap;
@@ -838,8 +837,6 @@ class ZeroBoundsImageFilter : public SkImageFilter {
 public:
     static sk_sp<SkImageFilter> Make() { return sk_sp<SkImageFilter>(new ZeroBoundsImageFilter); }
 
-    SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(ZeroBoundsImageFilter)
-
 protected:
     sk_sp<SkSpecialImage> onFilterImage(SkSpecialImage*, const Context&, SkIPoint*) const override {
         return nullptr;
@@ -851,6 +848,8 @@ protected:
     }
 
 private:
+    SK_FLATTENABLE_HOOKS(ZeroBoundsImageFilter)
+
     ZeroBoundsImageFilter() : INHERITED(nullptr, 0, nullptr) {}
 
     typedef SkImageFilter INHERITED;

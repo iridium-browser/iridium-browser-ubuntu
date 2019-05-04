@@ -46,9 +46,6 @@ namespace extensions {
 
 namespace {
 
-// By default, we run on the IO loop.
-const int kThreadOptions = content::TestBrowserThreadBundle::IO_MAINLOOP;
-
 // Create a testing profile according to |params|.
 std::unique_ptr<TestingProfile> BuildTestingProfile(
     const ExtensionServiceTestBase::ExtensionServiceInitParams& params) {
@@ -85,7 +82,7 @@ ExtensionServiceTestBase::ExtensionServiceInitParams::
         default;
 
 ExtensionServiceTestBase::ExtensionServiceTestBase()
-    : thread_bundle_(kThreadOptions),
+    : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
       service_(nullptr),
       testing_local_state_(TestingBrowserProcess::GetGlobal()),
       registry_(nullptr) {
@@ -283,6 +280,9 @@ void ExtensionServiceTestBase::ValidateStringPref(
 
 void ExtensionServiceTestBase::SetUp() {
   LoadErrorReporter::GetInstance()->ClearErrors();
+
+  // Force TabManager/TabLifecycleUnitSource creation.
+  g_browser_process->resource_coordinator_parts();
 }
 
 void ExtensionServiceTestBase::TearDown() {

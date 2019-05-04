@@ -14,16 +14,17 @@
 
 namespace blink {
 class PaintLayer;
-class IntRect;
 class LayoutObject;
 class TracedValue;
 class LocalFrameView;
 
 struct TextRecord {
   DOMNodeId node_id = kInvalidDOMNodeId;
-  double first_size = 0.0;
+  uint64_t first_size = 0;
   base::TimeTicks first_paint_time = base::TimeTicks();
+#ifndef NDEBUG
   String text = "";
+#endif
 };
 
 // TextPaintTimingDetector contains Largest Text Paint and Last Text Paint.
@@ -62,19 +63,26 @@ class CORE_EXPORT TextPaintTimingDetector final
   void OnPrePaintFinished();
   void NotifyNodeRemoved(DOMNodeId);
   void Dispose() { timer_.Stop(); }
+  base::TimeTicks LargestTextPaint() const { return largest_text_paint_; }
+  uint64_t LargestTextPaintSize() const { return largest_text_paint_size_; }
+  base::TimeTicks LastTextPaint() const { return last_text_paint_; }
+  uint64_t LastTextPaintSize() const { return last_text_paint_size_; }
+  void StopRecordEntries();
+  bool IsRecording() const { return is_recording_; }
   void Trace(blink::Visitor*);
 
  private:
   void PopulateTraceValue(TracedValue& value,
                           const TextRecord& first_text_paint,
                           unsigned candidate_index) const;
-  IntRect CalculateTransformedRect(LayoutRect& visual_rect,
-                                   const PaintLayer& painting_layer) const;
   void TimerFired(TimerBase*);
+  void Analyze();
 
   void ReportSwapTime(WebLayerTreeView::SwapResult result,
                       base::TimeTicks timestamp);
   void RegisterNotifySwapTime(ReportTimeCallback callback);
+  void OnLargestTextDetected(const TextRecord&);
+  void OnLastTextDetected(const TextRecord&);
 
   HashSet<DOMNodeId> recorded_text_node_ids_;
   HashSet<DOMNodeId> size_zero_node_ids_;
@@ -92,9 +100,14 @@ class CORE_EXPORT TextPaintTimingDetector final
 
   // Make sure that at most one swap promise is ongoing.
   bool awaiting_swap_promise_ = false;
-  unsigned recorded_node_count_ = 0;
   unsigned largest_text_candidate_index_max_ = 0;
   unsigned last_text_candidate_index_max_ = 0;
+  bool is_recording_ = true;
+
+  base::TimeTicks largest_text_paint_;
+  uint64_t largest_text_paint_size_ = 0;
+  base::TimeTicks last_text_paint_;
+  uint64_t last_text_paint_size_ = 0;
   TaskRunnerTimer<TextPaintTimingDetector> timer_;
   Member<LocalFrameView> frame_view_;
 };

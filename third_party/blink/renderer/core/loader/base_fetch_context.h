@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_BASE_FETCH_CONTEXT_H_
 
 #include "base/optional.h"
+#include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "third_party/blink/public/mojom/net/ip_address_space.mojom-blink.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -15,7 +16,6 @@
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_context.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
-#include "third_party/blink/renderer/platform/weborigin/referrer_policy.h"
 
 namespace blink {
 
@@ -48,28 +48,20 @@ class CORE_EXPORT BaseFetchContext : public FetchContext {
 
   void Trace(blink::Visitor*) override;
 
-  virtual const FetchClientSettingsObject* GetFetchClientSettingsObject()
-      const = 0;
   virtual KURL GetSiteForCookies() const = 0;
   virtual SubresourceFilter* GetSubresourceFilter() const = 0;
   virtual PreviewsResourceLoadingHints* GetPreviewsResourceLoadingHints()
       const = 0;
-  virtual void CountUsage(WebFeature) const = 0;
-  virtual void CountDeprecation(WebFeature) const = 0;
   virtual bool ShouldBlockWebSocketByMixedContentCheck(const KURL&) const = 0;
   virtual std::unique_ptr<WebSocketHandshakeThrottle>
   CreateWebSocketHandshakeThrottle() = 0;
 
-  void AddInfoConsoleMessage(const String&, LogSource) const override;
-  void AddWarningConsoleMessage(const String&, LogSource) const override;
-  void AddErrorConsoleMessage(const String&, LogSource) const override;
   bool IsAdResource(const KURL&,
                     ResourceType,
                     mojom::RequestContextType) const override;
 
  protected:
-  explicit BaseFetchContext(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+  BaseFetchContext() = default;
 
   // Used for security checks.
   virtual bool AllowScriptFromSource(const KURL&) const = 0;
@@ -97,6 +89,7 @@ class CORE_EXPORT BaseFetchContext : public FetchContext {
   virtual base::Optional<mojom::IPAddressSpace> GetAddressSpace() const = 0;
   virtual const ContentSecurityPolicy* GetContentSecurityPolicy() const = 0;
 
+  // TODO(yhirano): Remove this.
   virtual void AddConsoleMessage(ConsoleMessage*) const = 0;
 
  private:

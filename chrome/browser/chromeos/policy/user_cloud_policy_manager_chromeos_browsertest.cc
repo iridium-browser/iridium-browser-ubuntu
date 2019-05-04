@@ -6,10 +6,11 @@
 #include <string>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/child_accounts/child_account_test_utils.h"
 #include "chrome/browser/chromeos/login/screens/gaia_view.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
@@ -38,15 +39,6 @@
 namespace {
 // The Gaia ID supplied by FakeGaia for our mocked-out signin.
 const char kTestGaiaId[] = "12345";
-
-const char kIdTokenChildAccount[] =
-    "dummy-header."
-    // base64 encoded: { "services": ["uca"] }
-    "eyAic2VydmljZXMiOiBbInVjYSJdIH0="
-    ".dummy-signature";
-
-// Services list for the child user. (This must be a correct JSON array.)
-const char kChildServices[] = "[\"uca\"]";
 
 // Helper class that counts the number of notifications of the specified
 // type that have been received.
@@ -122,7 +114,7 @@ IN_PROC_BROWSER_TEST_F(UserCloudPolicyManagerTest, StartSession) {
 
   TabStripModel* tabs = browser->tab_strip_model();
   ASSERT_TRUE(tabs);
-  const int expected_tab_count = static_cast<int>(arraysize(kStartupURLs));
+  const int expected_tab_count = static_cast<int>(base::size(kStartupURLs));
   EXPECT_EQ(expected_tab_count, tabs->count());
   for (int i = 0; i < expected_tab_count && i < tabs->count(); ++i) {
     EXPECT_EQ(GURL(kStartupURLs[i]),
@@ -196,11 +188,10 @@ IN_PROC_BROWSER_TEST_F(UserCloudPolicyManagerTest,
             user_manager::known_user::GetProfileRequiresPolicy(account_id));
 }
 
-IN_PROC_BROWSER_TEST_F(UserCloudPolicyManagerTest, MigrateForExistingUser) {
-  // Mark user as already having initialized the profile - this should allow
-  // the policy code to ignore errors (because we presume we already have a
-  // valid cache). We can remove this test when we fix crbug.com/731726 and
-  // remove the associated migration code from UserPolicyManagerFactoryChromeOS.
+IN_PROC_BROWSER_TEST_F(UserCloudPolicyManagerTest,
+                       PolicyCheckRequiredForInitializedProfile) {
+  // Mark user as already having initialized the profile - this should not
+  // change how the policy code treats unknown policy.
   AccountId account_id =
       AccountId::FromUserEmailGaiaId(kAccountId, kTestGaiaId);
   chromeos::ChromeUserManager* user_manager =
@@ -219,14 +210,16 @@ IN_PROC_BROWSER_TEST_F(UserCloudPolicyManagerTest, MigrateForExistingUser) {
   // Delete the policy file - this will cause a 500 error on policy requests.
   user_policy_helper()->DeletePolicyFile();
   SkipToLoginScreen();
-  LogIn(kAccountId, kAccountPassword, kEmptyServices);
-
-  // User should be marked as having a valid OAuth token.
-  EXPECT_EQ(user_manager::User::OAUTH2_TOKEN_STATUS_VALID,
-            user_manager->GetActiveUser()->oauth_token_status());
-
-  // User should still be marked as having completed profile initialization.
-  EXPECT_TRUE(user_manager->GetActiveUser()->profile_ever_initialized());
+  CountNotificationObserver observer(
+      chrome::NOTIFICATION_SESSION_STARTED,
+      content::NotificationService::AllSources());
+  chromeos::LoginDisplayHost::default_host()
+      ->GetOobeUI()
+      ->GetGaiaScreenView()
+      ->ShowSigninScreenForTest(kAccountId, kAccountPassword, kEmptyServices);
+  RunUntilBrowserProcessQuits();
+  // Should not receive a SESSION_STARTED notification.
+  ASSERT_EQ(0, observer.notification_count());
 
   // Policy status should still be unknown since we haven't managed to load
   // policy from disk nor have we been able to talk to the server.
@@ -293,7 +286,9 @@ class UserCloudPolicyManagerChildTest
   ~UserCloudPolicyManagerChildTest() override = default;
 
   // LoginPolicyTestBase:
-  std::string GetIdToken() const override { return kIdTokenChildAccount; }
+  std::string GetIdToken() const override {
+    return chromeos::test::GetChildAccountOAuthIdToken();
+  }
 
   // UserCloudPolicyManagerNonEnterpriseTest:
   void SetUp() override {
@@ -319,7 +314,8 @@ IN_PROC_BROWSER_TEST_F(UserCloudPolicyManagerChildTest, PolicyForChildUser) {
             user_manager::known_user::GetProfileRequiresPolicy(account_id));
 
   SkipToLoginScreen();
-  LogIn(GetAccount(), kAccountPassword, kChildServices);
+  LogIn(GetAccount(), kAccountPassword,
+        chromeos::test::kChildAccountServiceFlags);
 
   // User should be marked as having a valid OAuth token.
   const user_manager::UserManager* const user_manager =

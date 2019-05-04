@@ -14,16 +14,19 @@
 
 #include "base/base_export.h"
 #include "base/logging.h"
-#include "base/task/task_traits_details.h"
 #include "base/task/task_traits_extension.h"
+#include "base/traits_bag.h"
 #include "build/build_config.h"
 
 namespace base {
+
+class PostTaskAndroid;
 
 // Valid priorities supported by the task scheduler. Note: internal algorithms
 // depend on priorities being expressed as a continuous zero-based list from
 // lowest to highest priority. Users of this API shouldn't otherwise care about
 // nor use the underlying values.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.base.task
 enum class TaskPriority {
   // This will always be equal to the lowest priority available.
   LOWEST = 0,
@@ -122,16 +125,6 @@ struct WithBaseSyncPrimitives {};
 
 // Describes immutable metadata for a single task or a group of tasks.
 class BASE_EXPORT TaskTraits {
- private:
-  using TaskPriorityFilter =
-      trait_helpers::EnumTraitFilter<TaskPriority, TaskPriority::USER_VISIBLE>;
-  using MayBlockFilter = trait_helpers::BooleanTraitFilter<MayBlock>;
-  using TaskShutdownBehaviorFilter =
-      trait_helpers::EnumTraitFilter<TaskShutdownBehavior,
-                                     TaskShutdownBehavior::SKIP_ON_SHUTDOWN>;
-  using WithBaseSyncPrimitivesFilter =
-      trait_helpers::BooleanTraitFilter<WithBaseSyncPrimitives>;
-
  public:
   // ValidTrait ensures TaskTraits' constructor only accepts appropriate types.
   struct ValidTrait {
@@ -170,18 +163,19 @@ class BASE_EXPORT TaskTraits {
             trait_helpers::AreValidTraits<ValidTrait, ArgTypes...>{},
             args...)),
         priority_(
-            trait_helpers::GetTraitFromArgList<TaskPriorityFilter>(args...)),
+            trait_helpers::GetEnum<TaskPriority, TaskPriority::USER_VISIBLE>(
+                args...)),
         shutdown_behavior_(
-            trait_helpers::GetTraitFromArgList<TaskShutdownBehaviorFilter>(
+            trait_helpers::GetEnum<TaskShutdownBehavior,
+                                   TaskShutdownBehavior::SKIP_ON_SHUTDOWN>(
                 args...)),
         priority_set_explicitly_(
-            trait_helpers::TraitIsDefined<TaskPriorityFilter>(args...)),
+            trait_helpers::HasTrait<TaskPriority>(args...)),
         shutdown_behavior_set_explicitly_(
-            trait_helpers::TraitIsDefined<TaskShutdownBehaviorFilter>(args...)),
-        may_block_(trait_helpers::GetTraitFromArgList<MayBlockFilter>(args...)),
+            trait_helpers::HasTrait<TaskShutdownBehavior>(args...)),
+        may_block_(trait_helpers::HasTrait<MayBlock>(args...)),
         with_base_sync_primitives_(
-            trait_helpers::GetTraitFromArgList<WithBaseSyncPrimitivesFilter>(
-                args...)) {}
+            trait_helpers::HasTrait<WithBaseSyncPrimitives>(args...)) {}
 
   constexpr TaskTraits(const TaskTraits& other) = default;
   TaskTraits& operator=(const TaskTraits& other) = default;
@@ -207,6 +201,12 @@ class BASE_EXPORT TaskTraits {
   static constexpr TaskTraits Override(const TaskTraits& left,
                                        const TaskTraits& right) {
     return TaskTraits(left, right);
+  }
+
+  // Sets the priority of tasks with these traits to |priority|.
+  void UpdatePriority(TaskPriority priority) {
+    priority_ = priority;
+    priority_set_explicitly_ = true;
   }
 
   // Returns true if the priority was set explicitly.
@@ -246,6 +246,26 @@ class BASE_EXPORT TaskTraits {
   }
 
  private:
+  friend PostTaskAndroid;
+
+  // For use by PostTaskAndroid.
+  TaskTraits(bool priority_set_explicitly,
+             TaskPriority priority,
+             bool shutdown_behavior_set_explicitly,
+             TaskShutdownBehavior shutdown_behavior,
+             bool may_block,
+             bool with_base_sync_primitives,
+             TaskTraitsExtensionStorage extension)
+      : extension_(extension),
+        priority_(priority),
+        shutdown_behavior_(shutdown_behavior),
+        priority_set_explicitly_(priority_set_explicitly),
+        shutdown_behavior_set_explicitly_(shutdown_behavior_set_explicitly),
+        may_block_(may_block),
+        with_base_sync_primitives_(with_base_sync_primitives) {
+    static_assert(sizeof(TaskTraits) == 24, "Keep this constructor up to date");
+  }
+
   constexpr TaskTraits(const TaskTraits& left, const TaskTraits& right)
       : extension_(right.extension_.extension_id !=
                            TaskTraitsExtensionStorage::kInvalidExtensionId

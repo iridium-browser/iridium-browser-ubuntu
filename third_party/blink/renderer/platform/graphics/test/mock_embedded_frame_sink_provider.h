@@ -42,6 +42,9 @@ class MockEmbeddedFrameSinkProvider
                     mojom::blink::EmbeddedFrameSinkClientPtr,
                     viz::mojom::blink::CompositorFrameSinkClientPtr,
                     viz::mojom::blink::CompositorFrameSinkRequest));
+  MOCK_METHOD2(ConnectToEmbedder,
+               void(const viz::FrameSinkId&,
+                    mojom::blink::SurfaceEmbedderRequest));
 
   // Utility method to create a scoped EmbeddedFrameSinkProvider override.
   std::unique_ptr<TestingPlatformSupport::ScopedOverrideMojoInterface>

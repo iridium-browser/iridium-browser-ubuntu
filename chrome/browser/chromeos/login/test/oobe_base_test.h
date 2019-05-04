@@ -23,10 +23,6 @@ class WebUI;
 class WindowedNotificationObserver;
 }  // namespace content
 
-namespace extensions {
-class ScopedCurrentChannel;
-}
-
 namespace chromeos {
 
 class NetworkPortalDetectorTestImpl;
@@ -62,6 +58,12 @@ class OobeBaseTest : public extensions::ExtensionApiTest {
 
   virtual void InitHttpsForwarders();
 
+  // If this returns true (default), the |ash::switches::kShowWebUiLogin|
+  // command-line switch is passed to force the Web Ui Login.
+  // If this returns false, the switch is omitted so the views-based login may
+  // be used.
+  virtual bool ShouldForceWebUiLogin();
+
   // Network status control functions.
   void SimulateNetworkOffline();
   void SimulateNetworkOnline();
@@ -70,11 +72,6 @@ class OobeBaseTest : public extensions::ExtensionApiTest {
   base::Closure SimulateNetworkOfflineClosure();
   base::Closure SimulateNetworkOnlineClosure();
   base::Closure SimulateNetworkPortalClosure();
-
-  // Checks JavaScript |expression| in login screen.
-  void JsExpect(const std::string& expression);
-
-  test::JSChecker& JS() { return js_checker_; }
 
   bool initialize_fake_merge_session() {
     return initialize_fake_merge_session_;
@@ -106,19 +103,17 @@ class OobeBaseTest : public extensions::ExtensionApiTest {
                              const std::string& refresh_token);
 
   std::unique_ptr<FakeGaia> fake_gaia_;
-  NetworkPortalDetectorTestImpl* network_portal_detector_;
+  NetworkPortalDetectorTestImpl* network_portal_detector_ = nullptr;
 
   // Whether to use background networking. Note this is only effective when it
   // is set before SetUpCommandLine is invoked.
-  bool needs_background_networking_;
+  bool needs_background_networking_ = false;
 
   std::unique_ptr<content::WindowedNotificationObserver>
       login_screen_load_observer_;
-  std::unique_ptr<extensions::ScopedCurrentChannel> scoped_channel_;
   HTTPSForwarder gaia_https_forwarder_;
-  std::string gaia_frame_parent_;
-  bool initialize_fake_merge_session_;
-  test::JSChecker js_checker_;
+  std::string gaia_frame_parent_ = "signin-frame";
+  bool initialize_fake_merge_session_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(OobeBaseTest);
 };

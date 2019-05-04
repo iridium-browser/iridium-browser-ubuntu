@@ -14,6 +14,7 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/native_theme/caption_style.h"
 #include "ui/native_theme/native_theme_export.h"
 
 namespace gfx {
@@ -303,13 +304,11 @@ class NATIVE_THEME_EXPORT NativeTheme {
     kColorId_ButtonDisabledColor,
     kColorId_ButtonHoverColor,
     kColorId_ButtonPressedShade,
-    kColorId_BlueButtonEnabledColor,
-    kColorId_BlueButtonDisabledColor,
-    kColorId_BlueButtonPressedColor,
-    kColorId_BlueButtonHoverColor,
-    kColorId_BlueButtonShadowColor,
     kColorId_ProminentButtonColor,
+    kColorId_ProminentButtonFocusedColor,
+    kColorId_ProminentButtonDisabledColor,
     kColorId_TextOnProminentButtonColor,
+    kColorId_ButtonBorderColor,
     // MenuItem
     kColorId_TouchableMenuItemLabelColor,
     kColorId_ActionableSubmenuVerticalSeparatorColor,
@@ -321,6 +320,10 @@ class NATIVE_THEME_EXPORT NativeTheme {
     kColorId_MenuSeparatorColor,
     kColorId_MenuBackgroundColor,
     kColorId_MenuBorderColor,
+    kColorId_HighlightedMenuItemBackgroundColor,
+    kColorId_HighlightedMenuItemForegroundColor,
+    kColorId_FocusedHighlightedMenuItemBackgroundColor,
+    kColorId_MenuItemAlertBackgroundColor,
     // Label
     kColorId_LabelEnabledColor,
     kColorId_LabelDisabledColor,
@@ -407,6 +410,12 @@ class NATIVE_THEME_EXPORT NativeTheme {
   // Returns whether this NativeTheme uses higher-contrast colors, controlled by
   // system accessibility settings and the system theme.
   virtual bool UsesHighContrastColors() const = 0;
+
+  // Whether OS-level dark mode (as in macOS Mojave or Windows 10) is enabled.
+  virtual bool SystemDarkModeEnabled() const;
+
+  // Returns the system's caption style.
+  virtual CaptionStyle GetSystemCaptionStyle() const;
 
  protected:
   NativeTheme();

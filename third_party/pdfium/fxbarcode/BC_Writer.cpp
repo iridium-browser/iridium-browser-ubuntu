@@ -68,10 +68,3 @@ bool CBC_Writer::SetEndChar(char end) {
 bool CBC_Writer::SetErrorCorrectionLevel(int32_t level) {
   return false;
 }
-
-RetainPtr<CFX_DIBitmap> CBC_Writer::CreateDIBitmap(int32_t width,
-                                                   int32_t height) {
-  auto pDIBitmap = pdfium::MakeRetain<CFX_DIBitmap>();
-  pDIBitmap->Create(width, height, m_colorSpace);
-  return pDIBitmap;
-}

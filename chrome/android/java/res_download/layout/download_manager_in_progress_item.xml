@@ -7,7 +7,6 @@
 <android.support.v7.widget.GridLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:minHeight="64dp"
@@ -30,7 +29,7 @@
         android:id="@+id/title"
         style="@style/DownloadItemText"
         android:layout_marginTop="11dp"
-        android:textAppearance="@style/BlackTitle1"
+        android:textAppearance="@style/TextAppearance.BlackTitle1"
         app:layout_column="1"
         app:layout_row="0"
         app:layout_gravity="fill_horizontal" />
@@ -38,12 +37,12 @@
     <TextView
         android:id="@+id/caption"
         style="@style/DownloadItemText"
-        android:textAppearance="@style/BlackHint2"
+        android:textAppearance="@style/TextAppearance.BlackHint2"
         app:layout_column="1"
         app:layout_row="1"
         app:layout_gravity="fill_horizontal" />
 
-    <android.support.v7.widget.AppCompatImageButton
+    <org.chromium.ui.widget.ChromeImageButton
         android:id="@+id/cancel_button"
         android:layout_width="48dp"
         android:layout_height="48dp"

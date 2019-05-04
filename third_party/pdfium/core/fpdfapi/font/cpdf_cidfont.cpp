@@ -333,7 +333,7 @@ bool CPDF_CIDFont::Load() {
   }
 
   const CPDF_Array* pFonts = m_pFontDict->GetArrayFor("DescendantFonts");
-  if (!pFonts || pFonts->GetCount() != 1)
+  if (!pFonts || pFonts->size() != 1)
     return false;
 
   const CPDF_Dictionary* pCIDFontDict = pFonts->GetDictAt(0);
@@ -733,7 +733,7 @@ int CPDF_CIDFont::GlyphFromCharCode(uint32_t charcode, bool* pVertGlyph) {
   return pdata[0] * 256 + pdata[1];
 }
 
-uint32_t CPDF_CIDFont::GetNextChar(const ByteStringView& pString,
+uint32_t CPDF_CIDFont::GetNextChar(ByteStringView pString,
                                    size_t* pOffset) const {
   return m_pCMap->GetNextChar(pString, pOffset);
 }
@@ -742,7 +742,7 @@ int CPDF_CIDFont::GetCharSize(uint32_t charcode) const {
   return m_pCMap->GetCharSize(charcode);
 }
 
-size_t CPDF_CIDFont::CountChar(const ByteStringView& pString) const {
+size_t CPDF_CIDFont::CountChar(ByteStringView pString) const {
   return m_pCMap->CountChar(pString);
 }
 
@@ -771,7 +771,7 @@ void CPDF_CIDFont::LoadMetricsArray(const CPDF_Array* pArray,
   int iCurElement = 0;
   uint32_t first_code = 0;
   uint32_t last_code = 0;
-  for (size_t i = 0; i < pArray->GetCount(); i++) {
+  for (size_t i = 0; i < pArray->size(); i++) {
     const CPDF_Object* pObj = pArray->GetDirectObjectAt(i);
     if (!pObj)
       continue;
@@ -780,12 +780,12 @@ void CPDF_CIDFont::LoadMetricsArray(const CPDF_Array* pArray,
       if (width_status != 1)
         return;
       if (first_code >
-          std::numeric_limits<uint32_t>::max() - pObjArray->GetCount()) {
+          std::numeric_limits<uint32_t>::max() - pObjArray->size()) {
         width_status = 0;
         continue;
       }
 
-      for (size_t j = 0; j < pObjArray->GetCount(); j += nElements) {
+      for (size_t j = 0; j < pObjArray->size(); j += nElements) {
         result->push_back(first_code);
         result->push_back(first_code);
         for (int k = 0; k < nElements; k++)

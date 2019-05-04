@@ -4,10 +4,11 @@
 
 #include "ash/assistant/ui/assistant_container_view_animator_legacy_impl.h"
 
-#include "ash/assistant/assistant_controller.h"
-#include "ash/assistant/assistant_ui_controller.h"
+#include <algorithm>
+
 #include "ash/assistant/ui/assistant_container_view.h"
 #include "ash/assistant/ui/assistant_ui_constants.h"
+#include "ash/assistant/ui/assistant_view_delegate.h"
 #include "base/metrics/histogram_macros.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/views/animation/ink_drop_painted_layer_delegates.h"
@@ -38,10 +39,9 @@ float GetCompositorRefreshRate(ui::Layer* layer) {
 
 AssistantContainerViewAnimatorLegacyImpl::
     AssistantContainerViewAnimatorLegacyImpl(
-        AssistantController* assistant_controller,
+        AssistantViewDelegate* delegate,
         AssistantContainerView* assistant_container_view)
-    : AssistantContainerViewAnimator(assistant_controller,
-                                     assistant_container_view) {}
+    : AssistantContainerViewAnimator(delegate, assistant_container_view) {}
 
 AssistantContainerViewAnimatorLegacyImpl::
     ~AssistantContainerViewAnimatorLegacyImpl() = default;
@@ -68,14 +68,12 @@ void AssistantContainerViewAnimatorLegacyImpl::OnPreferredSizeChanged() {
   if (!assistant_container_view_->GetWidget())
     return;
 
-  end_radius_ = assistant_controller_->ui_controller()->model()->ui_mode() ==
-                        AssistantUiMode::kMiniUi
+  end_radius_ = delegate_->GetUiModel()->ui_mode() == AssistantUiMode::kMiniUi
                     ? kMiniUiCornerRadiusDip
                     : kCornerRadiusDip;
 
   const bool visible =
-      assistant_controller_->ui_controller()->model()->visibility() ==
-      AssistantVisibility::kVisible;
+      delegate_->GetUiModel()->visibility() == AssistantVisibility::kVisible;
 
   // When visible, size changes are animated.
   if (visible) {
@@ -126,7 +124,7 @@ void AssistantContainerViewAnimatorLegacyImpl::AnimationProgressed(
   bounds.set_size(gfx::Size(size.width(), size.height()));
 
   // Maintain original |center_x| and |bottom| positions.
-  bounds.set_x(center_x - (bounds.width() / 2));
+  bounds.set_x(std::max(center_x - (bounds.width() / 2), 0));
   bounds.set_y(bottom - bounds.height());
 
   // Interpolate the correct corner radius.

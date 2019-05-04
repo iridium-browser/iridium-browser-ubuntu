@@ -51,6 +51,8 @@ class WebGLColorBufferFloat;
 class WebGLDebugRendererInfo;
 class WebGLDepthTexture;
 class WebGLLoseContext;
+class WebGLMultiDraw;
+class WebGLMultiDrawInstanced;
 
 class WebGLRenderingContext final : public WebGLRenderingContextBase {
   DEFINE_WRAPPERTYPEINFO();
@@ -73,6 +75,11 @@ class WebGLRenderingContext final : public WebGLRenderingContextBase {
     void OnError(HTMLCanvasElement*, const String& error) override;
   };
 
+  WebGLRenderingContext(CanvasRenderingContextHost*,
+                        std::unique_ptr<WebGraphicsContext3DProvider>,
+                        bool using_gpu_compositing,
+                        const CanvasContextCreationAttributesCore&);
+
   CanvasRenderingContext::ContextType GetContextType() const override {
     return CanvasRenderingContext::kContextWebgl;
   }
@@ -85,11 +92,6 @@ class WebGLRenderingContext final : public WebGLRenderingContextBase {
   void Trace(blink::Visitor*) override;
 
  private:
-  WebGLRenderingContext(CanvasRenderingContextHost*,
-                        std::unique_ptr<WebGraphicsContext3DProvider>,
-                        bool using_gpu_compositing,
-                        const CanvasContextCreationAttributesCore&);
-
   // Enabled extension objects.
   Member<ANGLEInstancedArrays> angle_instanced_arrays_;
   Member<EXTBlendMinMax> ext_blend_min_max_;
@@ -119,6 +121,8 @@ class WebGLRenderingContext final : public WebGLRenderingContextBase {
   Member<WebGLDepthTexture> webgl_depth_texture_;
   Member<WebGLDrawBuffers> webgl_draw_buffers_;
   Member<WebGLLoseContext> webgl_lose_context_;
+  Member<WebGLMultiDraw> webgl_multi_draw_;
+  Member<WebGLMultiDrawInstanced> webgl_multi_draw_instanced_;
 };
 
 DEFINE_TYPE_CASTS(WebGLRenderingContext,

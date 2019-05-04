@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/string_or_trusted_script_url.h"
 #include "third_party/blink/renderer/bindings/core/v8/usv_string_or_trusted_url.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_html.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_script.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_script_url.h"
@@ -25,7 +26,7 @@ void GetStringFromTrustedTypeThrows(
     const StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURLOrTrustedURL&
         string_or_trusted_type) {
   Document* document = Document::CreateForTest();
-  document->SetRequireTrustedTypes();
+  document->SetRequireTrustedTypesForTesting();
   DummyExceptionStateForTesting exception_state;
   ASSERT_FALSE(exception_state.HadException());
   String s = GetStringFromTrustedType(string_or_trusted_type, document,
@@ -37,11 +38,14 @@ void GetStringFromTrustedTypeThrows(
 
 void GetStringFromTrustedHTMLThrows(
     const StringOrTrustedHTML& string_or_trusted_html) {
-  Document* document = Document::CreateForTest();
-  document->SetRequireTrustedTypes();
+  std::unique_ptr<DummyPageHolder> dummy_page_holder =
+      DummyPageHolder::Create(IntSize(800, 600));
+  Document& document = dummy_page_holder->GetDocument();
+  document.SetRequireTrustedTypesForTesting();
+  V8TestingScope scope;
   DummyExceptionStateForTesting exception_state;
   ASSERT_FALSE(exception_state.HadException());
-  String s = GetStringFromTrustedHTML(string_or_trusted_html, document,
+  String s = GetStringFromTrustedHTML(string_or_trusted_html, &document,
                                       exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(ESErrorType::kTypeError, exception_state.CodeAs<ESErrorType>());
@@ -50,11 +54,14 @@ void GetStringFromTrustedHTMLThrows(
 
 void GetStringFromTrustedScriptThrows(
     const StringOrTrustedScript& string_or_trusted_script) {
-  Document* document = Document::CreateForTest();
-  document->SetRequireTrustedTypes();
+  std::unique_ptr<DummyPageHolder> dummy_page_holder =
+      DummyPageHolder::Create(IntSize(800, 600));
+  Document& document = dummy_page_holder->GetDocument();
+  document.SetRequireTrustedTypesForTesting();
+  V8TestingScope scope;
   DummyExceptionStateForTesting exception_state;
   ASSERT_FALSE(exception_state.HadException());
-  String s = GetStringFromTrustedScript(string_or_trusted_script, document,
+  String s = GetStringFromTrustedScript(string_or_trusted_script, &document,
                                         exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(ESErrorType::kTypeError, exception_state.CodeAs<ESErrorType>());
@@ -63,12 +70,15 @@ void GetStringFromTrustedScriptThrows(
 
 void GetStringFromTrustedScriptURLThrows(
     const StringOrTrustedScriptURL& string_or_trusted_script_url) {
-  Document* document = Document::CreateForTest();
-  document->SetRequireTrustedTypes();
+  std::unique_ptr<DummyPageHolder> dummy_page_holder =
+      DummyPageHolder::Create(IntSize(800, 600));
+  Document& document = dummy_page_holder->GetDocument();
+  document.SetRequireTrustedTypesForTesting();
+  V8TestingScope scope;
   DummyExceptionStateForTesting exception_state;
   ASSERT_FALSE(exception_state.HadException());
   String s = GetStringFromTrustedScriptURL(string_or_trusted_script_url,
-                                           document, exception_state);
+                                           &document, exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(ESErrorType::kTypeError, exception_state.CodeAs<ESErrorType>());
   exception_state.ClearException();
@@ -76,12 +86,15 @@ void GetStringFromTrustedScriptURLThrows(
 
 void GetStringFromTrustedURLThrows(
     const USVStringOrTrustedURL& string_or_trusted_url) {
-  Document* document = Document::CreateForTest();
-  document->SetRequireTrustedTypes();
+  std::unique_ptr<DummyPageHolder> dummy_page_holder =
+      DummyPageHolder::Create(IntSize(800, 600));
+  Document& document = dummy_page_holder->GetDocument();
+  document.SetRequireTrustedTypesForTesting();
+  V8TestingScope scope;
   DummyExceptionStateForTesting exception_state;
   ASSERT_FALSE(exception_state.HadException());
-  String s =
-      GetStringFromTrustedURL(string_or_trusted_url, document, exception_state);
+  String s = GetStringFromTrustedURL(string_or_trusted_url, &document,
+                                     exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(ESErrorType::kTypeError, exception_state.CodeAs<ESErrorType>());
   exception_state.ClearException();
@@ -93,7 +106,7 @@ void GetStringFromTrustedTypeWorks(
         string_or_trusted_type,
     String expected) {
   Document* document = Document::CreateForTest();
-  document->SetRequireTrustedTypes();
+  document->SetRequireTrustedTypesForTesting();
   DummyExceptionStateForTesting exception_state;
   String s = GetStringFromTrustedType(string_or_trusted_type, document,
                                       exception_state);
@@ -103,10 +116,13 @@ void GetStringFromTrustedTypeWorks(
 void GetStringFromTrustedHTMLWorks(
     const StringOrTrustedHTML& string_or_trusted_html,
     String expected) {
-  Document* document = Document::CreateForTest();
-  document->SetRequireTrustedTypes();
+  std::unique_ptr<DummyPageHolder> dummy_page_holder =
+      DummyPageHolder::Create(IntSize(800, 600));
+  Document& document = dummy_page_holder->GetDocument();
+  document.SetRequireTrustedTypesForTesting();
+  V8TestingScope scope;
   DummyExceptionStateForTesting exception_state;
-  String s = GetStringFromTrustedHTML(string_or_trusted_html, document,
+  String s = GetStringFromTrustedHTML(string_or_trusted_html, &document,
                                       exception_state);
   ASSERT_EQ(s, expected);
 }
@@ -114,10 +130,13 @@ void GetStringFromTrustedHTMLWorks(
 void GetStringFromTrustedScriptWorks(
     const StringOrTrustedScript& string_or_trusted_script,
     String expected) {
-  Document* document = Document::CreateForTest();
-  document->SetRequireTrustedTypes();
+  std::unique_ptr<DummyPageHolder> dummy_page_holder =
+      DummyPageHolder::Create(IntSize(800, 600));
+  Document& document = dummy_page_holder->GetDocument();
+  document.SetRequireTrustedTypesForTesting();
+  V8TestingScope scope;
   DummyExceptionStateForTesting exception_state;
-  String s = GetStringFromTrustedScript(string_or_trusted_script, document,
+  String s = GetStringFromTrustedScript(string_or_trusted_script, &document,
                                         exception_state);
   ASSERT_EQ(s, expected);
 }
@@ -125,22 +144,28 @@ void GetStringFromTrustedScriptWorks(
 void GetStringFromTrustedScriptURLWorks(
     const StringOrTrustedScriptURL& string_or_trusted_script_url,
     String expected) {
-  Document* document = Document::CreateForTest();
-  document->SetRequireTrustedTypes();
+  std::unique_ptr<DummyPageHolder> dummy_page_holder =
+      DummyPageHolder::Create(IntSize(800, 600));
+  Document& document = dummy_page_holder->GetDocument();
+  document.SetRequireTrustedTypesForTesting();
+  V8TestingScope scope;
   DummyExceptionStateForTesting exception_state;
   String s = GetStringFromTrustedScriptURL(string_or_trusted_script_url,
-                                           document, exception_state);
+                                           &document, exception_state);
   ASSERT_EQ(s, expected);
 }
 
 void GetStringFromTrustedURLWorks(
     const USVStringOrTrustedURL& string_or_trusted_url,
     String expected) {
-  Document* document = Document::CreateForTest();
-  document->SetRequireTrustedTypes();
+  std::unique_ptr<DummyPageHolder> dummy_page_holder =
+      DummyPageHolder::Create(IntSize(800, 600));
+  Document& document = dummy_page_holder->GetDocument();
+  document.SetRequireTrustedTypesForTesting();
+  V8TestingScope scope;
   DummyExceptionStateForTesting exception_state;
-  String s =
-      GetStringFromTrustedURL(string_or_trusted_url, document, exception_state);
+  String s = GetStringFromTrustedURL(string_or_trusted_url, &document,
+                                     exception_state);
   ASSERT_EQ(s, expected);
 }
 
@@ -164,7 +189,7 @@ TEST(TrustedTypesUtilTest, GetStringFromTrustedType_TrustedScript) {
 }
 
 TEST(TrustedTypesUtilTest, GetStringFromTrustedType_TrustedScriptURL) {
-  KURL url_address("http://www.example.com/");
+  String url_address = "http://www.example.com/";
   TrustedScriptURL* script_url = TrustedScriptURL::Create(url_address);
   StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURLOrTrustedURL
       trusted_value =
@@ -173,14 +198,34 @@ TEST(TrustedTypesUtilTest, GetStringFromTrustedType_TrustedScriptURL) {
   GetStringFromTrustedTypeWorks(trusted_value, "http://www.example.com/");
 }
 
+TEST(TrustedTypesUtilTest, GetStringFromTrustedType_TrustedScriptURL_Relative) {
+  String url_address = "relative/url.html";
+  TrustedScriptURL* script_url = TrustedScriptURL::Create(url_address);
+  StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURLOrTrustedURL
+      trusted_value =
+          StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURLOrTrustedURL::
+              FromTrustedScriptURL(script_url);
+  GetStringFromTrustedTypeWorks(trusted_value, "relative/url.html");
+}
+
 TEST(TrustedTypesUtilTest, GetStringFromTrustedType_TrustedURL) {
-  KURL url_address("http://www.example.com/");
+  String url_address = "http://www.example.com/";
   TrustedURL* url = TrustedURL::Create(url_address);
   StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURLOrTrustedURL
       trusted_value =
           StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURLOrTrustedURL::
               FromTrustedURL(url);
   GetStringFromTrustedTypeWorks(trusted_value, "http://www.example.com/");
+}
+
+TEST(TrustedTypesUtilTest, GetStringFromTrustedType_TrustedURL_Relative) {
+  String url_address = "relative/url.html";
+  TrustedURL* url = TrustedURL::Create(url_address);
+  StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURLOrTrustedURL
+      trusted_value =
+          StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURLOrTrustedURL::
+              FromTrustedURL(url);
+  GetStringFromTrustedTypeWorks(trusted_value, "relative/url.html");
 }
 
 TEST(TrustedTypesUtilTest, GetStringFromTrustedType_String) {
@@ -214,7 +259,7 @@ TEST(TrustedTypesUtilTest, GetStringFromTrustedTypeWithoutCheck_TrustedScript) {
 
 TEST(TrustedTypesUtilTest,
      GetStringFromTrustedTypeWithoutCheck_TrustedScriptURL) {
-  KURL url_address("http://www.example.com/");
+  String url_address = "http://www.example.com/";
   TrustedScriptURL* script_url = TrustedScriptURL::Create(url_address);
   StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURLOrTrustedURL
       trusted_value =
@@ -225,7 +270,7 @@ TEST(TrustedTypesUtilTest,
 }
 
 TEST(TrustedTypesUtilTest, GetStringFromTrustedTypeWithoutCheck_TrustedURL) {
-  KURL url_address("http://www.example.com/");
+  String url_address = "http://www.example.com/";
   TrustedURL* url = TrustedURL::Create(url_address);
   StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURLOrTrustedURL
       trusted_value =
@@ -281,7 +326,7 @@ TEST(TrustedTypesUtilTest, GetStringFromTrustedScript_String) {
 
 // GetStringFromTrustedScriptURL tests
 TEST(TrustedTypesUtilTest, GetStringFromTrustedScriptURL_TrustedScriptURL) {
-  KURL url_address("http://www.example.com/");
+  String url_address = "http://www.example.com/";
   TrustedScriptURL* script_url = TrustedScriptURL::Create(url_address);
   StringOrTrustedScriptURL trusted_value =
       StringOrTrustedScriptURL::FromTrustedScriptURL(script_url);
@@ -296,7 +341,7 @@ TEST(TrustedTypesUtilTest, GetStringFromTrustedScriptURL_String) {
 
 // GetStringFromTrustedURL tests
 TEST(TrustedTypesUtilTest, GetStringFromTrustedURL_TrustedURL) {
-  KURL url_address("http://www.example.com/");
+  String url_address = "http://www.example.com/";
   TrustedURL* url = TrustedURL::Create(url_address);
   USVStringOrTrustedURL trusted_value =
       USVStringOrTrustedURL::FromTrustedURL(url);

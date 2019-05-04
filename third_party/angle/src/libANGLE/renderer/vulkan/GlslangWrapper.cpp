@@ -33,7 +33,7 @@ constexpr char kLayoutMarkerBegin[]    = "@@ LAYOUT-";
 constexpr char kMarkerEnd[]            = " @@";
 constexpr char kUniformQualifier[]     = "uniform";
 constexpr char kVersionDefine[]        = "#version 450 core\n";
-constexpr char kLineRasterDefine[] = R"(#version 450 core
+constexpr char kLineRasterDefine[]     = R"(#version 450 core
 
 #define ANGLE_ENABLE_LINE_SEGMENT_RASTERIZATION
 )";
@@ -391,6 +391,6 @@ angle::Result GlslangWrapper::GetShaderCodeImpl(vk::Context *context,
     glslang::GlslangToSpv(*vertexStage, *vertexCodeOut);
     glslang::GlslangToSpv(*fragmentStage, *fragmentCodeOut);
 
-    return angle::Result::Continue();
+    return angle::Result::Continue;
 }
 }  // namespace rx

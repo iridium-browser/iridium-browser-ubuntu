@@ -9,7 +9,6 @@ import android.content.res.Resources;
 import android.view.View;
 import android.widget.FrameLayout.LayoutParams;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
@@ -25,25 +24,16 @@ public abstract class BasicNativePage extends EmptyTabObserver implements Native
     private final Activity mActivity;
     private final NativePageHost mHost;
     private final int mBackgroundColor;
-    private final int mThemeColor;
     private int mTopMargin;
     private int mBottomMargin;
 
     private String mUrl;
 
     public BasicNativePage(ChromeActivity activity, NativePageHost host) {
-        this(activity, host, false);
-    }
-
-    public BasicNativePage(ChromeActivity activity, NativePageHost host, boolean isIncognito) {
         initialize(activity, host);
         mActivity = activity;
         mHost = host;
-
-        mThemeColor = ColorUtils.getDefaultThemeColor(activity.getResources(), isIncognito);
-        mBackgroundColor = isIncognito
-                ? ApiCompatibilityUtils.getColor(activity.getResources(), R.color.ntp_bg_incognito)
-                : mThemeColor;
+        mBackgroundColor = ColorUtils.getDefaultThemeColor(activity.getResources(), false);
 
         Resources res = mActivity.getResources();
 
@@ -84,11 +74,6 @@ public abstract class BasicNativePage extends EmptyTabObserver implements Native
     }
 
     @Override
-    public int getThemeColor() {
-        return mThemeColor;
-    }
-
-    @Override
     public boolean needsToolbarShadow() {
         return true;
     }
@@ -106,10 +91,14 @@ public abstract class BasicNativePage extends EmptyTabObserver implements Native
 
     /**
      * Tells the native page framework that the url should be changed.
+     * @param url The URL of the page.
+     * @param replaceLastUrl Whether the last navigation entry should be replaced with the new URL.
      */
-    public void onStateChange(String url) {
+    public void onStateChange(String url, boolean replaceLastUrl) {
         if (url.equals(mUrl)) return;
-        mHost.loadUrl(new LoadUrlParams(url), /* incognito = */ false);
+        LoadUrlParams params = new LoadUrlParams(url);
+        params.setShouldReplaceCurrentEntry(replaceLastUrl);
+        mHost.loadUrl(params, /* incognito = */ false);
     }
 
     /**

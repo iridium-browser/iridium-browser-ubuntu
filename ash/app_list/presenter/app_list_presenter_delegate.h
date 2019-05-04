@@ -62,8 +62,8 @@ class APP_LIST_PRESENTER_EXPORT AppListPresenterDelegate {
       aura::Window* root_window,
       bool is_visible) = 0;
 
-  // Returns true if the home launcher is enabled in tablet mode.
-  virtual bool IsHomeLauncherEnabledInTabletMode() = 0;
+  // Returns true if tablet mode is enabled.
+  virtual bool IsTabletMode() const = 0;
 
   // Returns the view delegate, which will be passed into views so that views
   // can get access to Ash.
@@ -77,7 +77,7 @@ class APP_LIST_PRESENTER_EXPORT AppListPresenterDelegate {
   virtual aura::Window* GetRootWindowForDisplayId(int64_t display_id) = 0;
 
   // Called when the app list visibility changes.
-  virtual void OnVisibilityChanged(bool visible, aura::Window* root_window) = 0;
+  virtual void OnVisibilityChanged(bool visible, int64_t display_id) = 0;
 
   // Called when the app list target visibility changes.
   virtual void OnTargetVisibilityChanged(bool visible) = 0;

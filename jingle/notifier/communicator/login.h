@@ -14,6 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "jingle/glue/network_service_config.h"
 #include "jingle/notifier/base/server_information.h"
 #include "jingle/notifier/communicator/login_settings.h"
 #include "jingle/notifier/communicator/single_login_attempt.h"
@@ -22,14 +23,10 @@
 #include "services/network/public/cpp/network_connection_tracker.h"
 #include "third_party/libjingle_xmpp/xmpp/xmppengine.h"
 
-namespace buzz {
+namespace jingle_xmpp {
 class XmppClientSettings;
 class XmppTaskParentInterface;
-}  // namespace buzz
-
-namespace net {
-class URLRequestContextGetter;
-}  // namespace net
+}  // namespace jingle_xmpp
 
 namespace notifier {
 
@@ -49,7 +46,7 @@ class Login
    public:
     // Called when a connection has been successfully established.
     virtual void OnConnect(
-        base::WeakPtr<buzz::XmppTaskParentInterface> base_task) = 0;
+        base::WeakPtr<jingle_xmpp::XmppTaskParentInterface> base_task) = 0;
 
     // Called when there's no connection to the server but we expect
     // it to come back come back eventually.  The connection will be
@@ -67,15 +64,15 @@ class Login
   };
 
   // Does not take ownership of |delegate|, which must not be NULL.
-  Login(
-      Delegate* delegate,
-      const buzz::XmppClientSettings& user_settings,
-      const scoped_refptr<net::URLRequestContextGetter>& request_context_getter,
-      const ServerList& servers,
-      bool try_ssltcp_first,
-      const std::string& auth_mechanism,
-      const net::NetworkTrafficAnnotationTag& traffic_annotation,
-      network::NetworkConnectionTracker* network_connection_tracker);
+  Login(Delegate* delegate,
+        const jingle_xmpp::XmppClientSettings& user_settings,
+        jingle_glue::GetProxyResolvingSocketFactoryCallback
+            get_socket_factory_callback,
+        const ServerList& servers,
+        bool try_ssltcp_first,
+        const std::string& auth_mechanism,
+        const net::NetworkTrafficAnnotationTag& traffic_annotation,
+        network::NetworkConnectionTracker* network_connection_tracker);
   ~Login() override;
 
   // Starts connecting (or forces a reconnection if we're backed off).
@@ -84,7 +81,7 @@ class Login
   // The updated settings take effect only the next time when a
   // connection is attempted (either via reconnection or a call to
   // StartConnection()).
-  void UpdateXmppSettings(const buzz::XmppClientSettings& user_settings);
+  void UpdateXmppSettings(const jingle_xmpp::XmppClientSettings& user_settings);
 
   // network::NetworkConnectionTracker::NetworkConnectionObserver implementation
   void OnConnectionChanged(network::mojom::ConnectionType type) override;
@@ -94,7 +91,7 @@ class Login
 
   // SingleLoginAttempt::Delegate implementation.
   void OnConnect(
-      base::WeakPtr<buzz::XmppTaskParentInterface> base_task) override;
+      base::WeakPtr<jingle_xmpp::XmppTaskParentInterface> base_task) override;
   void OnRedirect(const ServerInformation& redirect_server) override;
   void OnCredentialsRejected() override;
   void OnSettingsExhausted() override;

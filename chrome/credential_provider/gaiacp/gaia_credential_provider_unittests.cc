@@ -22,15 +22,17 @@ namespace credential_provider {
 class GcpCredentialProviderTest : public ::testing::Test {
  public:
   void CreateGCPWUser(const wchar_t* username,
+                      const wchar_t* email,
                       const wchar_t* password,
                       const wchar_t* fullname,
                       const wchar_t* comment,
+                      const wchar_t* gaia_id,
                       BSTR* sid) {
     DWORD error;
     ASSERT_EQ(S_OK, fake_os_user_manager_.AddUser(username, password, fullname,
                                                   comment, true, sid, &error));
-    ASSERT_EQ(S_OK, SetUserProperty(OLE2CW(*sid), L"nr", 0));
-    ASSERT_EQ(S_OK, SetUserProperty(OLE2CW(*sid), L"th", L"th_value"));
+    ASSERT_EQ(S_OK, SetUserProperty(OLE2CW(*sid), L"id", gaia_id));
+    ASSERT_EQ(S_OK, SetUserProperty(OLE2CW(*sid), L"email", email));
   }
 
   void CreateDeletedGCPWUser(BSTR* sid) {
@@ -40,20 +42,14 @@ class GcpCredentialProviderTest : public ::testing::Test {
     ASSERT_TRUE(ConvertSidToStringSid(sid_deleted, &user_sid_string));
     *sid = SysAllocString(W2COLE(user_sid_string));
 
-    ASSERT_EQ(S_OK, SetUserProperty(user_sid_string, L"nr", 0));
     ASSERT_EQ(S_OK, SetUserProperty(user_sid_string, L"th", L"th_value"));
     LocalFree(user_sid_string);
-  }
-
-  FakeWinHttpUrlFetcherFactory* url_fetcher_factory() {
-    return &url_fetcher_factory_;
   }
 
  private:
   void SetUp() override;
 
   registry_util::RegistryOverrideManager registry_override_;
-  FakeWinHttpUrlFetcherFactory url_fetcher_factory_;
   FakeOSUserManager fake_os_user_manager_;
   FakeScopedLsaPolicyFactory fake_scoped_lsa_policy_factory_;
 };
@@ -73,7 +69,8 @@ TEST_F(GcpCredentialProviderTest, Basic) {
 TEST_F(GcpCredentialProviderTest, CleanupStaleTokenHandles) {
   // Simulate a user created by GCPW that does not have a stale handle.
   CComBSTR sid_good;
-  CreateGCPWUser(L"username", L"password", L"Full Name", L"Comment", &sid_good);
+  CreateGCPWUser(L"username", L"foo@gmail.com", L"password", L"Full Name",
+                 L"Comment", L"gaia-id", &sid_good);
 
   // Simulate a user created by GCPW that was deleted from the machine.
   CComBSTR sid_bad;
@@ -87,18 +84,16 @@ TEST_F(GcpCredentialProviderTest, CleanupStaleTokenHandles) {
 
   // Expect "good" sid to still in the registry, "bad" one to be cleaned up.
   base::win::RegKey key;
-  ASSERT_EQ(ERROR_SUCCESS,
-            key.Open(HKEY_LOCAL_MACHINE, L"Software\\Google\\GCP\\Users\\",
-                     KEY_READ));
+  ASSERT_EQ(ERROR_SUCCESS, key.Open(HKEY_LOCAL_MACHINE,
+                                    GetUsersRootKeyForTesting(), KEY_READ));
   EXPECT_EQ(ERROR_SUCCESS, key.OpenKey(OLE2CW(sid_good), KEY_READ));
 
-  ASSERT_EQ(ERROR_SUCCESS,
-            key.Open(HKEY_LOCAL_MACHINE, L"Software\\Google\\GCP\\Users\\",
-                     KEY_READ));
+  ASSERT_EQ(ERROR_SUCCESS, key.Open(HKEY_LOCAL_MACHINE,
+                                    GetUsersRootKeyForTesting(), KEY_READ));
   EXPECT_NE(ERROR_SUCCESS, key.OpenKey(OLE2CW(sid_bad), KEY_READ));
 }
 
-TEST_F(GcpCredentialProviderTest, SetUserArray) {
+TEST_F(GcpCredentialProviderTest, SetUserArray_NoGaiaUsers) {
   CComPtr<ICredentialProviderSetUserArray> user_array;
   ASSERT_EQ(
       S_OK,
@@ -112,8 +107,8 @@ TEST_F(GcpCredentialProviderTest, SetUserArray) {
   CComPtr<ICredentialProvider> provider;
   ASSERT_EQ(S_OK, user_array.QueryInterface(&provider));
 
-  // There should be no credentials.  The user added above should be ignored
-  // because it does not need reauth.
+  // There should be no credentials. Only users with the requisite registry
+  // entry will be counted.
   DWORD count;
   DWORD default_index;
   BOOL autologon;
@@ -124,11 +119,10 @@ TEST_F(GcpCredentialProviderTest, SetUserArray) {
   EXPECT_FALSE(autologon);
 }
 
-TEST_F(GcpCredentialProviderTest, SetUserArray_NeedsReauth) {
-  // Create a GCPW user user as needing reauth.
+TEST_F(GcpCredentialProviderTest, SetUserArray_WithGaiaUsers) {
   CComBSTR sid;
-  CreateGCPWUser(L"username", L"password", L"Full Name", L"Comment", &sid);
-  ASSERT_EQ(S_OK, SetUserProperty(OLE2CW(sid), L"nr", 1));
+  CreateGCPWUser(L"username", L"foo@gmail.com", L"password", L"Full Name",
+                 L"Comment", L"gaia-id", &sid);
 
   CComPtr<ICredentialProviderSetUserArray> user_array;
   ASSERT_EQ(
@@ -138,13 +132,12 @@ TEST_F(GcpCredentialProviderTest, SetUserArray_NeedsReauth) {
 
   FakeCredentialProviderUserArray array;
   array.AddUser(OLE2CW(sid), L"username");
-  array.AddUser(L"sid2", L"username2");
   ASSERT_EQ(S_OK, user_array->SetUserArray(&array));
 
   CComPtr<ICredentialProvider> provider;
   ASSERT_EQ(S_OK, user_array.QueryInterface(&provider));
 
-  // There should be 1 credential.  It should implement IReauthCredential.
+  // There should be 1 credential. It should implement IReauthCredential.
   DWORD count;
   DWORD default_index;
   BOOL autologon;
@@ -158,52 +151,6 @@ TEST_F(GcpCredentialProviderTest, SetUserArray_NeedsReauth) {
   ASSERT_EQ(S_OK, provider->GetCredentialAt(0, &cred));
   CComPtr<IReauthCredential> reauth;
   EXPECT_EQ(S_OK, cred.QueryInterface(&reauth));
-}
-
-TEST_F(GcpCredentialProviderTest, SetUserArray_PasswordChanged) {
-  // Create two GCPW users that are not marked as needing reauth.
-  CComBSTR sid1;
-  CreateGCPWUser(L"u1", L"p1", L"n1", L"c1", &sid1);
-
-  CComPtr<ICredentialProviderSetUserArray> user_array;
-  ASSERT_EQ(
-      S_OK,
-      CComCreator<CComObject<CGaiaCredentialProvider>>::CreateInstance(
-          nullptr, IID_ICredentialProviderSetUserArray, (void**)&user_array));
-
-  base::WaitableEvent reauth_check_done_event;
-  CComPtr<IGaiaCredentialProviderForTesting> for_testing;
-  ASSERT_EQ(S_OK, user_array.QueryInterface(&for_testing));
-  ASSERT_EQ(S_OK,
-            for_testing->SetReauthCheckDoneEvent(
-                reinterpret_cast<INT_PTR>(reauth_check_done_event.handle())));
-
-  url_fetcher_factory()->SetFakeResponse(
-      GURL("https://www.googleapis.com/oauth2/v2/tokeninfo"),
-      FakeWinHttpUrlFetcher::Headers(), "{\"error\":\"foo\"}");
-
-  FakeCredentialProviderUserArray array;
-  array.AddUser(OLE2CW(sid1), L"u1");
-  ASSERT_EQ(S_OK, user_array->SetUserArray(&array));
-
-  CComPtr<ICredentialProvider> provider;
-  ASSERT_EQ(S_OK, user_array.QueryInterface(&provider));
-
-  // There should be no credentials since none need reauth.
-  DWORD count;
-  DWORD default_index;
-  BOOL autologon;
-  ASSERT_EQ(S_OK,
-            provider->GetCredentialCount(&count, &default_index, &autologon));
-  ASSERT_EQ(0u, count);
-  EXPECT_EQ(CREDENTIAL_PROVIDER_NO_DEFAULT, default_index);
-  EXPECT_FALSE(autologon);
-
-  // After the network check, account should be marked as needing reauth.
-  reauth_check_done_event.Wait();
-  DWORD needs_reauth;
-  ASSERT_EQ(S_OK, GetUserProperty(OLE2CW(sid1), L"nr", &needs_reauth));
-  ASSERT_EQ(1u, needs_reauth);
 }
 
 TEST_F(GcpCredentialProviderTest, CpusLogon) {
@@ -243,7 +190,7 @@ TEST_F(GcpCredentialProviderTest, CpusLogon) {
   // Get fields.
   DWORD field_count;
   ASSERT_EQ(S_OK, provider->GetFieldDescriptorCount(&field_count));
-  EXPECT_EQ(4u, field_count);
+  EXPECT_EQ(5u, field_count);
 
   // Deactivate the CP.
   ASSERT_EQ(S_OK, provider->UnAdvise());
@@ -286,7 +233,7 @@ TEST_F(GcpCredentialProviderTest, CpusUnlock) {
   // Get fields.
   DWORD field_count;
   ASSERT_EQ(S_OK, provider->GetFieldDescriptorCount(&field_count));
-  EXPECT_EQ(4u, field_count);
+  EXPECT_EQ(5u, field_count);
 
   // Deactivate the CP.
   ASSERT_EQ(S_OK, provider->UnAdvise());

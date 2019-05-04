@@ -233,10 +233,10 @@ bool GeometryMapper::LocalToAncestorVisualRectInternal(
     return !rect_to_map.Rect().IsEmpty();
   }
 
-  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+  if (!RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
     // On SPv1 we may fail when the paint invalidation container creates an
     // overflow clip (in ancestor_state) which is not in localState of an
-    // out-of-flow positioned descendant. See crbug.com/513108 and layout test
+    // out-of-flow positioned descendant. See crbug.com/513108 and web test
     // compositing/overflow/handle-non-ancestor-clip-parent.html (run with
     // --enable-prefer-compositing-to-lcd-text) for details.
     // Ignore it for SPv1 for now.
@@ -281,13 +281,13 @@ bool GeometryMapper::SlowLocalToAncestorVisualRectWithEffects(
 
   PropertyTreeState final_transform_and_clip_state(
       ancestor_state.Transform(), ancestor_state.Clip(), nullptr);
-  LocalToAncestorVisualRectInternal(
+  bool intersects = LocalToAncestorVisualRectInternal(
       last_transform_and_clip_state, final_transform_and_clip_state,
       mapping_rect, clip_behavior, inclusive_behavior, success);
 
   // Many effects (e.g. filters, clip-paths) can make a clip rect not tight.
   mapping_rect.ClearIsTight();
-  return true;
+  return intersects;
 }
 
 FloatClipRect GeometryMapper::LocalToAncestorClipRect(
@@ -366,7 +366,7 @@ FloatClipRect GeometryMapper::LocalToAncestorClipRectInternal(
   }
   if (!clip_node) {
     success = false;
-    if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+    if (!RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
       // On SPv1 we may fail when the paint invalidation container creates an
       // overflow clip (in ancestor_state) which is not in localState of an
       // out-of-flow positioned descendant. See crbug.com/513108 and layout

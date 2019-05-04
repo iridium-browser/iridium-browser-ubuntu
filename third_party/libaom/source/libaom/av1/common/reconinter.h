@@ -47,7 +47,7 @@ extern "C" {
 #define WEDGE_NONE -1
 
 // Angles are with respect to horizontal anti-clockwise
-typedef enum {
+enum {
   WEDGE_HORIZONTAL = 0,
   WEDGE_VERTICAL = 1,
   WEDGE_OBLIQUE27 = 2,
@@ -55,7 +55,7 @@ typedef enum {
   WEDGE_OBLIQUE117 = 4,
   WEDGE_OBLIQUE153 = 5,
   WEDGE_DIRECTIONS
-} WedgeDirectionType;
+} UENUM1BYTE(WedgeDirectionType);
 
 // 3-tuple: {direction, x_offset, y_offset}
 typedef struct {
@@ -161,6 +161,8 @@ static INLINE void highbd_inter_predictor(const uint8_t *src, int src_stride,
 void av1_modify_neighbor_predictor_for_obmc(MB_MODE_INFO *mbmi);
 int av1_skip_u4x4_pred_in_obmc(BLOCK_SIZE bsize,
                                const struct macroblockd_plane *pd, int dir);
+int av1_check_identical_obmc_mv_field(const AV1_COMMON *cm, MACROBLOCKD *xd,
+                                      int mi_row, int mi_col);
 
 static INLINE int is_interinter_compound_used(COMPOUND_TYPE type,
                                               BLOCK_SIZE sb_type) {
@@ -349,13 +351,15 @@ void av1_combine_interintra(MACROBLOCKD *xd, BLOCK_SIZE bsize, int plane,
                             const uint8_t *inter_pred, int inter_stride,
                             const uint8_t *intra_pred, int intra_stride);
 
-void av1_jnt_comp_weight_assign(const AV1_COMMON *cm, const MB_MODE_INFO *mbmi,
-                                int order_idx, int *fwd_offset, int *bck_offset,
-                                int *use_jnt_comp_avg, int is_compound);
+void av1_dist_wtd_comp_weight_assign(const AV1_COMMON *cm,
+                                     const MB_MODE_INFO *mbmi, int order_idx,
+                                     int *fwd_offset, int *bck_offset,
+                                     int *use_dist_wtd_comp_avg,
+                                     int is_compound);
 int av1_allow_warp(const MB_MODE_INFO *const mbmi,
                    const WarpTypesAllowed *const warp_types,
                    const WarpedMotionParams *const gm_params,
-                   int build_for_obmc, int x_scale, int y_scale,
+                   int build_for_obmc, const struct scale_factors *const sf,
                    WarpedMotionParams *final_warp_params);
 
 #ifdef __cplusplus

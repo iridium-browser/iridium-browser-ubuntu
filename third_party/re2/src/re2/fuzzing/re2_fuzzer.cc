@@ -5,8 +5,11 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <map>
+#include <memory>
+#include <queue>
 #include <string>
 
+#include "re2/prefilter.h"
 #include "re2/re2.h"
 
 using re2::StringPiece;
@@ -21,7 +24,7 @@ void Test(StringPiece pattern, const RE2::Options& options, StringPiece text) {
     return;
 
   // Don't waste time fuzzing high-size programs.
-  // (They can cause bug reports due to fuzzer timeouts.)
+  // They can cause bug reports due to fuzzer timeouts.
   int size = re.ProgramSize();
   if (size > 9999)
     return;
@@ -30,33 +33,71 @@ void Test(StringPiece pattern, const RE2::Options& options, StringPiece text) {
     return;
 
   // Don't waste time fuzzing high-fanout programs.
-  // (They can also cause bug reports due to fuzzer timeouts.)
+  // They can cause bug reports due to fuzzer timeouts.
   std::map<int, int> histogram;
   int fanout = re.ProgramFanout(&histogram);
-  if (fanout > 8)
+  if (fanout > 9)
     return;
   int rfanout = re.ReverseProgramFanout(&histogram);
-  if (rfanout > 8)
+  if (rfanout > 9)
     return;
 
-  StringPiece sp1, sp2, sp3, sp4;
-  string s1, s2, s3, s4;
-  int i1, i2, i3, i4;
-  double d1, d2, d3, d4;
+  // Don't waste time fuzzing programs with large substrings.
+  // They can cause bug reports due to fuzzer timeouts when they
+  // are repetitions (e.g. hundreds of NUL bytes) and matching is
+  // unanchored. And they aren't interesting for fuzzing purposes.
+  std::unique_ptr<re2::Prefilter> prefilter(re2::Prefilter::FromRE2(&re));
+  if (prefilter == nullptr)
+    return;
+  std::queue<re2::Prefilter*> nodes;
+  nodes.push(prefilter.get());
+  while (!nodes.empty()) {
+    re2::Prefilter* node = nodes.front();
+    nodes.pop();
+    if (node->op() == re2::Prefilter::ATOM) {
+      if (node->atom().size() > 9)
+        return;
+    } else if (node->op() == re2::Prefilter::AND ||
+               node->op() == re2::Prefilter::OR) {
+      for (re2::Prefilter* sub : *node->subs())
+        nodes.push(sub);
+    }
+  }
 
-  RE2::FullMatch(text, re, &sp1, &sp2, &sp3, &sp4);
-  RE2::PartialMatch(text, re, &s1, &s2, &s3, &s4);
+  if (re.NumberOfCapturingGroups() == 0) {
+    // Avoid early return due to too many arguments.
+    StringPiece sp = text;
+    RE2::FullMatch(sp, re);
+    RE2::PartialMatch(sp, re);
+    RE2::Consume(&sp, re);
+    sp = text;  // Reset.
+    RE2::FindAndConsume(&sp, re);
+  } else {
+    // Okay, we have at least one capturing group...
+    // Try conversion for variously typed arguments.
+    StringPiece sp = text;
+    short s;
+    RE2::FullMatch(sp, re, &s);
+    long l;
+    RE2::PartialMatch(sp, re, &l);
+    float f;
+    RE2::Consume(&sp, re, &f);
+    sp = text;  // Reset.
+    double d;
+    RE2::FindAndConsume(&sp, re, &d);
+  }
 
-  sp1 = sp2 = text;
-  RE2::Consume(&sp1, re, &i1, &i2, &i3, &i4);
-  RE2::FindAndConsume(&sp2, re, &d1, &d2, &d3, &d4);
+  string s = string(text);
+  RE2::Replace(&s, re, "");
+  s = string(text);  // Reset.
+  RE2::GlobalReplace(&s, re, "");
 
-  s3 = s4 = string(text);
-  RE2::Replace(&s3, re, "");
-  RE2::GlobalReplace(&s4, re, "");
+  string min, max;
+  re.PossibleMatchRange(&min, &max, /*maxlen=*/9);
 
   // Exercise some other API functionality.
-  dummy += re.NumberOfCapturingGroups();
+  dummy += re.NamedCapturingGroups().size();
+  dummy += re.CapturingGroupNames().size();
   dummy += RE2::QuoteMeta(pattern).size();
 }
 

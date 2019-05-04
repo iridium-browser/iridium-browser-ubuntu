@@ -333,6 +333,13 @@ class EBuild(object):
       r'.*-(([0-9][0-9a-z_.]*)(-r[0-9]+)?)[.]ebuild')
   _WORKON_COMMIT_PATTERN = re.compile(r'^CROS_WORKON_COMMIT=')
 
+  # These eclass files imply that src_test is defined for an ebuild.
+  _ECLASS_IMPLIES_TEST = set((
+      'cros-common.mk',
+      'cros-go',      # defines src_test
+      'tast-bundle',  # inherits cros-go
+  ))
+
   @classmethod
   def _RunCommand(cls, command, **kwargs):
     kwargs.setdefault('capture_output', True)
@@ -499,10 +506,10 @@ class EBuild(object):
     has_test = False
     for line in fileinput.input(ebuild_path):
       if line.startswith('inherit '):
-        eclasses = line.split()
+        eclasses = set(line.split())
         if 'cros-workon' in eclasses:
           is_workon = True
-        if 'cros-common.mk' in eclasses:
+        if EBuild._ECLASS_IMPLIES_TEST & eclasses:
           has_test = True
       elif line.startswith('KEYWORDS='):
         for keyword in line.split('=', 1)[1].strip("\"'").split():
@@ -878,16 +885,30 @@ class EBuild(object):
 
     # The chromeos-version script will output a usable raw version number,
     # or nothing in case of error or no available version
-    try:
-      output = self._RunCommand([vers_script] + srcdirs).strip()
-    except cros_build_lib.RunCommandError as e:
-      cros_build_lib.Die('Package %s chromeos-version.sh failed: %s' %
-                         (self.pkgname, e))
+    result = cros_build_lib.RunCommand(['bash', '-x', vers_script] + srcdirs,
+                                       capture_output=True, error_code_ok=True)
 
-    if not output:
-      cros_build_lib.Die('Package %s has a chromeos-version.sh script but '
-                         'it returned no valid version for "%s"' %
-                         (self.pkgname, ' '.join(srcdirs)))
+    output = result.output.strip()
+    if result.returncode or not output:
+      # Crbug.com/917099 - Let's get more information for debugging, at least
+      # temporarily.
+      fsck_out = {}
+      packed_refs = ''
+      for srcdir in srcdirs:
+        fsck_out[srcdir] = self._RunCommand(['git', 'fsck', srcdir],
+                                            error_code_ok=True)
+      # TODO(crbug.com/917099): Remove this long-term because it's verbose.
+      ls_out = self._RunCommand(['ls', '-lLRa'] + srcdirs, error_code_ok=True)
+      for srcdir in srcdirs + ['.']:
+        path = os.path.join(srcdir, '.git/packed-refs')
+        if os.path.exists(path):
+          packed_refs += '%s:\n%s\n' % (path, osutils.ReadFile(path))
+      cros_build_lib.Die(
+          'Package %s has a chromeos-version.sh script but failed:\n'
+          'return code = %s\nstdout = %s\nstderr = %s\ndir listing = %s\n'
+          'git fsck = %s\nsrcdirs = %s\npacked-refs file contents:\n%s\n',
+          self.pkgname, result.returncode, result.output, result.error,
+          ls_out, fsck_out, srcdirs, packed_refs)
 
     # Sanity check: disallow versions that will be larger than the 9999 ebuild
     # used by cros-workon.

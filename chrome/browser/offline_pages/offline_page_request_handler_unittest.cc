@@ -38,7 +38,6 @@
 #include "components/offline_pages/core/offline_page_metadata_store.h"
 #include "components/offline_pages/core/request_header/offline_page_navigation_ui_data.h"
 #include "components/offline_pages/core/stub_system_download_manager.h"
-#include "components/previews/content/previews_user_data.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_request_info.h"
@@ -676,8 +675,8 @@ void OfflinePageRequestHandlerTestBase::CreateFileWithContentOnIO(
   file_name += base::IntToString(file_name_sequence_num_++);
   file_name += ".mht";
   temp_file_path_ = temp_dir_.GetPath().AppendASCII(file_name);
-  ASSERT_TRUE(base::WriteFile(temp_file_path_, content.c_str(),
-                              content.length()) != -1);
+  ASSERT_NE(base::WriteFile(temp_file_path_, content.c_str(), content.length()),
+            -1);
   callback.Run();
 }
 
@@ -976,8 +975,7 @@ OfflinePageRequestHandlerTestBase::BuildTestOfflinePageModel(
 
   return std::unique_ptr<KeyedService>(new OfflinePageModelTaskified(
       std::move(metadata_store), std::move(archive_manager),
-      std::move(download_manager), task_runner,
-      base::DefaultClock::GetInstance()));
+      std::move(download_manager), task_runner));
 }
 
 // static
@@ -1139,8 +1137,6 @@ std::unique_ptr<net::URLRequest> OfflinePageRequestJobBuilder::CreateRequest(
       test_url_request_context_->CreateRequest(url, net::DEFAULT_PRIORITY,
                                                url_request_delegate_.get());
   request->set_method(method);
-
-  previews::PreviewsUserData::Create(request.get(), 1u);
 
   content::ResourceRequestInfo::AllocateForTesting(
       request.get(),
@@ -1312,6 +1308,10 @@ void OfflinePageURLLoaderBuilder::InterceptRequestOnIO(
   network::ResourceRequest request =
       CreateResourceRequest(url, method, extra_headers, is_main_frame);
 
+  request.previews_state = test_base_->allow_preview()
+                               ? content::OFFLINE_PAGE_ON
+                               : content::PREVIEWS_OFF;
+
   url_loader_ = OfflinePageURLLoader::Create(
       navigation_ui_data_.get(),
       test_base_->web_contents()->GetMainFrame()->GetFrameTreeNodeId(), request,
@@ -1323,9 +1323,6 @@ void OfflinePageURLLoaderBuilder::InterceptRequestOnIO(
     return;
 
   url_loader_->SetTabIdGetterForTesting(base::BindRepeating(&GetTabId, kTabId));
-  url_loader_->SetShouldAllowPreviewCallbackForTesting(
-      base::BindRepeating(&OfflinePageRequestHandlerTestBase::allow_preview,
-                          base::Unretained(test_base_)));
 }
 
 void OfflinePageURLLoaderBuilder::InterceptRequest(
@@ -2078,6 +2075,27 @@ TYPED_TEST(OfflinePageRequestHandlerTest, LoadOtherPageOnDigestMismatch) {
       OfflinePageRequestHandler::AggregatedRequestResult::
           SHOW_OFFLINE_ON_DISCONNECTED_NETWORK);
   this->ExpectOfflinePageAccessCount(offline_id2, 0);
+}
+
+// Disabled due to https://crbug.com/917113.
+TYPED_TEST(OfflinePageRequestHandlerTest, DISABLED_EmptyFile) {
+  this->SimulateHasNetworkConnectivity(false);
+
+  const std::string expected_data("");
+  base::FilePath temp_file_path = this->CreateFileWithContent(expected_data);
+  ArchiveValidator archive_validator;
+  const std::string expected_digest = archive_validator.Finish();
+
+  int64_t offline_id =
+      this->SavePublicPage(kUrl, GURL(), temp_file_path, 0, expected_digest);
+
+  this->LoadPage(kUrl);
+
+  this->ExpectOfflinePageServed(
+      offline_id, 0,
+      OfflinePageRequestHandler::AggregatedRequestResult::
+          SHOW_OFFLINE_ON_DISCONNECTED_NETWORK);
+  EXPECT_EQ(expected_data, this->data_received());
 }
 
 TYPED_TEST(OfflinePageRequestHandlerTest, TinyFile) {

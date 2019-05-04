@@ -50,16 +50,17 @@ MidiManagerAndroid::MidiManagerAndroid(MidiService* service)
     : MidiManager(service) {}
 
 MidiManagerAndroid::~MidiManagerAndroid() {
-  bool result = service()->task_service()->UnbindInstance();
-  CHECK(result);
+  if (!service()->task_service()->UnbindInstance())
+    return;
+
+  // Finalization steps should be implemented after the UnbindInstance() call.
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_MidiManagerAndroid_stop(env, raw_manager_);
 }
 
 void MidiManagerAndroid::StartInitialization() {
-  if (!service()->task_service()->BindInstance()) {
-    NOTREACHED();
-    CompleteInitialization(Result::INITIALIZATION_ERROR);
-    return;
-  }
+  if (!service()->task_service()->BindInstance())
+    return CompleteInitialization(Result::INITIALIZATION_ERROR);
 
   JNIEnv* env = base::android::AttachCurrentThread();
 
@@ -183,9 +184,9 @@ void MidiManagerAndroid::AddDevice(std::unique_ptr<MidiDeviceAndroid> device) {
         base::StringPrintf("native:port-in-%ld", static_cast<long>(index)));
 
     input_port_to_index_.insert(std::make_pair(port.get(), index));
-    AddInputPort(MidiPortInfo(id, device->GetManufacturer(),
-                              device->GetProductName(),
-                              device->GetDeviceVersion(), state));
+    AddInputPort(mojom::PortInfo(id, device->GetManufacturer(),
+                                 device->GetProductName(),
+                                 device->GetDeviceVersion(), state));
   }
   for (auto& port : device->output_ports()) {
     const size_t index = all_output_ports_.size();
@@ -199,8 +200,8 @@ void MidiManagerAndroid::AddDevice(std::unique_ptr<MidiDeviceAndroid> device) {
 
     output_port_to_index_.insert(std::make_pair(port.get(), index));
     AddOutputPort(
-        MidiPortInfo(id, device->GetManufacturer(), device->GetProductName(),
-                     device->GetDeviceVersion(), PortState::CONNECTED));
+        mojom::PortInfo(id, device->GetManufacturer(), device->GetProductName(),
+                        device->GetDeviceVersion(), PortState::CONNECTED));
   }
   devices_.push_back(std::move(device));
 }

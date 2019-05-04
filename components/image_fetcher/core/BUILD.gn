@@ -2,10 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+if (is_android) {
+  import("//build/config/android/rules.gni")
+}
+
 static_library("core") {
   sources = [
     "cached_image_fetcher.cc",
     "cached_image_fetcher.h",
+    "cached_image_fetcher_service.cc",
+    "cached_image_fetcher_service.h",
     "image_data_fetcher.cc",
     "image_data_fetcher.h",
     "image_decoder.h",
@@ -17,11 +23,12 @@ static_library("core") {
     "request_metadata.h",
   ]
   deps = [
-    "storage",
+    "cache",
   ]
   public_deps = [
     "//base",
     "//components/data_use_measurement/core",
+    "//components/keyed_service/core",
     "//net",
     "//services/network/public/cpp",
     "//ui/gfx",
@@ -60,9 +67,9 @@ source_set("unit_tests") {
   deps = [
     ":core",
     ":test_support",
-    "storage",
-    "storage:storage_unit_tests",
-    "storage/proto",
+    "cache",
+    "cache:cache_unit_tests",
+    "cache/proto",
     "//components/leveldb_proto:test_support",
     "//components/prefs:test_support",
     "//net",
@@ -71,4 +78,12 @@ source_set("unit_tests") {
     "//testing/gtest",
     "//ui/gfx:test_support",
   ]
+}
+
+if (is_android) {
+  java_cpp_enum("cached_image_fetcher_java_enums_srcjar") {
+    sources = [
+      "cache/cached_image_fetcher_metrics_reporter.h",
+    ]
+  }
 }

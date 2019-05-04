@@ -70,6 +70,7 @@ emergencies](https://www.youtube.com/watch?v=buHaKYL9Jhg).
 and
 [chrome-security@google.com](https://groups.google.com/a/google.com/forum/#!forum/chrome-security)
 lists get a reply (by someone; not necessarily the sheriffs themselves).
+See [go/chrome-security-emails](https://goto.google.com/chrome-security-emails) for a dashboard.
   * Note: external emails will always come in on security@chromium.org as
 chrome-security@google.com is a google-only list, but both need to be triaged.
 * Ensure [accurate label management](security-labels.md) on bugs, for example
@@ -157,7 +158,7 @@ Chrome Security chat, or find an area owner to help.
 
 Tips for reproducing bugs:
 
-* [https://clusterfuzz.com/v2/upload-testcase](https://clusterfuzz.com/v2/upload-testcase)
+* [https://clusterfuzz.com/upload-testcase](https://clusterfuzz.com/upload-testcase)
 allows you to upload files to reproduce crashes on various platforms and will
 identify revision ranges when the regression was introduced. If a test case
 requires multiple files, they can be uploaded together in a zip or tar archive.
@@ -232,10 +233,12 @@ necessary bugs.
 
 * Reproduce using iOS device, desktop Safari, or [Browserstack](http://browserstack.com/)
 * Assign severity, impact, milestone, and component labels
-* CC Apple friends (if you don't know who they are, ping awhalley@)
 * Label **ExternalDependency**
-* File the bug at [bugs.webkit.org](https://bugs.webkit.org) or with
-  product-security@apple.com.
+* Label **Hotlist-WebKit**. This label is monitored by Apple friends.
+* File a security bug at [bugs.webkit.org](https://bugs.webkit.org), and CC
+  chrome-ios-security-bugs@google.com. This alias is monitored by iOS Chrome
+  team so they can be notified when the WebKit bug is fixed.
+* Note the WebKit bug ID in the crbug report.
 
 ### Find An Owner To Fix The Bug
 

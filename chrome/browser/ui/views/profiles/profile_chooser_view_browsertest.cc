@@ -13,6 +13,7 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/metrics/user_action_tester.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -41,7 +42,6 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/event_utils.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/webview/webview.h"
@@ -222,7 +222,7 @@ class ProfileChooserViewExtensionsTest
     return ProfileChooserView::profile_bubble_;
   }
 
-  views::View* signin_current_profile_button() {
+  views::LabelButton* signin_current_profile_button() {
     return ProfileChooserView::profile_bubble_->signin_current_profile_button_;
   }
 
@@ -236,6 +236,7 @@ class ProfileChooserViewExtensionsTest
   DISALLOW_COPY_AND_ASSIGN(ProfileChooserViewExtensionsTest);
 };
 
+// TODO(https://crbug.com/855867): This test is flaky on Windows.
 #if defined(OS_WIN)
 #define MAYBE_SigninButtonHasFocus DISABLED_SigninButtonHasFocus
 #else
@@ -247,6 +248,17 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
   ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser()));
 
   EXPECT_TRUE(signin_current_profile_button()->HasFocus());
+}
+
+IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, ClickSigninButton) {
+  ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser()));
+
+  views::ButtonListener* bubble = current_profile_bubble();
+  const ui::MouseEvent event(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
+                             ui::EventTimeForNow(), 0, 0);
+  base::UserActionTester tester;
+  bubble->ButtonPressed(signin_current_profile_button(), event);
+  EXPECT_EQ(1, tester.GetActionCount("Signin_Signin_FromAvatarBubbleSignin"));
 }
 
 // Make sure nothing bad happens when the browser theme changes while the
@@ -459,8 +471,7 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, InvokeUi_Guest) {
 // TODO: Flaking test crbug.com/802374
 // Shows the |ProfileChooserView| during a Guest browsing session when the DICE
 // flag is enabled.
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
-                       DISABLED_InvokeUi_DiceGuest) {
+IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, InvokeUi_DiceGuest) {
   ScopedAccountConsistencyDice scoped_dice;
   ShowAndVerifyUi();
 }
@@ -483,7 +494,6 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
 // Shows the |ProfileChooserView| when a supervised user is the active profile.
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
                        DISABLED_InvokeUi_SupervisedUser) {
-  ScopedAccountConsistencyDiceFixAuthErrors scoped_account_consistency;
   ShowAndVerifyUi();
 }
 

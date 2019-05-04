@@ -28,6 +28,7 @@
 
 #include "build/build_config.h"
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/renderer/core/event_interface_names.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/events/wheel_event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -41,7 +42,7 @@
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 inline SpinButtonElement::SpinButtonElement(Document& document,
                                             SpinButtonOwner& spin_button_owner)
@@ -58,9 +59,9 @@ SpinButtonElement* SpinButtonElement::Create(
     Document& document,
     SpinButtonOwner& spin_button_owner) {
   SpinButtonElement* element =
-      new SpinButtonElement(document, spin_button_owner);
+      MakeGarbageCollected<SpinButtonElement>(document, spin_button_owner);
   element->SetShadowPseudoId(AtomicString("-webkit-inner-spin-button"));
-  element->setAttribute(idAttr, ShadowElementNames::SpinButton());
+  element->setAttribute(kIdAttr, shadow_element_names::SpinButton());
   return element;
 }
 
@@ -92,7 +93,7 @@ void SpinButtonElement::DefaultEventHandler(Event& event) {
   auto& mouse_event = ToMouseEvent(event);
   IntPoint local = RoundedIntPoint(box->AbsoluteToLocal(
       FloatPoint(mouse_event.AbsoluteLocation()), kUseTransforms));
-  if (mouse_event.type() == EventTypeNames::mousedown &&
+  if (mouse_event.type() == event_type_names::kMousedown &&
       mouse_event.button() ==
           static_cast<short>(WebPointerProperties::Button::kLeft)) {
     if (box->PixelSnappedBorderBoxRect().Contains(local)) {
@@ -111,15 +112,15 @@ void SpinButtonElement::DefaultEventHandler(Event& event) {
       }
       event.SetDefaultHandled();
     }
-  } else if (mouse_event.type() == EventTypeNames::mouseup &&
+  } else if (mouse_event.type() == event_type_names::kMouseup &&
              mouse_event.button() ==
                  static_cast<short>(WebPointerProperties::Button::kLeft)) {
     ReleaseCapture();
-  } else if (event.type() == EventTypeNames::mousemove) {
+  } else if (event.type() == event_type_names::kMousemove) {
     if (box->PixelSnappedBorderBoxRect().Contains(local)) {
       if (!capturing_) {
         if (LocalFrame* frame = GetDocument().GetFrame()) {
-          frame->GetEventHandler().SetCapturingMouseEventsNode(this);
+          frame->GetEventHandler().SetCapturingMouseEventsElement(this);
           capturing_ = true;
           if (Page* page = GetDocument().GetPage())
             page->GetChromeClient().RegisterPopupOpeningObserver(this);
@@ -148,7 +149,7 @@ void SpinButtonElement::ForwardEvent(Event& event) {
   if (!GetLayoutBox())
     return;
 
-  if (!event.HasInterface(EventNames::WheelEvent))
+  if (!event.HasInterface(event_interface_names::kWheelEvent))
     return;
 
   if (!spin_button_owner_)
@@ -190,7 +191,7 @@ void SpinButtonElement::ReleaseCapture(EventDispatch event_dispatch) {
   if (!capturing_)
     return;
   if (LocalFrame* frame = GetDocument().GetFrame()) {
-    frame->GetEventHandler().SetCapturingMouseEventsNode(nullptr);
+    frame->GetEventHandler().SetCapturingMouseEventsElement(nullptr);
     capturing_ = false;
     if (Page* page = GetDocument().GetPage())
       page->GetChromeClient().UnregisterPopupOpeningObserver(this);
@@ -249,7 +250,7 @@ bool SpinButtonElement::ShouldRespondToMouseEvents() {
          spin_button_owner_->ShouldSpinButtonRespondToMouseEvents();
 }
 
-void SpinButtonElement::Trace(blink::Visitor* visitor) {
+void SpinButtonElement::Trace(Visitor* visitor) {
   visitor->Trace(spin_button_owner_);
   HTMLDivElement::Trace(visitor);
 }

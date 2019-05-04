@@ -45,6 +45,7 @@ class ImageBitmapOptions;
 class MediaCustomControlsFullscreenDetector;
 class MediaRemotingInterstitial;
 class PictureInPictureInterstitial;
+class VideoWakeLock;
 
 class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
                                            public CanvasImageSource,
@@ -53,7 +54,9 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
 
  public:
   static HTMLVideoElement* Create(Document&);
-  void Trace(blink::Visitor*) override;
+
+  HTMLVideoElement(Document&);
+  void Trace(Visitor*) override;
 
   bool HasPendingActivity() const final;
 
@@ -85,6 +88,8 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
   unsigned webkitDroppedFrameCount() const;
 
   // Used by canvas to gain raw pixel access
+  //
+  // PaintFlags is optional. If unspecified, its blend mode defaults to kSrc.
   void PaintCurrentFrame(
       cc::PaintCanvas*,
       const IntRect&,
@@ -146,7 +151,7 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
                                                AccelerationHint,
                                                const FloatSize&) override;
   bool IsVideoElement() const override { return true; }
-  bool WouldTaintOrigin(const SecurityOrigin*) const override;
+  bool WouldTaintOrigin() const override;
   FloatSize ElementSize(const FloatSize&) const override;
   const KURL& SourceURL() const override { return currentSrc(); }
   bool IsHTMLVideoElement() const override { return true; }
@@ -159,7 +164,7 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
   ScriptPromise CreateImageBitmap(ScriptState*,
                                   EventTarget&,
                                   base::Optional<IntRect> crop_rect,
-                                  const ImageBitmapOptions&) override;
+                                  const ImageBitmapOptions*) override;
 
   // WebMediaPlayerClient implementation.
   void OnBecamePersistentVideo(bool) final;
@@ -192,6 +197,13 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
 
   void SetIsEffectivelyFullscreen(blink::WebFullscreenVideoStatus);
 
+  void SetImageForTest(ImageResourceContent* content) {
+    DCHECK(image_loader_);
+    image_loader_->SetImageForTest(content);
+  }
+
+  VideoWakeLock* wake_lock_for_tests() const { return wake_lock_; }
+
  protected:
   // EventTarget overrides.
   void AddedEventListener(const AtomicString& event_type,
@@ -201,8 +213,6 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
   friend class MediaCustomControlsFullscreenDetectorTest;
   friend class HTMLMediaElementEventListenersTest;
   friend class HTMLVideoElementPersistentTest;
-
-  HTMLVideoElement(Document&);
 
   // PausableObject functions.
   void ContextDestroyed(ExecutionContext*) final;
@@ -226,6 +236,7 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
   Member<HTMLImageLoader> image_loader_;
   Member<MediaCustomControlsFullscreenDetector>
       custom_controls_fullscreen_detector_;
+  Member<VideoWakeLock> wake_lock_;
 
   Member<MediaRemotingInterstitial> remoting_interstitial_;
   Member<PictureInPictureInterstitial> picture_in_picture_interstitial_;

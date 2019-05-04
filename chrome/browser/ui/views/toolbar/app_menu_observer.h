@@ -8,7 +8,16 @@
 class AppMenuObserver {
  public:
   // Invoked when the AppMenu is about to be destroyed (from its destructor).
-  virtual void AppMenuDestroyed() = 0;
+  virtual void AppMenuDestroyed() {}
+
+  virtual void AppMenuClosed() {}
+
+  // Called after AppMenu::RunMenu().
+  virtual void AppMenuShown() {}
+
+  // Called when a menu item is activated, just before the associated command is
+  // executed.
+  virtual void OnExecuteCommand(int command_id) {}
 
  protected:
   virtual ~AppMenuObserver() {}

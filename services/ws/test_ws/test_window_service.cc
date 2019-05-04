@@ -13,15 +13,44 @@
 #include "services/ws/public/mojom/constants.mojom.h"
 #include "services/ws/test_ws/test_gpu_interface_provider.h"
 #include "services/ws/window_service.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/mus/property_utils.h"
+#include "ui/aura/window_tracker.h"
 #include "ui/compositor/test/context_factories_for_test.h"
+#include "ui/display/screen.h"
+#include "ui/events/event.h"
+#include "ui/events/event_sink.h"
 #include "ui/gl/test/gl_surface_test_support.h"
+#include "ui/wm/core/window_util.h"
 
 namespace ws {
 namespace test {
 
-TestWindowService::TestWindowService() = default;
+class TestWindowService::VisibilitySynchronizer : public aura::WindowTracker {
+ public:
+  VisibilitySynchronizer() = default;
+  ~VisibilitySynchronizer() override = default;
+
+ private:
+  // aura::WindowObserver:
+  void OnWindowPropertyChanged(aura::Window* window,
+                               const void* key,
+                               intptr_t old) override {
+    if (key == aura::client::kShowStateKey) {
+      if (wm::WindowStateIs(window, ui::SHOW_STATE_MINIMIZED))
+        window->Hide();
+      else
+        window->Show();
+    }
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(VisibilitySynchronizer);
+};
+
+TestWindowService::TestWindowService(
+    service_manager::mojom::ServiceRequest request)
+    : service_binding_(this, std::move(request)) {}
 
 TestWindowService::~TestWindowService() {
   Shutdown(base::NullCallback());
@@ -37,9 +66,11 @@ void TestWindowService::InitForInProcess(
   SetupAuraTestHelper(context_factory, context_factory_private);
 
   gpu_interface_provider_ = std::move(gpu_interface_provider);
+  visibility_synchronizer_ = std::make_unique<VisibilitySynchronizer>();
 }
 
 void TestWindowService::InitForOutOfProcess() {
+  visibility_synchronizer_ = std::make_unique<VisibilitySynchronizer>();
 #if defined(OS_CHROMEOS)
   // Use gpu service only for ChromeOS to run content_browsertests in mash.
   //
@@ -69,7 +100,24 @@ std::unique_ptr<aura::Window> TestWindowService::NewTopLevel(
     property_converter->SetPropertyFromTransportValue(
         top_level.get(), property.first, &property.second);
   }
+  if (maximize_next_window_) {
+    top_level->SetProperty(aura::client::kShowStateKey,
+                           ui::SHOW_STATE_MAXIMIZED);
+    maximize_next_window_ = false;
+  }
+  visibility_synchronizer_->Add(top_level.get());
   return top_level;
+}
+
+void TestWindowService::RunWindowMoveLoop(aura::Window* window,
+                                          mojom::MoveLoopSource source,
+                                          const gfx::Point& cursor,
+                                          DoneCallback callback) {
+  window_move_done_callback_ = std::move(callback);
+}
+void TestWindowService::CancelWindowMoveLoop() {
+  CHECK(!window_move_done_callback_.is_null());
+  std::move(window_move_done_callback_).Run(false);
 }
 
 void TestWindowService::RunDragLoop(aura::Window* window,
@@ -87,9 +135,14 @@ void TestWindowService::CancelDragLoop(aura::Window* window) {
   drag_drop_client_.DragCancel();
 }
 
-aura::WindowTreeHost* TestWindowService::GetWindowTreeHostForDisplayId(
-    int64_t display_id) {
-  return aura_test_helper_->host();
+ui::EventTarget* TestWindowService::GetGlobalEventTarget() {
+  return aura_test_helper_->root_window();
+}
+
+aura::Window* TestWindowService::GetRootWindowForDisplayId(int64_t display_id) {
+  if (display::Screen::GetScreen()->GetAllDisplays().size() > 1)
+    NOTIMPLEMENTED_LOG_ONCE() << "Add test support for multiple displays.";
+  return aura_test_helper_->root_window();
 }
 
 void TestWindowService::OnStart() {
@@ -133,12 +186,11 @@ void TestWindowService::CreateService(
   DCHECK(!ui_service_created_);
   ui_service_created_ = true;
 
-  auto window_service = std::make_unique<WindowService>(
+  window_service_ = std::make_unique<WindowService>(
       this, std::move(gpu_interface_provider_),
       aura_test_helper_->focus_client(), /*decrement_client_ids=*/false,
       aura_test_helper_->GetEnv());
-  service_context_ = std::make_unique<service_manager::ServiceContext>(
-      std::move(window_service), std::move(request));
+  window_service_->BindServiceRequest(std::move(request));
   pid_receiver->SetPID(base::GetCurrentProcId());
 }
 
@@ -149,10 +201,15 @@ void TestWindowService::OnGpuServiceInitialized() {
     std::move(pending_create_service_).Run();
 }
 
+void TestWindowService::MaximizeNextWindow(MaximizeNextWindowCallback cb) {
+  maximize_next_window_ = true;
+  std::move(cb).Run();
+}
+
 void TestWindowService::Shutdown(
     test_ws::mojom::TestWs::ShutdownCallback callback) {
   // WindowService depends upon Screen, which is owned by AuraTestHelper.
-  service_context_.reset();
+  window_service_.reset();
 
   // |aura_test_helper_| could be null when exiting before fully initialized.
   if (aura_test_helper_) {
@@ -183,7 +240,8 @@ void TestWindowService::CreateGpuHost() {
       std::make_unique<discardable_memory::DiscardableSharedMemoryManager>();
 
   gpu_host_ = std::make_unique<gpu_host::GpuHost>(
-      this, context()->connector(), discardable_shared_memory_manager_.get());
+      this, service_binding_.GetConnector(),
+      discardable_shared_memory_manager_.get());
 
   gpu_interface_provider_ = std::make_unique<TestGpuInterfaceProvider>(
       gpu_host_.get(), discardable_shared_memory_manager_.get());

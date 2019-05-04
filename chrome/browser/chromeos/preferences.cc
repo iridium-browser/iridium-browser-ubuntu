@@ -19,6 +19,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
+#include "chrome/browser/chromeos/base/locale_util.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_syncer.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
@@ -34,7 +35,7 @@
 #include "chrome/browser/ui/ash/system_tray_client.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "chromeos/system/devicemode.h"
 #include "chromeos/system/statistics_provider.h"
@@ -174,6 +175,9 @@ void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
       prefs::kSystemTimezoneAutomaticDetectionPolicy,
       enterprise_management::SystemTimezoneProto::USERS_DECIDE);
   registry->RegisterStringPref(prefs::kMinimumAllowedChromeVersion, "");
+  // TODO(tonydeluna): Remove deprecated pref.
+  // Carrier deal notification shown count defaults to 0.
+  registry->RegisterIntegerPref(prefs::kCarrierDealPromoShown, 0);
 
   AshShellInit::RegisterDisplayPrefs(registry);
 }
@@ -196,6 +200,15 @@ void Preferences::RegisterProfilePrefs(
   }
 
   registry->RegisterBooleanPref(prefs::kPerformanceTracingEnabled, false);
+
+  // This pref is device specific and must not be synced.
+  registry->RegisterIntegerPref(
+      prefs::kAccountManagerNumTimesMigrationRanSuccessfully,
+      0 /* default_value */);
+
+  // This pref is device specific and must not be synced.
+  registry->RegisterIntegerPref(
+      prefs::kAccountManagerNumTimesWelcomeScreenShown, 0 /* default_value */);
 
   registry->RegisterBooleanPref(
       prefs::kTapToClickEnabled,
@@ -255,6 +268,9 @@ void Preferences::RegisterProfilePrefs(
       ash::prefs::kDictationAcceleratorDialogHasBeenAccepted, false,
       PrefRegistry::PUBLIC);
   registry->RegisterBooleanPref(
+      ash::prefs::kDisplayRotationAcceleratorDialogHasBeenAccepted, false,
+      PrefRegistry::PUBLIC);
+  registry->RegisterBooleanPref(
       ash::prefs::kAccessibilityScreenMagnifierEnabled, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterBooleanPref(
@@ -268,6 +284,17 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterIntegerPref(
       ash::prefs::kAccessibilityAutoclickDelayMs, ash::kDefaultAutoclickDelayMs,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterIntegerPref(
+      ash::prefs::kAccessibilityAutoclickEventType,
+      static_cast<int>(ash::kDefaultAutoclickEventType),
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterBooleanPref(
+      ash::prefs::kAccessibilityAutoclickRevertToLeftClick, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterIntegerPref(
+      ash::prefs::kAccessibilityAutoclickMovementThreshold,
+      ash::kDefaultAutoclickMovementThreshold,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterBooleanPref(
       ash::prefs::kAccessibilityVirtualKeyboardEnabled, false,
@@ -289,7 +316,7 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterBooleanPref(
       ash::prefs::kAccessibilitySwitchAccessEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterBooleanPref(
       ash::prefs::kShouldAlwaysShowAccessibilityMenu, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
@@ -313,9 +340,6 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterBooleanPref(
       drive::prefs::kDisableDriveOverCellular, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      drive::prefs::kDisableDriveHostedFiles, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(drive::prefs::kDriveFsWasLaunchedAtLeastOnce,
                                 false);
   registry->RegisterStringPref(drive::prefs::kDriveFsProfileSalt, "");
@@ -326,11 +350,14 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterStringPref(prefs::kLanguagePreviousInputMethod, "");
   registry->RegisterListPref(prefs::kLanguageAllowedInputMethods,
                              std::make_unique<base::ListValue>());
+  registry->RegisterListPref(prefs::kAllowedLanguages,
+                             std::make_unique<base::ListValue>());
   registry->RegisterStringPref(prefs::kLanguagePreferredLanguages,
                                kFallbackInputMethodLocale);
   registry->RegisterStringPref(prefs::kLanguagePreloadEngines,
                                hardware_keyboard_id);
   registry->RegisterStringPref(prefs::kLanguageEnabledImes, "");
+  registry->RegisterDictionaryPref(prefs::kLanguageInputMethodSpecificSettings);
 
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapSearchKeyTo,
@@ -410,8 +437,7 @@ void Preferences::RegisterProfilePrefs(
   // We don't sync wake-on-wifi related prefs because they are device specific.
   registry->RegisterBooleanPref(prefs::kWakeOnWifiDarkConnect, true);
 
-  // 3G first-time usage promo will be shown at least once.
-  registry->RegisterBooleanPref(prefs::kShow3gPromoNotification, true);
+  registry->RegisterBooleanPref(prefs::kShowMobileDataNotification, true);
 
   // Number of times Data Saver prompt has been shown on 3G data network.
   registry->RegisterIntegerPref(
@@ -485,6 +511,7 @@ void Preferences::RegisterProfilePrefs(
                                 update_engine::EndOfLifeStatus::kSupported);
 
   registry->RegisterBooleanPref(prefs::kCastReceiverEnabled, false);
+  registry->RegisterBooleanPref(prefs::kShowArcSettingsOnSessionStart, false);
   registry->RegisterBooleanPref(prefs::kShowSyncSettingsOnSessionStart, false);
 
   // Text-to-speech prefs.
@@ -493,15 +520,15 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterDoublePref(
       prefs::kTextToSpeechRate,
-      blink::SpeechSynthesisConstants::kDefaultTextToSpeechRate,
+      blink::kWebSpeechSynthesisDefaultTextToSpeechRate,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterDoublePref(
       prefs::kTextToSpeechPitch,
-      blink::SpeechSynthesisConstants::kDefaultTextToSpeechPitch,
+      blink::kWebSpeechSynthesisDefaultTextToSpeechPitch,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterDoublePref(
       prefs::kTextToSpeechVolume,
-      blink::SpeechSynthesisConstants::kDefaultTextToSpeechVolume,
+      blink::kWebSpeechSynthesisDefaultTextToSpeechVolume,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
 
   // By default showing Sync Consent is set to true. It can changed by policy.
@@ -541,6 +568,9 @@ void Preferences::InitUserPrefs(sync_preferences::PrefServiceSyncable* prefs) {
                               prefs, callback);
   allowed_input_methods_.Init(prefs::kLanguageAllowedInputMethods, prefs,
                               callback);
+  allowed_languages_.Init(prefs::kAllowedLanguages, prefs, callback);
+  preferred_languages_.Init(prefs::kLanguagePreferredLanguages, prefs,
+                            callback);
   ime_menu_activated_.Init(prefs::kLanguageImeMenuActivated, prefs, callback);
   // Notifies the system tray to remove the IME items.
   if (base::FeatureList::IsEnabled(features::kOptInImeMenu) &&
@@ -810,6 +840,15 @@ void Preferences::ApplyPreferences(ApplyReason reason,
       preload_engines_.SetValue(
           base::JoinString(ime_state_->GetActiveInputMethodIds(), ","));
     }
+  }
+  if (reason != REASON_PREF_CHANGED || pref_name == prefs::kAllowedLanguages)
+    locale_util::RemoveDisallowedLanguagesFromPreferred(prefs_);
+
+  if (reason != REASON_PREF_CHANGED ||
+      pref_name == prefs::kLanguagePreferredLanguages) {
+    // In case setting has been changed with sync it can contain disallowed
+    // values.
+    locale_util::RemoveDisallowedLanguagesFromPreferred(prefs_);
   }
 
   if (reason == REASON_INITIALIZATION)

@@ -43,7 +43,7 @@
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/keepalive_statistics_recorder.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
-#include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -146,18 +146,13 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   static const int kAvgBytesPerOutstandingRequest = 4400;
 
   // Called when a RenderViewHost is created.
-  void OnRenderViewHostCreated(
+  static void OnRenderViewHostCreated(
       int child_id,
       int route_id,
       net::URLRequestContextGetter* url_request_context_getter);
 
   // Called when a RenderViewHost is deleted.
-  void OnRenderViewHostDeleted(int child_id, int route_id);
-
-  // Called when a RenderViewHost starts or stops loading.
-  void OnRenderViewHostSetIsLoading(int child_id,
-                                    int route_id,
-                                    bool is_loading);
+  static void OnRenderViewHostDeleted(int child_id, int route_id);
 
   // Force cancels any pending requests for the given process.
   void CancelRequestsForProcess(int child_id);
@@ -243,6 +238,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       ServiceWorkerNavigationHandleCore* service_worker_handle_core,
       AppCacheNavigationHandleCore* appcache_handle_core,
       uint32_t url_loader_options,
+      net::RequestPriority net_priority,
       const GlobalRequestID& global_request_id);
 
   int num_in_flight_requests_for_testing() const {

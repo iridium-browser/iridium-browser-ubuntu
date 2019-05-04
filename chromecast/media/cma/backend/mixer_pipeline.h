@@ -10,9 +10,14 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "chromecast/public/media/audio_post_processor_shlib.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
+
+namespace base {
+class Value;
+}  // namespace base
 
 namespace chromecast {
 namespace media {
@@ -70,9 +75,6 @@ class MixerPipeline {
   // and GetOutput(), i.e. the group delay of PostProcessors in "linearize"
   int64_t GetPostLoopbackRenderingDelayMicroseconds() const;
 
-  // Informs FilterGroups that the output should be mixed to mono.
-  void SetMixToMono(bool mix_to_mono);
-
   // Informs FilterGroups and PostProcessors which channel will be played out.
   // |playout_channel| may be |-1| to signal all channels will be played out.
   void SetPlayoutChannel(int playout_channel);
@@ -85,8 +87,11 @@ class MixerPipeline {
   bool BuildPipeline(PostProcessingPipelineParser* config,
                      PostProcessingPipelineFactory* factory);
 
+  // Adds |ids| to the list of DeviceIds |filter_group| can process.
+  bool SetGroupDeviceIds(const base::Value* ids, FilterGroup* filter_group);
+
   std::vector<std::unique_ptr<FilterGroup>> filter_groups_;
-  FilterGroup* default_stream_group_ = nullptr;
+  base::flat_map<std::string, FilterGroup*> stream_sinks_;
   FilterGroup* loopback_output_group_ = nullptr;
   FilterGroup* output_group_ = nullptr;
 

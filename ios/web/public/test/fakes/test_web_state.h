@@ -35,8 +35,6 @@ class TestWebState : public WebState {
   void SetDelegate(WebStateDelegate* delegate) override;
   bool IsWebUsageEnabled() const override;
   void SetWebUsageEnabled(bool enabled) override;
-  bool ShouldSuppressDialogs() const override;
-  void SetShouldSuppressDialogs(bool should_suppress) override;
   UIView* GetView() override;
   void WasShown() override;
   void WasHidden() override;
@@ -86,11 +84,12 @@ class TestWebState : public WebState {
   void DidChangeVisibleSecurityState() override {}
   bool HasOpener() const override;
   void SetHasOpener(bool has_opener) override;
-  void TakeSnapshot(CGRect rect, SnapshotCallback callback) override;
+  void TakeSnapshot(const gfx::RectF& rect, SnapshotCallback callback) override;
 
   // Setters for test data.
   void SetBrowserState(BrowserState* browser_state);
   void SetJSInjectionReceiver(CRWJSInjectionReceiver* injection_receiver);
+  void SetTitle(const base::string16& title);
   void SetContentIsHTML(bool content_is_html);
   void SetLoading(bool is_loading);
   void SetCurrentURL(const GURL& url);

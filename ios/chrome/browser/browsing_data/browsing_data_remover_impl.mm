@@ -22,6 +22,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "components/autofill/core/browser/legacy_strike_database.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/history/core/browser/history_service.h"
@@ -36,6 +37,7 @@
 #include "components/signin/core/browser/signin_pref_names.h"
 #include "components/signin/ios/browser/account_consistency_service.h"
 #include "ios/chrome/browser/application_context.h"
+#include "ios/chrome/browser/autofill/legacy_strike_database_factory.h"
 #include "ios/chrome/browser/autofill/personal_data_manager_factory.h"
 #include "ios/chrome/browser/bookmarks/bookmark_remover_helper.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
@@ -62,8 +64,6 @@
 #include "net/base/net_errors.h"
 #include "net/cookies/cookie_store.h"
 #include "net/http/transport_security_state.h"
-#include "net/ssl/channel_id_service.h"
-#include "net/ssl/channel_id_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
@@ -84,8 +84,16 @@ enum CookieOrCacheDeletionChoice {
   MAX_CHOICE_VALUE
 };
 
-bool AllDomainsPredicate(const std::string& domain) {
-  return true;
+template <typename T>
+void IgnoreArgumentHelper(base::OnceClosure callback, T unused_argument) {
+  std::move(callback).Run();
+}
+
+// A convenience method to turn a callback without arguments into one that
+// accepts (and ignores) a single argument.
+template <typename T>
+base::OnceCallback<void(T)> IgnoreArgument(base::OnceClosure callback) {
+  return base::BindOnce(&IgnoreArgumentHelper<T>, std::move(callback));
 }
 
 void BookmarkClearedAdapter(std::unique_ptr<BookmarkRemoverHelper> remover,
@@ -122,36 +130,6 @@ void ClearCookies(
   cookie_store->DeleteAllCreatedInTimeRangeAsync(
       creation_range, AdaptCallbackForRepeating(base::BindOnce(
                           &DeleteCallbackAdapter, std::move(callback))));
-}
-
-// Clears SSL connection pool and then invoke callback.
-void OnClearedChannelIDs(
-    scoped_refptr<net::URLRequestContextGetter> request_context_getter,
-    base::OnceClosure callback) {
-  DCHECK_CURRENTLY_ON(web::WebThread::IO);
-  // Need to close open SSL connections which may be using the channel ids we
-  // are deleting.
-  // TODO(crbug.com/166069): Make the server bound cert service/store have
-  // observers that can notify relevant things directly.
-  request_context_getter->GetURLRequestContext()
-      ->ssl_config_service()
-      ->NotifySSLConfigChange();
-  std::move(callback).Run();
-}
-
-// Clears channel IDs.
-void ClearChannelIDs(
-    scoped_refptr<net::URLRequestContextGetter> request_context_getter,
-    base::Time delete_begin,
-    base::Time delete_end,
-    base::OnceClosure callback) {
-  DCHECK_CURRENTLY_ON(web::WebThread::IO);
-  net::ChannelIDService* channel_id_service =
-      request_context_getter->GetURLRequestContext()->channel_id_service();
-  channel_id_service->GetChannelIDStore()->DeleteForDomainsCreatedBetween(
-      base::BindRepeating(&AllDomainsPredicate), delete_begin, delete_end,
-      AdaptCallbackForRepeating(base::BindOnce(
-          &OnClearedChannelIDs, request_context_getter, std::move(callback))));
 }
 
 }  // namespace
@@ -243,11 +221,6 @@ void BrowsingDataRemoverImpl::Remove(browsing_data::TimePeriod time_period,
   DCHECK(!browser_state_->IsOffTheRecord() ||
          time_period == browsing_data::TimePeriod::ALL_TIME);
 
-  // Cookies and server bound certificates should have the same lifetime.
-  DCHECK_EQ(
-      IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_COOKIES),
-      IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_CHANNEL_IDS));
-
   // Partial clearing of downloads, bookmarks or reading lists is not supported.
   DCHECK(
       !(IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_DOWNLOADS) ||
@@ -327,17 +300,6 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
                            CreatePendingTaskCompletionClosure())));
   }
 
-  if (IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_CHANNEL_IDS)) {
-    base::RecordAction(base::UserMetricsAction("ClearBrowsingData_ChannelIDs"));
-    base::PostTaskWithTraits(
-        FROM_HERE, task_traits,
-        base::BindOnce(
-            &ClearChannelIDs, context_getter_, delete_begin, delete_end,
-            base::BindOnce(base::IgnoreResult(&base::TaskRunner::PostTask),
-                           current_task_runner, FROM_HERE,
-                           CreatePendingTaskCompletionClosure())));
-  }
-
   // There is no need to clean the remaining types of data for off-the-record
   // ChromeBrowserStates as no data is saved. Early return to avoid scheduling
   // unnecessary work.
@@ -361,9 +323,8 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
       base::RecordAction(base::UserMetricsAction("ClearBrowsingData_History"));
       history_service->ExpireLocalAndRemoteHistoryBetween(
           ios::WebHistoryServiceFactory::GetForBrowserState(browser_state_),
-          std::set<GURL>(), delete_begin, delete_end,
-          AdaptCallbackForRepeating(CreatePendingTaskCompletionClosure()),
-          &history_task_tracker_);
+          std::set<GURL>(), delete_begin, delete_end, /*user_initiated*/ true,
+          CreatePendingTaskCompletionClosure(), &history_task_tracker_);
     }
 
     // Need to clear the host cache and accumulated speculative data, as it also
@@ -464,6 +425,14 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
                                                        delete_end);
       web_data_service->RemoveAutofillDataModifiedBetween(delete_begin,
                                                           delete_end);
+
+      // Clear out the Autofill LegacyStrikeDatabase in its entirety.
+      autofill::LegacyStrikeDatabase* legacy_strike_database =
+          autofill::LegacyStrikeDatabaseFactory::GetForBrowserState(
+              browser_state_);
+      if (legacy_strike_database)
+        legacy_strike_database->ClearAllStrikes(AdaptCallbackForRepeating(
+            IgnoreArgument<bool>(CreatePendingTaskCompletionClosure())));
 
       // Ask for a call back when the above calls are finished.
       web_data_service->GetDBTaskRunner()->PostTaskAndReply(

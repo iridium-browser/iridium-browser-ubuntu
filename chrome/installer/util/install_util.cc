@@ -16,13 +16,13 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/values.h"
 #include "base/win/registry.h"
 #include "base/win/shlwapi.h"
@@ -64,26 +64,6 @@ void LogStartMenuShortcutStatus(StartMenuShortcutStatus status) {
                             status);
 }
 
-#if defined(GOOGLE_CHROME_BUILD)
-// These values are persisted to logs. Entries should not be renumbered and
-// numeric values should never be reused.
-enum class ToastActivatorCLSIDMismatchReason {
-  kShortcutClsidIsStable = 0,
-  kShortcutClsidIsBeta = 1,
-  kShortcutClsidIsDev = 2,
-  kShortcutClsidIsChromium = 3,
-  kShortcutClsidIsNull = 4,
-  kShortcutClsidIsUnknown = 5,
-  kMaxValue = kShortcutClsidIsUnknown,
-};
-
-void RecordToastActivatorCLSIDMismatchReason(
-    ToastActivatorCLSIDMismatchReason reason) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "Notifications.Windows.ToastActivatorCLSIDMismatchReason", reason);
-}
-#endif  // defined(GOOGLE_CHROME_BUILD)
-
 // Creates a zero-sized non-decorated foreground window that doesn't appear
 // in the taskbar. This is used as a parent window for calls to ShellExecuteEx
 // in order for the UAC dialog to appear in the foreground and for focus
@@ -118,6 +98,24 @@ HWND CreateUACForegroundWindow() {
     ::SetForegroundWindow(foreground_window);
   }
   return foreground_window;
+}
+
+// Returns Registry key path of Chrome policies. This is used by the policies
+// that are shared between Chrome and installer.
+base::string16 GetChromePoliciesRegistryPath() {
+  base::string16 key_path = L"SOFTWARE\\Policies\\";
+  install_static::AppendChromeInstallSubDirectory(
+      install_static::InstallDetails::Get().mode(), false /* !include_suffix */,
+      &key_path);
+  return key_path;
+}
+
+// Retruns the registry key path and value name where the cloud management
+// enrollment option is stored.
+void GetCloudManagementBlockOnFailureRegistryPath(base::string16* key_path,
+                                                  base::string16* value_name) {
+  *key_path = GetChromePoliciesRegistryPath();
+  *value_name = L"CloudManagementEnrollmentMandatory";
 }
 
 }  // namespace
@@ -337,52 +335,10 @@ bool InstallUtil::IsStartMenuShortcutWithActivatorGuidInstalled() {
     return false;
   }
 
-  const CLSID& shortcut_clsid = properties.toast_activator_clsid;
-
-  if (!::IsEqualCLSID(shortcut_clsid,
+  if (!::IsEqualCLSID(properties.toast_activator_clsid,
                       install_static::GetToastActivatorClsid())) {
     LogStartMenuShortcutStatus(
         StartMenuShortcutStatus::kToastActivatorClsidIncorrect);
-
-#if defined(GOOGLE_CHROME_BUILD)
-    // Record the reason for CLSID mismatch between shortcut and installer. We
-    // only care about Canary.
-    const auto& details = install_static::InstallDetails::Get();
-    if (details.install_mode_index() == install_static::CANARY_INDEX) {
-      ToastActivatorCLSIDMismatchReason reason =
-          ToastActivatorCLSIDMismatchReason::kShortcutClsidIsUnknown;
-
-      // Stolen from chrome/install_static/chromium_install_modes.cc:
-      static constexpr CLSID kChromiumToastActivatorClsid = {
-          0x635EFA6F,
-          0x08D6,
-          0x4EC9,
-          {0xBD, 0x14, 0x8A, 0x0F, 0xDE, 0x97, 0x51, 0x59}};
-
-      if (::IsEqualCLSID(
-              shortcut_clsid,
-              install_static::kInstallModes[install_static::STABLE_INDEX]
-                  .toast_activator_clsid)) {
-        reason = ToastActivatorCLSIDMismatchReason::kShortcutClsidIsStable;
-      } else if (::IsEqualCLSID(
-                     shortcut_clsid,
-                     install_static::kInstallModes[install_static::BETA_INDEX]
-                         .toast_activator_clsid)) {
-        reason = ToastActivatorCLSIDMismatchReason::kShortcutClsidIsBeta;
-      } else if (::IsEqualCLSID(
-                     shortcut_clsid,
-                     install_static::kInstallModes[install_static::DEV_INDEX]
-                         .toast_activator_clsid)) {
-        reason = ToastActivatorCLSIDMismatchReason::kShortcutClsidIsDev;
-      } else if (::IsEqualCLSID(shortcut_clsid, kChromiumToastActivatorClsid)) {
-        reason = ToastActivatorCLSIDMismatchReason::kShortcutClsidIsChromium;
-      } else if (::IsEqualCLSID(shortcut_clsid, CLSID_NULL)) {
-        reason = ToastActivatorCLSIDMismatchReason::kShortcutClsidIsNull;
-      }
-
-      RecordToastActivatorCLSIDMismatchReason(reason);
-    }
-#endif  // defined(GOOGLE_CHROME_BUILD)
 
     return false;
   }
@@ -557,9 +513,9 @@ void InstallUtil::AppendModeSwitch(base::CommandLine* command_line) {
 // static
 base::string16 InstallUtil::GetCurrentDate() {
   static const wchar_t kDateFormat[] = L"yyyyMMdd";
-  wchar_t date_str[arraysize(kDateFormat)] = {0};
-  int len = GetDateFormatW(LOCALE_INVARIANT, 0, NULL, kDateFormat,
-                           date_str, arraysize(date_str));
+  wchar_t date_str[base::size(kDateFormat)] = {0};
+  int len = GetDateFormatW(LOCALE_INVARIANT, 0, NULL, kDateFormat, date_str,
+                           base::size(date_str));
   if (len) {
     --len;  // Subtract terminating \0.
   } else {
@@ -627,22 +583,21 @@ void InstallUtil::AddUpdateDowngradeVersionItem(
 
 // static
 void InstallUtil::GetMachineLevelUserCloudPolicyEnrollmentTokenRegistryPath(
-    std::wstring* key_path,
-    std::wstring* value_name) {
+    base::string16* key_path,
+    base::string16* value_name,
+    base::string16* old_value_name) {
   // This token applies to all installs on the machine, even though only a
   // system install can set it.  This is to prevent users from doing a user
   // install of chrome to get around policies.
-  *key_path = L"SOFTWARE\\Policies\\";
-  install_static::AppendChromeInstallSubDirectory(
-      install_static::InstallDetails::Get().mode(), false /* !include_suffix */,
-      key_path);
-  *value_name = L"MachineLevelUserCloudPolicyEnrollmentToken";
+  *key_path = GetChromePoliciesRegistryPath();
+  *value_name = L"CloudManagementEnrollmentToken";
+  *old_value_name = L"MachineLevelUserCloudPolicyEnrollmentToken";
 }
 
 // static
 void InstallUtil::GetMachineLevelUserCloudPolicyDMTokenRegistryPath(
-    std::wstring* key_path,
-    std::wstring* value_name) {
+    base::string16* key_path,
+    base::string16* value_name) {
   // This token applies to all installs on the machine, even though only a
   // system install can set it.  This is to prevent users from doing a user
   // install of chrome to get around policies.
@@ -655,7 +610,7 @@ void InstallUtil::GetMachineLevelUserCloudPolicyDMTokenRegistryPath(
 }
 
 // static
-std::wstring InstallUtil::GetMachineLevelUserCloudPolicyEnrollmentToken() {
+base::string16 InstallUtil::GetMachineLevelUserCloudPolicyEnrollmentToken() {
   // Because chrome needs to know if machine level user cloud policies must be
   // initialized even before the entire policy service is brought up, this
   // helper function exists to directly read the token from the system policies.
@@ -665,29 +620,31 @@ std::wstring InstallUtil::GetMachineLevelUserCloudPolicyEnrollmentToken() {
   // this token via SCCM.
   // TODO(rogerta): This may not be the best place for the helpers dealing with
   // the enrollment and/or DM tokens.  See crbug.com/823852 for details.
-  std::wstring key_path;
-  std::wstring value_name;
-  GetMachineLevelUserCloudPolicyEnrollmentTokenRegistryPath(&key_path,
-                                                            &value_name);
+  base::string16 key_path;
+  base::string16 value_name;
+  base::string16 old_value_name;
+  GetMachineLevelUserCloudPolicyEnrollmentTokenRegistryPath(
+      &key_path, &value_name, &old_value_name);
 
-  RegKey key;
-  LONG result = key.Open(HKEY_LOCAL_MACHINE, key_path.c_str(), KEY_QUERY_VALUE);
-  if (result != ERROR_SUCCESS) {
-    if (result != ERROR_FILE_NOT_FOUND) {
-      ::SetLastError(result);
-      PLOG(ERROR) << "Failed to open HKLM\\" << key_path;
-    }
-    return std::wstring();
-  }
-
-  std::wstring value;
-  result = key.ReadValue(value_name.c_str(), &value);
-  if (result != ERROR_SUCCESS) {
-    ::SetLastError(result);
-    PLOG(ERROR) << "Failed to read HKLM\\" << key_path << "\\" << value_name;
-  }
+  base::string16 value;
+  RegKey key(HKEY_LOCAL_MACHINE, key_path.c_str(), KEY_QUERY_VALUE);
+  if (key.ReadValue(value_name.c_str(), &value) == ERROR_FILE_NOT_FOUND)
+    key.ReadValue(old_value_name.c_str(), &value);
 
   return value;
+}
+
+// static
+bool InstallUtil::ShouldCloudManagementBlockOnFailure() {
+  base::string16 key_path;
+  base::string16 value_name;
+  GetCloudManagementBlockOnFailureRegistryPath(&key_path, &value_name);
+
+  DWORD value = 0;
+  RegKey(HKEY_LOCAL_MACHINE, key_path.c_str(), KEY_QUERY_VALUE)
+      .ReadValueDW(value_name.c_str(), &value);
+
+  return value != 0;
 }
 
 // static

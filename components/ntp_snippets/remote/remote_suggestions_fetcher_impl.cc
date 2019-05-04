@@ -115,7 +115,7 @@ Status FetchResultToStatus(FetchResult result) {
 
 int GetMinuteOfTheDay(bool local_time,
                       bool reduced_resolution,
-                      base::Clock* clock) {
+                      const base::Clock* clock) {
   base::Time now(clock->Now());
   base::Time::Exploded now_exploded{};
   local_time ? now.LocalExplode(&now_exploded) : now.UTCExplode(&now_exploded);
@@ -275,7 +275,7 @@ void RemoteSuggestionsFetcherImpl::StartTokenRequest() {
     return;
   }
 
-  OAuth2TokenService::ScopeSet scopes{kContentSuggestionsApiScope};
+  identity::ScopeSet scopes{kContentSuggestionsApiScope};
   token_fetcher_ = std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
       "ntp_snippets", identity_manager_, scopes,
       base::BindOnce(&RemoteSuggestionsFetcherImpl::AccessTokenFetchFinished,
@@ -377,7 +377,7 @@ void RemoteSuggestionsFetcherImpl::FetchFinished(
   DCHECK(fetch_result == FetchResult::SUCCESS || !categories.has_value());
 
   if (fetch_result == FetchResult::HTTP_ERROR_UNAUTHORIZED) {
-    OAuth2TokenService::ScopeSet scopes{kContentSuggestionsApiScope};
+    identity::ScopeSet scopes{kContentSuggestionsApiScope};
     std::string account_id = identity_manager_->GetPrimaryAccountId();
     identity_manager_->RemoveAccessTokenFromCache(account_id, scopes,
                                                   access_token);

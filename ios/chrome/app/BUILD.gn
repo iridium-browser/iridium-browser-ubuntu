@@ -10,16 +10,10 @@ import("//ios/build/chrome_build.gni")
 import("//ios/build/config.gni")
 import("//ios/public/provider/chrome/browser/build_config.gni")
 import("//ios/third_party/firebase/firebase.gni")
-import("//services/service_manager/public/service_manifest.gni")
 
 buildflag_header("firebase_buildflags") {
   header = "firebase_buildflags.h"
   flags = [ "FIREBASE_ENABLED=$ios_enable_firebase_sdk" ]
-}
-
-service_manifest("chrome_browser_manifest_overlay") {
-  source = "//ios/chrome/browser/chrome_browser_manifest_overlay.json"
-  packaged_services = [ "//services/identity:manifest" ]
 }
 
 source_set("app") {
@@ -164,13 +158,13 @@ source_set("app_internal") {
     "//components/prefs",
     "//components/prefs/ios",
     "//components/proxy_config",
-    "//components/signin/core/browser",
     "//components/suggestions",
     "//components/sync",
     "//components/url_formatter",
     "//components/web_resource",
     "//ios/chrome/app/application_delegate",
     "//ios/chrome/app/application_delegate:application_delegate_internal",
+    "//ios/chrome/app/intents",
     "//ios/chrome/app/spotlight",
     "//ios/chrome/app/startup",
     "//ios/chrome/app/startup:startup_basic",
@@ -230,6 +224,7 @@ source_set("app_internal") {
     "//ios/chrome/browser/upgrade",
     "//ios/chrome/browser/variations:ios_chrome_ui_string_overrider_factory",
     "//ios/chrome/browser/voice",
+    "//ios/chrome/browser/web",
     "//ios/chrome/browser/web:tab_id_tab_helper",
     "//ios/chrome/browser/web:web_internal",
     "//ios/chrome/browser/web_state_list",
@@ -246,6 +241,7 @@ source_set("app_internal") {
     "//ios/third_party/material_roboto_font_loader_ios",
     "//mojo/core/embedder",
     "//net",
+    "//services/identity/public/cpp:cpp",
     "//skia",
     "//ui/base",
     "//ui/gfx",

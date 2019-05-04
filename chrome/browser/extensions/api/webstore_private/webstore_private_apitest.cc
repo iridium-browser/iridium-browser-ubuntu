@@ -44,7 +44,7 @@
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #endif
 
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
@@ -362,7 +362,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, MAYBE_InstallTheme) {
   ASSERT_TRUE(RunInstallTest("theme.html", "../../theme.crx"));
   listener.Wait();
   ASSERT_TRUE(listener.received_success());
-  ASSERT_EQ("iamefpfkojoapidjnbafmgkgncegbkad", listener.id());
+  ASSERT_EQ("idlfhncioikpdnlhnmcjogambnefbbfp", listener.id());
 }
 
 // Tests that an error is properly reported when an empty crx is returned.

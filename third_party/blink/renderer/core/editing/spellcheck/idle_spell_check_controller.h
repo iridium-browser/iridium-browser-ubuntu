@@ -34,6 +34,8 @@ class CORE_EXPORT IdleSpellCheckController final
 
  public:
   static IdleSpellCheckController* Create(LocalFrame&);
+
+  explicit IdleSpellCheckController(LocalFrame&);
   ~IdleSpellCheckController();
 
   enum class State {
@@ -52,7 +54,7 @@ class CORE_EXPORT IdleSpellCheckController final
   // document is detached or spellchecking is globally disabled.
   void Deactivate();
 
-  void DocumentAttached(Document*);
+  void DidAttachDocument(Document*);
 
   // Exposed for testing only.
   SpellCheckRequester& GetSpellCheckRequester() const;
@@ -65,8 +67,6 @@ class CORE_EXPORT IdleSpellCheckController final
 
  private:
   class IdleCallback;
-
-  explicit IdleSpellCheckController(LocalFrame&);
 
   LocalFrame& GetFrame() const { return *frame_; }
 

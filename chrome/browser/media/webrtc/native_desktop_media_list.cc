@@ -251,7 +251,8 @@ NativeDesktopMediaList::NativeDesktopMediaList(
 }
 
 NativeDesktopMediaList::~NativeDesktopMediaList() {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  // This thread should mostly be an idle observer. Stopping it should be fast.
+  base::ScopedAllowBaseSyncPrimitivesOutsideBlockingScope allow_thread_join;
   thread_.task_runner()->DeleteSoon(FROM_HERE, worker_.release());
   thread_.Stop();
 }
@@ -290,6 +291,17 @@ void NativeDesktopMediaList::RefreshForAuraWindows(
 #endif  // defined(USE_AURA)
 
   UpdateSourcesList(sources);
+
+  if (thumbnail_size_.IsEmpty()) {
+#if defined(USE_AURA)
+    pending_native_thumbnail_capture_ = true;
+#endif
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
+        base::BindOnce(&NativeDesktopMediaList::UpdateNativeThumbnailsFinished,
+                       weak_factory_.GetWeakPtr()));
+    return;
+  }
 
   // OnAuraThumbnailCaptured() and UpdateNativeThumbnailsFinished() are
   // guaranteed to be excuted after RefreshForAuraWindows() and

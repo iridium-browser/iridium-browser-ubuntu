@@ -7,14 +7,9 @@
 
 #include "base/macros.h"
 #include "base/time/time.h"
+#include "base/unguessable_token.h"
 #include "content/common/content_export.h"
 #include "services/media_session/public/mojom/media_session.mojom.h"
-
-namespace blink {
-namespace mojom {
-enum class MediaSessionAction;
-}  // namespace mojom
-}  // namespace blink
 
 namespace content {
 
@@ -34,28 +29,18 @@ class MediaSession : public media_session::mojom::MediaSession {
 
   ~MediaSession() override = default;
 
-  // Stop the media session.
-  // |type| represents the origin of the request.
-  virtual void Stop(SuspendType suspend_type) = 0;
-
-  // Seek the media session forward.
-  virtual void SeekForward(base::TimeDelta seek_time) = 0;
-
-  // Seek the media session backward.
-  virtual void SeekBackward(base::TimeDelta seek_time) = 0;
-
-  // Return if the session can be controlled by Resume() and Suspend() calls
-  // above.
-  virtual bool IsControllable() const = 0;
-
-  // Return if the actual playback state is paused.
-  virtual bool IsActuallyPaused() const = 0;
-
   // Tell the media session a user action has performed.
-  virtual void DidReceiveAction(blink::mojom::MediaSessionAction action) = 0;
+  virtual void DidReceiveAction(
+      media_session::mojom::MediaSessionAction action) = 0;
 
   // Set the volume multiplier applied during ducking.
   virtual void SetDuckingVolumeMultiplier(double multiplier) = 0;
+
+  // Set the audio focus group id for this media session. Sessions in the same
+  // group can share audio focus. Setting this to null will use the browser
+  // default value. This will only have any effect if audio focus grouping is
+  // supported.
+  virtual void SetAudioFocusGroupId(const base::UnguessableToken& group_id) = 0;
 
   // media_session.mojom.MediaSession overrides -------------------------------
 
@@ -84,6 +69,26 @@ class MediaSession : public media_session::mojom::MediaSession {
   // Adds an observer to listen to events related to this MediaSession.
   void AddObserver(
       media_session::mojom::MediaSessionObserverPtr observer) override = 0;
+
+  // Skip to the previous track. If there is no previous track then this will be
+  // a no-op.
+  void PreviousTrack() override = 0;
+
+  // Skip to the next track. If there is no next track then this will be a
+  // no-op.
+  void NextTrack() override = 0;
+
+  // Skip ad.
+  void SkipAd() override = 0;
+
+  // Seek the media session. If the media cannot seek then this will be a no-op.
+  // The |seek_time| is the time delta that the media will seek by and supports
+  // both positive and negative values.
+  void Seek(base::TimeDelta seek_time) override = 0;
+
+  // Stop the media session.
+  // |type| represents the origin of the request.
+  void Stop(SuspendType suspend_type) override = 0;
 
  protected:
   MediaSession() = default;

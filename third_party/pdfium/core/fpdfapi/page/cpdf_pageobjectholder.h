@@ -18,6 +18,7 @@
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "core/fxge/fx_dib.h"
 
 class CPDF_ContentParser;
 class CPDF_Dictionary;
@@ -30,13 +31,15 @@ class PauseIndicatorIface;
 struct GraphicsData {
   float fillAlpha;
   float strokeAlpha;
-  int blendType;
+  BlendMode blendType;
+
   bool operator<(const GraphicsData& other) const;
 };
 
 struct FontData {
   ByteString baseFont;
   ByteString type;
+
   bool operator<(const FontData& other) const;
 };
 
@@ -44,7 +47,10 @@ class CPDF_PageObjectHolder {
  public:
   enum class ParseState : uint8_t { kNotParsed, kParsing, kParsed };
 
-  CPDF_PageObjectHolder(CPDF_Document* pDoc, CPDF_Dictionary* pDict);
+  CPDF_PageObjectHolder(CPDF_Document* pDoc,
+                        CPDF_Dictionary* pDict,
+                        CPDF_Dictionary* pPageResources,
+                        CPDF_Dictionary* pResources);
   virtual ~CPDF_PageObjectHolder();
 
   virtual bool IsPage() const;

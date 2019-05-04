@@ -8,6 +8,7 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.junit.Assert.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -15,9 +16,10 @@ import static org.mockito.Mockito.when;
 import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.ACTIVE_TAB_INDEX;
 import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.HEIGHT;
 import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.TABS;
+import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.TOP_SHADOW_VISIBLE;
 import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.VISIBLE;
 
-import android.support.v4.view.ViewPager;
+import android.support.v7.widget.RecyclerView;
 import android.view.ViewGroup;
 
 import org.junit.Before;
@@ -32,11 +34,11 @@ import org.chromium.base.metrics.test.ShadowRecordHistogram;
 import org.chromium.base.task.test.CustomShadowAsyncTask;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.autofill.keyboard_accessory.KeyboardAccessoryData.Tab;
-import org.chromium.chrome.browser.modelutil.ListObservable;
-import org.chromium.chrome.browser.modelutil.PropertyKey;
-import org.chromium.chrome.browser.modelutil.PropertyModel;
-import org.chromium.chrome.browser.modelutil.PropertyObservable;
-import org.chromium.chrome.test.util.browser.modelutil.FakeViewProvider;
+import org.chromium.ui.modelutil.ListObservable;
+import org.chromium.ui.modelutil.PropertyKey;
+import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.modelutil.PropertyObservable;
+import org.chromium.ui.test.util.modelutil.FakeViewProvider;
 
 /**
  * Controller tests for the keyboard accessory bottom sheet component.
@@ -50,7 +52,9 @@ public class AccessorySheetControllerTest {
     @Mock
     private ListObservable.ListObserver<Void> mTabListObserver;
     @Mock
-    private ViewPager mMockView;
+    private AccessorySheetView mMockView;
+    @Mock
+    private RecyclerView mMockRecyclerView;
 
     private final Tab[] mTabs =
             new Tab[] {new Tab(null, null, 0, 0, null), new Tab(null, null, 0, 0, null),
@@ -220,6 +224,21 @@ public class AccessorySheetControllerTest {
 
         assertThat(mModel.get(TABS).size(), is(3));
         assertThat(mModel.get(ACTIVE_TAB_INDEX), is(2));
+    }
+
+    @Test
+    public void testScrollingChangesShadowVisibility() {
+        assertThat(mModel.get(TOP_SHADOW_VISIBLE), is(false));
+
+        // If the list was scrolled far enough that the top is hidden, show the top shadow.
+        when(mMockRecyclerView.canScrollVertically(eq(-1))).thenReturn(true);
+        mCoordinator.getScrollListener().onScrolled(mMockRecyclerView, 0, 10);
+        assertThat(mModel.get(TOP_SHADOW_VISIBLE), is(true));
+
+        // If the list was scrolled back to the top, hide the shadow again.
+        when(mMockRecyclerView.canScrollVertically(eq(-1))).thenReturn(false);
+        mCoordinator.getScrollListener().onScrolled(mMockRecyclerView, 0, -10);
+        assertThat(mModel.get(TOP_SHADOW_VISIBLE), is(false));
     }
 
     @Test

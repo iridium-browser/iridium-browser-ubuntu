@@ -16,15 +16,11 @@ enum EventType {
   UNKNOWN,
   KEY_PRESSED,
   KEY_RELEASED,
-  POINTER_DOWN,
-  POINTER_MOVED,
-  POINTER_UP,
-  POINTER_CANCELLED,
-  POINTER_ENTERED,
-  POINTER_EXITED,
-  POINTER_WHEEL_CHANGED,
-  POINTER_CAPTURE_CHANGED,
   GESTURE_TAP,
+  GESTURE_SWIPE,
+  GESTURE_PINCH_BEGIN,
+  GESTURE_PINCH_END,
+  GESTURE_PINCH_UPDATE,
   SCROLL,
   SCROLL_FLING_START,
   SCROLL_FLING_CANCEL,
@@ -80,13 +76,6 @@ enum PointerKind {
   ERASER,
 };
 
-enum WheelMode {
-  PIXEL,
-  LINE,
-  PAGE,
-  SCALING,
-};
-
 // Phase information used for a ScrollEvent.
 // These values match ui::ScrollEventPhase in ui/events/event_constants.h
 enum ScrollEventPhase {
@@ -104,4 +93,12 @@ enum EventMomentumPhase {
   MAY_BEGIN,
   INERTIAL_UPDATE,
   END,
+};
+
+// Device type for gesture events.
+// These values match ui::GestureDeviceType in ui/events/event_constants.h
+enum GestureDeviceType {
+  DEVICE_UNKNOWN,
+  DEVICE_TOUCHPAD,
+  DEVICE_TOUCHSCREEN,
 };

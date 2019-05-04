@@ -21,6 +21,7 @@
 #include "ui/gfx/paint_throbber.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/controls/focus_ring.h"
 #include "ui/views/masked_targeter_delegate.h"
 #include "ui/views/view.h"
 
@@ -32,9 +33,7 @@ class TabStyle;
 
 namespace gfx {
 class Animation;
-class AnimationContainer;
 class LinearAnimation;
-class ThrobAnimation;
 }
 namespace views {
 class Label;
@@ -58,9 +57,9 @@ class Tab : public gfx::AnimationDelegate,
   // hide the close button on inactive tabs. Any smaller and they're too easy
   // to hit on accident.
   static constexpr int kMinimumContentsWidthForCloseButtons = 68;
-  static constexpr int kTouchableMinimumContentsWidthForCloseButtons = 100;
+  static constexpr int kTouchMinimumContentsWidthForCloseButtons = 100;
 
-  Tab(TabController* controller, gfx::AnimationContainer* container);
+  explicit Tab(TabController* controller);
   ~Tab() override;
 
   // gfx::AnimationDelegate:
@@ -77,11 +76,13 @@ class Tab : public gfx::AnimationDelegate,
                               ui::MenuSourceType source_type) override;
 
   // views::MaskedTargeterDelegate:
-  bool GetHitTestMask(gfx::Path* mask) const override;
+  bool GetHitTestMask(SkPath* mask) const override;
 
   // views::View:
   void Layout() override;
   const char* GetClassName() const override;
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+  bool OnKeyPressed(const ui::KeyEvent& event) override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
@@ -143,12 +144,12 @@ class Tab : public gfx::AnimationDelegate,
   void SetData(TabRendererData data);
   const TabRendererData& data() const { return data_; }
 
-  // Redraws the loading animation if one is visible. Otherwise, no-op.
-  void StepLoadingAnimation();
+  // Redraws the loading animation if one is visible. Otherwise, no-op. The
+  // |elapsed_time| parameter is shared between tabs and used to keep the
+  // throbbers in sync.
+  void StepLoadingAnimation(const base::TimeDelta& elapsed_time);
 
-  // Starts/Stops a pulse animation.
-  void StartPulse();
-  void StopPulse();
+  bool ShowingLoadingAnimation() const;
 
   // Sets the visibility of the indicator shown when the tab needs to indicate
   // to the user that it needs their attention.
@@ -167,9 +168,9 @@ class Tab : public gfx::AnimationDelegate,
     return tab_activated_with_last_tap_down_;
   }
 
-  GlowHoverController* hover_controller() { return &hover_controller_; }
+  GlowHoverController* hover_controller() { return hover_controller_.get(); }
   const GlowHoverController* hover_controller() const {
-    return &hover_controller_;
+    return hover_controller_.get();
   }
 
   bool mouse_hovered() const { return mouse_hovered_; }
@@ -238,11 +239,6 @@ class Tab : public gfx::AnimationDelegate,
   // True if the tab has been detached.
   bool detached_ = false;
 
-  // Whole-tab throbbing "pulse" animation.
-  gfx::ThrobAnimation pulse_animation_;
-
-  scoped_refptr<gfx::AnimationContainer> animation_container_;
-
   TabIcon* icon_ = nullptr;
   AlertIndicator* alert_indicator_ = nullptr;
   TabCloseButton* close_button_ = nullptr;
@@ -256,7 +252,7 @@ class Tab : public gfx::AnimationDelegate,
 
   bool tab_activated_with_last_tap_down_ = false;
 
-  GlowHoverController hover_controller_;
+  std::unique_ptr<GlowHoverController> hover_controller_;
 
   // The offset used to paint the inactive background image.
   int background_offset_;
@@ -296,6 +292,9 @@ class Tab : public gfx::AnimationDelegate,
   // different from View::IsMouseHovered() which does a naive intersection with
   // the view bounds.
   bool mouse_hovered_ = false;
+
+  // Focus ring for accessibility.
+  std::unique_ptr<views::FocusRing> focus_ring_;
 
   DISALLOW_COPY_AND_ASSIGN(Tab);
 };

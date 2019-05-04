@@ -24,6 +24,7 @@ from dashboard.models import sheriff
 from tracing.value import histogram as histogram_module
 from tracing.value import histogram_set
 from tracing.value.diagnostics import breakdown
+from tracing.value.diagnostics import date_range
 from tracing.value.diagnostics import generic_set
 from tracing.value.diagnostics import reserved_infos
 
@@ -52,61 +53,61 @@ def _CreateHistogram(
 
   histograms = histogram_set.HistogramSet(hists)
   if master:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.MASTERS.name,
         generic_set.GenericSet([master]))
   if bot:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.BOTS.name,
         generic_set.GenericSet([bot]))
   if commit_position:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.CHROMIUM_COMMIT_POSITIONS.name,
         generic_set.GenericSet([commit_position]))
   if benchmark:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.BENCHMARKS.name,
         generic_set.GenericSet([benchmark]))
   if benchmark_description:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.BENCHMARK_DESCRIPTIONS.name,
         generic_set.GenericSet([benchmark_description]))
   if owner:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.OWNERS.name,
         generic_set.GenericSet([owner]))
   if device:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.DEVICE_IDS.name,
         generic_set.GenericSet([device]))
   if stories:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.STORIES.name,
         generic_set.GenericSet(stories))
   if story_tags:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.STORY_TAGS.name,
         generic_set.GenericSet(story_tags))
   if is_ref:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.IS_REFERENCE_BUILD.name,
         generic_set.GenericSet([True]))
   if is_summary is not None:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.SUMMARY_KEYS.name,
         generic_set.GenericSet(is_summary))
   if point_id is not None:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.POINT_ID.name,
         generic_set.GenericSet([point_id]))
   if build_url is not None:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.BUILD_URLS.name,
         generic_set.GenericSet([['build', build_url]]))
   if revision_timestamp is not None:
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.REVISION_TIMESTAMPS.name,
-        histogram_module.DateRange(revision_timestamp))
+        date_range.DateRange(revision_timestamp))
   return histograms
 
 
@@ -125,8 +126,12 @@ class AddHistogramsBaseTest(testing_common.TestCase):
     self.SetCurrentUser('foo@bar.com', is_admin=True)
     oauth_patcher = mock.patch.object(api_auth, 'oauth')
     self.addCleanup(oauth_patcher.stop)
-    mock_oauth = oauth_patcher.start()
-    SetGooglerOAuth(mock_oauth)
+    SetGooglerOAuth(oauth_patcher.start())
+
+    identity_patcher = mock.patch.object(utils, 'app_identity')
+    self.addCleanup(identity_patcher.stop)
+    self.mock_utils = identity_patcher.start()
+    self.mock_utils.get_application_id.return_value = 'chromeperf'
 
     patcher = mock.patch.object(add_histograms, 'cloudstorage')
     self.mock_cloudstorage = patcher.start()
@@ -711,15 +716,12 @@ class AddHistogramsTest(AddHistogramsBaseTest):
   def setUp(self):
     super(AddHistogramsTest, self).setUp()
 
-  def TaskParamsByGuid(self):
+  def TaskParams(self):
     tasks = self.GetTaskQueueTasks(add_histograms.TASK_QUEUE_NAME)
-    params_by_guid = {}
+    params = []
     for task in tasks:
-      params = base64.b64decode(task['body'])
-      histogram_dicts = json.loads(params)
-      for d in histogram_dicts:
-        params_by_guid[d['data']['guid']] = d
-    return params_by_guid
+      params.extend(json.loads(base64.b64decode(task['body'])))
+    return params
 
   @mock.patch.object(
       add_histograms, '_QueueHistogramTasks')
@@ -732,19 +734,19 @@ class AddHistogramsTest(AddHistogramsBaseTest):
 
     hists = [_MakeHistogram('hist_%d' % i) for i in xrange(100)]
     histograms = histogram_set.HistogramSet(hists)
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.MASTERS.name,
         generic_set.GenericSet(['master']))
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.BOTS.name,
         generic_set.GenericSet(['bot']))
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.CHROMIUM_COMMIT_POSITIONS.name,
         generic_set.GenericSet([12345]))
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.BENCHMARKS.name,
         generic_set.GenericSet(['benchmark']))
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.DEVICE_IDS.name,
         generic_set.GenericSet(['devie_foo']))
 
@@ -763,19 +765,19 @@ class AddHistogramsTest(AddHistogramsBaseTest):
 
     hists = [_MakeHistogram('hist_%d' % i) for i in xrange(50)]
     histograms = histogram_set.HistogramSet(hists)
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.MASTERS.name,
         generic_set.GenericSet(['master']))
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.BOTS.name,
         generic_set.GenericSet(['bot']))
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.CHROMIUM_COMMIT_POSITIONS.name,
         generic_set.GenericSet([12345]))
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.BENCHMARKS.name,
         generic_set.GenericSet(['benchmark']))
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.DEVICE_IDS.name,
         generic_set.GenericSet(['devie_foo']))
 
@@ -819,7 +821,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.BENCHMARKS.name:
                     '0bc1021b-8107-4db7-bc8c-49d7cf53c5ae',
             },
-            'guid': '4989617a-14d6-4f80-8f75-dafda2ff13b0',
             'name': 'foo',
             'unit': 'count'
         }, {
@@ -836,27 +837,19 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.STORIES.name:
                     'dc894bd9-0b73-4400-9d95-b21ee371031d',
             },
-            'guid': '2a714c36-f4ef-488d-8bee-93c7e3149388',
             'name': 'foo2',
             'unit': 'count'
         }
     ])
     self.PostAddHistogram({'data': data})
-    params_by_guid = self.TaskParamsByGuid()
+    params = self.TaskParams()
 
-    self.assertEqual(2, len(params_by_guid))
-    self.assertEqual(
-        'master/bot/benchmark/foo/story',
-        params_by_guid['4989617a-14d6-4f80-8f75-dafda2ff13b0']['test_path'])
-    self.assertEqual(
-        424242,
-        params_by_guid['4989617a-14d6-4f80-8f75-dafda2ff13b0']['revision'])
-    self.assertEqual(
-        'master/bot/benchmark/foo2/story',
-        params_by_guid['2a714c36-f4ef-488d-8bee-93c7e3149388']['test_path'])
-    self.assertEqual(
-        424242,
-        params_by_guid['2a714c36-f4ef-488d-8bee-93c7e3149388']['revision'])
+    self.assertEqual(2, len(params))
+    self.assertEqual(424242, params[0]['revision'])
+    self.assertEqual(424242, params[1]['revision'])
+    paths = set(p['test_path'] for p in params)
+    self.assertIn('master/bot/benchmark/foo/story', paths)
+    self.assertIn('master/bot/benchmark/foo2/story', paths)
 
   def testPostHistogramPassesHistogramLevelSparseDiagnostics(self):
     data = json.dumps([
@@ -892,7 +885,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.BENCHMARKS.name:
                     '876d0fba-1d12-4c00-a7e9-5fed467e19e3',
             },
-            'guid': '4989617a-14d6-4f80-8f75-dafda2ff13b0',
             'name': 'foo',
             'unit': 'count'
         }, {
@@ -909,23 +901,20 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.BENCHMARKS.name:
                     '876d0fba-1d12-4c00-a7e9-5fed467e19e3',
             },
-            'guid': '2a714c36-f4ef-488d-8bee-93c7e3149388',
             'name': 'foo2',
             'unit': 'count'
         }
     ])
     self.PostAddHistogram({'data': data})
-
-    params_by_guid = self.TaskParamsByGuid()
-    params = params_by_guid['2a714c36-f4ef-488d-8bee-93c7e3149388']
-    diagnostics = params['diagnostics']
-
-    self.assertEqual(1, len(diagnostics))
-    self.assertEqual(
-        ['test'], diagnostics[reserved_infos.DEVICE_IDS.name]['values'])
-    self.assertNotEqual(
-        '0bc1021b-8107-4db7-bc8c-49d7cf53c5ae',
-        diagnostics[reserved_infos.DEVICE_IDS.name]['guid'])
+    for params in self.TaskParams():
+      diagnostics = params['diagnostics']
+      if len(diagnostics) < 1:
+        continue
+      self.assertEqual(
+          ['test'], diagnostics[reserved_infos.DEVICE_IDS.name]['values'])
+      self.assertNotEqual(
+          '0bc1021b-8107-4db7-bc8c-49d7cf53c5ae',
+          diagnostics[reserved_infos.DEVICE_IDS.name]['guid'])
 
   def testPostHistogram_AddsNewSparseDiagnostic(self):
     diag_dict = {
@@ -966,15 +955,13 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.BENCHMARKS.name:
                     '0bc1021b-8107-4db7-bc8c-49d7cf53c5ae',
             },
-            'guid': '4989617a-14d6-4f80-8f75-dafda2ff13b0',
             'name': 'foo',
             'unit': 'count'}
     ])
     self.PostAddHistogram({'data': data})
 
     diagnostics = histogram.SparseDiagnostic.query().fetch()
-    params_by_guid = self.TaskParamsByGuid()
-    params = params_by_guid['4989617a-14d6-4f80-8f75-dafda2ff13b0']
+    params = self.TaskParams()[0]
     hist = params['data']
 
     self.assertEqual(4, len(diagnostics))
@@ -1022,7 +1009,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.BENCHMARKS.name:
                     '0bc1021b-8107-4db7-bc8c-49d7cf53c5ae',
             },
-            'guid': '4989617a-14d6-4f80-8f75-dafda2ff13b0',
             'name': 'foo',
             'unit': 'count'
         }
@@ -1030,9 +1016,7 @@ class AddHistogramsTest(AddHistogramsBaseTest):
     self.PostAddHistogram({'data': data})
 
     diagnostics = histogram.SparseDiagnostic.query().fetch()
-    params_by_guid = self.TaskParamsByGuid()
-    params = params_by_guid['4989617a-14d6-4f80-8f75-dafda2ff13b0']
-    hist = params['data']
+    hist = self.TaskParams()[0]['data']
 
     self.assertEqual(3, len(diagnostics))
     self.assertEqual(
@@ -1076,7 +1060,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.BENCHMARKS.name:
                     '0bc1021b-8107-4db7-bc8c-49d7cf53c5ae',
             },
-            'guid': '4989617a-14d6-4f80-8f75-dafda2ff13b0',
             'name': 'foo',
             'unit': 'count'
         }
@@ -1108,7 +1091,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.BENCHMARKS.name:
                     '0bc1021b-8107-4db7-bc8c-49d7cf53c5ae',
             },
-            'guid': '4989617a-14d6-4f80-8f75-dafda2ff13b0',
             'name': 'foo',
             'unit': 'count'}
     ])
@@ -1139,7 +1121,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.CHROMIUM_COMMIT_POSITIONS.name:
                     '25f0a111-9bb4-4cea-b0c1-af2609623160'
             },
-            'guid': '4989617a-14d6-4f80-8f75-dafda2ff13b0',
             'name': 'foo',
             'unit': 'count'
         }
@@ -1184,7 +1165,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.BENCHMARKS.name:
                     '0bc1021b-8107-4db7-bc8c-49d7cf53c5ae',
             },
-            'guid': '4989617a-14d6-4f80-8f75-dafda2ff13b0',
             'name': 'foo',
             'unit': 'count'}
         ])
@@ -1192,9 +1172,8 @@ class AddHistogramsTest(AddHistogramsBaseTest):
     self.PostAddHistogram({'data': data})
 
     diagnostics = histogram.SparseDiagnostic.query().fetch()
-    params_by_guid = self.TaskParamsByGuid()
 
-    params = params_by_guid['4989617a-14d6-4f80-8f75-dafda2ff13b0']
+    params = self.TaskParams()[0]
     hist = params['data']
     owners_info = hist['diagnostics'][reserved_infos.OWNERS.name]
     self.assertEqual(4, len(diagnostics))
@@ -1260,7 +1239,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.OWNERS.name:
                     'cabb59fe-4bcf-4512-881c-d038c7a80635'
             },
-            'guid': '4989617a-14d6-4f80-8f75-dafda2ff13b0',
             'name': 'foo',
             'unit': 'count'
         }, {
@@ -1277,7 +1255,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.BENCHMARKS.name:
                     '0bc1021b-8107-4db7-bc8c-49d7cf53c5ae',
             },
-            'guid': '5239617a-14d6-4f80-8f75-dafda2ff13b1',
             'name': 'bar',
             'unit': 'count'
         }])
@@ -1330,7 +1307,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.OWNERS.name:
                     'cabb59fe-4bcf-4512-881c-d038c7a80635'
             },
-            'guid': '4989617a-14d6-4f80-8f75-dafda2ff13b0',
             'name': 'foo',
             'unit': 'count'
         }, {
@@ -1347,7 +1323,6 @@ class AddHistogramsTest(AddHistogramsBaseTest):
                 reserved_infos.OWNERS.name:
                     '7c5bd92f-4146-411b-9192-248ffc1be92c'
             },
-            'guid': 'bda61ae3-0178-43f8-8aec-3ab78b9a2e18',
             'name': 'foo',
             'unit': 'count'
         }])
@@ -1357,8 +1332,9 @@ class AddHistogramsTest(AddHistogramsBaseTest):
   def testFindHistogramLevelSparseDiagnostics(self):
     hist = histogram_module.Histogram('hist', 'count')
     histograms = histogram_set.HistogramSet([hist])
-    histograms.AddSharedDiagnostic('foo', generic_set.GenericSet(['bar']))
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
+        'foo', generic_set.GenericSet(['bar']))
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.DEVICE_IDS.name,
         generic_set.GenericSet([]))
     diagnostics = add_histograms.FindHistogramLevelSparseDiagnostics(hist)
@@ -1392,7 +1368,7 @@ class AddHistogramsTest(AddHistogramsBaseTest):
     hist = histogram_module.Histogram('hist', 'count')
     histograms = histogram_set.HistogramSet([hist])
     chromium_commit = generic_set.GenericSet(['123'])
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.CHROMIUM_COMMIT_POSITIONS.name, chromium_commit)
     with self.assertRaises(api_request_handler.BadRequestError):
       add_histograms.ComputeRevision(histograms)
@@ -1401,7 +1377,7 @@ class AddHistogramsTest(AddHistogramsBaseTest):
     hist = histogram_module.Histogram('hist', 'count')
     histograms = histogram_set.HistogramSet([hist])
     chromium_commit = generic_set.GenericSet([424242, 0])
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.CHROMIUM_COMMIT_POSITIONS.name, chromium_commit)
     with self.assertRaises(api_request_handler.BadRequestError):
       add_histograms.ComputeRevision(histograms)
@@ -1435,7 +1411,7 @@ class AddHistogramsTest(AddHistogramsBaseTest):
   def testSparseDiagnosticsAreNotInlined(self):
     hist = histogram_module.Histogram('hist', 'count')
     histograms = histogram_set.HistogramSet([hist])
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.BENCHMARKS.name,
         generic_set.GenericSet(['benchmark']))
     add_histograms.InlineDenseSharedDiagnostics(histograms)
@@ -1445,10 +1421,10 @@ class AddHistogramsTest(AddHistogramsBaseTest):
   def testLogDebugInfo_Succeeds(self, mock_log):
     hist = histogram_module.Histogram('hist', 'count')
     histograms = histogram_set.HistogramSet([hist])
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.LOG_URLS.name,
         generic_set.GenericSet(['http://foo']))
-    histograms.AddSharedDiagnostic(
+    histograms.AddSharedDiagnosticToAllHistograms(
         reserved_infos.BUILD_URLS.name,
         generic_set.GenericSet(['http://bar']))
     add_histograms._LogDebugInfo(histograms)

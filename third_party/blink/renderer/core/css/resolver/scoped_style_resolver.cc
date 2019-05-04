@@ -81,6 +81,9 @@ void ScopedStyleResolver::AddFontFaceRules(const RuleSet& rule_set) {
   }
   if (font_face_rules.size() && document.GetStyleResolver())
     document.GetStyleResolver()->InvalidateMatchedPropertiesCache();
+
+  for (const auto& rule : rule_set.FontFeatureValuesRules())
+    document.GetStyleEngine().AddDefaultFontDisplay(rule);
 }
 
 void ScopedStyleResolver::AppendActiveStyleSheets(
@@ -114,8 +117,7 @@ void ScopedStyleResolver::CollectFeaturesTo(
       device_dependent_media_query_results_);
 
   for (auto sheet : author_style_sheets_) {
-    if (!RuntimeEnabledFeatures::ConstructableStylesheetsEnabled())
-      DCHECK(sheet->ownerNode());
+    DCHECK(sheet->ownerNode() || sheet->IsConstructed());
     StyleSheetContents* contents = sheet->Contents();
     if (contents->HasOneClient() ||
         visited_shared_style_sheet_contents.insert(contents).is_new_entry)
@@ -206,7 +208,7 @@ void ScopedStyleResolver::KeyframesRulesAdded(const TreeScope& tree_scope) {
     InvalidationRootForTreeScope(tree_scope)
         .SetNeedsStyleRecalc(kSubtreeStyleChange,
                              StyleChangeReasonForTracing::Create(
-                                 StyleChangeReason::kStyleSheetChange));
+                                 style_change_reason::kStyleSheetChange));
     return;
   }
 
@@ -219,8 +221,7 @@ void ScopedStyleResolver::CollectMatchingAuthorRules(
     ShadowV0CascadeOrder cascade_order) {
   wtf_size_t sheet_index = 0;
   for (auto sheet : author_style_sheets_) {
-    if (!RuntimeEnabledFeatures::ConstructableStylesheetsEnabled())
-      DCHECK(sheet->ownerNode());
+    DCHECK(sheet->ownerNode() || sheet->IsConstructed());
     MatchRequest match_request(&sheet->Contents()->GetRuleSet(),
                                &scope_->RootNode(), sheet, sheet_index++);
     collector.CollectMatchingRules(match_request, cascade_order);
@@ -232,8 +233,7 @@ void ScopedStyleResolver::CollectMatchingShadowHostRules(
     ShadowV0CascadeOrder cascade_order) {
   wtf_size_t sheet_index = 0;
   for (auto sheet : author_style_sheets_) {
-    if (!RuntimeEnabledFeatures::ConstructableStylesheetsEnabled())
-      DCHECK(sheet->ownerNode());
+    DCHECK(sheet->ownerNode() || sheet->IsConstructed());
     MatchRequest match_request(&sheet->Contents()->GetRuleSet(),
                                &scope_->RootNode(), sheet, sheet_index++);
     collector.CollectMatchingShadowHostRules(match_request, cascade_order);
@@ -274,8 +274,7 @@ void ScopedStyleResolver::CollectMatchingPartPseudoRules(
     return;
   wtf_size_t sheet_index = 0;
   for (auto sheet : author_style_sheets_) {
-    if (!RuntimeEnabledFeatures::ConstructableStylesheetsEnabled())
-      DCHECK(sheet->ownerNode());
+    DCHECK(sheet->ownerNode() || sheet->IsConstructed());
     MatchRequest match_request(&sheet->Contents()->GetRuleSet(),
                                &scope_->RootNode(), sheet, sheet_index++);
     collector.CollectMatchingPartPseudoRules(match_request, part_names,
@@ -326,7 +325,8 @@ void ScopedStyleResolver::AddTreeBoundaryCrossingRules(
     AddRules(rule_set_for_scope, author_rules.ContentPseudoElementRules());
 
   if (!tree_boundary_crossing_rule_set_) {
-    tree_boundary_crossing_rule_set_ = new CSSStyleSheetRuleSubSet();
+    tree_boundary_crossing_rule_set_ =
+        MakeGarbageCollected<CSSStyleSheetRuleSubSet>();
     GetTreeScope().GetDocument().GetStyleEngine().AddTreeBoundaryCrossingScope(
         GetTreeScope());
   }
@@ -341,7 +341,8 @@ void ScopedStyleResolver::V0ShadowAddedOnV1Document() {
     return;
 
   if (!tree_boundary_crossing_rule_set_) {
-    tree_boundary_crossing_rule_set_ = new CSSStyleSheetRuleSubSet();
+    tree_boundary_crossing_rule_set_ =
+        MakeGarbageCollected<CSSStyleSheetRuleSubSet>();
     GetTreeScope().GetDocument().GetStyleEngine().AddTreeBoundaryCrossingScope(
         GetTreeScope());
   }
@@ -369,7 +370,8 @@ void ScopedStyleResolver::AddSlottedRules(const RuleSet& author_rules,
   // rule sets. See V0ShadowAddedOnV1Document().
   if (GetTreeScope().GetDocument().MayContainV0Shadow()) {
     if (!tree_boundary_crossing_rule_set_) {
-      tree_boundary_crossing_rule_set_ = new CSSStyleSheetRuleSubSet();
+      tree_boundary_crossing_rule_set_ =
+          MakeGarbageCollected<CSSStyleSheetRuleSubSet>();
       GetTreeScope()
           .GetDocument()
           .GetStyleEngine()
@@ -380,7 +382,7 @@ void ScopedStyleResolver::AddSlottedRules(const RuleSet& author_rules,
     return;
   }
   if (!slotted_rule_set_)
-    slotted_rule_set_ = new CSSStyleSheetRuleSubSet();
+    slotted_rule_set_ = MakeGarbageCollected<CSSStyleSheetRuleSubSet>();
   slotted_rule_set_->push_back(
       RuleSubSet::Create(parent_style_sheet, sheet_index, slotted_rule_set));
 }

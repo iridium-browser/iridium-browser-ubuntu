@@ -11,11 +11,17 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/widget/widget.h"
 
+#if defined(OS_CHROMEOS)
+#include "ash/public/cpp/rounded_corner_decorator.h"
+#endif
+
 namespace views {
+class BackToTabImageButton;
 class ControlImageButton;
 class CloseImageButton;
+class PlaybackImageButton;
 class ResizeHandleButton;
-class ToggleImageButton;
+class SkipAdLabelButton;
 }  // namespace views
 
 // The Chrome desktop implementation of OverlayWindow. This will only be
@@ -42,6 +48,7 @@ class OverlayWindowViews : public content::OverlayWindow,
   void UpdateVideoSize(const gfx::Size& natural_size) override;
   void SetPlaybackState(PlaybackState playback_state) override;
   void SetAlwaysHidePlayPauseButton(bool is_visible) override;
+  void SetSkipAdButtonVisibility(bool is_visible) override;
   void SetPictureInPictureCustomControls(
       const std::vector<blink::PictureInPictureControlInfo>& controls) override;
   ui::Layer* GetWindowBackgroundLayer() override;
@@ -64,12 +71,25 @@ class OverlayWindowViews : public content::OverlayWindow,
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Gets the bounds of the controls.
+  gfx::Rect GetBackToTabControlsBounds();
+  gfx::Rect GetSkipAdControlsBounds();
   gfx::Rect GetCloseControlsBounds();
+  gfx::Rect GetResizeHandleControlsBounds();
   gfx::Rect GetPlayPauseControlsBounds();
   gfx::Rect GetFirstCustomControlsBounds();
   gfx::Rect GetSecondCustomControlsBounds();
 
-  views::ToggleImageButton* play_pause_controls_view_for_testing() const;
+  // Gets the proper hit test component when the hit point is on the resize
+  // handle in order to force a drag-to-resize.
+  int GetResizeHTComponent() const;
+
+  // Returns true if the controls (e.g. close button, play/pause button) are
+  // visible.
+  bool AreControlsVisible() const;
+
+  views::PlaybackImageButton* play_pause_controls_view_for_testing() const;
+  gfx::Point back_to_tab_image_position_for_testing() const;
+  views::SkipAdLabelButton* skip_ad_controls_view_for_testing() const;
   gfx::Point close_image_position_for_testing() const;
   gfx::Point resize_handle_position_for_testing() const;
   views::View* controls_parent_view_for_testing() const;
@@ -122,6 +142,8 @@ class OverlayWindowViews : public content::OverlayWindow,
   void SetSecondCustomControlsBounds();
 
   ui::Layer* GetControlsScrimLayer();
+  ui::Layer* GetBackToTabControlsLayer();
+  ui::Layer* GetSkipAdControlsLayer();
   ui::Layer* GetCloseControlsLayer();
   ui::Layer* GetResizeHandleLayer();
   ui::Layer* GetControlsParentLayer();
@@ -148,10 +170,6 @@ class OverlayWindowViews : public content::OverlayWindow,
   // case for media streams video that user is not allowed to play/pause.
   bool always_hide_play_pause_button_ = false;
 
-  // Current playback state on the video in Picture-in-Picture window. It is
-  // used to show/hide controls.
-  PlaybackState playback_state_ = kNoVideo;
-
   // The upper and lower bounds of |current_size_|. These are determined by the
   // size of the primary display work area when Picture-in-Picture is initiated.
   // TODO(apacible): Update these bounds when the display the window is on
@@ -177,16 +195,29 @@ class OverlayWindowViews : public content::OverlayWindow,
   std::unique_ptr<views::View> video_view_;
   std::unique_ptr<views::View> controls_scrim_view_;
   // |controls_parent_view_| is the parent view of all control views except
-  // the close view.
+  // the back-to-tab, close and skip-ad views.
   std::unique_ptr<views::View> controls_parent_view_;
+  std::unique_ptr<views::BackToTabImageButton> back_to_tab_controls_view_;
+  std::unique_ptr<views::SkipAdLabelButton> skip_ad_controls_view_;
   std::unique_ptr<views::CloseImageButton> close_controls_view_;
   std::unique_ptr<views::ResizeHandleButton> resize_handle_view_;
-  std::unique_ptr<views::ToggleImageButton> play_pause_controls_view_;
+  std::unique_ptr<views::PlaybackImageButton> play_pause_controls_view_;
   std::unique_ptr<views::ControlImageButton> first_custom_controls_view_;
   std::unique_ptr<views::ControlImageButton> second_custom_controls_view_;
+#if defined(OS_CHROMEOS)
+  std::unique_ptr<ash::RoundedCornerDecorator> decorator_;
+#endif
 
   // Automatically hides the controls a few seconds after user tap gesture.
   base::RetainingOneShotTimer hide_controls_timer_;
+
+  // Current playback state on the video in Picture-in-Picture window. It is
+  // used to toggle play/pause/replay button.
+  PlaybackState playback_state_for_testing_ = kEndOfVideo;
+
+  // Whether or not the skip ad button will be shown. This is the
+  // case when Media Session "skipad" action is handled by the website.
+  bool show_skip_ad_button_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(OverlayWindowViews);
 };

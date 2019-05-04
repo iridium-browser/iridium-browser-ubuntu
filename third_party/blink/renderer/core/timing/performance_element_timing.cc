@@ -14,7 +14,8 @@ PerformanceElementTiming* PerformanceElementTiming::Create(
     const AtomicString& name,
     const IntRect& intersection_rect,
     DOMHighResTimeStamp start_time) {
-  return new PerformanceElementTiming(name, intersection_rect, start_time);
+  return MakeGarbageCollected<PerformanceElementTiming>(name, intersection_rect,
+                                                        start_time);
 }
 
 PerformanceElementTiming::PerformanceElementTiming(
@@ -27,7 +28,7 @@ PerformanceElementTiming::PerformanceElementTiming(
 PerformanceElementTiming::~PerformanceElementTiming() = default;
 
 AtomicString PerformanceElementTiming::entryType() const {
-  return PerformanceEntryNames::element;
+  return performance_entry_names::kElement;
 }
 
 PerformanceEntryType PerformanceElementTiming::EntryTypeEnum() const {

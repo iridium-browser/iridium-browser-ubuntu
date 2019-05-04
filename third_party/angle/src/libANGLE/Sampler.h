@@ -19,7 +19,7 @@ namespace rx
 {
 class GLImplFactory;
 class SamplerImpl;
-}
+}  // namespace rx
 
 namespace gl
 {
@@ -32,7 +32,7 @@ class Sampler final : public RefCountObject, public LabeledObject, public angle:
 
     void onDestroy(const Context *context) override;
 
-    void setLabel(const std::string &label) override;
+    void setLabel(const Context *context, const std::string &label) override;
     const std::string &getLabel() const override;
 
     void setMinFilter(GLenum minFilter);
@@ -68,6 +68,9 @@ class Sampler final : public RefCountObject, public LabeledObject, public angle:
     void setSRGBDecode(GLenum sRGBDecode);
     GLenum getSRGBDecode() const;
 
+    void setBorderColor(const ColorGeneric &color);
+    const ColorGeneric &getBorderColor() const;
+
     const SamplerState &getSamplerState() const;
 
     rx::SamplerImpl *getImplementation() const;
@@ -83,4 +86,4 @@ class Sampler final : public RefCountObject, public LabeledObject, public angle:
 
 }  // namespace gl
 
-#endif // LIBANGLE_SAMPLER_H_
+#endif  // LIBANGLE_SAMPLER_H_

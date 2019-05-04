@@ -42,7 +42,6 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/common/bindings_policy.h"
-#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/url_constants.h"
@@ -50,6 +49,7 @@
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_utils.h"
+#include "content/test/navigation_simulator_impl.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
 #include "content/test/test_render_frame_host.h"
@@ -272,12 +272,6 @@ class WebContentsImplTest : public RenderViewHostImplTestHarness {
         ->media_web_contents_observer()
         ->has_audio_wake_lock_for_testing();
   }
-
-  bool has_video_wake_lock() {
-    return contents()
-        ->media_web_contents_observer()
-        ->has_video_wake_lock_for_testing();
-  }
 };
 
 class TestWebContentsObserver : public WebContentsObserver {
@@ -299,16 +293,25 @@ class TestWebContentsObserver : public WebContentsObserver {
     last_url_ = validated_url;
   }
 
+  void DidFirstVisuallyNonEmptyPaint() override {
+    observed_did_first_visually_non_empty_paint_ = true;
+    EXPECT_TRUE(web_contents()->CompletedFirstVisuallyNonEmptyPaint());
+  }
+
   void DidChangeThemeColor(SkColor theme_color) override {
     last_theme_color_ = theme_color;
   }
 
   const GURL& last_url() const { return last_url_; }
   SkColor last_theme_color() const { return last_theme_color_; }
+  bool observed_did_first_visually_non_empty_paint() const {
+    return observed_did_first_visually_non_empty_paint_;
+  }
 
  private:
   GURL last_url_;
   SkColor last_theme_color_;
+  bool observed_did_first_visually_non_empty_paint_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(TestWebContentsObserver);
 };
@@ -425,45 +428,22 @@ TEST_F(WebContentsImplTest, UseTitleFromPendingEntryIfSet) {
 
 // Browser initiated navigations to view-source URLs of WebUI pages should work.
 TEST_F(WebContentsImplTest, DirectNavigationToViewSourceWebUI) {
-  NavigationControllerImpl& cont =
-      static_cast<NavigationControllerImpl&>(controller());
-  const GURL kGURL("view-source:chrome://blah");
+  const GURL kGURL("view-source:chrome://blah/");
   // NavigationControllerImpl rewrites view-source URLs, simulating that here.
   const GURL kRewrittenURL("chrome://blah");
 
   process()->sink().ClearMessages();
 
-  // Use LoadURLWithParams instead of LoadURL, because the former properly
-  // rewrites view-source:chrome://blah URLs to chrome://blah.
-  NavigationController::LoadURLParams load_params(kGURL);
-  load_params.transition_type = ui::PAGE_TRANSITION_TYPED;
-  load_params.extra_headers = "content-type: text/plain";
-  load_params.load_type = NavigationController::LOAD_TYPE_DEFAULT;
-  load_params.is_renderer_initiated = false;
-  controller().LoadURLWithParams(load_params);
+  NavigationSimulator::NavigateAndCommitFromBrowser(contents(), kGURL);
 
-  NavigationRequest* request =
-      main_test_rfh()->frame_tree_node()->navigation_request();
-  CHECK(request);
-
-  int entry_id = cont.GetPendingEntry()->GetUniqueID();
   // Did we get the expected message?
   EXPECT_TRUE(process()->sink().GetFirstMessageMatching(
       FrameMsg_EnableViewSourceMode::ID));
 
-  FrameHostMsg_DidCommitProvisionalLoad_Params params;
-  InitNavigateParams(&params, entry_id, true, kRewrittenURL,
-                     ui::PAGE_TRANSITION_TYPED);
-  main_test_rfh()->PrepareForCommit();
-  main_test_rfh()->SimulateCommitProcessed(
-      request->navigation_handle()->GetNavigationId(),
-      true /* was_successful */);
-  main_test_rfh()->SendNavigateWithParams(&params,
-                                          false /* was_within_same_document */);
-
   // This is the virtual URL.
-  EXPECT_EQ(base::ASCIIToUTF16("view-source:chrome://blah"),
-            contents()->GetTitle());
+  EXPECT_EQ(
+      kGURL,
+      contents()->GetController().GetLastCommittedEntry()->GetVirtualURL());
 
   // The actual URL navigated to.
   EXPECT_EQ(kRewrittenURL,
@@ -597,10 +577,12 @@ TEST_F(WebContentsImplTest, CrossSiteBoundaries) {
 
   // DidNavigate from the back action.
   contents()->TestDidNavigateWithSequenceNumber(
-      goback_rfh, entry_id, false, url2, Referrer(), ui::PAGE_TRANSITION_TYPED,
+      goback_rfh, entry_id, false, url, Referrer(), ui::PAGE_TRANSITION_TYPED,
       false, 2, 0);
   EXPECT_FALSE(contents()->CrossProcessNavigationPending());
   EXPECT_EQ(goback_rfh, main_test_rfh());
+  EXPECT_EQ(url, contents()->GetLastCommittedURL());
+  EXPECT_EQ(url, contents()->GetVisibleURL());
   EXPECT_EQ(instance1, contents()->GetSiteInstance());
   // There should be a proxy for the pending RFH SiteInstance.
   EXPECT_TRUE(contents()->GetRenderManagerForTesting()->
@@ -1613,7 +1595,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialNoNewNavigationDontProceed) {
 TEST_F(WebContentsImplTest,
        ShowInterstitialFromBrowserNewNavigationProceed) {
   // Navigate to a page.
-  GURL url1("http://www.google.com");
+  GURL url1("http://www.thepage.com/one");
   NavigationSimulator::NavigateAndCommitFromBrowser(contents(), url1);
   EXPECT_EQ(1, controller().GetEntryCount());
 
@@ -1655,7 +1637,7 @@ TEST_F(WebContentsImplTest,
 
   // Simulate the navigation to the page, that's when the interstitial gets
   // hidden.
-  GURL url3("http://www.thepage.com");
+  GURL url3("http://www.thepage.com/two");
   main_test_rfh()->PrepareForCommit();
   main_test_rfh()->SendNavigate(0, true, url3);
 
@@ -2091,7 +2073,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialProceedMultipleCommands) {
 // Test showing an interstitial while another interstitial is already showing.
 TEST_F(WebContentsImplTest, ShowInterstitialOnInterstitial) {
   // Navigate to a page so we have a navigation entry in the controller.
-  GURL start_url("http://www.google.com");
+  GURL start_url("http://www.thepage.com/one");
   NavigationSimulator::NavigateAndCommitFromBrowser(contents(), start_url);
   EXPECT_EQ(1, controller().GetEntryCount());
 
@@ -2129,7 +2111,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialOnInterstitial) {
 
   // Let's make sure interstitial2 is working as intended.
   interstitial2->Proceed();
-  GURL landing_url("http://www.thepage.com");
+  GURL landing_url("http://www.thepage.com/two");
   main_test_rfh()->SendNavigate(0, true, landing_url);
 
   EXPECT_FALSE(contents()->ShowingInterstitialPage());
@@ -2146,7 +2128,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialOnInterstitial) {
 // interstitial.
 TEST_F(WebContentsImplTest, ShowInterstitialProceedShowInterstitial) {
   // Navigate to a page so we have a navigation entry in the controller.
-  GURL start_url("http://www.google.com");
+  GURL start_url("http://www.thepage.com/one");
   NavigationSimulator::NavigateAndCommitFromBrowser(contents(), start_url);
   EXPECT_EQ(1, controller().GetEntryCount());
 
@@ -2188,7 +2170,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialProceedShowInterstitial) {
 
   // Let's make sure interstitial2 is working as intended.
   interstitial2->Proceed();
-  GURL landing_url("http://www.thepage.com");
+  GURL landing_url("http://www.thepage.com/two");
   main_test_rfh()->SendNavigate(0, true, landing_url);
 
   RunAllPendingInMessageLoop();
@@ -2481,6 +2463,7 @@ TEST_F(WebContentsImplTest, FilterURLs) {
   // about:blank
   GURL url_normalized(url::kAboutBlankURL);
   GURL url_from_ipc("about:whatever");
+  GURL url_blocked(kBlockedURL);
 
   // We navigate the test WebContents to about:blank, since NavigateAndCommit
   // will use the given URL to create the NavigationEntry as well, and that
@@ -2490,7 +2473,7 @@ TEST_F(WebContentsImplTest, FilterURLs) {
   // Check that an IPC with about:whatever is correctly normalized.
   contents()->TestDidFinishLoad(url_from_ipc);
 
-  EXPECT_EQ(url_normalized, observer.last_url());
+  EXPECT_EQ(url_blocked, observer.last_url());
 
   // Create and navigate another WebContents.
   std::unique_ptr<TestWebContents> other_contents(
@@ -2500,7 +2483,7 @@ TEST_F(WebContentsImplTest, FilterURLs) {
 
   // Check that an IPC with about:whatever is correctly normalized.
   other_contents->TestDidFailLoadWithError(url_from_ipc, 1, base::string16());
-  EXPECT_EQ(url_normalized, other_observer.last_url());
+  EXPECT_EQ(url_blocked, other_observer.last_url());
 }
 
 // Test that if a pending contents is deleted before it is shown, we don't
@@ -3055,9 +3038,11 @@ TEST_F(WebContentsImplTestWithSiteIsolation, StartStopEventsBalance) {
   // RenderFrameHost to call into WebContents::DidStartLoading, which starts
   // the spinner.
   {
+    auto navigation =
+        NavigationSimulatorImpl::CreateBrowserInitiated(bar_url, contents());
     NavigationController::LoadURLParams load_params(bar_url);
-    load_params.referrer =
-        Referrer(GURL("http://referrer"), blink::kWebReferrerPolicyDefault);
+    load_params.referrer = Referrer(GURL("http://referrer"),
+                                    network::mojom::ReferrerPolicy::kDefault);
     load_params.transition_type = ui::PAGE_TRANSITION_GENERATED;
     load_params.extra_headers = "content-type: text/plain";
     load_params.load_type = NavigationController::LOAD_TYPE_DEFAULT;
@@ -3065,7 +3050,8 @@ TEST_F(WebContentsImplTestWithSiteIsolation, StartStopEventsBalance) {
     load_params.override_user_agent = NavigationController::UA_OVERRIDE_TRUE;
     load_params.frame_tree_node_id =
         subframe->frame_tree_node()->frame_tree_node_id();
-    controller().LoadURLWithParams(load_params);
+    navigation->SetLoadURLParams(&load_params);
+    navigation->Start();
     entry_id = controller().GetPendingEntry()->GetUniqueID();
 
     // Commit the navigation in the child frame and send the DidStopLoading
@@ -3197,16 +3183,8 @@ TEST_F(WebContentsImplTest, DISABLED_NoEarlyStop) {
 }
 
 TEST_F(WebContentsImplTest, MediaWakeLock) {
-  // Verify that both negative and positive player ids don't blow up.
-  const int kPlayerAudioVideoId = 15;
-  const int kPlayerAudioOnlyId = -15;
-  const int kPlayerVideoOnlyId = 30;
-  const int kPlayerRemoteId = -30;
-
   EXPECT_FALSE(has_audio_wake_lock());
-  EXPECT_FALSE(has_video_wake_lock());
 
-  TestRenderFrameHost* rfh = main_test_rfh();
   AudioStreamMonitor* monitor = contents()->audio_stream_monitor();
 
   // Ensure RenderFrame is initialized before simulating events coming from it.
@@ -3224,111 +3202,9 @@ TEST_F(WebContentsImplTest, MediaWakeLock) {
   contents()->NotifyNavigationStateChanged(INVALIDATE_TYPE_TAB);
   EXPECT_FALSE(has_audio_wake_lock());
 
-  // Start a player with both audio and video.  A video wake lock
-  // should be created.  If audio stream monitoring is available, an audio power
-  // save blocker should be created too.
-  rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnMediaPlaying(
-      0, kPlayerAudioVideoId, true, true, false,
-      media::MediaContentType::Persistent));
-  EXPECT_TRUE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Upon hiding the video wake lock should be released.
-  contents()->WasHidden();
-  EXPECT_FALSE(has_video_wake_lock());
-
-  // Start another player that only has video.  There should be no change in
-  // the wake locks.  The notification should take into account the
-  // visibility state of the WebContents.
-  rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnMediaPlaying(
-      0, kPlayerVideoOnlyId, true, false, false,
-      media::MediaContentType::Persistent));
-  EXPECT_FALSE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Showing the WebContents should result in the creation of the blocker.
-  contents()->WasShown();
-  EXPECT_TRUE(has_video_wake_lock());
-
-  // Start another player that only has audio.  There should be no change in
-  // the wake locks.
-  rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnMediaPlaying(
-      0, kPlayerAudioOnlyId, false, true, false,
-      media::MediaContentType::Persistent));
-  EXPECT_TRUE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Start a remote player. There should be no change in the power save
-  // blockers.
-  rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnMediaPlaying(
-      0, kPlayerRemoteId, true, true, true,
-      media::MediaContentType::Persistent));
-  EXPECT_TRUE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Destroy the original audio video player.  Both wake locks should
-  // remain.
-  rfh->OnMessageReceived(
-      MediaPlayerDelegateHostMsg_OnMediaPaused(0, kPlayerAudioVideoId, false));
-  EXPECT_TRUE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Destroy the audio only player.  The video wake lock should remain.
-  rfh->OnMessageReceived(
-      MediaPlayerDelegateHostMsg_OnMediaPaused(0, kPlayerAudioOnlyId, false));
-  EXPECT_TRUE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Destroy the video only player.  No wake locks should remain.
-  rfh->OnMessageReceived(
-      MediaPlayerDelegateHostMsg_OnMediaPaused(0, kPlayerVideoOnlyId, false));
-  EXPECT_FALSE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Destroy the remote player. No wake locks should remain.
-  rfh->OnMessageReceived(
-      MediaPlayerDelegateHostMsg_OnMediaPaused(0, kPlayerRemoteId, false));
-  EXPECT_FALSE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Start a player with both audio and video.  A video wake lock
-  // should be created.  If audio stream monitoring is available, an audio power
-  // save blocker should be created too.
-  rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnMediaPlaying(
-      0, kPlayerAudioVideoId, true, true, false,
-      media::MediaContentType::Persistent));
-  EXPECT_TRUE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  viz::SurfaceId surface_id =
-      viz::SurfaceId(viz::FrameSinkId(1, 1),
-                     viz::LocalSurfaceId(
-                         11, base::UnguessableToken::Deserialize(0x111111, 0)));
-
-  // Send the video in Picture-in-Picture mode, power blocker should still be
-  // on.
-  rfh->OnMessageReceived(
-      MediaPlayerDelegateHostMsg_OnPictureInPictureModeStarted(
-          0, kPlayerAudioVideoId, surface_id, gfx::Size(), 0, true));
-  EXPECT_TRUE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Hiding the window should keep the power blocker.
-  contents()->WasHidden();
-  EXPECT_TRUE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Leaving Picture-in-Picture should reset the power blocker.
-  rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnPictureInPictureModeEnded(
-      0, kPlayerAudioVideoId, 1 /* request_id */));
-  EXPECT_FALSE(has_video_wake_lock());
-  EXPECT_FALSE(has_audio_wake_lock());
-
-  // Crash the renderer.
   main_test_rfh()->GetProcess()->SimulateCrash();
 
   // Verify that all the wake locks have been released.
-  EXPECT_FALSE(has_video_wake_lock());
   EXPECT_FALSE(has_audio_wake_lock());
 }
 
@@ -3352,9 +3228,7 @@ TEST_F(WebContentsImplTest, ThemeColorChangeDependingOnFirstVisiblePaint) {
 
   // Simulate that the first visually non-empty paint has occurred. This will
   // propagate the current theme color to the delegates.
-  RenderViewHostTester::TestOnMessageReceived(
-      test_rvh(),
-      ViewHostMsg_DidFirstVisuallyNonEmptyPaint(test_rvh()->GetRoutingID()));
+  RenderViewHostTester::SimulateFirstPaint(test_rvh());
 
   EXPECT_EQ(SK_ColorRED, contents()->GetThemeColor());
   EXPECT_EQ(SK_ColorRED, observer.last_theme_color());
@@ -3371,8 +3245,10 @@ class PictureInPictureDelegate : public WebContentsDelegate {
  public:
   PictureInPictureDelegate() = default;
 
-  MOCK_METHOD2(EnterPictureInPicture,
-               gfx::Size(const viz::SurfaceId&, const gfx::Size&));
+  MOCK_METHOD3(EnterPictureInPicture,
+               gfx::Size(content::WebContents* web_contents,
+                         const viz::SurfaceId&,
+                         const gfx::Size&));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PictureInPictureDelegate);
@@ -3402,6 +3278,7 @@ class TestOverlayWindow : public OverlayWindow {
   void UpdateVideoSize(const gfx::Size& natural_size) override {}
   void SetPlaybackState(PlaybackState playback_state) override {}
   void SetAlwaysHidePlayPauseButton(bool is_visible) override {}
+  void SetSkipAdButtonVisibility(bool is_visible) override {}
   ui::Layer* GetWindowBackgroundLayer() override { return nullptr; }
   ui::Layer* GetVideoLayer() override { return nullptr; }
   gfx::Rect GetVideoBounds() override { return gfx::Rect(); }
@@ -3451,7 +3328,8 @@ TEST_F(WebContentsImplTest, EnterPictureInPicture) {
                      viz::LocalSurfaceId(
                          11, base::UnguessableToken::Deserialize(0x111111, 0)));
 
-  EXPECT_CALL(delegate, EnterPictureInPicture(surface_id, gfx::Size(42, 42)));
+  EXPECT_CALL(delegate,
+              EnterPictureInPicture(contents(), surface_id, gfx::Size(42, 42)));
 
   rfh->OnMessageReceived(
       MediaPlayerDelegateHostMsg_OnPictureInPictureModeStarted(
@@ -3583,6 +3461,15 @@ TEST_F(WebContentsImplTest, StartingSandboxFlags) {
   blink::WebSandboxFlags effective_flags =
       root->effective_frame_policy().sandbox_flags;
   EXPECT_EQ(effective_flags, expected_flags);
+}
+
+TEST_F(WebContentsImplTest, DidFirstVisuallyNonEmptyPaint) {
+  TestWebContentsObserver observer(contents());
+
+  RenderWidgetHostOwnerDelegate* rwhod = test_rvh();
+  rwhod->RenderWidgetDidFirstVisuallyNonEmptyPaint();
+
+  EXPECT_TRUE(observer.observed_did_first_visually_non_empty_paint());
 }
 
 }  // namespace content

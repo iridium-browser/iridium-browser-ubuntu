@@ -105,14 +105,8 @@ bool CrossesExtensionExtents(blink::WebLocalFrame* frame,
       return false;
   }
 
-  // Only consider keeping non-app URLs in an app process if this window
-  // has an opener (in which case it might be an OAuth popup that tries to
-  // script an iframe within the app).
-  bool should_consider_workaround = !!frame->Opener();
-
   return extensions::CrossesExtensionProcessBoundary(
-      *extension_registry->GetMainThreadExtensionSet(), old_url, new_url,
-      should_consider_workaround);
+      *extension_registry->GetMainThreadExtensionSet(), old_url, new_url);
 }
 
 }  // namespace
@@ -158,6 +152,7 @@ void ChromeExtensionsRendererClient::RenderThreadStarted() {
     extension_dispatcher_ = std::make_unique<extensions::Dispatcher>(
         std::make_unique<ChromeExtensionsDispatcherDelegate>());
   }
+  extension_dispatcher_->OnRenderThreadStarted(thread);
   permissions_policy_delegate_.reset(
       new extensions::RendererPermissionsPolicyDelegate(
           extension_dispatcher_.get()));
@@ -261,8 +256,6 @@ void ChromeExtensionsRendererClient::SetExtensionDispatcherForTest(
   permissions_policy_delegate_.reset(
       new extensions::RendererPermissionsPolicyDelegate(
           extension_dispatcher_.get()));
-  content::RenderThread::Get()->RegisterExtension(
-      extensions::SafeBuiltins::CreateV8Extension());
 }
 
 extensions::Dispatcher*

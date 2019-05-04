@@ -16,7 +16,6 @@
 #include "chrome/browser/vr/assets_load_status.h"
 #include "chrome/browser/vr/browser_ui_interface.h"
 #include "chrome/browser/vr/keyboard_ui_interface.h"
-#include "chrome/browser/vr/model/tab_model.h"
 #include "chrome/browser/vr/scheduler_ui_interface.h"
 #include "chrome/browser/vr/ui_element_renderer.h"
 #include "chrome/browser/vr/ui_initial_state.h"
@@ -76,6 +75,7 @@ class VR_UI_EXPORT Ui : public UiInterface,
   }
   bool GetElementVisibilityForTesting(
       UserFriendlyElementName element_name) override;
+  void SetUiInputManagerForTesting(bool enabled) override;
 
   void Dump(bool include_bindings);
   // TODO(crbug.com/767957): Refactor to hide these behind the UI interface.
@@ -90,7 +90,7 @@ class VR_UI_EXPORT Ui : public UiInterface,
   // BrowserUiInterface
   void SetWebVrMode(bool enabled) override;
   void SetFullscreen(bool enabled) override;
-  void SetToolbarState(const ToolbarState& state) override;
+  void SetLocationBarState(const LocationBarState& state) override;
   void SetIncognito(bool enabled) override;
   void SetLoading(bool loading) override;
   void SetLoadProgress(float progress) override;
@@ -102,6 +102,8 @@ class VR_UI_EXPORT Ui : public UiInterface,
   void ShowExitVrPrompt(UiUnsupportedMode reason) override;
   void SetSpeechRecognitionEnabled(bool enabled) override;
   void SetRecognitionResult(const base::string16& result) override;
+  void SetHasOrCanRequestRecordAudioPermission(
+      bool has_or_can_request_record_audio) override;
   void OnSpeechRecognitionStateChanged(int new_state) override;
   void SetOmniboxSuggestions(
       std::unique_ptr<OmniboxSuggestions> suggestions) override;
@@ -110,19 +112,18 @@ class VR_UI_EXPORT Ui : public UiInterface,
                       const base::Version& component_version) override;
   void OnAssetsUnavailable() override;
   void WaitForAssets() override;
+  void SetRegularTabsOpen(bool open) override;
+  void SetIncognitoTabsOpen(bool open) override;
   void SetOverlayTextureEmpty(bool empty) override;
   void ShowSoftInput(bool show) override;
   void UpdateWebInputIndices(int selection_start,
                              int selection_end,
                              int composition_start,
                              int composition_end) override;
-  void AddOrUpdateTab(int id,
-                      bool incognito,
-                      const base::string16& title) override;
-  void RemoveTab(int id, bool incognito) override;
-  void RemoveAllTabs() override;
   void PerformKeyboardInputForTesting(
       KeyboardTestInput keyboard_input) override;
+  void SetVisibleExternalPromptNotification(
+      ExternalPromptNotificationType prompt) override;
 
   // UiInterface
   base::WeakPtr<BrowserUiInterface> GetBrowserUiWeakPtr() override;
@@ -145,8 +146,9 @@ class VR_UI_EXPORT Ui : public UiInterface,
   void CancelPlatformToast() override;
 
   void OnPause() override;
-  void OnControllerUpdated(const ControllerModel& controller_model,
-                           const ReticleModel& reticle_model) override;
+  void OnControllersUpdated(
+      const std::vector<ControllerModel>& controller_models,
+      const ReticleModel& reticle_model) override;
   void OnProjMatrixChanged(const gfx::Transform& proj_matrix) override;
   void OnSwapContents(int new_content_id) override;
   void OnContentBoundsChanged(int width, int height) override;
@@ -207,7 +209,6 @@ class VR_UI_EXPORT Ui : public UiInterface,
   void InitializeModel(const UiInitialState& ui_initial_state);
   UiBrowserInterface* browser_;
   ContentElement* GetContentElement();
-  std::vector<TabModel>::iterator FindTab(int id, std::vector<TabModel>* tabs);
   FovRectangle GetMinimalFov(const gfx::Transform& view_matrix,
                              const std::vector<const UiElement*>& elements,
                              const FovRectangle& fov_recommended,
@@ -219,6 +220,7 @@ class VR_UI_EXPORT Ui : public UiInterface,
   std::unique_ptr<ContentInputDelegate> content_input_delegate_;
   std::unique_ptr<UiElementRenderer> ui_element_renderer_;
   std::unique_ptr<UiInputManager> input_manager_;
+  std::unique_ptr<UiInputManager> input_manager_for_testing_;
   std::unique_ptr<UiRenderer> ui_renderer_;
   std::unique_ptr<SkiaSurfaceProvider> provider_;
 

@@ -27,11 +27,6 @@
 - (void)webState:(web::WebState*)webState
     didPruneNavigationItemsWithCount:(size_t)pruned_item_count;
 
-// Invoked by WebStateObserverBridge::NavigationItemCommitted.
-- (void)webState:(web::WebState*)webState
-    didCommitNavigationWithDetails:
-        (const web::LoadCommittedDetails&)load_details;
-
 // Invoked by WebStateObserverBridge::DidStartNavigation.
 - (void)webState:(web::WebState*)webState
     didStartNavigation:(web::NavigationContext*)navigation;
@@ -55,9 +50,6 @@
 
 // Invoked by WebStateObserverBridge::DidChangeVisibleSecurityState.
 - (void)webStateDidChangeVisibleSecurityState:(web::WebState*)webState;
-
-// Invoked by WebStateObserverBridge::DidSuppressDialog.
-- (void)webStateDidSuppressDialog:(web::WebState*)webState;
 
 // Invoked by WebStateObserverBridge::FaviconUrlUpdated.
 - (void)webState:(web::WebState*)webState
@@ -102,9 +94,6 @@ class WebStateObserverBridge : public web::WebStateObserver {
   void WasHidden(web::WebState* web_state) override;
   void NavigationItemsPruned(web::WebState* web_state,
                              size_t pruned_item_count) override;
-  void NavigationItemCommitted(
-      web::WebState* web_state,
-      const LoadCommittedDetails& load_details) override;
   void DidStartNavigation(web::WebState* web_state,
                           NavigationContext* navigation_context) override;
   void DidFinishNavigation(web::WebState* web_state,
@@ -116,7 +105,6 @@ class WebStateObserverBridge : public web::WebStateObserver {
   void DidChangeBackForwardState(web::WebState* web_state) override;
   void TitleWasSet(web::WebState* web_state) override;
   void DidChangeVisibleSecurityState(web::WebState* web_state) override;
-  void DidSuppressDialog(web::WebState* web_state) override;
   void FaviconUrlUpdated(web::WebState* web_state,
                          const std::vector<FaviconURL>& candidates) override;
   void WebFrameDidBecomeAvailable(WebState* web_state,

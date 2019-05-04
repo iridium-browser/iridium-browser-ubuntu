@@ -36,6 +36,7 @@ class NetworkQualityTracker;
 namespace offline_pages {
 
 struct ClientId;
+class OfflinerClient;
 class OfflinerPolicy;
 class Offliner;
 class SavePageRequest;
@@ -62,6 +63,14 @@ class RequestCoordinator : public KeyedService,
     virtual void OnChanged(const SavePageRequest& request) = 0;
     virtual void OnNetworkProgress(const SavePageRequest& request,
                                    int64_t received_bytes) = 0;
+  };
+
+  class ActiveTabInfo {
+   public:
+    virtual ~ActiveTabInfo() {}
+    // Returns true if the active tab's URL matches |url|. If Chrome is in the
+    // background, this should return false.
+    virtual bool DoesActiveTabMatch(const GURL& url) = 0;
   };
 
   enum class RequestAvailability {
@@ -110,9 +119,6 @@ class RequestCoordinator : public KeyedService,
       std::vector<std::unique_ptr<SavePageRequest>>)>
       GetRequestsCallback;
 
-  // Callback for stopping the background offlining.
-  typedef base::OnceCallback<void(int64_t request_id)> CancelCallback;
-
   // Callback for SavePageLater calls.
   typedef base::OnceCallback<void(AddRequestResult)> SavePageLaterCallback;
 
@@ -121,7 +127,8 @@ class RequestCoordinator : public KeyedService,
                      std::unique_ptr<RequestQueue> queue,
                      std::unique_ptr<Scheduler> scheduler,
                      network::NetworkQualityTracker* network_quality_tracker,
-                     std::unique_ptr<OfflinePagesUkmReporter> ukm_reporter);
+                     std::unique_ptr<OfflinePagesUkmReporter> ukm_reporter,
+                     std::unique_ptr<ActiveTabInfo> active_tab_info);
 
   ~RequestCoordinator() override;
 
@@ -135,6 +142,13 @@ class RequestCoordinator : public KeyedService,
   void RemoveRequests(const std::vector<int64_t>& request_ids,
                       RemoveRequestsCallback callback);
 
+  // Invokes |remove_predicate| for all requests in the queue, and removes each
+  // request where |remove_predicate| returns true. Note: |remove_predicate| is
+  // called from a background thread.
+  void RemoveRequestsIf(const base::RepeatingCallback<
+                            bool(const SavePageRequest&)>& remove_predicate,
+                        RemoveRequestsCallback done_callback);
+
   // Pause a list of requests by |request_id|.  This will change the state
   // in the request queue so the request cannot be started.
   void PauseRequests(const std::vector<int64_t>& request_ids);
@@ -145,6 +159,12 @@ class RequestCoordinator : public KeyedService,
   // Get all save page request items in the callback.
   void GetAllRequests(GetRequestsCallback callback);
 
+  // Calls |RequestQueueStore::SetAutoFetchNotificationState|.
+  void SetAutoFetchNotificationState(
+      int64_t request_id,
+      SavePageRequest::AutoFetchNotificationState state,
+      base::OnceCallback<void(bool updated)> callback);
+
   // Starts processing of one or more queued save page later requests
   // in scheduled background mode.
   // Returns whether processing was started and that caller should expect
@@ -152,6 +172,9 @@ class RequestCoordinator : public KeyedService,
   bool StartScheduledProcessing(
       const DeviceConditions& device_conditions,
       const base::RepeatingCallback<void(bool)>& callback);
+
+  // Cancel previously scheduled processing of requests.
+  void CancelProcessing();
 
   // Attempts to starts processing of one or more queued save page later
   // requests (if device conditions are suitable) in immediate mode
@@ -165,12 +188,6 @@ class RequestCoordinator : public KeyedService,
   // returns false.
   bool StartImmediateProcessing(
       const base::RepeatingCallback<void(bool)>& callback);
-
-  // Stops the current request processing if active. This is a way for
-  // caller to abort processing; otherwise, processing will complete on
-  // its own. In either case, the callback will be called when processing
-  // is stopped or complete.
-  void StopProcessing(Offliner::RequestStatus stop_status);
 
   // Used to denote that the foreground thread is ready for the offliner
   // to start work on a previously entered, but unavailable request.
@@ -197,8 +214,6 @@ class RequestCoordinator : public KeyedService,
       const base::RepeatingCallback<void(bool)>& callback) {
     internal_start_processing_callback_ = callback;
   }
-
-  void StartImmediatelyForTest() { StartImmediatelyIfConnected(); }
 
   // Observers implementing the RequestCoordinator::Observer interface can
   // register here to get notifications of changes to request state.  This
@@ -227,17 +242,12 @@ class RequestCoordinator : public KeyedService,
 
   ClientPolicyController* GetPolicyController();
 
-  // Returns the status of the most recent offlining.
-  Offliner::RequestStatus last_offlining_status() {
-    return last_offlining_status_;
-  }
-
   // Return the state of the request coordinator.
   RequestCoordinatorState state() { return state_; }
 
   // Tracks whether the last offlining attempt got canceled.  This is reset by
   // the next call to start processing.
-  bool is_canceled() {
+  bool is_canceled() const {
     return processing_state_ == ProcessingWindowState::STOPPED;
   }
 
@@ -272,6 +282,11 @@ class RequestCoordinator : public KeyedService,
     IMMEDIATE_WINDOW,
   };
 
+  // Stops the current request processing if active. Whether or not a request is
+  // active, ScheduleOrTryNextRequest() will be called to resume processing
+  // eventually.
+  void StopProcessing(Offliner::RequestStatus stop_status);
+
   // Receives the results of a get from the request queue, and turns that into
   // SavePageRequest objects for the caller of GetQueuedRequests.
   void GetQueuedRequestsCallback(
@@ -303,16 +318,7 @@ class RequestCoordinator : public KeyedService,
   void HandleRemovedRequests(RequestNotifier::BackgroundSavePageResult status,
                              UpdateRequestsResult result);
 
-  // Handle updating of request status after cancel is called. Will call
-  // HandleCancelRecordResultCallback for UMA handling
-  void HandleCancelUpdateStatusCallback(
-      CancelCallback next_callback,
-      Offliner::RequestStatus stop_status,
-      const SavePageRequest& canceled_request);
-  void UpdateStatusForCancel(Offliner::RequestStatus stop_status);
-  void ResetActiveRequestCallback(int64_t offline_id);
-  void StartSchedulerCallback(int64_t offline_id);
-  void TryNextRequestCallback(int64_t offline_id);
+  void MarkDeferredAttemptCallback(UpdateRequestsResult result);
 
   bool StartProcessingInternal(
       const ProcessingWindowState processing_state,
@@ -348,7 +354,8 @@ class RequestCoordinator : public KeyedService,
   // The parameter is a signal for what (if any) conditions to schedule future
   // processing for.
   void RequestNotPicked(bool non_user_requested_tasks_remaining,
-                        bool cleanup_needed);
+                        bool cleanup_needed,
+                        base::Time available_time);
 
   // Callback from request picker that receives the current available queued
   // request count as well as the total queued request count (which may be
@@ -358,12 +365,6 @@ class RequestCoordinator : public KeyedService,
   void RequestCounts(bool is_start_of_processing,
                      size_t total_requests,
                      size_t available_requests);
-
-  void HandleWatchdogTimeout();
-
-  // Cancels an in progress offlining, and updates state appropriately.
-  void StopOfflining(CancelCallback callback,
-                     Offliner::RequestStatus stop_status);
 
   // Marks attempt on the request and sends it to offliner in continuation.
   void SendRequestToOffliner(const SavePageRequest& request);
@@ -384,25 +385,30 @@ class RequestCoordinator : public KeyedService,
   void OfflinerProgressCallback(const SavePageRequest& request,
                                 int64_t received_bytes);
 
-  // Records a completed attempt for the request and update it in the queue
-  // (possibly removing it).
-  void UpdateRequestForCompletedAttempt(const SavePageRequest& request,
-                                        Offliner::RequestStatus status);
+  // Records a completed or aborted attempt for the request and update it in
+  // the queue (possibly removing it).
+  void UpdateRequestForAttempt(const SavePageRequest& request,
+                               Offliner::RequestStatus status);
 
   // Returns whether we should try another request based on the outcome
   // of the previous one.
-  bool ShouldTryNextRequest(Offliner::RequestStatus previous_request_status);
+  bool ShouldTryNextRequest(
+      Offliner::RequestStatus previous_request_status) const;
 
   // Try to find and start offlining an available request.
   // |is_start_of_processing| identifies if this is the beginning of a
   // processing window (vs. continuing within a current processing window).
   void TryNextRequest(bool is_start_of_processing);
 
+  // Either schedules to resume processing, or resumes processing immediately.
+  // |previous_status| is the reason processing the previous request stopped.
+  void ScheduleOrTryNextRequest(Offliner::RequestStatus previous_status);
+
   // Cross the JNI Bridge and get the current device conditions from Android.
   void UpdateCurrentConditionsFromAndroid();
 
-  // If there is an active request in the list, cancel that request.
-  bool CancelActiveRequestIfItMatches(const std::vector<int64_t>& request_ids);
+  // If the active request is identified by |request_id|, cancel it.
+  bool CancelActiveRequestIfItMatches(int64_t request_id);
 
   // Records an aborted attempt for the request and update it in the queue
   // (possibly removing it).
@@ -439,6 +445,8 @@ class RequestCoordinator : public KeyedService,
   // Cached value of whether low end device. Overwritable for testing.
   bool is_low_end_device_;
 
+  // Access to |Offliner|, always non-null.
+  std::unique_ptr<OfflinerClient> offliner_client_;
   // Current state of the request coordinator.
   RequestCoordinatorState state_;
   // Identifies the type of current processing window or if processing stopped.
@@ -448,8 +456,6 @@ class RequestCoordinator : public KeyedService,
   bool use_test_device_conditions_;
   // For use by tests, a fake network connection type
   net::NetworkChangeNotifier::ConnectionType test_connection_type_;
-  // Owned pointer to the current offliner.
-  std::unique_ptr<Offliner> offliner_;
   base::Time operation_start_time_;
   // The observers.
   base::ObserverList<Observer>::Unchecked observers_;
@@ -471,7 +477,7 @@ class RequestCoordinator : public KeyedService,
   net::EffectiveConnectionType network_quality_at_request_start_;
   // Holds an ID of the currently active request.
   int64_t active_request_id_;
-  // Status of the most recent offlining.
+  // Status of the most recent offlining, retained for testing only.
   Offliner::RequestStatus last_offlining_status_;
   // A set of request_ids that we are holding off until the download manager is
   // done with them.
@@ -488,8 +494,6 @@ class RequestCoordinator : public KeyedService,
   base::RepeatingCallback<void(bool)> internal_start_processing_callback_;
   // Logger to record events.
   RequestCoordinatorEventLogger event_logger_;
-  // Timer to watch for pre-render attempts running too long.
-  base::OneShotTimer watchdog_timer_;
   // Used for potential immediate processing when we get network connection.
   std::unique_ptr<ConnectionNotifier> connection_notifier_;
   // Used to track prioritized requests.
@@ -503,6 +507,8 @@ class RequestCoordinator : public KeyedService,
   base::circular_deque<int64_t> prioritized_requests_;
   // Updates a request's PendingState.
   PendingStateUpdater pending_state_updater_;
+
+  std::unique_ptr<ActiveTabInfo> active_tab_info_;
   // Allows us to pass a weak pointer to callbacks.
   base::WeakPtrFactory<RequestCoordinator> weak_ptr_factory_;
 

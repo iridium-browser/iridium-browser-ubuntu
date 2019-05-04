@@ -108,20 +108,22 @@ class ScopedExit final : angle::NonCopyable
     std::function<void()> mExit;
 };
 
+using CompileImplFunctor = std::function<void(const std::string &)>;
 class CompileTask : public angle::Closure
 {
   public:
     CompileTask(ShHandle handle,
                 std::string &&sourcePath,
                 std::string &&source,
-                ShCompileOptions options)
+                ShCompileOptions options,
+                CompileImplFunctor &&functor)
         : mHandle(handle),
           mSourcePath(sourcePath),
           mSource(source),
           mOptions(options),
+          mCompileImplFunctor(functor),
           mResult(false)
-    {
-    }
+    {}
     void operator()() override
     {
         std::vector<const char *> srcStrings;
@@ -131,6 +133,10 @@ class CompileTask : public angle::Closure
         }
         srcStrings.push_back(mSource.c_str());
         mResult = sh::Compile(mHandle, &srcStrings[0], srcStrings.size(), mOptions);
+        if (mResult)
+        {
+            mCompileImplFunctor(sh::GetObjectCode(mHandle));
+        }
     }
     bool getResult() { return mResult; }
 
@@ -139,6 +145,7 @@ class CompileTask : public angle::Closure
     std::string mSourcePath;
     std::string mSource;
     ShCompileOptions mOptions;
+    CompileImplFunctor mCompileImplFunctor;
     bool mResult;
 };
 
@@ -153,9 +160,7 @@ ShaderState::ShaderState(ShaderType shaderType)
     mLocalSize.fill(-1);
 }
 
-ShaderState::~ShaderState()
-{
-}
+ShaderState::~ShaderState() {}
 
 Shader::Shader(ShaderProgramManager *manager,
                rx::GLImplFactory *implFactory,
@@ -189,7 +194,7 @@ Shader::~Shader()
     ASSERT(!mImplementation);
 }
 
-void Shader::setLabel(const std::string &label)
+void Shader::setLabel(const Context *context, const std::string &label)
 {
     mState.mLabel = label;
 }
@@ -359,7 +364,7 @@ void Shader::compile(const Context *context)
     std::string sourcePath;
     ShCompileOptions options =
         mImplementation->prepareSourceAndReturnOptions(context, &sourceStream, &sourcePath);
-    options |= (SH_OBJECT_CODE | SH_VARIABLES);
+    options |= (SH_OBJECT_CODE | SH_VARIABLES | SH_EMULATE_GL_DRAW_ID);
     auto source = sourceStream.str();
 
     // Add default options to WebGL shaders to prevent unexpected behavior during compilation.
@@ -369,6 +374,7 @@ void Shader::compile(const Context *context)
         options |= SH_LIMIT_CALL_STACK_DEPTH;
         options |= SH_LIMIT_EXPRESSION_COMPLEXITY;
         options |= SH_ENFORCE_PACKING_RESTRICTIONS;
+        options |= SH_INIT_SHARED_VARIABLES;
     }
 
     // Some targets (eg D3D11 Feature Level 9_3 and below) do not support non-constant loop indexes
@@ -387,9 +393,21 @@ void Shader::compile(const Context *context)
     ASSERT(compilerHandle);
     mCompilerResourcesString = mShCompilerInstance.getBuiltinResourcesString();
 
-    mCompileTask  = std::make_shared<CompileTask>(compilerHandle, std::move(sourcePath),
-                                                 std::move(source), options);
     mWorkerPool   = context->getWorkerThreadPool();
+    std::function<void(const std::string &)> compileImplFunctor;
+    if (mWorkerPool->isAsync())
+    {
+        compileImplFunctor = [this](const std::string &source) {
+            mImplementation->compileAsync(source);
+        };
+    }
+    else
+    {
+        compileImplFunctor = [](const std::string &source) {};
+    }
+    mCompileTask =
+        std::make_shared<CompileTask>(compilerHandle, std::move(sourcePath), std::move(source),
+                                      options, std::move(compileImplFunctor));
     mCompileEvent = mWorkerPool->postWorkerTask(mCompileTask);
 }
 

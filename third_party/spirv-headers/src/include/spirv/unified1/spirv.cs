@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2018 The Khronos Group Inc.
+// Copyright (c) 2014-2019 The Khronos Group Inc.
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and/or associated documentation files (the "Materials"),
@@ -26,14 +26,16 @@
 // the Binary Section of the SPIR-V specification.
 
 // Enumeration tokens for SPIR-V, in various styles:
-//   C, C++, C++11, JSON, Lua, Python, C#
+//   C, C++, C++11, JSON, Lua, Python, C#, D
 // 
 // - C will have tokens with a "Spv" prefix, e.g.: SpvSourceLanguageGLSL
 // - C++ will have tokens in the "spv" name space, e.g.: spv::SourceLanguageGLSL
 // - C++11 will use enum classes in the spv namespace, e.g.: spv::SourceLanguage::GLSL
 // - Lua will use tables, e.g.: spv.SourceLanguage.GLSL
 // - Python will use dictionaries, e.g.: spv['SourceLanguage']['GLSL']
-// - C# will use enum classes in the Specification class located in the "Spv" namespace, e.g.: Spv.Specification.SourceLanguage.GLSL
+// - C# will use enum classes in the Specification class located in the "Spv" namespace,
+//     e.g.: Spv.Specification.SourceLanguage.GLSL
+// - D will have tokens under the "spv" module, e.g: spv.SourceLanguage.GLSL
 // 
 // Some tokens act like mask values, which can be OR'd together,
 // while others are mutually exclusive.  The mask-like ones have
@@ -47,7 +49,7 @@ namespace Spv
     {
         public const uint MagicNumber = 0x07230203;
         public const uint Version = 0x00010300;
-        public const uint Revision = 1;
+        public const uint Revision = 6;
         public const uint OpCodeMask = 0xffff;
         public const uint WordCountShift = 16;
 
@@ -72,12 +74,12 @@ namespace Spv
             Kernel = 6,
             TaskNV = 5267,
             MeshNV = 5268,
-            RayGenerationNVX = 5313,
-            IntersectionNVX = 5314,
-            AnyHitNVX = 5315,
-            ClosestHitNVX = 5316,
-            MissNVX = 5317,
-            CallableNVX = 5318,
+            RayGenerationNV = 5313,
+            IntersectionNV = 5314,
+            AnyHitNV = 5315,
+            ClosestHitNV = 5316,
+            MissNV = 5317,
+            CallableNV = 5318,
         }
 
         public enum AddressingModel
@@ -85,6 +87,7 @@ namespace Spv
             Logical = 0,
             Physical32 = 1,
             Physical64 = 2,
+            PhysicalStorageBuffer64EXT = 5348,
         }
 
         public enum MemoryModel
@@ -136,6 +139,11 @@ namespace Spv
             LocalSizeId = 38,
             LocalSizeHintId = 39,
             PostDepthCoverage = 4446,
+            DenormPreserve = 4459,
+            DenormFlushToZero = 4460,
+            SignedZeroInfNanPreserve = 4461,
+            RoundingModeRTE = 4462,
+            RoundingModeRTZ = 4463,
             StencilRefReplacingEXT = 5027,
             OutputLinesNV = 5269,
             OutputPrimitivesNV = 5270,
@@ -159,10 +167,13 @@ namespace Spv
             AtomicCounter = 10,
             Image = 11,
             StorageBuffer = 12,
-            RayPayloadNVX = 5338,
-            HitAttributeNVX = 5339,
-            IncomingRayPayloadNVX = 5342,
-            ShaderRecordBufferNVX = 5343,
+            CallableDataNV = 5328,
+            IncomingCallableDataNV = 5329,
+            RayPayloadNV = 5338,
+            HitAttributeNV = 5339,
+            IncomingRayPayloadNV = 5342,
+            ShaderRecordBufferNV = 5343,
+            PhysicalStorageBufferEXT = 5349,
         }
 
         public enum Dim
@@ -413,6 +424,8 @@ namespace Spv
             MaxByteOffset = 45,
             AlignmentId = 46,
             MaxByteOffsetId = 47,
+            NoSignedWrap = 4469,
+            NoUnsignedWrap = 4470,
             ExplicitInterpAMD = 4999,
             OverrideCoverageNV = 5248,
             PassthroughNV = 5250,
@@ -423,6 +436,8 @@ namespace Spv
             PerTaskNV = 5273,
             PerVertexNV = 5285,
             NonUniformEXT = 5300,
+            RestrictPointerEXT = 5355,
+            AliasedPointerEXT = 5356,
             HlslCounterBufferGOOGLE = 5634,
             HlslSemanticGOOGLE = 5635,
         }
@@ -509,21 +524,24 @@ namespace Spv
             MeshViewIndicesNV = 5281,
             BaryCoordNV = 5286,
             BaryCoordNoPerspNV = 5287,
+            FragSizeEXT = 5292,
             FragmentSizeNV = 5292,
+            FragInvocationCountEXT = 5293,
             InvocationsPerPixelNV = 5293,
-            LaunchIdNVX = 5319,
-            LaunchSizeNVX = 5320,
-            WorldRayOriginNVX = 5321,
-            WorldRayDirectionNVX = 5322,
-            ObjectRayOriginNVX = 5323,
-            ObjectRayDirectionNVX = 5324,
-            RayTminNVX = 5325,
-            RayTmaxNVX = 5326,
-            InstanceCustomIndexNVX = 5327,
-            ObjectToWorldNVX = 5330,
-            WorldToObjectNVX = 5331,
-            HitTNVX = 5332,
-            HitKindNVX = 5333,
+            LaunchIdNV = 5319,
+            LaunchSizeNV = 5320,
+            WorldRayOriginNV = 5321,
+            WorldRayDirectionNV = 5322,
+            ObjectRayOriginNV = 5323,
+            ObjectRayDirectionNV = 5324,
+            RayTminNV = 5325,
+            RayTmaxNV = 5326,
+            InstanceCustomIndexNV = 5327,
+            ObjectToWorldNV = 5330,
+            WorldToObjectNV = 5331,
+            HitTNV = 5332,
+            HitKindNV = 5333,
+            IncomingRayFlagsNV = 5351,
         }
 
         public enum SelectionControlShift
@@ -755,6 +773,11 @@ namespace Spv
             StorageBuffer8BitAccess = 4448,
             UniformAndStorageBuffer8BitAccess = 4449,
             StoragePushConstant8 = 4450,
+            DenormPreserve = 4464,
+            DenormFlushToZero = 4465,
+            SignedZeroInfNanPreserve = 4466,
+            RoundingModeRTE = 4467,
+            RoundingModeRTZ = 4468,
             Float16ImageAMD = 5008,
             ImageGatherBiasLodAMD = 5009,
             FragmentMaskAMD = 5010,
@@ -772,6 +795,7 @@ namespace Spv
             ImageFootprintNV = 5282,
             FragmentBarycentricNV = 5284,
             ComputeDerivativeGroupQuadsNV = 5288,
+            FragmentDensityEXT = 5291,
             ShadingRateNV = 5291,
             GroupNonUniformPartitionedNV = 5297,
             ShaderNonUniformEXT = 5301,
@@ -786,13 +810,15 @@ namespace Spv
             InputAttachmentArrayNonUniformIndexingEXT = 5310,
             UniformTexelBufferArrayNonUniformIndexingEXT = 5311,
             StorageTexelBufferArrayNonUniformIndexingEXT = 5312,
-            RaytracingNVX = 5340,
+            RayTracingNV = 5340,
             VulkanMemoryModelKHR = 5345,
             VulkanMemoryModelDeviceScopeKHR = 5346,
+            PhysicalStorageBufferAddressesEXT = 5347,
             ComputeDerivativeGroupLinearNV = 5350,
             SubgroupShuffleINTEL = 5568,
             SubgroupBufferBlockIOINTEL = 5569,
             SubgroupImageBlockIOINTEL = 5570,
+            SubgroupImageMediaBlockIOINTEL = 5579,
         }
 
         public enum Op
@@ -1156,11 +1182,12 @@ namespace Spv
             OpImageSampleFootprintNV = 5283,
             OpGroupNonUniformPartitionNV = 5296,
             OpWritePackedPrimitiveIndices4x8NV = 5299,
-            OpReportIntersectionNVX = 5334,
-            OpIgnoreIntersectionNVX = 5335,
-            OpTerminateRayNVX = 5336,
-            OpTraceNVX = 5337,
-            OpTypeAccelerationStructureNVX = 5341,
+            OpReportIntersectionNV = 5334,
+            OpIgnoreIntersectionNV = 5335,
+            OpTerminateRayNV = 5336,
+            OpTraceNV = 5337,
+            OpTypeAccelerationStructureNV = 5341,
+            OpExecuteCallableNV = 5344,
             OpSubgroupShuffleINTEL = 5571,
             OpSubgroupShuffleDownINTEL = 5572,
             OpSubgroupShuffleUpINTEL = 5573,
@@ -1169,6 +1196,8 @@ namespace Spv
             OpSubgroupBlockWriteINTEL = 5576,
             OpSubgroupImageBlockReadINTEL = 5577,
             OpSubgroupImageBlockWriteINTEL = 5578,
+            OpSubgroupImageMediaBlockReadINTEL = 5580,
+            OpSubgroupImageMediaBlockWriteINTEL = 5581,
             OpDecorateStringGOOGLE = 5632,
             OpMemberDecorateStringGOOGLE = 5633,
         }

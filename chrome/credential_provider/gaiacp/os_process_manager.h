@@ -15,9 +15,10 @@ namespace base {
 class CommandLine;
 
 namespace win {
-class ScopedProcessInformation;
-}  // namespace win
 
+class ScopedProcessInformation;
+
+}  // namespace win
 }  // namespace base
 
 namespace credential_provider {
@@ -28,11 +29,6 @@ class OSProcessManager {
   static OSProcessManager* Get();
 
   virtual ~OSProcessManager();
-
-  // Creates a batch type logon token for the given user.
-  virtual HRESULT CreateLogonToken(const wchar_t* username,
-                                   const wchar_t* password,
-                                   base::win::ScopedHandle* token);
 
   // Gets the logon SID from the specified logon token.  The call must release
   // the returned |sid| by calling LocalFree().
@@ -50,6 +46,16 @@ class OSProcessManager {
       const base::CommandLine& command_line,
       _STARTUPINFOW* startupinfo,
       base::win::ScopedProcessInformation* procinfo);
+
+  // Creates a running process using the same security context as the caller.
+  virtual HRESULT CreateRunningProcess(
+      const base::CommandLine& command_line,
+      _STARTUPINFOW* startupinfo,
+      base::win::ScopedProcessInformation* procinfo);
+
+  // This method is called from dllmain.cc when setting fakes from one module
+  // to another.
+  static void SetInstanceForTesting(OSProcessManager* instance);
 
  protected:
   OSProcessManager() {}

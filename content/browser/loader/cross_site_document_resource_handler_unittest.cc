@@ -1057,6 +1057,38 @@ const TestScenario kScenarios[] = {
         0,                                          // verdict_packet
     },
     {
+        "Allowed: Javascript 206",
+        __LINE__,
+        "http://www.b.com/script.js",           // target_url
+        RESOURCE_TYPE_SCRIPT,                   // resource_type
+        "http://www.a.com/",                    // initiator_origin
+        OriginHeader::kOmit,                    // cors_request
+        "application/javascript",               // response_content_type
+        MimeType::kOthers,                      // canonical_mime_type
+        false,                                  // include_no_sniff_header
+        true,                                   // simulate_range_response
+        AccessControlAllowOriginHeader::kOmit,  // cors_response
+        {"x = 1;"},                             // packets
+        Verdict::kAllow,                        // verdict
+        -1,                                     // verdict_packet
+    },
+    {
+        "Allowed: text/html 206 media with CORS",
+        __LINE__,
+        "http://www.b.com/movie.html",  // target_url
+        RESOURCE_TYPE_MEDIA,            // resource_type
+        "http://www.a.com/",            // initiator_origin
+        OriginHeader::kInclude,         // cors_request
+        "text/html",                    // response_content_type
+        MimeType::kInvalidMimeType,     // canonical_mime_type
+        false,                          // include_no_sniff_header
+        true,                           // simulate_range_response
+        AccessControlAllowOriginHeader::kAllowInitiatorOrigin,  // cors_response
+        {"simulated *middle*-of-html content"},                 // packets
+        Verdict::kAllow,                                        // verdict
+        -1,  // verdict_packet
+    },
+    {
         "Allowed: text/plain 206 media",
         __LINE__,
         "http://www.b.com/movie.txt",           // target_url
@@ -1171,11 +1203,11 @@ class CrossSiteDocumentResourceHandlerTest
     stream_sink_ = stream_sink->GetWeakPtr();
 
     // Create the CrossSiteDocumentResourceHandler.
-    bool is_nocors_plugin_request =
-        resource_type == RESOURCE_TYPE_PLUGIN_RESOURCE &&
-        cors_request == OriginHeader::kOmit;
+    auto fetch_request_mode = cors_request == OriginHeader::kOmit
+                                  ? network::mojom::FetchRequestMode::kNoCors
+                                  : network::mojom::FetchRequestMode::kCors;
     auto document_blocker = std::make_unique<CrossSiteDocumentResourceHandler>(
-        std::move(stream_sink), request_.get(), is_nocors_plugin_request);
+        std::move(stream_sink), request_.get(), fetch_request_mode);
     document_blocker_ = document_blocker.get();
     first_handler_ = std::move(document_blocker);
 

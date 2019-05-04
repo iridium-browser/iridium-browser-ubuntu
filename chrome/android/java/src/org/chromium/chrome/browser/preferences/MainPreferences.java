@@ -19,7 +19,10 @@ import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.contextual_suggestions.ContextualSuggestionsEnabledStateUtils;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
-import org.chromium.chrome.browser.preferences.datareduction.DataReductionPreferences;
+import org.chromium.chrome.browser.password_manager.ManagePasswordsReferrer;
+import org.chromium.chrome.browser.preferences.autofill_assistant.AutofillAssistantPreferences;
+import org.chromium.chrome.browser.preferences.datareduction.DataReductionPreferenceFragment;
+import org.chromium.chrome.browser.preferences.developer.DeveloperPreferences;
 import org.chromium.chrome.browser.search_engines.TemplateUrl;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.signin.SigninManager;
@@ -44,6 +47,8 @@ public class MainPreferences extends PreferenceFragment
     public static final String PREF_NOTIFICATIONS = "notifications";
     public static final String PREF_LANGUAGES = "languages";
     public static final String PREF_DOWNLOADS = "downloads";
+    public static final String PREF_DEVELOPER = "developer";
+    public static final String PREF_AUTOFILL_ASSISTANT = "autofill_assistant";
 
     public static final String AUTOFILL_GUID = "guid";
     // Needs to be in sync with kSettingsOrigin[] in
@@ -106,8 +111,9 @@ public class MainPreferences extends PreferenceFragment
             getPreferenceScreen().removePreference(findPreference(PREF_SYNC_AND_SERVICES));
         }
 
+        updatePasswordsPreference();
+
         setManagedPreferenceDelegateForPreference(PREF_SEARCH_ENGINE);
-        setManagedPreferenceDelegateForPreference(PREF_SAVED_PASSWORDS);
         setManagedPreferenceDelegateForPreference(PREF_DATA_REDUCTION);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -151,6 +157,14 @@ public class MainPreferences extends PreferenceFragment
         // This checks whether the flag for Downloads Preferences is enabled.
         if (!ChromeFeatureList.isEnabled(ChromeFeatureList.DOWNLOADS_LOCATION_CHANGE)) {
             getPreferenceScreen().removePreference(findPreference(PREF_DOWNLOADS));
+        }
+
+        // This checks whether Autofill Assistant is enabled and was shown at least once (only then
+        // will the AA switch be assigned a value).
+        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_ASSISTANT)
+                || !ContextUtils.getAppSharedPreferences().contains(
+                        AutofillAssistantPreferences.PREF_AUTOFILL_ASSISTANT_SWITCH)) {
+            getPreferenceScreen().removePreference(findPreference(PREF_AUTOFILL_ASSISTANT));
         }
     }
 
@@ -201,9 +215,15 @@ public class MainPreferences extends PreferenceFragment
             removePreferenceIfPresent(PREF_CONTEXTUAL_SUGGESTIONS);
         }
 
+        if (DeveloperPreferences.shouldShowDeveloperPreferences()) {
+            addPreferenceIfAbsent(PREF_DEVELOPER);
+        } else {
+            removePreferenceIfPresent(PREF_DEVELOPER);
+        }
+
         ChromeBasePreference dataReduction =
                 (ChromeBasePreference) findPreference(PREF_DATA_REDUCTION);
-        dataReduction.setSummary(DataReductionPreferences.generateSummary(getResources()));
+        dataReduction.setSummary(DataReductionPreferenceFragment.generateSummary(getResources()));
     }
 
     private Preference addPreferenceIfAbsent(String key) {
@@ -233,6 +253,15 @@ public class MainPreferences extends PreferenceFragment
         Preference searchEnginePreference = findPreference(PREF_SEARCH_ENGINE);
         searchEnginePreference.setEnabled(true);
         searchEnginePreference.setSummary(defaultSearchEngineName);
+    }
+
+    private void updatePasswordsPreference() {
+        Preference passwordsPreference = findPreference(PREF_SAVED_PASSWORDS);
+        passwordsPreference.setOnPreferenceClickListener(preference -> {
+            PreferencesLauncher.showPasswordSettings(
+                    getActivity(), ManagePasswordsReferrer.CHROME_SETTINGS);
+            return true;
+        });
     }
 
     private void setOnOffSummary(Preference pref, boolean isOn) {
@@ -277,9 +306,6 @@ public class MainPreferences extends PreferenceFragment
         return new ManagedPreferenceDelegate() {
             @Override
             public boolean isPreferenceControlledByPolicy(Preference preference) {
-                if (PREF_SAVED_PASSWORDS.equals(preference.getKey())) {
-                    return PrefServiceBridge.getInstance().isRememberPasswordsManaged();
-                }
                 if (PREF_DATA_REDUCTION.equals(preference.getKey())) {
                     return DataReductionProxySettings.getInstance().isDataReductionProxyManaged();
                 }
@@ -291,11 +317,6 @@ public class MainPreferences extends PreferenceFragment
 
             @Override
             public boolean isPreferenceClickDisabledByPolicy(Preference preference) {
-                if (PREF_SAVED_PASSWORDS.equals(preference.getKey())) {
-                    PrefServiceBridge prefs = PrefServiceBridge.getInstance();
-                    return prefs.isRememberPasswordsManaged()
-                            && !prefs.isRememberPasswordsEnabled();
-                }
                 if (PREF_DATA_REDUCTION.equals(preference.getKey())) {
                     DataReductionProxySettings settings = DataReductionProxySettings.getInstance();
                     return settings.isDataReductionProxyManaged()

@@ -14,11 +14,11 @@
 #include "components/ukm/ukm_service.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/metrics/ios_chrome_metrics_service_accessor.h"
+#import "ios/chrome/browser/ui/authentication/cells/signin_promo_view.h"
 #import "ios/chrome/browser/ui/authentication/signin_earl_grey_ui.h"
 #import "ios/chrome/browser/ui/authentication/signin_earlgrey_utils.h"
-#import "ios/chrome/browser/ui/authentication/signin_promo_view.h"
 #import "ios/chrome/browser/ui/tab_grid/tab_grid_egtest_util.h"
-#include "ios/chrome/browser/ui/ui_util.h"
+#include "ios/chrome/browser/ui/util/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/app/sync_test_util.h"
@@ -48,7 +48,7 @@ using chrome_test_util::SettingsAccountButton;
 using chrome_test_util::SettingsDoneButton;
 using chrome_test_util::SettingsMenuPrivacyButton;
 using chrome_test_util::SignOutAccountsButton;
-using chrome_test_util::SyncSwitchCell;
+using chrome_test_util::LegacySyncSwitchCell;
 using chrome_test_util::TurnSyncSwitchOn;
 
 namespace metrics {
@@ -144,19 +144,19 @@ void ClearBrowsingData() {
 
 void OpenNewIncognitoTab() {
   NSUInteger incognito_tab_count = GetIncognitoTabCount();
-  chrome_test_util::OpenNewIncognitoTab();
+  [ChromeEarlGrey openNewIncognitoTab];
   [ChromeEarlGrey waitForIncognitoTabCount:(incognito_tab_count + 1)];
   GREYAssert(IsIncognitoMode(), @"Failed to switch to incognito mode.");
 }
 
 void CloseCurrentIncognitoTab() {
   NSUInteger incognito_tab_count = GetIncognitoTabCount();
-  chrome_test_util::CloseCurrentTab();
+  [ChromeEarlGrey closeCurrentTab];
   [ChromeEarlGrey waitForIncognitoTabCount:(incognito_tab_count - 1)];
 }
 
 void CloseAllIncognitoTabs() {
-  GREYAssert(chrome_test_util::CloseAllIncognitoTabs(), @"Tabs did not close");
+  [ChromeEarlGrey closeAllIncognitoTabs];
   [ChromeEarlGrey waitForIncognitoTabCount:0];
 
   // The user is dropped into the tab grid after closing the last incognito tab.
@@ -171,7 +171,7 @@ void CloseAllIncognitoTabs() {
 
 void OpenNewRegularTab() {
   NSUInteger tab_count = chrome_test_util::GetMainTabCount();
-  chrome_test_util::OpenNewTab();
+  [ChromeEarlGrey openNewTab];
   [ChromeEarlGrey waitForMainTabCount:(tab_count + 1)];
 }
 
@@ -302,7 +302,7 @@ void SignOut() {
   OpenNewRegularTab();
   AssertUKMEnabled(false);
 
-  GREYAssert(chrome_test_util::CloseAllIncognitoTabs(), @"Tabs did not close");
+  [ChromeEarlGrey closeAllIncognitoTabs];
   [ChromeEarlGrey waitForIncognitoTabCount:0];
   AssertUKMEnabled(true);
 
@@ -353,26 +353,26 @@ void SignOut() {
   [[EarlGrey selectElementWithMatcher:AccountsSyncButton()]
       performAction:grey_tap()];
   // Toggle "Sync Everything" then "History" switches off.
-  [[EarlGrey selectElementWithMatcher:SyncSwitchCell(
+  [[EarlGrey selectElementWithMatcher:LegacySyncSwitchCell(
                                           l10n_util::GetNSString(
                                               IDS_IOS_SYNC_EVERYTHING_TITLE),
                                           YES)]
       performAction:TurnSyncSwitchOn(NO)];
-  [[EarlGrey
-      selectElementWithMatcher:SyncSwitchCell(l10n_util::GetNSString(
-                                                  IDS_SYNC_DATATYPE_TYPED_URLS),
-                                              YES)]
+  [[EarlGrey selectElementWithMatcher:LegacySyncSwitchCell(
+                                          l10n_util::GetNSString(
+                                              IDS_SYNC_DATATYPE_TYPED_URLS),
+                                          YES)]
       performAction:TurnSyncSwitchOn(NO)];
 
   AssertUKMEnabled(false);
 
   // Toggle "History" then "Sync Everything" switches on.
-  [[EarlGrey
-      selectElementWithMatcher:SyncSwitchCell(l10n_util::GetNSString(
-                                                  IDS_SYNC_DATATYPE_TYPED_URLS),
-                                              NO)]
+  [[EarlGrey selectElementWithMatcher:LegacySyncSwitchCell(
+                                          l10n_util::GetNSString(
+                                              IDS_SYNC_DATATYPE_TYPED_URLS),
+                                          NO)]
       performAction:TurnSyncSwitchOn(YES)];
-  [[EarlGrey selectElementWithMatcher:SyncSwitchCell(
+  [[EarlGrey selectElementWithMatcher:LegacySyncSwitchCell(
                                           l10n_util::GetNSString(
                                               IDS_IOS_SYNC_EVERYTHING_TITLE),
                                           NO)]

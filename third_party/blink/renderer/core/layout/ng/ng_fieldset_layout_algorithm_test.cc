@@ -35,7 +35,7 @@ class NGFieldsetLayoutAlgorithmTest : public NGBaseLayoutAlgorithmTest {
     scoped_refptr<NGLayoutResult> result =
         NGBlockLayoutAlgorithm(node, space).Layout();
 
-    return ToNGPhysicalBoxFragment(result->PhysicalFragment().get());
+    return ToNGPhysicalBoxFragment(result->PhysicalFragment());
   }
 
   scoped_refptr<const NGPhysicalBoxFragment> RunBlockLayoutAlgorithm(
@@ -273,9 +273,9 @@ TEST_F(NGFieldsetLayoutAlgorithmTest, LegendAutoSize) {
   offset:unplaced size:1000x323
     offset:0,0 size:126x323
       offset:13,0 size:50x200
-        offset:0,0 size:25x200
-        offset:25,0 size:25x200
         offset:50,0 size:0x0
+          offset:-50,0 size:25x200
+          offset:-25,0 size:25x200
       offset:3,200 size:120x120
         offset:10,10 size:100x100
 )DUMP";

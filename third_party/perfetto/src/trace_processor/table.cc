@@ -47,12 +47,16 @@ std::string TypeToString(Table::ColumnType type) {
       return "STRING";
     case Table::ColumnType::kUint:
       return "UNSIGNED INT";
-    case Table::ColumnType::kUlong:
-      return "UNSIGNED BIG INT";
+    case Table::ColumnType::kLong:
+      return "BIG INT";
     case Table::ColumnType::kInt:
       return "INT";
+    case Table::ColumnType::kDouble:
+      return "DOUBLE";
+    case Table::ColumnType::kUnknown:
+      PERFETTO_FATAL("Cannot map unknown column type");
   }
-  PERFETTO_CHECK(false);
+  PERFETTO_FATAL("Not reached");  // For gcc
 }
 
 }  // namespace
@@ -67,6 +71,7 @@ void Table::RegisterInternal(sqlite3* db,
                              const TraceStorage* storage,
                              const std::string& table_name,
                              bool read_write,
+                             bool requires_args,
                              Factory factory) {
   std::unique_ptr<TableDescriptor> desc(new TableDescriptor());
   desc->storage = storage;
@@ -80,15 +85,22 @@ void Table::RegisterInternal(sqlite3* db,
     const TableDescriptor* xdesc = static_cast<const TableDescriptor*>(arg);
     auto table = xdesc->factory(xdb, xdesc->storage);
 
-    auto schema = table->CreateSchema(argc, argv);
+    auto opt_schema = table->Init(argc, argv);
+    if (!opt_schema.has_value()) {
+      PERFETTO_ELOG("Failed to create schema (table %s)", xdesc->name.c_str());
+      return SQLITE_ERROR;
+    }
+
+    const auto& schema = opt_schema.value();
     auto create_stmt = schema.ToCreateTableStmt();
+    PERFETTO_DLOG("Create table statement: %s", create_stmt.c_str());
 
     int res = sqlite3_declare_vtab(xdb, create_stmt.c_str());
     if (res != SQLITE_OK)
       return res;
 
     // Freed in xDisconnect().
-    table->schema_ = schema;
+    table->schema_ = std::move(schema);
     table->name_ = xdesc->name;
     *tab = table.release();
 
@@ -151,6 +163,22 @@ void Table::RegisterInternal(sqlite3* db,
       db, table_name.c_str(), module, desc.release(),
       [](void* arg) { delete static_cast<TableDescriptor*>(arg); });
   PERFETTO_CHECK(res == SQLITE_OK);
+
+  // Register virtual tables into an internal 'perfetto_tables' table. This is
+  // used for iterating through all the tables during a database export. Note
+  // that virtual tables requiring arguments aren't registered because they
+  // can't be automatically instantiated for exporting.
+  if (!requires_args) {
+    char* insert_sql = sqlite3_mprintf(
+        "INSERT INTO perfetto_tables(name) VALUES('%q')", table_name.c_str());
+    char* error = nullptr;
+    sqlite3_exec(db, insert_sql, 0, 0, &error);
+    sqlite3_free(insert_sql);
+    if (error) {
+      PERFETTO_ELOG("Error registering table: %s", error);
+      sqlite3_free(error);
+    }
+  }
 }
 
 int Table::OpenInternal(sqlite3_vtab_cursor** ppCursor) {
@@ -272,10 +300,13 @@ Table::Schema::Schema() = default;
 Table::Schema::Schema(const Schema&) = default;
 Table::Schema& Table::Schema::operator=(const Schema&) = default;
 
-std::string Table::Schema::ToCreateTableStmt() {
+std::string Table::Schema::ToCreateTableStmt() const {
   std::string stmt = "CREATE TABLE x(";
   for (const auto& col : columns_) {
-    stmt += " " + col.name() + " " + TypeToString(col.type()) + ",";
+    stmt += " " + col.name() + " " + TypeToString(col.type());
+    if (col.hidden())
+      stmt += " HIDDEN";
+     stmt += ",";
   }
   stmt += " PRIMARY KEY(";
   for (size_t i = 0; i < primary_keys_.size(); i++) {

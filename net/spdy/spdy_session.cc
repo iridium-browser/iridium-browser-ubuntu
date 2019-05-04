@@ -42,6 +42,7 @@
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source_type.h"
 #include "net/log/net_log_with_source.h"
+#include "net/nqe/network_quality_estimator.h"
 #include "net/quic/quic_http_utils.h"
 #include "net/socket/socket.h"
 #include "net/socket/ssl_client_socket.h"
@@ -55,8 +56,8 @@
 #include "net/ssl/ssl_cipher_suite_names.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/third_party/quic/core/http/spdy_utils.h"
-#include "net/third_party/spdy/core/spdy_frame_builder.h"
-#include "net/third_party/spdy/core/spdy_protocol.h"
+#include "net/third_party/quiche/src/spdy/core/spdy_frame_builder.h"
+#include "net/third_party/quiche/src/spdy/core/spdy_protocol.h"
 #include "url/url_constants.h"
 
 namespace net {
@@ -403,8 +404,8 @@ std::unique_ptr<base::Value> NetLogSpdyRecvGoAwayCallback(
   dict->SetString(
       "error_code",
       base::StringPrintf("%u (%s)", error_code, ErrorCodeToString(error_code)));
-  dict->SetString("debug_data",
-                  ElideGoAwayDebugDataForNetLog(capture_mode, debug_data));
+  dict->SetKey("debug_data",
+               ElideGoAwayDebugDataForNetLog(capture_mode, debug_data));
   return std::move(dict);
 }
 
@@ -714,6 +715,18 @@ size_t SpdyStreamRequest::EstimateMemoryUsage() const {
   return base::trace_event::EstimateItemMemoryUsage(url_);
 }
 
+void SpdyStreamRequest::SetPriority(RequestPriority priority) {
+  if (priority_ == priority)
+    return;
+
+  if (stream_)
+    stream_->SetPriority(priority);
+  if (session_)
+    session_->ChangeStreamRequestPriority(weak_ptr_factory_.GetWeakPtr(),
+                                          priority);
+  priority_ = priority;
+}
+
 void SpdyStreamRequest::OnRequestCompleteSuccess(
     const base::WeakPtr<SpdyStream>& stream) {
   DCHECK(session_);
@@ -823,6 +836,7 @@ SpdySession::SpdySession(
         greased_http2_frame,
     TimeFunc time_func,
     ServerPushDelegate* push_delegate,
+    NetworkQualityEstimator* network_quality_estimator,
     NetLog* net_log)
     : in_io_loop_(false),
       spdy_session_key_(spdy_session_key),
@@ -880,6 +894,7 @@ SpdySession::SpdySession(
           base::TimeDelta::FromSeconds(kDefaultConnectionAtRiskOfLossSeconds)),
       hung_interval_(base::TimeDelta::FromSeconds(kHungIntervalSeconds)),
       time_func_(time_func),
+      network_quality_estimator_(network_quality_estimator),
       weak_factory_(this) {
   net_log_.BeginEvent(
       NetLogEventType::HTTP2_SESSION,
@@ -987,8 +1002,8 @@ void SpdySession::InitializeWithSocket(
   auto it = initial_settings_.find(spdy::SETTINGS_MAX_HEADER_LIST_SIZE);
   uint32_t spdy_max_header_list_size =
       (it == initial_settings_.end()) ? kSpdyMaxHeaderListSize : it->second;
-  buffered_spdy_framer_ =
-      std::make_unique<BufferedSpdyFramer>(spdy_max_header_list_size, net_log_);
+  buffered_spdy_framer_ = std::make_unique<BufferedSpdyFramer>(
+      spdy_max_header_list_size, net_log_, time_func_);
   buffered_spdy_framer_->set_visitor(this);
   buffered_spdy_framer_->set_debug_visitor(this);
   buffered_spdy_framer_->UpdateHeaderDecoderTableSize(max_header_table_size_);
@@ -1539,7 +1554,8 @@ bool SpdySession::ChangeSocketTag(const SocketTag& new_tag) {
 
   SpdySessionKey new_key(spdy_session_key_.host_port_pair(),
                          spdy_session_key_.proxy_server(),
-                         spdy_session_key_.privacy_mode(), new_tag);
+                         spdy_session_key_.privacy_mode(),
+                         spdy_session_key_.is_proxy_session(), new_tag);
   spdy_session_key_ = new_key;
 
   return true;
@@ -1619,7 +1635,7 @@ int SpdySession::CreateStream(const SpdyStreamRequest& request,
   return OK;
 }
 
-void SpdySession::CancelStreamRequest(
+bool SpdySession::CancelStreamRequest(
     const base::WeakPtr<SpdyStreamRequest>& request) {
   DCHECK(request);
   RequestPriority priority = request->priority();
@@ -1650,6 +1666,20 @@ void SpdySession::CancelStreamRequest(
     // present, should not be pending completion.
     DCHECK(std::find_if(it, queue->end(), RequestEquals(request)) ==
            queue->end());
+    return true;
+  }
+  return false;
+}
+
+void SpdySession::ChangeStreamRequestPriority(
+    const base::WeakPtr<SpdyStreamRequest>& request,
+    RequestPriority priority) {
+  // |request->priority()| is updated by the caller after this returns.
+  // |request| needs to still have its old priority in order for
+  // CancelStreamRequest() to find it in the correct queue.
+  DCHECK_NE(priority, request->priority());
+  if (CancelStreamRequest(request)) {
+    pending_create_stream_queues_[priority].push_back(request);
   }
 }
 
@@ -2859,7 +2889,12 @@ void SpdySession::OnPing(spdy::SpdyPingId unique_id, bool is_ack) {
   ping_in_flight_ = false;
 
   // Record RTT in histogram when there are no more pings in flight.
-  RecordPingRTTHistogram(time_func_() - last_ping_sent_time_);
+  base::TimeDelta ping_duration = time_func_() - last_ping_sent_time_;
+  RecordPingRTTHistogram(ping_duration);
+  if (network_quality_estimator_) {
+    network_quality_estimator_->RecordSpdyPingLatency(host_port_pair(),
+                                                      ping_duration);
+  }
 }
 
 void SpdySession::OnRstStream(spdy::SpdyStreamId stream_id,
@@ -3129,7 +3164,8 @@ void SpdySession::OnHeaders(spdy::SpdyStreamId stream_id,
                             spdy::SpdyStreamId parent_stream_id,
                             bool exclusive,
                             bool fin,
-                            spdy::SpdyHeaderBlock headers) {
+                            spdy::SpdyHeaderBlock headers,
+                            base::TimeTicks recv_first_byte_time) {
   CHECK(in_io_loop_);
 
   if (net_log().IsCapturing()) {
@@ -3170,7 +3206,6 @@ void SpdySession::OnHeaders(spdy::SpdyStreamId stream_id,
   }
 
   base::Time response_time = base::Time::Now();
-  base::TimeTicks recv_first_byte_time = time_func_();
   // May invalidate |stream|.
   stream->OnHeadersReceived(headers, response_time, recv_first_byte_time);
 }

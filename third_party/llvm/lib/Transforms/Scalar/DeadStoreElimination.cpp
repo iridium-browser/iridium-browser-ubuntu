@@ -349,9 +349,9 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
                                    InstOverlapIntervalsTy &IOL,
                                    AliasAnalysis &AA,
                                    const Function *F) {
-  // If we don't know the sizes of either access, then we can't do a comparison.
-  if (Later.Size == MemoryLocation::UnknownSize ||
-      Earlier.Size == MemoryLocation::UnknownSize)
+  // FIXME: Vet that this works for size upper-bounds. Seems unlikely that we'll
+  // get imprecise values here, though (except for unknown sizes).
+  if (!Later.Size.isPrecise() || !Earlier.Size.isPrecise())
     return OW_Unknown;
 
   const uint64_t LaterSize = Later.Size.getValue();
@@ -643,7 +643,7 @@ static void findUnconditionalPreds(SmallVectorImpl<BasicBlock *> &Blocks,
   for (pred_iterator I = pred_begin(BB), E = pred_end(BB); I != E; ++I) {
     BasicBlock *Pred = *I;
     if (Pred == BB) continue;
-    TerminatorInst *PredTI = Pred->getTerminator();
+    Instruction *PredTI = Pred->getTerminator();
     if (PredTI->getNumSuccessors() != 1)
       continue;
 
@@ -834,7 +834,7 @@ static bool handleEndBlock(BasicBlock &BB, AliasAnalysis *AA,
       continue;
     }
 
-    if (auto CS = CallSite(&*BBI)) {
+    if (auto *Call = dyn_cast<CallBase>(&*BBI)) {
       // Remove allocation function calls from the list of dead stack objects;
       // there can't be any references before the definition.
       if (isAllocLikeFn(&*BBI, TLI))
@@ -842,15 +842,15 @@ static bool handleEndBlock(BasicBlock &BB, AliasAnalysis *AA,
 
       // If this call does not access memory, it can't be loading any of our
       // pointers.
-      if (AA->doesNotAccessMemory(CS))
+      if (AA->doesNotAccessMemory(Call))
         continue;
 
       // If the call might load from any of our allocas, then any store above
       // the call is live.
       DeadStackObjects.remove_if([&](Value *I) {
         // See if the call site touches the value.
-        return isRefSet(AA->getModRefInfo(CS, I, getPointerSize(I, DL, *TLI,
-                                                                BB.getParent())));
+        return isRefSet(AA->getModRefInfo(
+            Call, I, getPointerSize(I, DL, *TLI, BB.getParent())));
       });
 
       // If all of the allocas were clobbered by the call then we're not going

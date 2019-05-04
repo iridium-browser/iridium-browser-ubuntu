@@ -26,7 +26,6 @@
 #include "SkMD5.h"
 #include "SkMakeUnique.h"
 #include "SkMalloc.h"
-#include "SkMatrix44.h"
 #include "SkPixmap.h"
 #include "SkPngChunkReader.h"
 #include "SkPngEncoder.h"
@@ -169,9 +168,9 @@ static void test_in_stripes(skiatest::Reporter* r, SkCodec* codec, const SkImage
 }
 
 template<typename Codec>
-static void test_codec(skiatest::Reporter* r, Codec* codec, SkBitmap& bm, const SkImageInfo& info,
-        const SkISize& size, SkCodec::Result expectedResult, SkMD5::Digest* digest,
-        const SkMD5::Digest* goodDigest) {
+static void test_codec(skiatest::Reporter* r, const char* path, Codec* codec, SkBitmap& bm,
+        const SkImageInfo& info, const SkISize& size, SkCodec::Result expectedResult,
+        SkMD5::Digest* digest, const SkMD5::Digest* goodDigest) {
 
     REPORTER_ASSERT(r, info.dimensions() == size);
     bm.allocPixels(info);
@@ -195,16 +194,21 @@ static void test_codec(skiatest::Reporter* r, Codec* codec, SkBitmap& bm, const 
             // This will allow comparison even if the image is incomplete.
             bm565.eraseColor(SK_ColorBLACK);
 
-            REPORTER_ASSERT(r, expectedResult == codec->getPixels(info565,
-                    bm565.getPixels(), bm565.rowBytes()));
+            auto actualResult = codec->getPixels(info565, bm565.getPixels(), bm565.rowBytes());
+            if (actualResult == expectedResult) {
+                SkMD5::Digest digest565;
+                md5(bm565, &digest565);
 
-            SkMD5::Digest digest565;
-            md5(bm565, &digest565);
-
-            // A dumb client's request for non-opaque should also succeed.
-            for (auto alpha : { kPremul_SkAlphaType, kUnpremul_SkAlphaType }) {
-                info565 = info565.makeAlphaType(alpha);
-                test_info(r, codec, info565, expectedResult, &digest565);
+                // A request for non-opaque should also succeed.
+                for (auto alpha : { kPremul_SkAlphaType, kUnpremul_SkAlphaType }) {
+                    info565 = info565.makeAlphaType(alpha);
+                    test_info(r, codec, info565, expectedResult, &digest565);
+                }
+            } else {
+                ERRORF(r, "Decoding %s to 565 failed with result \"%s\"\n\t\t\t\texpected:\"%s\"",
+                          path,
+                          SkCodec::ResultToString(actualResult),
+                          SkCodec::ResultToString(expectedResult));
             }
         } else {
             test_info(r, codec, info565, SkCodec::kInvalidConversion, nullptr);
@@ -310,7 +314,7 @@ static void check(skiatest::Reporter* r,
     SkBitmap bm;
     SkCodec::Result expectedResult =
         supportsIncomplete ? SkCodec::kIncompleteInput : SkCodec::kSuccess;
-    test_codec(r, codec.get(), bm, info, size, expectedResult, &codecDigest, nullptr);
+    test_codec(r, path, codec.get(), bm, info, size, expectedResult, &codecDigest, nullptr);
 
     // Scanline decoding follows.
 
@@ -436,7 +440,7 @@ static void check(skiatest::Reporter* r,
 
         SkBitmap bm;
         SkMD5::Digest androidCodecDigest;
-        test_codec(r, androidCodec.get(), bm, info, size, expectedResult, &androidCodecDigest,
+        test_codec(r, path, androidCodec.get(), bm, info, size, expectedResult, &androidCodecDigest,
                    &codecDigest);
     }
 
@@ -1020,7 +1024,7 @@ static void check_color_xform(skiatest::Reporter* r, const char* path) {
 
     const int dstWidth = subsetWidth / opts.fSampleSize;
     const int dstHeight = subsetHeight / opts.fSampleSize;
-    auto colorSpace = SkColorSpace::MakeRGB(g2Dot2_TransferFn, SkColorSpace::kAdobeRGB_Gamut);
+    auto colorSpace = SkColorSpace::MakeRGB(SkNamedTransferFn::k2Dot2, SkNamedGamut::kAdobeRGB);
     SkImageInfo dstInfo = codec->getInfo().makeWH(dstWidth, dstHeight)
                                           .makeColorType(kN32_SkColorType)
                                           .makeColorSpace(colorSpace);
@@ -1419,6 +1423,74 @@ DEF_TEST(Codec_InvalidHeader, r) {
     test_invalid_header(r, "invalid_images/b34778578.bmp");
 }
 
+/*
+For the Codec_InvalidAnimated test, immediately below,
+resources/invalid_images/skbug6046.gif is:
+
+00000000: 4749 4638 3961 2000 0000 0000 002c ff00  GIF89a ......,..
+00000010: 7400 0600 0000 4001 0021 f904 0a00 0000  t.....@..!......
+00000020: 002c ff00 0000 ff00 7400 0606 0606 0601  .,......t.......
+00000030: 0021 f904 0000 0000 002c ff00 0000 ffcc  .!.......,......
+00000040: 1b36 5266 deba 543d                      .6Rf..T=
+
+It nominally contains 3 frames, but all of them are invalid. It came from a
+fuzzer doing random mutations and copies. The breakdown:
+
+@000  6 bytes magic "GIF89a"
+@006  7 bytes Logical Screen Descriptor: 0x20 0x00 ... 0x00
+   - width     =    32
+   - height    =     0
+   - flags     =  0x00
+   - background color index, pixel aspect ratio bytes ignored
+@00D 10 bytes Image Descriptor header: 0x2C 0xFF ... 0x40
+   - origin_x  =   255
+   - origin_y  =   116
+   - width     =     6
+   - height    =     0
+   - flags     =  0x40, interlaced
+@017  2 bytes Image Descriptor body (pixel data): 0x01 0x00
+   - lit_width =     1, INVALID, OUTSIDE THE RANGE [2, 8]
+   - 0x00 byte means "end of data" for this frame
+@019  8 bytes Graphic Control Extension: 0x21 0xF9 ... 0x00
+   - valid, but irrelevant here.
+@021 10 bytes Image Descriptor header: 0x2C 0xFF ... 0x06
+   - origin_x  =   255
+   - origin_y  =     0
+   - width     =   255
+   - height    =   116
+   - flags     =  0x06, INVALID, 0x80 BIT ZERO IMPLIES 0x07 BITS SHOULD BE ZERO
+@02B 14 bytes Image Descriptor body (pixel data): 0x06 0x06 ... 0x00
+   - lit_width =     6
+   - 0x06 precedes a 6 byte block of data
+   - 0x04 precedes a 4 byte block of data
+   - 0x00 byte means "end of data" for this frame
+@039 10 bytes Image Descriptor header: 0x2C 0xFF ... 0x06
+   - origin_x  =   255
+   - origin_y  =     0
+   - width     = 52479
+   - height    = 13851
+   - flags     =  0x52, INVALID, 0x80 BIT ZERO IMPLIES 0x07 BITS SHOULD BE ZERO
+@043  5 bytes Image Descriptor body (pixel data): 0x66 0xDE ... unexpected-EOF
+   - lit_width =   102, INVALID, OUTSIDE THE RANGE [2, 8]
+   - 0xDE precedes a 222 byte block of data, INVALIDLY TRUNCATED
+
+On Image Descriptor flags INVALIDITY,
+https://www.w3.org/Graphics/GIF/spec-gif89a.txt section 20.c says that "Size of
+Local Color Table [the low 3 bits]... should be 0 if there is no Local Color
+Table specified [the high bit]."
+
+On LZW literal width (also known as Minimum Code Size) INVALIDITY outside of
+the range [2, 8], https://www.w3.org/Graphics/GIF/spec-gif89a.txt Appendix F
+says that "Normally this will be the same as the number of [palette index]
+bits. Because of some algorithmic constraints however, black & white images
+which have one color bit must be indicated as having a code size of 2."
+
+In practice, some GIF decoders, including the old third_party/gif code, don't
+enforce this. It says: "currentFrame->setDataSize(this->getOneByte())" with the
+only further check being against an upper bound of SK_MAX_DICTIONARY_ENTRY_BITS
+(the constant 12).
+*/
+
 DEF_TEST(Codec_InvalidAnimated, r) {
     // ASAN will complain if there is an issue.
     auto path = "invalid_images/skbug6046.gif";
@@ -1444,6 +1516,36 @@ DEF_TEST(Codec_InvalidAnimated, r) {
         const auto reqFrame = frameInfos[i].fRequiredFrame;
         opts.fPriorFrame = reqFrame == i - 1 ? reqFrame : SkCodec::kNoFrame;
         auto result = codec->startIncrementalDecode(info, bm.getPixels(), bm.rowBytes(), &opts);
+
+#ifdef SK_HAS_WUFFS_LIBRARY
+        // We are transitioning from an old GIF implementation to a new (Wuffs)
+        // GIF implementation.
+        //
+        // This test (without SK_HAS_WUFFS_LIBRARY) is overly specific to the
+        // old implementation. As a fuzzer-discovered test, it's likely that
+        // what's fundamentally being tested isn't that decoding an invalid GIF
+        // leads to kSuccess, but that decoding an invalid GIF doesn't lead to
+        // an ASAN violation.
+        //
+        // Each of the 3 frames of the source GIF image is fundamentally
+        // invalid, as per the "breakdown" comment above. The old
+        // implementation is happy to call startIncrementalDecode 3 times. The
+        // new implementation is happy for the first two times, but on the 3rd,
+        // SkCodec::startIncrementalDecode calls SkCodec::handleFrameIndex
+        // which calls SkCodec::getPixels on the requiredFrame (the 0'th
+        // frame), and the new implementation subsequently hits the
+        // invalid-ness and returns kErrorInInput instead of kSuccess.
+        //
+        // Once the transition is complete, we can remove the #ifdef and delete
+        // the rest of the test function.
+        if (i == 2) {
+            if (result != SkCodec::kErrorInInput) {
+                ERRORF(r, "Unexpected result for decoding frame %i (out of %i) with error %i\n", i,
+                       frameInfos.size(), result);
+            }
+            return;
+        }
+#endif
         if (result != SkCodec::kSuccess) {
             ERRORF(r, "Failed to start decoding frame %i (out of %i) with error %i\n", i,
                    frameInfos.size(), result);
@@ -1488,22 +1590,21 @@ static void test_encode_icc(skiatest::Reporter* r, SkEncodedImageFormat format) 
 
     // Test with P3 color space.
     SkDynamicMemoryWStream p3Buf;
-    sk_sp<SkColorSpace> p3 = SkColorSpace::MakeRGB(SkColorSpace::kSRGB_RenderTargetGamma,
-                                                   SkColorSpace::kDCIP3_D65_Gamut);
+    sk_sp<SkColorSpace> p3 = SkColorSpace::MakeRGB(SkNamedTransferFn::kSRGB, SkNamedGamut::kDCIP3);
     pixmap.setColorSpace(p3);
     encode_format(&p3Buf, pixmap, format);
     sk_sp<SkData> p3Data = p3Buf.detachAsData();
     std::unique_ptr<SkCodec> p3Codec(SkCodec::MakeFromData(p3Data));
     REPORTER_ASSERT(r, p3Codec->getInfo().colorSpace()->gammaCloseToSRGB());
-    SkMatrix44 mat0, mat1;
+    skcms_Matrix3x3 mat0, mat1;
     bool success = p3->toXYZD50(&mat0);
     REPORTER_ASSERT(r, success);
     success = p3Codec->getInfo().colorSpace()->toXYZD50(&mat1);
     REPORTER_ASSERT(r, success);
 
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
-            REPORTER_ASSERT(r, color_space_almost_equal(mat0.get(i, j), mat1.get(i, j)));
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            REPORTER_ASSERT(r, color_space_almost_equal(mat0.vals[i][j], mat1.vals[i][j]));
         }
     }
 }
@@ -1535,6 +1636,30 @@ DEF_TEST(Codec_webp_rowsDecoded, r) {
     test_info(r, codec.get(), codec->getInfo(), SkCodec::kInvalidInput, nullptr);
 }
 
+/*
+For the Codec_ossfuzz6274 test, immediately below,
+resources/invalid_images/ossfuzz6274.gif is:
+
+00000000: 4749 4638 3961 2000 2000 f120 2020 2020  GIF89a . ..
+00000010: 2020 2020 2020 2020 2021 f903 ff20 2020           !...
+00000020: 002c 0000 0000 2000 2000 2000 00         .,.... . . ..
+
+@000  6 bytes magic "GIF89a"
+@006  7 bytes Logical Screen Descriptor: 0x20 0x00 ... 0x00
+   - width     =    32
+   - height    =    32
+   - flags     =  0xF1, global color table, 4 RGB entries
+   - background color index, pixel aspect ratio bytes ignored
+@00D 12 bytes Color Table: 0x20 0x20 ... 0x20
+@019 20 bytes Graphic Control Extension: 0x21 0xF9 ... unexpected-EOF
+   - 0x03 precedes a 3 byte block of data, INVALID, MUST BE 4
+   - 0x20 precedes a 32 byte block of data, INVALIDly truncated
+
+https://www.w3.org/Graphics/GIF/spec-gif89a.txt section 23.c says that the
+block size (for an 0x21 0xF9 Graphic Control Extension) must be "the fixed
+value 4".
+*/
+
 DEF_TEST(Codec_ossfuzz6274, r) {
     if (GetResourcePath().isEmpty()) {
         return;
@@ -1542,6 +1667,31 @@ DEF_TEST(Codec_ossfuzz6274, r) {
 
     const char* file = "invalid_images/ossfuzz6274.gif";
     auto image = GetResourceAsImage(file);
+
+#ifdef SK_HAS_WUFFS_LIBRARY
+    // We are transitioning from an old GIF implementation to a new (Wuffs) GIF
+    // implementation.
+    //
+    // This test (without SK_HAS_WUFFS_LIBRARY) is overly specific to the old
+    // implementation. In the new implementation, the MakeFromStream factory
+    // method returns a nullptr SkImage*, instead of returning a non-null but
+    // otherwise all-transparent SkImage*.
+    //
+    // Either way, the end-to-end result is the same - the source input is
+    // rejected as an invalid GIF image - but the two implementations differ in
+    // how that's represented.
+    //
+    // Once the transition is complete, we can remove the #ifdef and delete the
+    // rest of the test function.
+    //
+    // See Codec_GifTruncated3 for the equivalent of the rest of the test
+    // function, on different (but still truncated) source data.
+    if (image) {
+        ERRORF(r, "Invalid data gave non-nullptr image");
+    }
+    return;
+#endif
+
     if (!image) {
         ERRORF(r, "Missing %s", file);
         return;

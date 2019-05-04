@@ -16,6 +16,8 @@
 
 namespace aura {
 
+class TestWindowTreeDelegate;
+
 enum class WindowTreeChangeType {
   ADD_TRANSIENT,
   BOUNDS,
@@ -49,6 +51,8 @@ class TestWindowTree : public ws::mojom::WindowTree {
   ~TestWindowTree() override;
 
   void set_client(ws::mojom::WindowTreeClient* client) { client_ = client; }
+
+  void set_delegate(TestWindowTreeDelegate* delegate) { delegate_ = delegate; }
 
   uint32_t window_id() const { return window_id_; }
 
@@ -116,6 +120,9 @@ class TestWindowTree : public ws::mojom::WindowTree {
   const gfx::Rect& last_set_window_bounds() const {
     return last_set_window_bounds_;
   }
+  const gfx::Rect& second_last_set_window_bounds() const {
+    return second_last_set_window_bounds_;
+  }
 
   ws::Id last_not_cancelled_window_id() const {
     return last_not_cancelled_window_id_;
@@ -125,6 +132,14 @@ class TestWindowTree : public ws::mojom::WindowTree {
   ws::Id last_transfer_new() const { return last_transfer_new_; }
   bool last_transfer_should_cancel() const {
     return last_transfer_should_cancel_;
+  }
+
+  bool last_accepts_drops() const { return last_accepts_drops_; }
+
+  size_t get_and_clear_accepts_drops_count() {
+    const int value = accepts_drops_count_;
+    accepts_drops_count_ = 0u;
+    return value;
   }
 
  private:
@@ -197,8 +212,8 @@ class TestWindowTree : public ws::mojom::WindowTree {
   void GetWindowTree(ws::Id window_id, GetWindowTreeCallback callback) override;
   void SetCapture(uint32_t change_id, ws::Id window_id) override;
   void ReleaseCapture(uint32_t change_id, ws::Id window_id) override;
-  void StartPointerWatcher(bool want_moves) override;
-  void StopPointerWatcher() override;
+  void ObserveEventTypes(
+      const std::vector<ui::mojom::EventType>& types) override;
   void Embed(ws::Id window_id,
              ws::mojom::WindowTreeClientPtr client,
              uint32_t flags,
@@ -221,7 +236,7 @@ class TestWindowTree : public ws::mojom::WindowTree {
                                ws::mojom::EventTargetingPolicy policy) override;
   void SetCursor(uint32_t change_id,
                  ws::Id transport_window_id,
-                 ui::CursorData cursor_data) override;
+                 ui::Cursor cursor) override;
   void SetWindowTextInputState(ws::Id window_id,
                                ui::mojom::TextInputStatePtr state) override;
   void SetImeVisibility(ws::Id window_id,
@@ -262,6 +277,9 @@ class TestWindowTree : public ws::mojom::WindowTree {
   void TransferGestureEventsTo(ws::Id current_id,
                                ws::Id new_id,
                                bool should_cancel) override;
+  void TrackOcclusionState(ws::Id window_id) override;
+  void PauseWindowOcclusionTracking() override;
+  void UnpauseWindowOcclusionTracking() override;
 
   struct AckedEvent {
     uint32_t event_id;
@@ -274,7 +292,7 @@ class TestWindowTree : public ws::mojom::WindowTree {
 
   std::vector<Change> changes_;
 
-  ws::mojom::WindowTreeClient* client_;
+  ws::mojom::WindowTreeClient* client_ = nullptr;
 
   base::Optional<base::flat_map<std::string, std::vector<uint8_t>>>
       last_new_window_properties_;
@@ -288,16 +306,25 @@ class TestWindowTree : public ws::mojom::WindowTree {
 
   base::Optional<viz::LocalSurfaceId> last_local_surface_id_;
 
+  // Records the last *two* window bounds set, useful for top-level windows,
+  // where each client-side DesktopWindowTreeHostMus has two aura::Windows (for
+  // the frame and the content), and both set bounds during views::Widget::Init.
   gfx::Rect last_set_window_bounds_;
+  gfx::Rect second_last_set_window_bounds_;
 
   ws::Id last_not_cancelled_window_id_ = 0u;
   ws::Id last_cancelled_window_id_ = 0u;
   ws::Id last_transfer_current_ = 0u;
   ws::Id last_transfer_new_ = 0u;
   bool last_transfer_should_cancel_ = false;
+  bool last_accepts_drops_ = false;
+
+  size_t accepts_drops_count_ = 0u;
 
   // Support only one scheduled embed in test.
   base::UnguessableToken scheduled_embed_;
+
+  TestWindowTreeDelegate* delegate_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(TestWindowTree);
 };

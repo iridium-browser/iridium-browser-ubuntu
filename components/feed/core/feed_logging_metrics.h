@@ -14,6 +14,7 @@
 #include "url/gurl.h"
 
 namespace base {
+class Clock;
 class Time;
 class TimeDelta;
 }  // namespace base
@@ -33,12 +34,17 @@ class FeedLoggingMetrics {
   using HistoryURLCheckCallback =
       base::RepeatingCallback<void(const GURL&, CheckURLVisitCallback)>;
 
-  explicit FeedLoggingMetrics(HistoryURLCheckCallback callback);
+  explicit FeedLoggingMetrics(HistoryURLCheckCallback callback,
+                              base::Clock* clock);
   ~FeedLoggingMetrics();
 
   // |suggestions_count| contains how many cards show to users. It does not
   // depend on whether the user actually saw the cards.
   void OnPageShown(const int suggestions_count);
+
+  // The amount of time for the Feed to populate articles. This does not include
+  // time to render but time to populate data in the UI.
+  void OnPagePopulated(base::TimeDelta timeToPopulate);
 
   // Should only be called once per NTP for each suggestion.
   void OnSuggestionShown(int position,
@@ -56,19 +62,30 @@ class FeedLoggingMetrics {
 
   void OnSuggestionDismissed(int position, const GURL& url);
 
-  void OnSuggestionArticleVisited(base::TimeDelta visit_time);
+  void OnSuggestionSwiped();
 
-  void OnSuggestionOfflinePageVisited(base::TimeDelta visit_time);
+  void OnSuggestionArticleVisited(base::TimeDelta visit_time,
+                                  bool return_to_ntp);
+
+  void OnSuggestionOfflinePageVisited(base::TimeDelta visit_time,
+                                      bool return_to_ntp);
 
   // Should only be called once per NTP for each "more" button.
   void OnMoreButtonShown(int position);
 
   void OnMoreButtonClicked(int position);
 
+  void OnSpinnerShown(base::TimeDelta shown_time);
+
+  void ReportScrolledAfterOpen();
+
  private:
   void CheckURLVisitedDone(int position, bool visited);
 
   const HistoryURLCheckCallback history_url_check_callback_;
+
+  // Used to access current time, injected for testing.
+  base::Clock* clock_;
 
   base::WeakPtrFactory<FeedLoggingMetrics> weak_ptr_factory_;
 

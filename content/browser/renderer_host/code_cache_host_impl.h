@@ -11,10 +11,11 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "build/build_config.h"
+#include "content/browser/cache_storage/cache_storage_cache_handle.h"
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom.h"
 #include "third_party/blink/public/mojom/loader/code_cache.mojom.h"
-#include "third_party/blink/public/platform/modules/cache_storage/cache_storage.mojom.h"
 
 class GURL;
 
@@ -29,7 +30,6 @@ class Origin;
 namespace content {
 
 class CacheStorageContextImpl;
-class CacheStorageCacheHandle;
 class GeneratedCodeCache;
 class GeneratedCodeCacheContext;
 

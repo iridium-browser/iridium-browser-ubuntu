@@ -4,6 +4,7 @@
 
 #include "components/safe_browsing/triggers/trigger_manager.h"
 
+#include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -72,7 +73,6 @@ class TriggerManagerTest : public ::testing::Test {
     safe_browsing::RegisterProfilePrefs(pref_service_.registry());
     SetPref(prefs::kSafeBrowsingExtendedReportingOptInAllowed, true);
     SetPref(prefs::kSafeBrowsingScoutReportingEnabled, true);
-    SetPref(prefs::kSafeBrowsingScoutGroupSelected, true);
 
     MockTriggerThrottler* mock_throttler = new MockTriggerThrottler();
     ON_CALL(*mock_throttler, TriggerCanFire(_)).WillByDefault(Return(true));
@@ -114,7 +114,7 @@ class TriggerManagerTest : public ::testing::Test {
   bool StartCollectingThreatDetails(const TriggerType trigger_type,
                                     content::WebContents* web_contents) {
     SBErrorOptions options =
-        TriggerManager::GetSBErrorDisplayOptions(pref_service_, *web_contents);
+        TriggerManager::GetSBErrorDisplayOptions(pref_service_, web_contents);
     return trigger_manager_.StartCollectingThreatDetails(
         trigger_type, web_contents, security_interstitials::UnsafeResource(),
         nullptr, nullptr, options);
@@ -130,7 +130,7 @@ class TriggerManagerTest : public ::testing::Test {
       EXPECT_CALL(*threat_details, FinishCollection(_, _)).Times(1);
     }
     SBErrorOptions options =
-        TriggerManager::GetSBErrorDisplayOptions(pref_service_, *web_contents);
+        TriggerManager::GetSBErrorDisplayOptions(pref_service_, web_contents);
     bool result = trigger_manager_.FinishCollectingThreatDetails(
         trigger_type, web_contents, base::TimeDelta(), false, 0, options);
 

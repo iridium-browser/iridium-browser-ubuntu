@@ -3,13 +3,12 @@
 // found in the LICENSE file.
 
 #include "ash/components/quick_launch/quick_launch_application.h"
-#include "services/service_manager/public/c/main.h"
-#include "services/service_manager/public/cpp/service_runner.h"
+#include "base/message_loop/message_loop.h"
+#include "services/service_manager/public/cpp/service_executable/service_main.h"
 
-MojoResult ServiceMain(MojoHandle service_request_handle) {
-  quick_launch::QuickLaunchApplication* app =
-      new quick_launch::QuickLaunchApplication;
-  app->set_running_standalone(true);
-  service_manager::ServiceRunner runner(app);
-  return runner.Run(service_request_handle);
+void ServiceMain(service_manager::mojom::ServiceRequest request) {
+  base::MessageLoop message_loop;
+  quick_launch::QuickLaunchApplication service(std::move(request));
+  service.set_running_standalone(true);
+  service.RunUntilTermination();
 }

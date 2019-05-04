@@ -6,11 +6,10 @@
 
 #include <memory>
 #include <set>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
-#include "base/test/test_mock_time_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/offline_pages/core/background/device_conditions.h"
 #include "components/offline_pages/core/background/offliner_policy.h"
@@ -21,6 +20,8 @@
 #include "components/offline_pages/core/background/request_queue_task_test_base.h"
 #include "components/offline_pages/core/background/save_page_request.h"
 #include "components/offline_pages/core/background/test_request_queue_store.h"
+#include "components/offline_pages/core/client_policy_controller.h"
+#include "components/offline_pages/core/offline_clock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace offline_pages {
@@ -103,7 +104,8 @@ class PickRequestTaskTest : public RequestQueueTaskTestBase {
       bool cleanup_needed);
 
   void RequestNotPicked(const bool non_user_requested_tasks_remaining,
-                        bool cleanup_needed);
+                        bool cleanup_needed,
+                        base::Time available_time);
 
   void RequestCountCallback(size_t total_count, size_t available_count);
 
@@ -120,10 +122,10 @@ class PickRequestTaskTest : public RequestQueueTaskTestBase {
   void TaskCompletionCallback(Task* completed_task);
 
  protected:
-
   std::unique_ptr<RequestNotifierStub> notifier_;
   std::unique_ptr<SavePageRequest> last_picked_;
   std::unique_ptr<OfflinerPolicy> policy_;
+  ClientPolicyController policy_controller_;
   RequestCoordinatorEventLogger event_logger_;
   std::set<int64_t> disabled_requests_;
   base::circular_deque<int64_t> prioritized_requests_;
@@ -167,7 +169,8 @@ void PickRequestTaskTest::RequestPicked(
 
 void PickRequestTaskTest::RequestNotPicked(
     const bool non_user_requested_tasks_remaining,
-    const bool cleanup_needed) {
+    const bool cleanup_needed,
+    base::Time available_time) {
   request_queue_not_picked_called_ = true;
 }
 
@@ -197,7 +200,7 @@ void PickRequestTaskTest::QueueRequests(const SavePageRequest& request1,
 void PickRequestTaskTest::MakePickRequestTask() {
   DeviceConditions conditions;
   task_.reset(new PickRequestTask(
-      &store_, policy_.get(),
+      &store_, policy_.get(), &policy_controller_,
       base::BindOnce(&PickRequestTaskTest::RequestPicked,
                      base::Unretained(this)),
       base::BindOnce(&PickRequestTaskTest::RequestNotPicked,
@@ -206,7 +209,6 @@ void PickRequestTaskTest::MakePickRequestTask() {
                      base::Unretained(this)),
       conditions, disabled_requests_, &prioritized_requests_));
   task_->SetTaskCompletionCallbackForTesting(
-      task_runner_.get(),
       base::BindRepeating(&PickRequestTaskTest::TaskCompletionCallback,
                           base::Unretained(this)));
 }
@@ -233,7 +235,7 @@ TEST_F(PickRequestTaskTest, ChooseRequestWithHigherRetryCount) {
       kMaxCompletedTries + 1, kBackgroundProcessingTimeBudgetSeconds));
   MakePickRequestTask();
 
-  base::Time creation_time = base::Time::Now();
+  base::Time creation_time = OfflineTimeNow();
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, creation_time,
                            kUserRequested);
   SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time,
@@ -254,8 +256,8 @@ TEST_F(PickRequestTaskTest, ChooseRequestWithHigherRetryCount) {
 
 TEST_F(PickRequestTaskTest, ChooseRequestWithSameRetryCountButEarlier) {
   base::Time creation_time1 =
-      base::Time::Now() - base::TimeDelta::FromSeconds(10);
-  base::Time creation_time2 = base::Time::Now();
+      OfflineTimeNow() - base::TimeDelta::FromSeconds(10);
+  base::Time creation_time2 = OfflineTimeNow();
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, creation_time1,
                            kUserRequested);
   SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time2,
@@ -279,8 +281,8 @@ TEST_F(PickRequestTaskTest, ChooseEarlierRequest) {
   MakePickRequestTask();
 
   base::Time creation_time1 =
-      base::Time::Now() - base::TimeDelta::FromSeconds(10);
-  base::Time creation_time2 = base::Time::Now();
+      OfflineTimeNow() - base::TimeDelta::FromSeconds(10);
+  base::Time creation_time2 = OfflineTimeNow();
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, creation_time1,
                            kUserRequested);
   SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time2,
@@ -304,7 +306,7 @@ TEST_F(PickRequestTaskTest, ChooseSameTimeRequestWithHigherRetryCount) {
       kMaxCompletedTries + 1, kBackgroundProcessingTimeBudgetSeconds));
   MakePickRequestTask();
 
-  base::Time creation_time = base::Time::Now();
+  base::Time creation_time = OfflineTimeNow();
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, creation_time,
                            kUserRequested);
   SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time,
@@ -328,7 +330,7 @@ TEST_F(PickRequestTaskTest, ChooseRequestWithLowerRetryCount) {
       kMaxCompletedTries + 1, kBackgroundProcessingTimeBudgetSeconds));
   MakePickRequestTask();
 
-  base::Time creation_time = base::Time::Now();
+  base::Time creation_time = OfflineTimeNow();
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, creation_time,
                            kUserRequested);
   SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time,
@@ -353,8 +355,8 @@ TEST_F(PickRequestTaskTest, ChooseLaterRequest) {
   MakePickRequestTask();
 
   base::Time creation_time1 =
-      base::Time::Now() - base::TimeDelta::FromSeconds(10);
-  base::Time creation_time2 = base::Time::Now();
+      OfflineTimeNow() - base::TimeDelta::FromSeconds(10);
+  base::Time creation_time2 = OfflineTimeNow();
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, creation_time1,
                            kUserRequested);
   SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time2,
@@ -371,7 +373,7 @@ TEST_F(PickRequestTaskTest, ChooseLaterRequest) {
 }
 
 TEST_F(PickRequestTaskTest, ChooseNonExpiredRequest) {
-  base::Time creation_time = base::Time::Now();
+  base::Time creation_time = OfflineTimeNow();
   base::Time expired_time =
       creation_time - base::TimeDelta::FromSeconds(
                           policy_->GetRequestExpirationTimeInSeconds() + 60);
@@ -395,8 +397,8 @@ TEST_F(PickRequestTaskTest, ChooseNonExpiredRequest) {
 
 TEST_F(PickRequestTaskTest, ChooseRequestThatHasNotExceededStartLimit) {
   base::Time creation_time1 =
-      base::Time::Now() - base::TimeDelta::FromSeconds(1);
-  base::Time creation_time2 = base::Time::Now();
+      OfflineTimeNow() - base::TimeDelta::FromSeconds(1);
+  base::Time creation_time2 = OfflineTimeNow();
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, creation_time1,
                            kUserRequested);
   SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time2,
@@ -421,8 +423,8 @@ TEST_F(PickRequestTaskTest, ChooseRequestThatHasNotExceededStartLimit) {
 
 TEST_F(PickRequestTaskTest, ChooseRequestThatHasNotExceededCompletionLimit) {
   base::Time creation_time1 =
-      base::Time::Now() - base::TimeDelta::FromSeconds(1);
-  base::Time creation_time2 = base::Time::Now();
+      OfflineTimeNow() - base::TimeDelta::FromSeconds(1);
+  base::Time creation_time2 = OfflineTimeNow();
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, creation_time1,
                            kUserRequested);
   SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time2,
@@ -453,7 +455,7 @@ TEST_F(PickRequestTaskTest, ChooseRequestThatIsNotDisabled) {
   disabled_requests_.insert(kRequestId2);
   MakePickRequestTask();
 
-  base::Time creation_time = base::Time::Now();
+  base::Time creation_time = OfflineTimeNow();
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, creation_time,
                            kUserRequested);
   SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time,
@@ -482,7 +484,7 @@ TEST_F(PickRequestTaskTest, ChoosePrioritizedRequests) {
   prioritized_requests_.push_back(kRequestId2);
   MakePickRequestTask();
 
-  base::Time creation_time = base::Time::Now();
+  base::Time creation_time = OfflineTimeNow();
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, creation_time,
                            kUserRequested);
   SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time,
@@ -521,7 +523,7 @@ TEST_F(PickRequestTaskTest, ChooseFromTwoPrioritizedRequests) {
   // Making request 1 more attractive to be picked not considering the
   // prioritizing issues with older creation time, fewer attempt count and it's
   // earlier in the request queue.
-  base::Time creation_time = base::Time::Now();
+  base::Time creation_time = OfflineTimeNow();
   base::Time older_creation_time =
       creation_time - base::TimeDelta::FromMinutes(10);
   SavePageRequest request1(kRequestId1, kUrl1, kClientId1, older_creation_time,

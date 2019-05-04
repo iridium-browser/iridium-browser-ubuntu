@@ -30,7 +30,8 @@ import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.download.home.DownloadManagerCoordinator;
-import org.chromium.chrome.browser.download.home.UmaUtils;
+import org.chromium.chrome.browser.download.home.metrics.UmaUtils;
+import org.chromium.chrome.browser.download.home.metrics.UmaUtils.MenuAction;
 import org.chromium.chrome.browser.download.home.toolbar.ToolbarUtils;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorFactory;
 import org.chromium.chrome.browser.native_page.BasicNativePage;
@@ -230,11 +231,12 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
                 isLocationEnabled ? R.id.with_settings_normal_menu_group : R.id.normal_menu_group;
         mSearchMenuId = isLocationEnabled ? R.id.with_settings_search_menu_id : R.id.search_menu_id;
         mInfoMenuId = isLocationEnabled ? 0 : R.id.info_menu_id;
+        final int closeMenuId =
+                isLocationEnabled ? R.id.with_settings_close_menu_id : R.id.close_menu_id;
 
         mToolbar = (DownloadManagerToolbar) mSelectableListLayout.initializeToolbar(
                 R.layout.download_manager_toolbar, mBackendProvider.getSelectionDelegate(), 0, null,
-                normalGroupId, R.id.selection_mode_menu_group, R.color.modern_primary_color, this,
-                true, isSeparateActivity);
+                normalGroupId, R.id.selection_mode_menu_group, this, true, isSeparateActivity);
         mToolbar.getMenu().setGroupVisible(normalGroupId, true);
         mToolbar.setManager(this);
         mToolbar.initialize(mFilterAdapter);
@@ -243,7 +245,9 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
 
         mToolbar.setInfoMenuItem(mInfoMenuId);
 
-        if (isLocationEnabled) ToolbarUtils.setupTrackerForDownloadSettingsIPH(mToolbar);
+        if (isLocationEnabled) {
+            ToolbarUtils.setupTrackerForDownloadSettingsIPH(mToolbar, Profile.getLastUsedProfile());
+        }
 
         mSelectableListLayout.configureWideDisplayStyle();
         mHistoryAdapter.initialize(mBackendProvider, mSelectableListLayout.getUiConfig());
@@ -252,7 +256,7 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
         enableStorageInfoHeader(mHistoryAdapter.shouldShowStorageInfoHeader());
 
         mIsSeparateActivity = isSeparateActivity;
-        if (!mIsSeparateActivity) mToolbar.removeCloseButton();
+        if (!mIsSeparateActivity) mToolbar.removeMenuItem(closeMenuId);
 
         RecordUserAction.record("Android.DownloadManager.Open");
     }
@@ -342,10 +346,11 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
 
     @Override
     public boolean onMenuItemClick(MenuItem item) {
+        UmaUtils.recordTopMenuAction(item.getItemId());
+
         if ((item.getItemId() == R.id.close_menu_id
                     || item.getItemId() == R.id.with_settings_close_menu_id)
                 && mIsSeparateActivity) {
-            UmaUtils.recordMenuActionHistogram(UmaUtils.MenuAction.CLOSE);
             mActivity.finish();
             return true;
         } else if (item.getItemId() == R.id.selection_mode_delete_menu_id) {
@@ -353,10 +358,7 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
                     mBackendProvider.getSelectionDelegate().getSelectedItemsAsList();
             mBackendProvider.getSelectionDelegate().clearSelection();
 
-            UmaUtils.recordMenuActionHistogram(UmaUtils.MenuAction.MULTI_DELETE);
-            RecordHistogram.recordCount100Histogram(
-                    "Android.DownloadManager.Menu.Delete.SelectedCount", items.size());
-
+            UmaUtils.recordTopMenuDeleteCount(items.size());
             deleteItems(items);
             return true;
         } else if (item.getItemId() == R.id.selection_mode_share_menu_id) {
@@ -366,33 +368,25 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
             //                    startActivityForResult() and the selection would only be cleared
             //                    after receiving an OK response. See crbug.com/638916.
             mBackendProvider.getSelectionDelegate().clearSelection();
-
-            UmaUtils.recordMenuActionHistogram(UmaUtils.MenuAction.MULTI_SHARE);
-            RecordHistogram.recordCount100Histogram(
-                    "Android.DownloadManager.Menu.Share.SelectedCount", items.size());
-
+            UmaUtils.recordTopMenuShareCount(items.size());
             shareItems(items);
             return true;
         } else if (item.getItemId() == mInfoMenuId) {
             boolean showInfo = !mHistoryAdapter.shouldShowStorageInfoHeader();
-            UmaUtils.recordMenuActionHistogram(
-                    showInfo ? UmaUtils.MenuAction.SHOW_INFO : UmaUtils.MenuAction.HIDE_INFO);
+            RecordHistogram.recordEnumeratedHistogram("Android.DownloadManager.Menu.Action",
+                    showInfo ? UmaUtils.MenuAction.SHOW_INFO : UmaUtils.MenuAction.HIDE_INFO,
+                    MenuAction.NUM_ENTRIES);
             enableStorageInfoHeader(showInfo);
             return true;
         } else if (item.getItemId() == mSearchMenuId) {
-            UmaUtils.recordMenuActionHistogram(UmaUtils.MenuAction.SEARCH);
             // The header should be removed as soon as a search is started. It will be added back in
             // DownloadHistoryAdatper#filter() when the search is ended.
             mHistoryAdapter.removeHeader();
             mSelectableListLayout.onStartSearch();
             mToolbar.showSearchView();
-            RecordUserAction.record("Android.DownloadManager.Search");
             return true;
         } else if (item.getItemId() == R.id.settings_menu_id) {
-            Intent intent = PreferencesLauncher.createIntentForSettingsPage(
-                    mActivity, DownloadPreferences.class.getName());
-            mActivity.startActivity(intent);
-            RecordUserAction.record("Android.DownloadManager.Settings");
+            PreferencesLauncher.launchSettingsPage(mActivity, DownloadPreferences.class);
             return true;
         }
         return false;
@@ -423,7 +417,7 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
         for (Observer observer : mObservers) observer.onUrlChanged(url);
 
         if (mNativePage != null) {
-            mNativePage.onStateChange(DownloadFilter.getUrlForFilter(filter));
+            mNativePage.onStateChange(DownloadFilter.getUrlForFilter(filter), true);
         }
 
         RecordHistogram.recordEnumeratedHistogram(
@@ -478,7 +472,8 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
         String snackbarText = singleItemDeleted
                 ? items.get(0).getDisplayFileName()
                 : String.format(Locale.getDefault(), "%d", items.size());
-        int snackbarTemplateId = singleItemDeleted ? R.string.undo_bar_delete_message
+        int snackbarTemplateId = singleItemDeleted
+                ? R.string.delete_message
                 : R.string.undo_bar_multiple_downloads_delete_message;
 
         Snackbar snackbar = Snackbar.make(snackbarText, mUndoDeletionSnackbarController,

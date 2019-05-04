@@ -13,6 +13,16 @@
 
 namespace blink {
 
+// static
+JSEventHandler* JSEventHandler::CreateOrNull(v8::Local<v8::Value> value,
+                                             HandlerType type) {
+  if (!value->IsObject())
+    return nullptr;
+
+  return MakeGarbageCollected<JSEventHandler>(
+      V8EventHandlerNonNull::Create(value.As<v8::Object>()), type);
+}
+
 v8::Local<v8::Value> JSEventHandler::GetEffectiveFunction(EventTarget& target) {
   v8::Local<v8::Value> v8_listener = GetListenerObject(target);
   if (!v8_listener.IsEmpty() && v8_listener->IsFunction())
@@ -20,27 +30,35 @@ v8::Local<v8::Value> JSEventHandler::GetEffectiveFunction(EventTarget& target) {
   return v8::Undefined(GetIsolate());
 }
 
-void JSEventHandler::SetCompiledHandler(
-    ScriptState* script_state,
-    v8::Local<v8::Function> listener,
-    const V8PrivateProperty::Symbol& property) {
+void JSEventHandler::SetCompiledHandler(ScriptState* incumbent_script_state,
+                                        v8::Local<v8::Function> listener) {
   DCHECK(!HasCompiledHandler());
+
+  // https://html.spec.whatwg.org/multipage/webappapis.html#getting-the-current-value-of-the-event-handler
+  // Step 12: Set eventHandler's value to the result of creating a Web IDL
+  // EventHandler callback function object whose object reference is function
+  // and whose callback context is settings object.
+  //
+  // Push |script_state|'s context onto the backup incumbent settings object
+  // stack because appropriate incumbent realm does not always exist when
+  // content attribute gets lazily compiled. This context is the same one of the
+  // relevant realm of |listener| and its event target.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
-      script_state->GetContext());
+      incumbent_script_state->GetContext());
   event_handler_ = V8EventHandlerNonNull::Create(listener);
-  Attach(script_state, listener, property, this);
 }
 
 // https://html.spec.whatwg.org/C/webappapis.html#the-event-handler-processing-algorithm
-void JSEventHandler::CallListenerFunction(EventTarget& event_target,
-                                          Event& event,
-                                          v8::Local<v8::Value> js_event) {
+void JSEventHandler::InvokeInternal(EventTarget& event_target,
+                                    Event& event,
+                                    v8::Local<v8::Value> js_event) {
   DCHECK(!js_event.IsEmpty());
 
   // Step 1. Let callback be the result of getting the current value of the
   //         event handler given eventTarget and name.
   // Step 2. If callback is null, then return.
-  v8::Local<v8::Value> listener_value = GetListenerObject(event_target);
+  v8::Local<v8::Value> listener_value =
+      GetListenerObject(*event.currentTarget());
   if (listener_value.IsEmpty() || listener_value->IsNull())
     return;
   DCHECK(HasCompiledHandler());
@@ -50,7 +68,7 @@ void JSEventHandler::CallListenerFunction(EventTarget& event_target,
   // WindowOrWorkerGlobalScope mixin. Otherwise, let special error event
   // handling be false.
   const bool special_error_event_handling =
-      event.IsErrorEvent() && event.type() == EventTypeNames::error &&
+      event.IsErrorEvent() && event.type() == event_type_names::kError &&
       event.currentTarget()->IsWindowOrWorkerGlobalScope();
 
   // Step 4. Process the Event object event as follows:
@@ -80,7 +98,7 @@ void JSEventHandler::CallListenerFunction(EventTarget& event_target,
     // https://html.spec.whatwg.org/C/workers.html#runtime-script-errors-2
     ScriptValue error_attribute = error_event->error(script_state_of_listener);
     if (error_attribute.IsEmpty() ||
-        error_event->target()->InterfaceName() == EventTargetNames::Worker)
+        error_event->target()->InterfaceName() == event_target_names::kWorker)
       error_attribute = ScriptValue::CreateNull(script_state_of_listener);
 
     arguments = {
@@ -93,8 +111,16 @@ void JSEventHandler::CallListenerFunction(EventTarget& event_target,
     arguments = {ScriptValue::From(script_state_of_listener, js_event)};
   }
 
+  if (!event_handler_->IsRunnableOrThrowException(
+          event.ShouldDispatchEvenWhenExecutionContextIsPaused()
+              ? V8EventHandlerNonNull::IgnorePause::kIgnore
+              : V8EventHandlerNonNull::IgnorePause::kDontIgnore)) {
+    return;
+  }
   ScriptValue result;
-  if (!event_handler_->Invoke(event.currentTarget(), arguments).To(&result) ||
+  if (!event_handler_
+           ->InvokeWithoutRunnabilityCheck(event.currentTarget(), arguments)
+           .To(&result) ||
       GetIsolate()->IsExecutionTerminating())
     return;
   v8::Local<v8::Value> v8_return_value = result.V8Value();
@@ -114,7 +140,7 @@ void JSEventHandler::CallListenerFunction(EventTarget& event_target,
   String result_for_beforeunload;
   if (IsOnBeforeUnloadEventHandler()) {
     // TODO(yukiy): use |NativeValueTraits|.
-    V8StringResource<> native_result(v8_return_value);
+    V8StringResource<kTreatNullAsNullString> native_result(v8_return_value);
 
     // |native_result.Prepare()| throws exception if it fails to convert
     // |native_result| to String.
@@ -138,13 +164,16 @@ void JSEventHandler::CallListenerFunction(EventTarget& event_target,
   //             then return value will never be false, since in such cases
   //             return value will have been coerced into either null or a
   //             DOMString.
-  if (event.IsBeforeUnloadEvent() &&
-      event.type() == EventTypeNames::beforeunload) {
-    DCHECK(result_for_beforeunload);
-    event.preventDefault();
-    BeforeUnloadEvent* before_unload_event = ToBeforeUnloadEvent(&event);
-    if (before_unload_event->returnValue().IsEmpty())
-      before_unload_event->setReturnValue(result_for_beforeunload);
+  const bool is_beforeunload_event =
+      event.IsBeforeUnloadEvent() &&
+      event.type() == event_type_names::kBeforeunload;
+  if (is_beforeunload_event) {
+    if (result_for_beforeunload) {
+      event.preventDefault();
+      BeforeUnloadEvent* before_unload_event = ToBeforeUnloadEvent(&event);
+      if (before_unload_event->returnValue().IsEmpty())
+        before_unload_event->setReturnValue(result_for_beforeunload);
+    }
   } else if (!IsOnBeforeUnloadEventHandler()) {
     if (special_error_event_handling && v8_return_value->IsBoolean() &&
         v8_return_value.As<v8::Boolean>()->Value())

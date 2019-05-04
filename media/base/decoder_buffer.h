@@ -147,6 +147,8 @@ class MEDIA_EXPORT DecoderBuffer
     discard_padding_ = discard_padding;
   }
 
+  // Returns DecryptConfig associated with |this|. Returns null iff |this| is
+  // not encrypted.
   const DecryptConfig* decrypt_config() const {
     DCHECK(!end_of_stream());
     return decrypt_config_.get();
@@ -229,6 +231,10 @@ class MEDIA_EXPORT DecoderBuffer
 
   // Whether the frame was marked as a keyframe in the container.
   bool is_key_frame_;
+
+  // Check for double destruction. This field is not to be used.
+  // crbug.com/794740.
+  uint32_t destruction_ = 0x55555555;
 
   // Constructor helper method for memory allocations.
   void Initialize();

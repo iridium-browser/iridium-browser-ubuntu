@@ -54,14 +54,14 @@ class TestMediaRouterAction : public MediaRouterAction {
   ~TestMediaRouterAction() override {}
 
   // MediaRouterAction:
-  void ActiveTabChanged(content::WebContents* old_contents,
-                        content::WebContents* new_contents,
-                        int index,
-                        int reason) override {
+  void OnTabStripModelChanged(
+      TabStripModel* tab_strip_model,
+      const TabStripModelChange& change,
+      const TabStripSelectionChange& selection) override {
     // This would be null if |controller_| hasn't been set.
     if (GetMediaRouterDialogController()) {
-      MediaRouterAction::ActiveTabChanged(old_contents, new_contents, index,
-                                          reason);
+      MediaRouterAction::OnTabStripModelChanged(tab_strip_model, change,
+                                                selection);
     }
   }
 
@@ -73,8 +73,12 @@ class TestMediaRouterAction : public MediaRouterAction {
 
  private:
   // MediaRouterAction:
-  MediaRouterDialogControllerWebUIImpl* GetMediaRouterDialogController()
-      override {
+  media_router::MediaRouterDialogControllerImplBase*
+  GetMediaRouterDialogController() override {
+    return controller_;
+  }
+  const media_router::MediaRouterDialogControllerImplBase*
+  GetMediaRouterDialogController() const override {
     return controller_;
   }
 

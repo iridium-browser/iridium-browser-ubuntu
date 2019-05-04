@@ -40,6 +40,8 @@ const char kSessionManagerRetrieveActiveSessions[] = "RetrieveActiveSessions";
 const char kSessionManagerRetrievePrimarySession[] = "RetrievePrimarySession";
 const char kSessionManagerStartTPMFirmwareUpdate[] = "StartTPMFirmwareUpdate";
 const char kSessionManagerStartDeviceWipe[] = "StartDeviceWipe";
+const char kSessionManagerClearForcedReEnrollmentVpd[] =
+    "ClearForcedReEnrollmentVpd";
 const char kSessionManagerHandleSupervisedUserCreationStarting[] =
     "HandleSupervisedUserCreationStarting";
 const char kSessionManagerHandleSupervisedUserCreationFinished[] =
@@ -48,6 +50,7 @@ const char kSessionManagerLockScreen[] = "LockScreen";
 const char kSessionManagerHandleLockScreenShown[] = "HandleLockScreenShown";
 const char kSessionManagerHandleLockScreenDismissed[] =
     "HandleLockScreenDismissed";
+const char kSessionManagerIsScreenLocked[] = "IsScreenLocked";
 const char kSessionManagerSetFlagsForUser[] = "SetFlagsForUser";
 const char kSessionManagerGetServerBackedStateKeys[] =
     "GetServerBackedStateKeys";
@@ -59,7 +62,6 @@ const char kSessionManagerStopArcInstance[] = "StopArcInstance";
 const char kSessionManagerSetArcCpuRestriction[] = "SetArcCpuRestriction";
 const char kSessionManagerEmitArcBooted[] = "EmitArcBooted";
 const char kSessionManagerGetArcStartTimeTicks[] = "GetArcStartTimeTicks";
-const char kSessionManagerRemoveArcData[] = "RemoveArcData";
 const char kSessionManagerStartContainer[] = "StartContainer";
 const char kSessionManagerStopContainer[] = "StopContainer";
 // Signals
@@ -106,6 +108,8 @@ const char kSigEncodeFail[] = INTERFACE ".SigEncodeFail";
 const char kTestingChannelError[] = INTERFACE ".TestingChannelError";
 const char kUnknownPid[] = INTERFACE ".UnknownPid";
 const char kVerifyFail[] = INTERFACE ".VerifyFail";
+const char kSystemPropertyUpdateFailed[] =
+    INTERFACE ".SystemPropertyUpdateFailed";
 const char kVpdUpdateFailed[] = INTERFACE ".VpdUpdateFailed";
 
 #undef INTERFACE

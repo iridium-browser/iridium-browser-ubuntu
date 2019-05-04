@@ -719,7 +719,7 @@
       "--json-output",
       "/path/to/tmp/json",
       "copy",
-      "set -x; /data/local/tmp/dm --resourcePath /sdcard/revenge_of_the_skiabot/resources --skps /sdcard/revenge_of_the_skiabot/skps --images /sdcard/revenge_of_the_skiabot/images/dm --colorImages /sdcard/revenge_of_the_skiabot/images/colorspace --nameByHash --properties gitHash abc123 builder Test-Android-Clang-Nexus7-CPU-Tegra3-arm-Release-All-Android buildbucket_build_id 123454321 swarming_bot_id skia-bot-123 swarming_task_id 123456 --svgs /sdcard/revenge_of_the_skiabot/svgs --key arch arm compiler Clang configuration Release cpu_or_gpu CPU cpu_or_gpu_value Tegra3 extra_config Android model Nexus7 os Android --uninterestingHashesFile /sdcard/revenge_of_the_skiabot/uninteresting_hashes.txt --writePath /sdcard/revenge_of_the_skiabot/dm_out --dont_write pdf --threads 2 --nogpu --config 8888 --src tests gm image colorImage --blacklist _ test _ GrShape --nonativeFonts --verbose; echo $? >/data/local/tmp/rc",
+      "set -x; /data/local/tmp/dm --resourcePath /sdcard/revenge_of_the_skiabot/resources --skps /sdcard/revenge_of_the_skiabot/skps --images /sdcard/revenge_of_the_skiabot/images/dm --colorImages /sdcard/revenge_of_the_skiabot/images/colorspace --nameByHash --properties gitHash abc123 builder Test-Android-Clang-Nexus7-CPU-Tegra3-arm-Release-All-Android buildbucket_build_id 123454321 swarming_bot_id skia-bot-123 swarming_task_id 123456 --svgs /sdcard/revenge_of_the_skiabot/svgs --key arch arm compiler Clang configuration Release cpu_or_gpu CPU cpu_or_gpu_value Tegra3 extra_config Android model Nexus7 os Android --uninterestingHashesFile /sdcard/revenge_of_the_skiabot/uninteresting_hashes.txt --writePath /sdcard/revenge_of_the_skiabot/dm_out --dont_write pdf --threads 2 --nogpu --config 8888 --src tests gm image colorImage --blacklist _ image gen_platf error _ test _ GrShape --nonativeFonts --verbose; echo $? >/data/local/tmp/rc",
       "[START_DIR]/tmp/dm.sh"
     ],
     "env": {
@@ -798,7 +798,7 @@
       "/usr/bin/adb.1.0.35",
       "pull",
       "/sdcard/revenge_of_the_skiabot/dm_out",
-      "[TMP_BASE]/adb_pull_tmp_1"
+      "[CLEANUP]/adb_pull_tmp_1"
     ],
     "cwd": "[START_DIR]/skia",
     "env": {
@@ -820,7 +820,7 @@
       "--json-output",
       "/path/to/tmp/json",
       "glob",
-      "[TMP_BASE]/adb_pull_tmp_1",
+      "[CLEANUP]/adb_pull_tmp_1",
       "dm_out/*"
     ],
     "infra_step": true,
@@ -828,8 +828,8 @@
     "stdout": "/path/to/tmp/",
     "~followup_annotations": [
       "@@@STEP_NEST_LEVEL@1@@@",
-      "@@@STEP_LOG_LINE@glob@[TMP_BASE]/adb_pull_tmp_1/1.png@@@",
-      "@@@STEP_LOG_LINE@glob@[TMP_BASE]/adb_pull_tmp_1/2.png@@@",
+      "@@@STEP_LOG_LINE@glob@[CLEANUP]/adb_pull_tmp_1/1.png@@@",
+      "@@@STEP_LOG_LINE@glob@[CLEANUP]/adb_pull_tmp_1/2.png@@@",
       "@@@STEP_LOG_END@glob@@@"
     ]
   },
@@ -841,7 +841,7 @@
       "--json-output",
       "/path/to/tmp/json",
       "copy",
-      "[TMP_BASE]/adb_pull_tmp_1/1.png",
+      "[CLEANUP]/adb_pull_tmp_1/1.png",
       "[START_DIR]/[SWARM_OUT_DIR]"
     ],
     "infra_step": true,
@@ -858,7 +858,7 @@
       "--json-output",
       "/path/to/tmp/json",
       "copy",
-      "[TMP_BASE]/adb_pull_tmp_1/2.png",
+      "[CLEANUP]/adb_pull_tmp_1/2.png",
       "[START_DIR]/[SWARM_OUT_DIR]"
     ],
     "infra_step": true,
@@ -875,10 +875,10 @@
       "--json-output",
       "/path/to/tmp/json",
       "rmtree",
-      "[TMP_BASE]/adb_pull_tmp_1"
+      "[CLEANUP]/adb_pull_tmp_1"
     ],
     "infra_step": true,
-    "name": "adb pull.rmtree [TMP_BASE]/adb_pull_tmp_1",
+    "name": "adb pull.rmtree [CLEANUP]/adb_pull_tmp_1",
     "~followup_annotations": [
       "@@@STEP_NEST_LEVEL@1@@@"
     ]
@@ -931,8 +931,7 @@
     "name": "kill adb server"
   },
   {
-    "name": "$result",
-    "recipe_result": null,
-    "status_code": 0
+    "jsonResult": null,
+    "name": "$result"
   }
 ]

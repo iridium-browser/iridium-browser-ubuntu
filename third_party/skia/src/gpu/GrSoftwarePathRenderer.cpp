@@ -22,7 +22,7 @@
 #include "SkTaskGroup.h"
 #include "SkTraceEvent.h"
 #include "ops/GrDrawOp.h"
-#include "ops/GrRectOpFactory.h"
+#include "ops/GrFillRectOp.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 GrPathRenderer::CanDrawPath
@@ -100,9 +100,9 @@ void GrSoftwarePathRenderer::DrawNonAARect(GrRenderTargetContext* renderTargetCo
                                            const SkMatrix& localMatrix) {
     GrContext* context = renderTargetContext->surfPriv().getContext();
     renderTargetContext->addDrawOp(clip,
-                                   GrRectOpFactory::MakeNonAAFillWithLocalMatrix(
-                                           context, std::move(paint), viewMatrix, localMatrix, rect,
-                                           GrAAType::kNone, &userStencilSettings));
+                                   GrFillRectOp::MakeWithLocalMatrix(
+                                           context, std::move(paint), GrAAType::kNone, viewMatrix,
+                                           localMatrix, rect, &userStencilSettings));
 }
 
 void GrSoftwarePathRenderer::DrawAroundInvPath(GrRenderTargetContext* renderTargetContext,
@@ -181,9 +181,12 @@ static sk_sp<GrTextureProxy> make_deferred_mask_texture_proxy(GrContext* context
     desc.fHeight = height;
     desc.fConfig = kAlpha_8_GrPixelConfig;
 
+    const GrBackendFormat format =
+            context->contextPriv().caps()->getBackendFormatFromColorType(kAlpha_8_SkColorType);
+
     // MDB TODO: We're going to fill this proxy with an ASAP upload (which is out of order wrt to
     // ops), so it can't have any pending IO.
-    return proxyProvider->createProxy(desc, kTopLeft_GrSurfaceOrigin, fit, SkBudgeted::kYes,
+    return proxyProvider->createProxy(format, desc, kTopLeft_GrSurfaceOrigin, fit, SkBudgeted::kYes,
                                       GrInternalSurfaceFlags::kNoPendingIO);
 }
 

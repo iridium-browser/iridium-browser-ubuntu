@@ -14,12 +14,12 @@
 
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
+import {Engine} from '../common/engine';
 import {Registry} from '../common/registry';
 import {TrackState} from '../common/state';
 
 import {Controller} from './controller';
 import {ControllerFactory} from './controller';
-import {Engine} from './engine';
 import {globals} from './globals';
 
 // TrackController is a base class overridden by track implementations (e.g.,
@@ -50,6 +50,17 @@ export abstract class TrackController<Config = {}, Data = {}> extends
 
   publish(data: Data): void {
     globals.publish('TrackData', {id: this.trackId, data});
+  }
+
+  /**
+   * Returns a valid SQL table name with the given prefix that should be unique
+   * for each track.
+   */
+  tableName(prefix: string) {
+    // Derive table name from, since that is unique for each track.
+    // Track ID can be UUID but '-' is not valid for sql table name.
+    const idSuffix = this.trackId.split('-').join('_');
+    return `${prefix}_${idSuffix}`;
   }
 
   run() {

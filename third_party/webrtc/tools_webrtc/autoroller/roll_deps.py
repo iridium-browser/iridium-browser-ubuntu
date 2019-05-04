@@ -29,7 +29,6 @@ def FindSrcDirPath():
 # Skip these dependencies (list without solution name prefix).
 DONT_AUTOROLL_THESE = [
   'src/examples/androidtests/third_party/gradle',
-  'src/third_party/ffmpeg',
 ]
 
 # These dependencies are missing in chromium/src/DEPS, either unused or already
@@ -258,8 +257,9 @@ def BuildDepsentryDict(deps_dict):
 
 
 def _FindChangedCipdPackages(path, old_pkgs, new_pkgs):
-  assert ({p['package'] for p in old_pkgs} ==
-          {p['package'] for p in new_pkgs})
+  pkgs_equal = ({p['package'] for p in old_pkgs} ==
+      {p['package'] for p in new_pkgs})
+  assert pkgs_equal, 'Old: %s\n New: %s' % (old_pkgs, new_pkgs)
   for old_pkg in old_pkgs:
     for new_pkg in new_pkgs:
       old_version = old_pkg['version']

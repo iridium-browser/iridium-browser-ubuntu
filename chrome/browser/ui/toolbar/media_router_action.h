@@ -56,6 +56,7 @@ class MediaRouterAction : public ToolbarActionViewController,
   bool IsEnabled(content::WebContents* web_contents) const override;
   bool WantsToRun(content::WebContents* web_contents) const override;
   bool HasPopup(content::WebContents* web_contents) const override;
+  bool IsShowingPopup() const override;
   void HidePopup() override;
   gfx::NativeView GetPopupNativeView() override;
   ui::MenuModel* GetContextMenu() override;
@@ -74,10 +75,10 @@ class MediaRouterAction : public ToolbarActionViewController,
                            joinable_route_ids) override;
 
   // ToolbarStripModelObserver:
-  void ActiveTabChanged(content::WebContents* old_contents,
-                        content::WebContents* new_contents,
-                        int index,
-                        int reason) override;
+  void OnTabStripModelChanged(
+      TabStripModel* tab_strip_model,
+      const TabStripModelChange& change,
+      const TabStripSelectionChange& selection) override;
 
   // ToolbarActionsBarObserver:
   void OnToolbarActionsBarAnimationEnded() override;
@@ -107,6 +108,8 @@ class MediaRouterAction : public ToolbarActionViewController,
   // Marked virtual for tests.
   virtual media_router::MediaRouterDialogControllerImplBase*
   GetMediaRouterDialogController();
+  virtual const media_router::MediaRouterDialogControllerImplBase*
+  GetMediaRouterDialogController() const;
 
   // Checks if the current icon of MediaRouterAction has changed. If so,
   // updates |current_icon_|.

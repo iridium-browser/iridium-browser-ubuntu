@@ -56,6 +56,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -126,7 +129,8 @@
           "--test-launcher-filter-file=../../testing/buildbot/filters/cast-linux.content_browsertests.filter"
         ],
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
@@ -366,6 +370,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -442,7 +449,8 @@
           "--test-launcher-filter-file=../../testing/buildbot/filters/cast-linux.content_browsertests.filter"
         ],
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
@@ -474,6 +482,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "events_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "exo_unittests"
       },
       {
         "swarming": {
@@ -629,21 +643,18 @@
   },
   "Fuchsia ARM64": {
     "additional_compile_targets": [
-      "gn_all"
-    ]
-  },
-  "Fuchsia ARM64 Cast Audio": {
-    "additional_compile_targets": [
-      "cast_shell",
-      "cast_test_lists"
+      "all"
     ]
   },
   "Fuchsia x64": {
     "additional_compile_targets": [
-      "gn_all"
+      "all"
     ],
     "gtest_tests": [
       {
+        "args": [
+          "--qemu-require-kvm"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -656,7 +667,22 @@
       },
       {
         "args": [
-          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.content_unittests.filter"
+          "--qemu-require-kvm"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "cast_runner_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.content_unittests.filter",
+          "--qemu-require-kvm"
         ],
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -669,6 +695,9 @@
         "test": "content_unittests"
       },
       {
+        "args": [
+          "--qemu-require-kvm"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -680,6 +709,9 @@
         "test": "cronet_tests"
       },
       {
+        "args": [
+          "--qemu-require-kvm"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -691,6 +723,9 @@
         "test": "cronet_unittests"
       },
       {
+        "args": [
+          "--qemu-require-kvm"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -703,7 +738,49 @@
       },
       {
         "args": [
-          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.ipc_tests.filter"
+          "--qemu-require-kvm"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "fidlgen_js_unittests"
+      },
+      {
+        "args": [
+          "--qemu-require-kvm"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "gpu_unittests"
+      },
+      {
+        "args": [
+          "--qemu-require-kvm"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "http_service_tests"
+      },
+      {
+        "args": [
+          "--qemu-require-kvm"
         ],
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -716,6 +793,9 @@
         "test": "ipc_tests"
       },
       {
+        "args": [
+          "--qemu-require-kvm"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -728,7 +808,8 @@
       },
       {
         "args": [
-          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.mojo_unittests.filter"
+          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.mojo_unittests.filter",
+          "--qemu-require-kvm"
         ],
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -741,6 +822,38 @@
         "test": "mojo_unittests"
       },
       {
+        "args": [
+          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.net_unittests.filter",
+          "--qemu-require-kvm"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "net_unittests"
+      },
+      {
+        "args": [
+          "--qemu-require-kvm"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "perfetto_unittests"
+      },
+      {
+        "args": [
+          "--qemu-require-kvm"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -752,6 +865,9 @@
         "test": "service_manager_unittests"
       },
       {
+        "args": [
+          "--qemu-require-kvm"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -763,6 +879,9 @@
         "test": "skia_unittests"
       },
       {
+        "args": [
+          "--qemu-require-kvm"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -775,7 +894,8 @@
       },
       {
         "args": [
-          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.ui_base_unittests.filter"
+          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.ui_base_unittests.filter",
+          "--qemu-require-kvm"
         ],
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -788,17 +908,9 @@
         "test": "ui_base_unittests"
       },
       {
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "kvm": "1"
-            }
-          ]
-        },
-        "test": "webrunner_browsertests"
-      },
-      {
+        "args": [
+          "--qemu-require-kvm"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -811,17 +923,11 @@
       }
     ]
   },
-  "Fuchsia x64 Cast Audio": {
-    "additional_compile_targets": [
-      "cast_shell",
-      "cast_test_lists"
-    ]
-  },
   "Leak Detection Linux": {
     "isolated_scripts": [
       {
         "args": [
-          "--smoke-test-mode",
+          "--pageset-repeat=1",
           "--test-shard-map-filename=linux_leak_detection_shard_map.json",
           "--upload-results",
           "--output-format=histograms",
@@ -949,8 +1055,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -978,6 +1083,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -1037,14 +1145,14 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -1507,11 +1615,9 @@
       {
         "args": [
           "--additional-driver-flag",
-          "--site-per-process",
-          "--additional-driver-flag",
-          "--isolate-origins=http://www.web-platform.test:8001/,http://www1.web-platform.test:8001/,http://www2.web-platform.test:8001/,http://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8001/,http://xn--lve-6lad.web-platform.test:8001/,http://www.web-platform.test:8081/,http://www1.web-platform.test:8081/,http://www2.web-platform.test:8081/,http://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8081/,http://xn--lve-6lad.web-platform.test:8081/,https://www.web-platform.test:8444/,https://www1.web-platform.test:8444/,https://www2.web-platform.test:8444/,https://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8444/,https://xn--lve-6lad.web-platform.test:8444/",
+          "--disable-site-isolation-trials",
           "--additional-expectations",
-          "src/third_party/WebKit/LayoutTests/FlagExpectations/site-per-process",
+          "src/third_party/blink/web_tests/FlagExpectations/disable-site-isolation-trials",
           "--num-retries=3"
         ],
         "isolate_name": "webkit_layout_tests_exparchive",
@@ -1521,7 +1627,7 @@
           ],
           "script": "//third_party/blink/tools/merge_web_test_results.py"
         },
-        "name": "site_per_process_webkit_layout_tests",
+        "name": "not_site_per_process_webkit_layout_tests",
         "results_handler": "layout tests",
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -1570,6 +1676,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -1607,6 +1719,10 @@
       }
     ],
     "scripts": [
+      {
+        "name": "check_static_initializers",
+        "script": "check_static_initializers.py"
+      },
       {
         "name": "checkdeps",
         "script": "checkdeps.py"
@@ -1698,8 +1814,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -1727,6 +1842,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -1786,14 +1904,14 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -2274,6 +2392,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -2389,8 +2513,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -2418,6 +2541,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -2477,14 +2603,14 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -2938,6 +3064,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -2950,6 +3082,18 @@
           "can_use_on_swarming_builders": true
         }
       }
+    ]
+  },
+  "fuchsia-arm64-cast": {
+    "additional_compile_targets": [
+      "cast_shell",
+      "cast_test_lists"
+    ]
+  },
+  "fuchsia-x64-cast": {
+    "additional_compile_targets": [
+      "cast_shell",
+      "cast_test_lists"
     ]
   },
   "linux-gcc-rel": {
@@ -3120,8 +3264,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -3164,6 +3307,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -3273,14 +3419,14 @@
             {
               "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "shards": 6
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -4098,11 +4244,9 @@
       {
         "args": [
           "--additional-driver-flag",
-          "--site-per-process",
-          "--additional-driver-flag",
-          "--isolate-origins=http://www.web-platform.test:8001/,http://www1.web-platform.test:8001/,http://www2.web-platform.test:8001/,http://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8001/,http://xn--lve-6lad.web-platform.test:8001/,http://www.web-platform.test:8081/,http://www1.web-platform.test:8081/,http://www2.web-platform.test:8081/,http://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8081/,http://xn--lve-6lad.web-platform.test:8081/,https://www.web-platform.test:8444/,https://www1.web-platform.test:8444/,https://www2.web-platform.test:8444/,https://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8444/,https://xn--lve-6lad.web-platform.test:8444/",
+          "--disable-site-isolation-trials",
           "--additional-expectations",
-          "src/third_party/WebKit/LayoutTests/FlagExpectations/site-per-process",
+          "src/third_party/blink/web_tests/FlagExpectations/disable-site-isolation-trials",
           "--num-retries=3"
         ],
         "isolate_name": "webkit_layout_tests_exparchive",
@@ -4112,7 +4256,7 @@
           ],
           "script": "//third_party/blink/tools/merge_web_test_results.py"
         },
-        "name": "site_per_process_webkit_layout_tests",
+        "name": "not_site_per_process_webkit_layout_tests",
         "results_handler": "layout tests",
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -4176,6 +4320,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -4223,6 +4373,10 @@
       }
     ],
     "scripts": [
+      {
+        "name": "check_static_initializers",
+        "script": "check_static_initializers.py"
+      },
       {
         "name": "checkdeps",
         "script": "checkdeps.py"

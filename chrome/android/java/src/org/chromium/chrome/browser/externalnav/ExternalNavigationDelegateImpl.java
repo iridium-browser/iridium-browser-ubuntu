@@ -32,7 +32,6 @@ import org.chromium.base.StrictModeContext;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.blink_public.web.WebReferrerPolicy;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeTabbedActivity2;
@@ -55,6 +54,7 @@ import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.common.Referrer;
+import org.chromium.network.mojom.ReferrerPolicy;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.PermissionCallback;
 import org.chromium.ui.base.WindowAndroid;
@@ -269,20 +269,20 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public int countSpecializedHandlers(List<ResolveInfo> infos, Intent intent) {
-        return getSpecializedHandlersWithFilter(infos, null, intent).size();
+    public int countSpecializedHandlers(List<ResolveInfo> infos) {
+        return getSpecializedHandlersWithFilter(infos, null).size();
     }
 
     @VisibleForTesting
     public static ArrayList<String> getSpecializedHandlersWithFilter(
-            List<ResolveInfo> infos, String filterPackageName, Intent intent) {
+            List<ResolveInfo> infos, String filterPackageName) {
         ArrayList<String> result = new ArrayList<>();
         if (infos == null) {
             return result;
         }
 
         for (ResolveInfo info : infos) {
-            if (!matchResolveInfoExceptWildCardHost(info, filterPackageName, intent)) {
+            if (!matchResolveInfoExceptWildCardHost(info, filterPackageName)) {
                 continue;
             }
 
@@ -301,7 +301,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     private static boolean matchResolveInfoExceptWildCardHost(
-            ResolveInfo info, String filterPackageName, Intent intent) {
+            ResolveInfo info, String filterPackageName) {
         IntentFilter intentFilter = info.filter;
         if (intentFilter == null) {
             // Error on the side of classifying ResolveInfo as generic.
@@ -311,19 +311,17 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             // Don't count generic handlers.
             return false;
         }
-        if (intent != null) {
-            boolean isWildCardHost = false;
-            Iterator<IntentFilter.AuthorityEntry> it = intentFilter.authoritiesIterator();
-            while (it != null && it.hasNext()) {
-                IntentFilter.AuthorityEntry entry = it.next();
-                if ("*".equals(entry.getHost())) {
-                    isWildCardHost = true;
-                    break;
-                }
+        boolean isWildCardHost = false;
+        Iterator<IntentFilter.AuthorityEntry> it = intentFilter.authoritiesIterator();
+        while (it != null && it.hasNext()) {
+            IntentFilter.AuthorityEntry entry = it.next();
+            if ("*".equals(entry.getHost())) {
+                isWildCardHost = true;
+                break;
             }
-            if (isWildCardHost) {
-                return false;
-            }
+        }
+        if (isWildCardHost) {
+            return false;
         }
         if (!TextUtils.isEmpty(filterPackageName)
                 && (info.activityInfo == null
@@ -348,7 +346,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         try (StrictModeContext unused = StrictModeContext.allowDiskReads()){
             List<ResolveInfo> handlers = context.getPackageManager().queryIntentActivities(
                     intent, PackageManager.GET_RESOLVED_FILTER);
-            return getSpecializedHandlersWithFilter(handlers, packageName, intent).size() > 0;
+            return getSpecializedHandlersWithFilter(handlers, packageName).size() > 0;
         } catch (RuntimeException e) {
             IntentUtils.logTransactionTooLargeOrRethrow(e, intent);
         }
@@ -356,8 +354,8 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public String findWebApkPackageName(List<ResolveInfo> infos) {
-        return WebApkValidator.findWebApkPackage(mApplicationContext, infos);
+    public String findFirstWebApkPackageName(List<ResolveInfo> infos) {
+        return WebApkValidator.findFirstWebApkPackage(mApplicationContext, infos);
     }
 
     @Override
@@ -541,8 +539,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
 
         LoadUrlParams loadUrlParams = new LoadUrlParams(url, PageTransition.AUTO_TOPLEVEL);
         if (!TextUtils.isEmpty(referrerUrl)) {
-            Referrer referrer =
-                    new Referrer(referrerUrl, WebReferrerPolicy.ALWAYS);
+            Referrer referrer = new Referrer(referrerUrl, ReferrerPolicy.ALWAYS);
             loadUrlParams.setReferrer(referrer);
         }
         tab.loadUrl(loadUrlParams);
@@ -553,8 +550,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         int transitionType = PageTransition.LINK;
         final LoadUrlParams loadUrlParams = new LoadUrlParams(url, transitionType);
         if (!TextUtils.isEmpty(referrerUrl)) {
-            Referrer referrer =
-                    new Referrer(referrerUrl, WebReferrerPolicy.ALWAYS);
+            Referrer referrer = new Referrer(referrerUrl, ReferrerPolicy.ALWAYS);
             loadUrlParams.setReferrer(referrer);
         }
         if (hasValidTab()) {
@@ -620,7 +616,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     @Override
     public void maybeRecordAppHandlersInIntent(Intent intent, List<ResolveInfo> infos) {
         intent.putExtra(IntentHandler.EXTRA_EXTERNAL_NAV_PACKAGES,
-                getSpecializedHandlersWithFilter(infos, null, intent));
+                getSpecializedHandlersWithFilter(infos, null));
     }
 
     @Override

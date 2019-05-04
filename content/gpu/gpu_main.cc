@@ -15,7 +15,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/threading/platform_thread.h"
 #include "base/timer/hi_res_timer_manager.h"
 #include "base/trace_event/trace_event.h"
@@ -64,6 +64,7 @@
 #endif
 
 #if defined(OS_WIN)
+#include "base/trace_event/trace_event_etw_export_win.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/windows_version.h"
 #include "media/gpu/windows/dxva_video_decode_accelerator_win.h"
@@ -211,6 +212,11 @@ int GpuMain(const MainFunctionParams& parameters) {
   if (gpu_preferences.gpu_startup_dialog)
     WaitForDebugger("Gpu");
 
+#if defined(OS_WIN)
+  if (gpu_preferences.enable_trace_export_events_to_etw)
+    base::trace_event::TraceEventETWExport::EnableETWExport();
+#endif
+
   base::Time start_time = base::Time::Now();
 
 #if defined(OS_WIN)
@@ -338,10 +344,8 @@ int GpuMain(const MainFunctionParams& parameters) {
   gpu_process.set_main_thread(child_thread);
 
   // Setup tracing sampler profiler as early as possible.
-  auto tracing_sampler_profiler =
-      std::make_unique<tracing::TracingSamplerProfiler>(
-          base::PlatformThread::CurrentId());
-  tracing_sampler_profiler->OnMessageLoopStarted();
+  std::unique_ptr<tracing::TracingSamplerProfiler> tracing_sampler_profiler =
+      tracing::TracingSamplerProfiler::CreateOnMainThread();
 
 #if defined(OS_ANDROID)
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(

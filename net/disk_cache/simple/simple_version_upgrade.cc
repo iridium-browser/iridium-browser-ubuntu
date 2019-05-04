@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "base/files/file.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/memory_mapped_file.h"
@@ -23,6 +24,7 @@ namespace {
 const uint32_t kMinVersionAbleToUpgrade = 5;
 
 const char kFakeIndexFileName[] = "index";
+const char kIndexDirName[] = "index-dir";
 const char kIndexFileName[] = "the-real-index";
 
 void LogMessageFailedUpgradeFromVersion(int version) {
@@ -142,9 +144,12 @@ SimpleCacheConsistencyResult UpgradeSimpleCacheOnDisk(
 
   if (!fake_index_file.IsValid()) {
     if (fake_index_file.error_details() == base::File::FILE_ERROR_NOT_FOUND) {
-      return WriteFakeIndexFile(fake_index)
-                 ? SimpleCacheConsistencyResult::kOK
-                 : SimpleCacheConsistencyResult::kWriteFakeIndexFileFailed;
+      if (!WriteFakeIndexFile(fake_index)) {
+        base::DeleteFile(fake_index, /* recursive = */ false);
+        LOG(ERROR) << "Failed to write a new fake index.";
+        return SimpleCacheConsistencyResult::kWriteFakeIndexFileFailed;
+      }
+      return SimpleCacheConsistencyResult::kOK;
     }
     return SimpleCacheConsistencyResult::kBadFakeIndexFile;
   }
@@ -153,10 +158,13 @@ SimpleCacheConsistencyResult UpgradeSimpleCacheOnDisk(
   int bytes_read = fake_index_file.Read(0,
                                         reinterpret_cast<char*>(&file_header),
                                         sizeof(file_header));
-  if (bytes_read != sizeof(file_header) ||
-      file_header.initial_magic_number !=
-          disk_cache::simplecache_v5::kSimpleInitialMagicNumber) {
-    LOG(ERROR) << "File structure does not match the disk cache backend.";
+  if (bytes_read != sizeof(file_header)) {
+    LOG(ERROR) << "Disk cache backend fake index file has wrong size.";
+    return SimpleCacheConsistencyResult::kBadFakeIndexReadSize;
+  }
+  if (file_header.initial_magic_number !=
+      disk_cache::simplecache_v5::kSimpleInitialMagicNumber) {
+    LOG(ERROR) << "Disk cache backend fake index file has wrong magic number.";
     return SimpleCacheConsistencyResult::kBadInitialMagicNumber;
   }
   fake_index_file.Close();
@@ -203,6 +211,11 @@ SimpleCacheConsistencyResult UpgradeSimpleCacheOnDisk(
     version_from++;
   }
 
+  if (version_from == 8) {
+    // Likewise, V8 -> V9 is handled entirely by the index reader.
+    version_from++;
+  }
+
   DCHECK_EQ(kSimpleVersion, version_from);
 
   if (!new_fake_index_needed)
@@ -221,6 +234,28 @@ SimpleCacheConsistencyResult UpgradeSimpleCacheOnDisk(
     return SimpleCacheConsistencyResult::kReplaceFileFailed;
   }
   return SimpleCacheConsistencyResult::kOK;
+}
+
+bool DeleteIndexFilesIfCacheIsEmpty(const base::FilePath& path) {
+  const base::FilePath fake_index = path.AppendASCII(kFakeIndexFileName);
+  const base::FilePath index_dir = path.AppendASCII(kIndexDirName);
+  // The newer schema versions have the real index in the index directory.
+  // Older versions, however, had a real index file in the same directory.
+  const base::FilePath legacy_index_file = path.AppendASCII(kIndexFileName);
+  base::FileEnumerator e(
+      path, /* recursive = */ false,
+      base::FileEnumerator::FILES | base::FileEnumerator::DIRECTORIES);
+  for (base::FilePath name = e.Next(); !name.empty(); name = e.Next()) {
+    if (name == fake_index || name == index_dir || name == legacy_index_file)
+      continue;
+    return false;
+  }
+  bool deleted_fake_index =
+      base::DeleteFile(fake_index, /* recursive = */ false);
+  bool deleted_index_dir = base::DeleteFile(index_dir, /* recursive = */ true);
+  bool deleted_legacy_index_file =
+      base::DeleteFile(legacy_index_file, /* recursive = */ false);
+  return deleted_fake_index || deleted_index_dir || deleted_legacy_index_file;
 }
 
 }  // namespace disk_cache

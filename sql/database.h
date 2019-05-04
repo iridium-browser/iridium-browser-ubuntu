@@ -15,15 +15,16 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/component_export.h"
 #include "base/containers/flat_map.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/tick_clock.h"
 #include "sql/internal_api_token.h"
-#include "sql/sql_export.h"
 #include "sql/statement_id.h"
 
 struct sqlite3;
@@ -63,7 +64,7 @@ class DatabaseTestPeer;
 // TODO(pwnall): This should be renamed to Database. Class instances are
 // typically named "db_" / "db", and the class' equivalents in other systems
 // used by Chrome are named LevelDB::DB and blink::IDBDatabase.
-class SQL_EXPORT Database {
+class COMPONENT_EXPORT(SQL) Database {
  private:
   class StatementRef;  // Forward declaration, see real one below.
 
@@ -251,11 +252,8 @@ class SQL_EXPORT Database {
   // everything else.
   void Preload();
 
-  // Try to trim the cache memory used by the database.  If |aggressively| is
-  // true, this function will try to free all of the cache memory it can. If
-  // |aggressively| is false, this function will try to cut cache memory
-  // usage by half.
-  void TrimMemory(bool aggressively);
+  // Release all non-essential memory associated with this database connection.
+  void TrimMemory();
 
   // Raze the database to the ground.  This approximates creating a
   // fresh database from scratch, within the constraints of SQLite's
@@ -376,18 +374,22 @@ class SQL_EXPORT Database {
   // keeping commonly-used ones around for future use is important for
   // performance.
   //
+  // The SQL_FROM_HERE macro is the recommended way of generating a StatementID.
+  // Code that generates custom IDs must ensure that a StatementID is never used
+  // for different SQL statements. Failing to meet this requirement results in
+  // incorrect behavior, and should be caught by a DCHECK.
+  //
+  // The SQL statement passed in |sql| must match the SQL statement reported
+  // back by SQLite. Mismatches are caught by a DCHECK, so any code that has
+  // automated test coverage or that was manually tested on a DCHECK build will
+  // not exhibit this problem. Mismatches generally imply that the statement
+  // passed in has extra whitespace or comments surrounding it, which waste
+  // storage and CPU cycles.
+  //
   // If the |sql| has an error, an invalid, inert StatementRef is returned (and
   // the code will crash in debug). The caller must deal with this eventuality,
   // either by checking validity of the |sql| before calling, by correctly
   // handling the return of an inert statement, or both.
-  //
-  // The StatementID and the SQL must always correspond to one-another. The
-  // ID is the lookup into the cache, so crazy things will happen if you use
-  // different SQL with the same ID.
-  //
-  // You will normally use the SQL_FROM_HERE macro to generate a statement
-  // ID associated with the current line of code. This gives uniqueness without
-  // you having to manage unique names. See StatementID above for more.
   //
   // Example:
   //   sql::Statement stmt(database_.GetCachedStatement(
@@ -418,6 +420,12 @@ class SQL_EXPORT Database {
   bool DoesViewExist(const char* table_name) const;
 
   // Returns true if a column with the given name exists in the given table.
+  //
+  // Calling this method on a VIEW returns an unspecified result.
+  //
+  // This should only be used by migration code for legacy features that do not
+  // use MetaTable, and need an alternative way of figuring out the database's
+  // current version.
   bool DoesColumnExist(const char* table_name, const char* column_name) const;
 
   // Returns sqlite's internal ID for the last inserted row. Valid only
@@ -551,7 +559,7 @@ class SQL_EXPORT Database {
   // official build.
   void AssertIOAllowed() const {
     if (!in_memory_)
-      base::AssertBlockingAllowed();
+      base::AssertBlockingAllowedDeprecated();
   }
 
   // Internal helper for Does*Exist() functions.
@@ -575,7 +583,8 @@ class SQL_EXPORT Database {
   //
   // The Database may revoke a StatementRef in some error cases, so callers
   // should always check validity before using.
-  class SQL_EXPORT StatementRef : public base::RefCounted<StatementRef> {
+  class COMPONENT_EXPORT(SQL) StatementRef
+      : public base::RefCounted<StatementRef> {
    public:
     REQUIRE_ADOPTION_FOR_REFCOUNTED_TYPE();
 

@@ -90,7 +90,8 @@ Polymer({
       value: null,
     },
 
-    /** Whether a managed network is available in the visible network list.
+    /**
+     * Whether a managed network is available in the visible network list.
      * @private {boolean}
      */
     managedNetworkAvailable: {
@@ -112,6 +113,15 @@ Polymer({
       type: Boolean,
       value: false,
       observer: 'autoConnectChanged_',
+    },
+
+    /**
+     * State of the Always-on VPN toggle.
+     * @private
+     */
+    alwaysOnVpn_: {
+      type: Boolean,
+      value: false,
     },
 
     /**
@@ -142,6 +152,10 @@ Polymer({
     /** @private */
     proxyExpanded_: Boolean,
   },
+
+  observers: [
+    'onAlwaysOnPrefChanged_(prefs.arc.vpn.always_on.*)',
+  ],
 
   listeners: {
     'network-list-changed': 'checkNetworkExists_',
@@ -181,11 +195,12 @@ Polymer({
    * @protected
    */
   currentRouteChanged: function(route, oldRoute) {
-    if (route != settings.routes.NETWORK_DETAIL)
+    if (route != settings.routes.NETWORK_DETAIL) {
       return;
+    }
 
     const queryParams = settings.getQueryParameters();
-    let guid = queryParams.get('guid') || '';
+    const guid = queryParams.get('guid') || '';
     if (!guid) {
       console.error('No guid specified for page:' + route);
       this.close_();
@@ -229,20 +244,23 @@ Polymer({
 
   /** @private */
   networkPropertiesChanged_: function() {
-    if (!this.networkProperties)
+    if (!this.networkProperties) {
       return;
+    }
 
     // Update autoConnect if it has changed. Default value is false.
     const autoConnect = CrOnc.getAutoConnect(this.networkProperties);
-    if (autoConnect != this.autoConnect_)
+    if (autoConnect != this.autoConnect_) {
       this.autoConnect_ = autoConnect;
+    }
 
     // Update preferNetwork if it has changed. Default value is false.
     const priority = /** @type {number} */ (
         CrOnc.getActiveValue(this.networkProperties.Priority) || 0);
     const preferNetwork = priority > 0;
-    if (preferNetwork != this.preferNetwork_)
+    if (preferNetwork != this.preferNetwork_) {
       this.preferNetwork_ = preferNetwork;
+    }
 
     // Set the IPAddress property to the IPV4 Address.
     const ipv4 =
@@ -259,8 +277,9 @@ Polymer({
       this.didSetFocus_ = true;
       const button = this.$$('#titleDiv .action-button:not([hidden])') ||
           this.$$('#titleDiv paper-button:not([hidden])');
-      if (button)
+      if (button) {
         setTimeout(() => button.focus());
+      }
     }
 
     if (this.shouldShowConfigureWhenNetworkLoaded_ &&
@@ -274,8 +293,9 @@ Polymer({
 
   /** @private */
   autoConnectChanged_: function() {
-    if (!this.networkProperties || !this.guid)
+    if (!this.networkProperties || !this.guid) {
       return;
+    }
     const onc = this.getEmptyNetworkProperties_();
     CrOnc.setTypeProperty(onc, 'AutoConnect', this.autoConnect_);
     this.setNetworkProperties_(onc);
@@ -283,15 +303,16 @@ Polymer({
 
   /** @private */
   preferNetworkChanged_: function() {
-    if (!this.networkProperties || !this.guid)
+    if (!this.networkProperties || !this.guid) {
       return;
+    }
     const onc = this.getEmptyNetworkProperties_();
     onc.Priority = this.preferNetwork_ ? 1 : 0;
     this.setNetworkProperties_(onc);
   },
 
   /**
-   * @param {{detail: !Array<string>}} event
+   * @param {!CustomEvent<!Array<string>>} event
    * @private
    */
   checkNetworkExists_: function(event) {
@@ -300,13 +321,14 @@ Polymer({
   },
 
   /**
-   * @param {{detail: !Array<string>}} event
+   * @param {!CustomEvent<!Array<string>>} event
    * @private
    */
   updateNetworkDetails_: function(event) {
     const networkIds = event.detail;
-    if (networkIds.indexOf(this.guid) != -1)
+    if (networkIds.indexOf(this.guid) != -1) {
       this.getNetworkDetails_();
+    }
   },
 
   /**
@@ -344,8 +366,9 @@ Polymer({
     }
 
     // Details page was closed while request was in progress, ignore the result.
-    if (!this.guid)
+    if (!this.guid) {
       return;
+    }
 
     if (!properties) {
       console.error('No properties for: ' + this.guid);
@@ -392,8 +415,9 @@ Polymer({
    * @private
    */
   setNetworkProperties_: function(onc) {
-    if (!this.networkPropertiesReceived_)
+    if (!this.networkPropertiesReceived_) {
       return;
+    }
 
     assert(!!this.guid);
     this.networkingPrivate.setProperties(this.guid, onc, () => {
@@ -424,8 +448,9 @@ Polymer({
    * @private
    */
   getStateText_: function(networkProperties, outOfRange) {
-    if (networkProperties === undefined || !networkProperties.ConnectionState)
+    if (networkProperties === undefined || !networkProperties.ConnectionState) {
       return '';
+    }
 
     if (outOfRange) {
       return networkProperties.Type == CrOnc.Type.TETHER ?
@@ -508,16 +533,19 @@ Polymer({
    */
   showConnect_: function(
       networkProperties, globalPolicy, managedNetworkAvailable) {
-    if (networkProperties === undefined)
+    if (networkProperties === undefined) {
       return false;
+    }
 
     if (this.isBlockedByPolicy_(
-            networkProperties, globalPolicy, managedNetworkAvailable))
+            networkProperties, globalPolicy, managedNetworkAvailable)) {
       return false;
+    }
     // TODO(lgcheng@) support connect Arc VPN from UI once Android support API
     // to initiate a VPN session.
-    if (this.isArcVpn_(networkProperties))
+    if (this.isArcVpn_(networkProperties)) {
       return false;
+    }
 
     return networkProperties.Type != CrOnc.Type.ETHERNET &&
         networkProperties.ConnectionState ==
@@ -542,13 +570,16 @@ Polymer({
    * @private
    */
   showForget_: function(networkProperties) {
-    if (this.isSecondaryUser_ || networkProperties === undefined)
+    if (this.isSecondaryUser_ || networkProperties === undefined) {
       return false;
+    }
     const type = networkProperties.Type;
-    if (type != CrOnc.Type.WI_FI && type != CrOnc.Type.VPN)
+    if (type != CrOnc.Type.WI_FI && type != CrOnc.Type.VPN) {
       return false;
-    if (this.isArcVpn_(networkProperties))
+    }
+    if (this.isArcVpn_(networkProperties)) {
       return false;
+    }
     return !this.isPolicySource(networkProperties.Source) &&
         this.isRemembered_(networkProperties);
   },
@@ -559,10 +590,12 @@ Polymer({
    * @private
    */
   showActivate_: function(networkProperties) {
-    if (this.isSecondaryUser_)
+    if (this.isSecondaryUser_) {
       return false;
-    if (!this.isCellular_(networkProperties))
+    }
+    if (!this.isCellular_(networkProperties)) {
       return false;
+    }
     const activation = networkProperties.Cellular.ActivationState;
     return activation == CrOnc.ActivationState.NOT_ACTIVATED ||
         activation == CrOnc.ActivationState.PARTIALLY_ACTIVATED;
@@ -577,19 +610,23 @@ Polymer({
    */
   showConfigure_: function(
       networkProperties, globalPolicy, managedNetworkAvailable) {
-    if (this.isSecondaryUser_ || networkProperties === undefined)
+    if (this.isSecondaryUser_ || networkProperties === undefined) {
       return false;
+    }
     if (this.isBlockedByPolicy_(
-            networkProperties, globalPolicy, managedNetworkAvailable))
+            networkProperties, globalPolicy, managedNetworkAvailable)) {
       return false;
+    }
     const type = networkProperties.Type;
-    if (type == CrOnc.Type.CELLULAR || type == CrOnc.Type.TETHER)
+    if (type == CrOnc.Type.CELLULAR || type == CrOnc.Type.TETHER) {
       return false;
+    }
     if (type == CrOnc.Type.WI_FI) {
       const security = networkProperties.WiFi &&
           CrOnc.getActiveValue(networkProperties.WiFi.Security);
-      if (!security || security == CrOnc.Security.NONE)
+      if (!security || security == CrOnc.Security.NONE) {
         return false;
+      }
     }
     if ((type == CrOnc.Type.WI_FI || type == CrOnc.Type.WI_MAX) &&
         networkProperties.ConnectionState !=
@@ -605,10 +642,26 @@ Polymer({
 
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
+   * @param {!chrome.settingsPrivate.PrefObject} vpn_config_allowed
    * @return {boolean}
    * @private
    */
-  disableConfigure_: function(networkProperties) {
+  disableForget_: function(networkProperties, vpn_config_allowed) {
+    return this.isVpn_(networkProperties) && vpn_config_allowed &&
+        !vpn_config_allowed.value;
+  },
+
+  /**
+   * @param {!CrOnc.NetworkProperties} networkProperties
+   * @param {!chrome.settingsPrivate.PrefObject} vpn_config_allowed
+   * @return {boolean}
+   * @private
+   */
+  disableConfigure_: function(networkProperties, vpn_config_allowed) {
+    if (this.isVpn_(networkProperties) && vpn_config_allowed &&
+        !vpn_config_allowed.value) {
+      return true;
+    }
     return this.isPolicySource(networkProperties.Source) &&
         !this.hasRecommendedFields_(networkProperties);
   },
@@ -619,8 +672,8 @@ Polymer({
    * @return {boolean}
    */
   hasRecommendedFields_: function(networkProperties) {
-    for (let property in networkProperties) {
-      let propertyValue = networkProperties[property];
+    for (const property in networkProperties) {
+      const propertyValue = networkProperties[property];
       if (this.isNetworkPolicyRecommended(propertyValue) ||
           (typeof propertyValue == 'object' &&
            this.hasRecommendedFields_(propertyValue))) {
@@ -636,8 +689,9 @@ Polymer({
    * @private
    */
   showViewAccount_: function(networkProperties) {
-    if (this.isSecondaryUser_)
+    if (this.isSecondaryUser_) {
       return false;
+    }
 
     // Show either the 'Activate' or the 'View Account' button (Cellular only).
     if (!this.isCellular_(networkProperties) ||
@@ -649,8 +703,9 @@ Polymer({
     const carrier = CrOnc.getActiveValue(networkProperties.Cellular.Carrier);
     if (carrier != CARRIER_VERIZON) {
       const paymentPortal = networkProperties.Cellular.PaymentPortal;
-      if (!paymentPortal || !paymentPortal.Url)
+      if (!paymentPortal || !paymentPortal.Url) {
         return false;
+      }
     }
 
     // Only show for connected networks or LTE networks with a valid MDN.
@@ -660,8 +715,9 @@ Polymer({
           technology != CrOnc.NetworkTechnology.LTE_ADVANCED) {
         return false;
       }
-      if (!networkProperties.Cellular.MDN)
+      if (!networkProperties.Cellular.MDN) {
         return false;
+      }
     }
 
     return true;
@@ -681,20 +737,54 @@ Polymer({
       networkProperties, defaultNetwork, networkPropertiesReceived, outOfRange,
       globalPolicy, managedNetworkAvailable) {
     if (!this.showConnect_(
-            networkProperties, globalPolicy, managedNetworkAvailable))
+            networkProperties, globalPolicy, managedNetworkAvailable)) {
       return false;
-    if (!networkPropertiesReceived || outOfRange)
+    }
+    if (!networkPropertiesReceived || outOfRange) {
       return false;
-    if (this.isSecondaryUser_ && this.networkProperties.Connectable === false)
+    }
+    if (this.isSecondaryUser_ && this.networkProperties.Connectable === false) {
       return false;
+    }
     if ((networkProperties.Type == CrOnc.Type.CELLULAR) &&
         (CrOnc.isSimLocked(networkProperties) ||
          this.get('Cellular.Scanning', networkProperties))) {
       return false;
     }
-    if (networkProperties.Type == CrOnc.Type.VPN && !defaultNetwork)
+    if (networkProperties.Type == CrOnc.Type.VPN && !defaultNetwork) {
       return false;
+    }
     return true;
+  },
+
+  /**
+   * @param {!CrOnc.NetworkProperties} networkProperties
+   * @return {boolean} Whether or not we are looking at VPN configuration.
+   * @private
+   */
+  isVpn_: function(networkProperties) {
+    return networkProperties.Type == CrOnc.Type.VPN;
+  },
+
+  /**
+   * @param {!CrOnc.NetworkProperties} networkProperties
+   * @param {!chrome.settingsPrivate.PrefObject} prefButtonAllowed
+   * @return {Object} Fake pref that is enforced
+   * whenever the original pref is true
+   * @private
+   */
+  getVpnConfigPrefFromValue_: function(networkProperties, prefButtonAllowed) {
+    if (!this.isVpn_(networkProperties) || !prefButtonAllowed) {
+      return null;
+    }
+    const fakePref = Object.assign({}, prefButtonAllowed);
+    if (prefButtonAllowed.value) {
+      delete fakePref.enforcement;
+      delete fakePref.controlledBy;
+    } else {
+      fakePref.enforcement = chrome.settingsPrivate.Enforcement.ENFORCED;
+    }
+    return fakePref;
   },
 
   /**
@@ -767,43 +857,17 @@ Polymer({
   },
 
   /**
-   * @param {!Event} event
-   * @private
-   */
-  toggleAdvancedExpanded_: function(event) {
-    if (event.target.tagName == this.CR_EXPAND_BUTTON_TAG)
-      return;  // Already handled.
-    this.advancedExpanded_ = !this.advancedExpanded_;
-  },
-
-  /**
-   * @param {!Event} event
-   * @private
-   */
-  toggleNetworkExpanded_: function(event) {
-    if (event.target.tagName == this.CR_EXPAND_BUTTON_TAG)
-      return;  // Already handled.
-    this.networkExpanded_ = !this.networkExpanded_;
-  },
-
-  /**
-   * @param {!Event} event
-   * @private
-   */
-  toggleProxyExpanded_: function(event) {
-    if (event.target.tagName == this.CR_EXPAND_BUTTON_TAG)
-      return;  // Already handled.
-    this.proxyExpanded_ = !this.proxyExpanded_;
-  },
-
-  /**
    * Event triggered for elements associated with network properties.
-   * @param {!{detail: !{field: string, value: !CrOnc.NetworkPropertyType}}} e
+   * @param {!CustomEvent<!{
+   *     field: string,
+   *     value: !CrOnc.NetworkPropertyType
+   * }>} e
    * @private
    */
   onNetworkPropertyChange_: function(e) {
-    if (!this.networkProperties)
+    if (!this.networkProperties) {
       return;
+    }
     const field = e.detail.field;
     const value = e.detail.value;
     const onc = this.getEmptyNetworkProperties_();
@@ -834,15 +898,16 @@ Polymer({
 
   /**
    * Event triggered when the IP Config or NameServers element changes.
-   * @param {!{detail: !{field: string,
-   *                     value: (string|!CrOnc.IPConfigProperties|
-   *                             !Array<string>)}}} event
-   *     The network-ip-config or network-nameservers change event.
+   * @param {!CustomEvent<!{
+   *     field: string,
+   *     value: (string|!CrOnc.IPConfigProperties| !Array<string>)
+   * }>} event The network-ip-config or network-nameservers change event.
    * @private
    */
   onIPConfigChange_: function(event) {
-    if (!this.networkProperties)
+    if (!this.networkProperties) {
       return;
+    }
     const field = event.detail.field;
     const value = event.detail.value;
     // Get an empty ONC dictionary and set just the IP Config properties that
@@ -854,8 +919,9 @@ Polymer({
     if (field == 'IPAddressConfigType') {
       const newIpConfigType =
           /** @type {chrome.networkingPrivate.IPConfigType} */ (value);
-      if (newIpConfigType == ipConfigType)
+      if (newIpConfigType == ipConfigType) {
         return;
+      }
       onc.IPAddressConfigType = newIpConfigType;
     } else if (field == 'NameServersConfigType') {
       const nsConfigType =
@@ -864,8 +930,9 @@ Polymer({
                   this.networkProperties.NameServersConfigType));
       const newNsConfigType =
           /** @type {chrome.networkingPrivate.IPConfigType} */ (value);
-      if (newNsConfigType == nsConfigType)
+      if (newNsConfigType == nsConfigType) {
         return;
+      }
       onc.NameServersConfigType = newNsConfigType;
     } else if (field == 'StaticIPConfig') {
       if (ipConfigType == CrOnc.IPConfigType.STATIC) {
@@ -885,8 +952,9 @@ Polymer({
       const keysToCopy = ['Type', 'IPAddress', 'RoutingPrefix', 'Gateway'];
       for (let i = 0; i < keysToCopy.length; ++i) {
         const key = keysToCopy[i];
-        if (key in value)
+        if (key in value) {
           onc.StaticIPConfig[key] = value[key];
+        }
       }
     } else if (field == 'NameServers') {
       // If a StaticIPConfig property is specified and its NameServers value
@@ -915,17 +983,19 @@ Polymer({
 
   /**
    * Event triggered when the Proxy configuration element changes.
-   * @param {!{detail: {field: string, value: !CrOnc.ProxySettings}}} event
+   * @param {!CustomEvent<!{field: string, value: !CrOnc.ProxySettings}>} event
    *     The network-proxy change event.
    * @private
    */
   onProxyChange_: function(event) {
-    if (!this.networkProperties)
+    if (!this.networkProperties) {
       return;
+    }
     const field = event.detail.field;
     const value = event.detail.value;
-    if (field != 'ProxySettings')
+    if (field != 'ProxySettings') {
       return;
+    }
     const onc = this.getEmptyNetworkProperties_();
     CrOnc.setProperty(onc, 'ProxySettings', /** @type {!Object} */ (value));
     this.setNetworkProperties_(onc);
@@ -970,24 +1040,57 @@ Polymer({
    * @return {boolean}
    * @private
    */
-  enableAutoConnect_: function(networkProperties, globalPolicy) {
-    if (networkProperties !== undefined &&
-        networkProperties.Type == CrOnc.Type.WI_FI && !!globalPolicy &&
-        !!globalPolicy.AllowOnlyPolicyNetworksToAutoconnect &&
-        !this.isPolicySource(networkProperties.Source)) {
+  isAutoConnectEnforcedByPolicy: function(networkProperties, globalPolicy) {
+    if (networkProperties === undefined ||
+        networkProperties.Type != CrOnc.Type.WI_FI) {
       return false;
     }
-    return !this.isNetworkPolicyEnforced(
-        this.getManagedAutoConnect_(networkProperties));
+    if (this.isPolicySource(networkProperties.Source)) {
+      return !this.isEditable(CrOnc.getManagedAutoConnect(networkProperties));
+    }
+    return globalPolicy && !!globalPolicy.AllowOnlyPolicyNetworksToAutoconnect;
   },
 
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
-   * @return {!CrOnc.ManagedProperty|undefined} Managed AutoConnect property.
+   * @return {boolean} Whether the toggle for the Always-on VPN feature is
+   * displayed.
    * @private
    */
-  getManagedAutoConnect_: function(networkProperties) {
-    return CrOnc.getManagedAutoConnect(networkProperties);
+  showAlwaysOnVpn_: function(networkProperties) {
+    return this.isArcVpn_(networkProperties) && this.prefs.arc &&
+        this.prefs.arc.vpn && this.prefs.arc.vpn.always_on &&
+        this.prefs.arc.vpn.always_on.vpn_package &&
+        networkProperties.VPN.Host.Active ===
+        this.prefs.arc.vpn.always_on.vpn_package.value;
+  },
+
+  /**
+   * @param {!CrOnc.NetworkProperties} networkProperties
+   * @param {!chrome.settingsPrivate.PrefObject} vpnConfigAllowed
+   * @return {boolean} Whether the toggle for the Always-on VPN feature is
+   * enabled.
+   * @private
+   */
+  enableAlwaysOnVpn_: function(networkProperties, vpnConfigAllowed) {
+    return this.isArcVpn_(networkProperties) && vpnConfigAllowed &&
+        !!vpnConfigAllowed.value;
+  },
+
+  /** @private */
+  onAlwaysOnPrefChanged_: function() {
+    if (this.prefs.arc && this.prefs.arc.vpn && this.prefs.arc.vpn.always_on &&
+        this.prefs.arc.vpn.always_on.lockdown) {
+      this.alwaysOnVpn_ = this.prefs.arc.vpn.always_on.lockdown.value;
+    }
+  },
+
+  /** @private */
+  onAlwaysOnVpnChange_: function() {
+    if (this.prefs.arc && this.prefs.arc.vpn && this.prefs.arc.vpn.always_on &&
+        this.prefs.arc.vpn.always_on.lockdown) {
+      this.set('prefs.arc.vpn.always_on.lockdown.value', this.alwaysOnVpn_);
+    }
   },
 
   /**
@@ -999,10 +1102,17 @@ Polymer({
    */
   showPreferNetwork_: function(
       networkProperties, globalPolicy, managedNetworkAvailable) {
-    // TODO(stevenjb): Resolve whether or not we want to allow "preferred" for
-    // networkProperties.Type == CrOnc.Type.ETHERNET.
+    if (!networkProperties) {
+      return false;
+    }
+
+    const type = networkProperties.Type;
+    if (type == CrOnc.Type.ETHERNET || type == CrOnc.Type.CELLULAR ||
+        this.isArcVpn_(networkProperties)) {
+      return false;
+    }
+
     return this.isRemembered_(networkProperties) &&
-        !this.isArcVpn_(networkProperties) &&
         !this.isBlockedByPolicy_(
             networkProperties, globalPolicy, managedNetworkAvailable);
   },
@@ -1015,8 +1125,9 @@ Polymer({
   hasVisibleFields_: function(fields) {
     for (let i = 0; i < fields.length; ++i) {
       const value = this.get(fields[i], this.networkProperties);
-      if (value !== undefined && value !== '')
+      if (value !== undefined && value !== '') {
         return true;
+      }
     }
     return false;
   },
@@ -1035,8 +1146,9 @@ Polymer({
    * @private
    */
   getInfoFields_: function() {
-    if (this.networkProperties === undefined)
+    if (this.networkProperties === undefined) {
       return [];
+    }
 
     /** @type {!Array<string>} */ const fields = [];
     const type = this.networkProperties.Type;
@@ -1079,15 +1191,17 @@ Polymer({
    * @private
    */
   getInfoEditFieldTypes_: function() {
-    if (this.networkProperties === undefined)
+    if (this.networkProperties === undefined) {
       return [];
+    }
 
     /** @dict */ const editFields = {};
     const type = this.networkProperties.Type;
     if (type == CrOnc.Type.VPN && !!this.networkProperties.VPN) {
       const vpnType = CrOnc.getActiveValue(this.networkProperties.VPN.Type);
-      if (vpnType != CrOnc.VPNType.THIRD_PARTY_VPN)
+      if (vpnType != CrOnc.VPNType.THIRD_PARTY_VPN) {
         editFields['VPN.Host'] = 'String';
+      }
       if (vpnType == CrOnc.VPNType.OPEN_VPN) {
         editFields['VPN.OpenVPN.Username'] = 'String';
         editFields['VPN.OpenVPN.ExtraHosts'] = 'StringArray';
@@ -1101,13 +1215,15 @@ Polymer({
    * @private
    */
   getAdvancedFields_: function() {
-    if (this.networkProperties === undefined)
+    if (this.networkProperties === undefined) {
       return [];
+    }
 
     /** @type {!Array<string>} */ const fields = [];
     const type = this.networkProperties.Type;
-    if (type != CrOnc.Type.TETHER)
+    if (type != CrOnc.Type.TETHER) {
       fields.push('MacAddress');
+    }
     if (type == CrOnc.Type.CELLULAR && !!this.networkProperties.Cellular) {
       fields.push(
           'Cellular.Carrier', 'Cellular.Family', 'Cellular.NetworkTechnology',
@@ -1199,10 +1315,12 @@ Polymer({
       return false;
     }
     if (this.isBlockedByPolicy_(
-            networkProperties, globalPolicy, managedNetworkAvailable))
+            networkProperties, globalPolicy, managedNetworkAvailable)) {
       return false;
-    if (networkProperties.Type == CrOnc.Type.CELLULAR)
+    }
+    if (networkProperties.Type == CrOnc.Type.CELLULAR) {
       return true;
+    }
     return this.isRememberedOrConnected_(networkProperties);
   },
 
@@ -1222,8 +1340,9 @@ Polymer({
       return false;
     }
     if (this.isBlockedByPolicy_(
-            networkProperties, globalPolicy, managedNetworkAvailable))
+            networkProperties, globalPolicy, managedNetworkAvailable)) {
       return false;
+    }
     return this.isRememberedOrConnected_(networkProperties);
   },
 
@@ -1236,6 +1355,15 @@ Polymer({
     return networkProperties !== undefined &&
         networkProperties.Type == CrOnc.Type.CELLULAR &&
         !!this.get('Cellular.SupportNetworkScan', this.networkProperties);
+  },
+
+  /**
+   * @param {!CrOnc.NetworkProperties} networkProperties
+   * @return {boolean}
+   * @private
+   */
+  showScanningSpinner_: function(networkProperties) {
+    return !!this.get('Cellular.Scanning', networkProperties);
   },
 
   /**
@@ -1283,8 +1411,9 @@ Polymer({
     // property holds an internal IP address Android uses to talk to ChromeOS.
     // TODO(lgcheng@) Show correct IP address when we implement IP configuration
     // correctly.
-    if (this.isArcVpn_(networkProperties))
+    if (this.isArcVpn_(networkProperties)) {
       return false;
+    }
 
     return !!ipAddress && this.isConnectedState_(networkProperties);
   },
@@ -1300,8 +1429,9 @@ Polymer({
    */
   allPropertiesMatch_: function(curValue, newValue) {
     for (const key in newValue) {
-      if (newValue[key] != curValue[key])
+      if (newValue[key] != curValue[key]) {
         return false;
+      }
     }
     return true;
   },

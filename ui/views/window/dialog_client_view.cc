@@ -7,11 +7,9 @@
 #include <algorithm>
 
 #include "build/build_config.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
-#include "ui/views/controls/button/blue_button.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/image_button.h"
@@ -93,7 +91,8 @@ void DialogClientView::AcceptWindow() {
   // Only notify the delegate once. See |delegate_allowed_close_|'s comment.
   if (!delegate_allowed_close_ && GetDialogDelegate()->Accept()) {
     delegate_allowed_close_ = true;
-    GetWidget()->Close();
+    GetWidget()->CloseWithReason(
+        views::Widget::ClosedReason::kAcceptButtonClicked);
   }
 }
 
@@ -101,7 +100,8 @@ void DialogClientView::CancelWindow() {
   // Only notify the delegate once. See |delegate_allowed_close_|'s comment.
   if (!delegate_allowed_close_ && GetDialogDelegate()->Cancel()) {
     delegate_allowed_close_ = true;
-    GetWidget()->Close();
+    GetWidget()->CloseWithReason(
+        views::Widget::ClosedReason::kCancelButtonClicked);
   }
 }
 
@@ -186,7 +186,7 @@ void DialogClientView::Layout() {
 bool DialogClientView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   DCHECK_EQ(accelerator.key_code(), ui::VKEY_ESCAPE);
 
-  GetWidget()->Close();
+  GetWidget()->CloseWithReason(Widget::ClosedReason::kEscKeyPressed);
   return true;
 }
 
@@ -276,7 +276,7 @@ void DialogClientView::ChildVisibilityChanged(View* child) {
   ChildPreferredSizeChanged(child);
 }
 
-void DialogClientView::OnDialogModelChanged() {
+void DialogClientView::OnDialogChanged() {
   UpdateDialogButtons();
 }
 

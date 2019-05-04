@@ -78,6 +78,8 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
  public:
   static MediaControlsImpl* Create(HTMLMediaElement&, ShadowRoot&);
+
+  explicit MediaControlsImpl(HTMLMediaElement&);
   ~MediaControlsImpl() override = default;
 
   // Returns whether the ModernMediaControlsEnabled runtime flag is on.
@@ -109,6 +111,7 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   // Return the internal elements, which is used by registering clicking
   // EventHandlers from MediaControlsWindowEventListener.
   HTMLDivElement* PanelElement() override;
+  HTMLDivElement* ButtonPanelElement();
   // TODO(mlamouri): this method is needed in order to notify the controls that
   // the `MediaControlsEnabled` setting has changed.
   void OnMediaControlsEnabledChange() override {
@@ -128,15 +131,21 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   void ToggleTextTrackList();
   void ShowTextTrackAtIndex(unsigned);
   void DisableShowingTextTracks();
+  bool TextTrackListIsWanted();
 
   // Returns the label for the track when a valid track is passed in and "Off"
   // when the parameter is null.
   String GetTextTrackLabel(TextTrack*) const;
 
   // Methods related to the overflow menu.
+  void OpenOverflowMenu();
+  void CloseOverflowMenu();
+  bool OverflowMenuIsWanted();
+
   void ToggleOverflowMenu();
   bool OverflowMenuVisible();
 
+  void VolumeSliderWantedTimerFired(TimerBase*);
   void OpenVolumeSliderIfNecessary();
   void CloseVolumeSliderIfNecessary();
 
@@ -237,10 +246,11 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   // check that the element is a video element first.
   HTMLVideoElement& VideoElement();
 
-  explicit MediaControlsImpl(HTMLMediaElement&);
-
   void InitializeControls();
   void PopulatePanel();
+
+  // Attach hover background div to buttons
+  void AttachHoverBackground(Element*);
 
   void MakeOpaque();
   void MakeOpaqueFromPointerEvent();
@@ -272,6 +282,9 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
   bool ShouldOpenVolumeSlider() const;
   bool ShouldCloseVolumeSlider() const;
+  void ShowVolumeControlHoverBackground();
+  void HideVolumeControlHoverBackground();
+  void SetVolumeControlContainerIsWanted(bool) const;
 
   void ElementSizeChangedTimerFired(TimerBase*);
 
@@ -280,8 +293,11 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   // current.
   void ComputeWhichControlsFit();
 
+  void HidePopupMenu();
   void UpdateOverflowMenuWanted() const;
+  void UpdateOverflowMenuItemCSSClass() const;
   void UpdateScrubbingMessageFits() const;
+  void UpdateOverflowAndTrackListCSSClassForPip() const;
   void UpdateSizingCSSClass();
   void MaybeRecordElementsDisplayed() const;
 
@@ -383,6 +399,8 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   bool is_paused_for_scrubbing_ : 1;
   bool is_scrubbing_ = false;
 
+  Member<HTMLDivElement> volume_control_container_;
+
   // Watches the video element for resize and updates media controls as
   // necessary.
   Member<ResizeObserver> resize_observer_;
@@ -408,6 +426,11 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
   // Timer for distinguishing double-taps.
   TaskRunnerTimer<MediaControlsImpl> tap_timer_;
+  bool is_paused_for_double_tap_ = false;
+
+  // Timer to delay showing the volume slider to avoid accidental triggering
+  // of the slider
+  TaskRunnerTimer<MediaControlsImpl> volume_slider_wanted_timer_;
 
   bool is_test_mode_ = false;
 };

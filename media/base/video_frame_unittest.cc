@@ -11,11 +11,11 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/format_macros.h"
-#include "base/macros.h"
 #include "base/memory/aligned_memory.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/shared_memory.h"
 #include "base/memory/unsafe_shared_memory_region.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
@@ -244,15 +244,15 @@ TEST(VideoFrame, CreateBlackFrame) {
   // Test frames themselves.
   uint8_t* y_plane = frame->data(VideoFrame::kYPlane);
   for (int y = 0; y < frame->coded_size().height(); ++y) {
-    EXPECT_EQ(0, memcmp(kExpectedYRow, y_plane, arraysize(kExpectedYRow)));
+    EXPECT_EQ(0, memcmp(kExpectedYRow, y_plane, base::size(kExpectedYRow)));
     y_plane += frame->stride(VideoFrame::kYPlane);
   }
 
   uint8_t* u_plane = frame->data(VideoFrame::kUPlane);
   uint8_t* v_plane = frame->data(VideoFrame::kVPlane);
   for (int y = 0; y < frame->coded_size().height() / 2; ++y) {
-    EXPECT_EQ(0, memcmp(kExpectedUVRow, u_plane, arraysize(kExpectedUVRow)));
-    EXPECT_EQ(0, memcmp(kExpectedUVRow, v_plane, arraysize(kExpectedUVRow)));
+    EXPECT_EQ(0, memcmp(kExpectedUVRow, u_plane, base::size(kExpectedUVRow)));
+    EXPECT_EQ(0, memcmp(kExpectedUVRow, v_plane, base::size(kExpectedUVRow)));
     u_plane += frame->stride(VideoFrame::kUPlane);
     v_plane += frame->stride(VideoFrame::kVPlane);
   }
@@ -402,11 +402,13 @@ TEST(VideoFrame, WrapExternalDmabufs) {
     planes[i].offset = offsets[i];
   }
   auto timestamp = base::TimeDelta::FromMilliseconds(1);
-  VideoFrameLayout layout(PIXEL_FORMAT_I420, coded_size, planes, buffer_sizes);
+  auto layout = VideoFrameLayout::CreateWithPlanes(
+      PIXEL_FORMAT_I420, coded_size, planes, buffer_sizes);
+  ASSERT_TRUE(layout);
   std::vector<base::ScopedFD> dmabuf_fds(3u);
-  auto frame =
-      VideoFrame::WrapExternalDmabufs(layout, visible_rect, visible_rect.size(),
-                                      std::move(dmabuf_fds), timestamp);
+  auto frame = VideoFrame::WrapExternalDmabufs(
+      *layout, visible_rect, visible_rect.size(), std::move(dmabuf_fds),
+      timestamp);
 
   EXPECT_EQ(frame->layout().format(), PIXEL_FORMAT_I420);
   EXPECT_EQ(frame->layout().coded_size(), coded_size);
@@ -625,6 +627,9 @@ TEST(VideoFrame, AllocationSize_OddSize) {
       case PIXEL_FORMAT_XRGB:
       case PIXEL_FORMAT_I420A:
       case PIXEL_FORMAT_RGB32:
+      case PIXEL_FORMAT_ABGR:
+      case PIXEL_FORMAT_XBGR:
+      case PIXEL_FORMAT_P016LE:
         EXPECT_EQ(60u, VideoFrame::AllocationSize(format, size))
             << VideoPixelFormatToString(format);
         break;

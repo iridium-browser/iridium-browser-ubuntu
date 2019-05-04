@@ -58,14 +58,16 @@ SchedulerWorker::SchedulerWorker(
   DCHECK(task_tracker_);
   DCHECK(CanUseBackgroundPriorityForSchedulerWorker() ||
          priority_hint_ != ThreadPriority::BACKGROUND);
+  wake_up_event_.declare_only_used_while_idle();
 }
 
 bool SchedulerWorker::Start(
     SchedulerWorkerObserver* scheduler_worker_observer) {
+  SchedulerLock::AssertNoLockHeldOnCurrentThread();
   AutoSchedulerLock auto_lock(thread_lock_);
   DCHECK(thread_handle_.is_null());
 
-  if (should_exit_.IsSet())
+  if (should_exit_.IsSet() || join_called_for_testing_.IsSet())
     return true;
 
   DCHECK(!scheduler_worker_observer_);
@@ -102,7 +104,10 @@ void SchedulerWorker::JoinForTesting() {
 
   {
     AutoSchedulerLock auto_lock(thread_lock_);
-    DCHECK(!thread_handle_.is_null());
+
+    if (thread_handle_.is_null())
+      return;
+
     thread_handle = thread_handle_;
     // Reset |thread_handle_| so it isn't joined by the destructor.
     thread_handle_ = PlatformThreadHandle();
@@ -283,8 +288,8 @@ NOINLINE void SchedulerWorker::RunBackgroundDedicatedCOMWorker() {
 
 void SchedulerWorker::RunWorker() {
   DCHECK_EQ(self_, this);
-  TRACE_EVENT_BEGIN0(TRACE_DISABLED_BY_DEFAULT("task_scheduler_diagnostics"),
-                     "SchedulerWorkerThread alive");
+  TRACE_EVENT_INSTANT0("task_scheduler", "SchedulerWorkerThread born",
+                       TRACE_EVENT_SCOPE_THREAD);
   TRACE_EVENT_BEGIN0("task_scheduler", "SchedulerWorkerThread active");
 
   if (scheduler_worker_observer_)
@@ -358,8 +363,8 @@ void SchedulerWorker::RunWorker() {
   self_ = nullptr;
 
   TRACE_EVENT_END0("task_scheduler", "SchedulerWorkerThread active");
-  TRACE_EVENT_END0(TRACE_DISABLED_BY_DEFAULT("task_scheduler_diagnostics"),
-                   "SchedulerWorkerThread alive");
+  TRACE_EVENT_INSTANT0("task_scheduler", "SchedulerWorkerThread dead",
+                       TRACE_EVENT_SCOPE_THREAD);
 }
 
 }  // namespace internal

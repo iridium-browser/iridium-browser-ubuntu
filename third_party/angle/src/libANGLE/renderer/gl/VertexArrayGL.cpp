@@ -79,14 +79,12 @@ VertexArrayGL::VertexArrayGL(const VertexArrayState &state,
     }
 }
 
-VertexArrayGL::~VertexArrayGL()
-{
-}
+VertexArrayGL::~VertexArrayGL() {}
 
 void VertexArrayGL::destroy(const gl::Context *context)
 {
     mStateManager->deleteVertexArray(mVertexArrayID);
-    mVertexArrayID = 0;
+    mVertexArrayID   = 0;
     mAppliedNumViews = 1;
 
     mStateManager->deleteBuffer(mStreamingElementArrayBuffer);
@@ -104,32 +102,19 @@ void VertexArrayGL::destroy(const gl::Context *context)
     }
 }
 
-angle::Result VertexArrayGL::syncDrawArraysState(const gl::Context *context,
-                                                 const gl::AttributesMask &activeAttributesMask,
-                                                 GLint first,
-                                                 GLsizei count,
-                                                 GLsizei instanceCount) const
+angle::Result VertexArrayGL::syncClientSideData(const gl::Context *context,
+                                                const gl::AttributesMask &activeAttributesMask,
+                                                GLint first,
+                                                GLsizei count,
+                                                GLsizei instanceCount) const
 {
-    return syncDrawState(context, activeAttributesMask, first, count, GL_NONE, nullptr,
-                         instanceCount, false, nullptr);
-}
-
-angle::Result VertexArrayGL::syncDrawElementsState(const gl::Context *context,
-                                                   const gl::AttributesMask &activeAttributesMask,
-                                                   GLsizei count,
-                                                   GLenum type,
-                                                   const void *indices,
-                                                   GLsizei instanceCount,
-                                                   bool primitiveRestartEnabled,
-                                                   const void **outIndices) const
-{
-    return syncDrawState(context, activeAttributesMask, 0, count, type, indices, instanceCount,
-                         primitiveRestartEnabled, outIndices);
+    return syncDrawState(context, activeAttributesMask, first, count,
+                         gl::DrawElementsType::InvalidEnum, nullptr, instanceCount, false, nullptr);
 }
 
 void VertexArrayGL::updateElementArrayBufferBinding(const gl::Context *context) const
 {
-    gl::Buffer *elementArrayBuffer = mState.getElementArrayBuffer().get();
+    gl::Buffer *elementArrayBuffer = mState.getElementArrayBuffer();
     if (elementArrayBuffer != nullptr && elementArrayBuffer != mAppliedElementArrayBuffer.get())
     {
         const BufferGL *bufferGL = GetImplAs<BufferGL>(elementArrayBuffer);
@@ -142,7 +127,7 @@ angle::Result VertexArrayGL::syncDrawState(const gl::Context *context,
                                            const gl::AttributesMask &activeAttributesMask,
                                            GLint first,
                                            GLsizei count,
-                                           GLenum type,
+                                           gl::DrawElementsType type,
                                            const void *indices,
                                            GLsizei instanceCount,
                                            bool primitiveRestartEnabled,
@@ -156,7 +141,7 @@ angle::Result VertexArrayGL::syncDrawState(const gl::Context *context,
     // Determine if an index buffer needs to be streamed and the range of vertices that need to be
     // copied
     IndexRange indexRange;
-    if (type != GL_NONE)
+    if (type != gl::DrawElementsType::InvalidEnum)
     {
         ANGLE_TRY(syncIndexData(context, count, type, indices, primitiveRestartEnabled,
                                 needsStreamingAttribs.any(), &indexRange, outIndices));
@@ -173,12 +158,12 @@ angle::Result VertexArrayGL::syncDrawState(const gl::Context *context,
         ANGLE_TRY(streamAttributes(context, needsStreamingAttribs, instanceCount, indexRange));
     }
 
-    return angle::Result::Continue();
+    return angle::Result::Continue;
 }
 
 angle::Result VertexArrayGL::syncIndexData(const gl::Context *context,
                                            GLsizei count,
-                                           GLenum type,
+                                           gl::DrawElementsType type,
                                            const void *indices,
                                            bool primitiveRestartEnabled,
                                            bool attributesNeedStreaming,
@@ -187,7 +172,7 @@ angle::Result VertexArrayGL::syncIndexData(const gl::Context *context,
 {
     ASSERT(outIndices);
 
-    gl::Buffer *elementArrayBuffer = mState.getElementArrayBuffer().get();
+    gl::Buffer *elementArrayBuffer = mState.getElementArrayBuffer();
 
     // Need to check the range of indices if attributes need to be streamed
     if (elementArrayBuffer != nullptr)
@@ -197,9 +182,9 @@ angle::Result VertexArrayGL::syncIndexData(const gl::Context *context,
         if (attributesNeedStreaming)
         {
             ptrdiff_t elementArrayBufferOffset = reinterpret_cast<ptrdiff_t>(indices);
-            ANGLE_TRY_HANDLE(context, mState.getElementArrayBuffer()->getIndexRange(
-                                          context, type, elementArrayBufferOffset, count,
-                                          primitiveRestartEnabled, outIndexRange));
+            ANGLE_TRY(mState.getElementArrayBuffer()->getIndexRange(
+                context, type, elementArrayBufferOffset, count, primitiveRestartEnabled,
+                outIndexRange));
         }
 
         // Indices serves as an offset into the index buffer in this case, use the same value for
@@ -230,8 +215,8 @@ angle::Result VertexArrayGL::syncIndexData(const gl::Context *context,
         mAppliedElementArrayBuffer.set(context, nullptr);
 
         // Make sure the element array buffer is large enough
-        const Type &indexTypeInfo          = GetTypeInfo(type);
-        size_t requiredStreamingBufferSize = indexTypeInfo.bytes * count;
+        const GLuint indexTypeBytes        = gl::GetDrawElementsTypeSize(type);
+        size_t requiredStreamingBufferSize = indexTypeBytes * count;
         if (requiredStreamingBufferSize > mStreamingElementArrayBufferSize)
         {
             // Copy the indices in while resizing the buffer
@@ -251,7 +236,7 @@ angle::Result VertexArrayGL::syncIndexData(const gl::Context *context,
         *outIndices = nullptr;
     }
 
-    return angle::Result::Continue();
+    return angle::Result::Continue;
 }
 
 void VertexArrayGL::computeStreamingAttributeSizes(const gl::AttributesMask &attribsToStream,
@@ -276,7 +261,7 @@ void VertexArrayGL::computeStreamingAttributeSizes(const gl::AttributesMask &att
         // If streaming is going to be required, compute the size of the required buffer
         // and how much slack space at the beginning of the buffer will be required by determining
         // the attribute with the largest data size.
-        size_t typeSize = ComputeVertexAttributeTypeSize(attrib);
+        size_t typeSize        = ComputeVertexAttributeTypeSize(attrib);
         GLuint adjustedDivisor = GetAdjustedDivisor(mAppliedNumViews, binding.getDivisor());
         *outStreamingDataSize +=
             typeSize * ComputeVertexBindingElementCount(adjustedDivisor, indexRange.vertexCount(),
@@ -299,7 +284,7 @@ angle::Result VertexArrayGL::streamAttributes(const gl::Context *context,
 
     if (streamingDataSize == 0)
     {
-        return angle::Result::Continue();
+        return angle::Result::Continue;
     }
 
     if (mStreamingArrayBuffer == 0)
@@ -338,7 +323,7 @@ angle::Result VertexArrayGL::streamAttributes(const gl::Context *context,
 
         for (auto idx : attribsToStream)
         {
-            const auto &attrib  = attribs[idx];
+            const auto &attrib = attribs[idx];
             ASSERT(IsVertexAttribPointerSupported(idx, attrib));
 
             const auto &binding = bindings[attrib.bindingIndex];
@@ -392,7 +377,7 @@ angle::Result VertexArrayGL::streamAttributes(const gl::Context *context,
 
     ANGLE_CHECK(GetImplAs<ContextGL>(context), unmapResult == GL_TRUE,
                 "Failed to unmap the client data streaming buffer.", GL_OUT_OF_MEMORY);
-    return angle::Result::Continue();
+    return angle::Result::Continue;
 }
 
 GLuint VertexArrayGL::getVertexArrayID() const
@@ -501,12 +486,13 @@ void VertexArrayGL::callVertexAttribPointer(GLuint attribIndex,
     if (attrib.pureInteger)
     {
         ASSERT(!attrib.normalized);
-        mFunctions->vertexAttribIPointer(attribIndex, attrib.size, attrib.type, stride, pointer);
+        mFunctions->vertexAttribIPointer(attribIndex, attrib.size, gl::ToGLenum(attrib.type),
+                                         stride, pointer);
     }
     else
     {
-        mFunctions->vertexAttribPointer(attribIndex, attrib.size, attrib.type, attrib.normalized,
-                                        stride, pointer);
+        mFunctions->vertexAttribPointer(attribIndex, attrib.size, gl::ToGLenum(attrib.type),
+                                        attrib.normalized, stride, pointer);
     }
 }
 
@@ -529,13 +515,14 @@ void VertexArrayGL::updateAttribFormat(size_t attribIndex)
     if (attrib.pureInteger)
     {
         ASSERT(!attrib.normalized);
-        mFunctions->vertexAttribIFormat(static_cast<GLuint>(attribIndex), attrib.size, attrib.type,
-                                        attrib.relativeOffset);
+        mFunctions->vertexAttribIFormat(static_cast<GLuint>(attribIndex), attrib.size,
+                                        gl::ToGLenum(attrib.type), attrib.relativeOffset);
     }
     else
     {
-        mFunctions->vertexAttribFormat(static_cast<GLuint>(attribIndex), attrib.size, attrib.type,
-                                       attrib.normalized, attrib.relativeOffset);
+        mFunctions->vertexAttribFormat(static_cast<GLuint>(attribIndex), attrib.size,
+                                       gl::ToGLenum(attrib.type), attrib.normalized,
+                                       attrib.relativeOffset);
     }
 
     mAppliedAttributes[attribIndex].size           = attrib.size;
@@ -669,14 +656,16 @@ void VertexArrayGL::syncDirtyBinding(const gl::Context *context,
     }
 }
 
-#define ANGLE_DIRTY_ATTRIB_FUNC(INDEX)                      \
-    case VertexArray::DIRTY_BIT_ATTRIB_0 + INDEX:           \
-        syncDirtyAttrib(context, INDEX, attribBits[INDEX]); \
+#define ANGLE_DIRTY_ATTRIB_FUNC(INDEX)                         \
+    case VertexArray::DIRTY_BIT_ATTRIB_0 + INDEX:              \
+        syncDirtyAttrib(context, INDEX, (*attribBits)[INDEX]); \
+        (*attribBits)[INDEX].reset();                          \
         break;
 
-#define ANGLE_DIRTY_BINDING_FUNC(INDEX)                       \
-    case VertexArray::DIRTY_BIT_BINDING_0 + INDEX:            \
-        syncDirtyBinding(context, INDEX, bindingBits[INDEX]); \
+#define ANGLE_DIRTY_BINDING_FUNC(INDEX)                          \
+    case VertexArray::DIRTY_BIT_BINDING_0 + INDEX:               \
+        syncDirtyBinding(context, INDEX, (*bindingBits)[INDEX]); \
+        (*bindingBits)[INDEX].reset();                           \
         break;
 
 #define ANGLE_DIRTY_BUFFER_DATA_FUNC(INDEX)            \
@@ -685,8 +674,8 @@ void VertexArrayGL::syncDirtyBinding(const gl::Context *context,
 
 angle::Result VertexArrayGL::syncState(const gl::Context *context,
                                        const gl::VertexArray::DirtyBits &dirtyBits,
-                                       const gl::VertexArray::DirtyAttribBitsArray &attribBits,
-                                       const gl::VertexArray::DirtyBindingBitsArray &bindingBits)
+                                       gl::VertexArray::DirtyAttribBitsArray *attribBits,
+                                       gl::VertexArray::DirtyBindingBitsArray *bindingBits)
 {
     mStateManager->bindVertexArray(mVertexArrayID, getAppliedElementArrayBufferID());
 
@@ -711,7 +700,7 @@ angle::Result VertexArrayGL::syncState(const gl::Context *context,
         }
     }
 
-    return angle::Result::Continue();
+    return angle::Result::Continue;
 }
 
 void VertexArrayGL::applyNumViewsToDivisor(int numViews)
@@ -729,7 +718,7 @@ void VertexArrayGL::applyNumViewsToDivisor(int numViews)
 
 void VertexArrayGL::applyActiveAttribLocationsMask(const gl::AttributesMask &activeMask)
 {
-    gl::AttributesMask updateMask     = mProgramActiveAttribLocationsMask ^ activeMask;
+    gl::AttributesMask updateMask = mProgramActiveAttribLocationsMask ^ activeMask;
     if (!updateMask.any())
     {
         return;

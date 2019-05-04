@@ -12,17 +12,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/chrome_device_id_helper.h"
 #include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "components/account_id/account_id.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "components/signin/core/browser/signin_client.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/identity/public/cpp/identity_manager.h"
 
 namespace chromeos {
 
@@ -52,12 +50,10 @@ void OAuth2LoginManager::RemoveObserver(
 }
 
 void OAuth2LoginManager::RestoreSession(
-    scoped_refptr<network::SharedURLLoaderFactory> auth_url_loader_factory,
     SessionRestoreStrategy restore_strategy,
     const std::string& oauth2_refresh_token,
     const std::string& oauth2_access_token) {
   DCHECK(user_profile_);
-  auth_url_loader_factory_ = auth_url_loader_factory;
   restore_strategy_ = restore_strategy;
   refresh_token_ = oauth2_refresh_token;
   oauthlogin_access_token_ = oauth2_access_token;
@@ -84,20 +80,13 @@ void OAuth2LoginManager::ContinueSessionRestore() {
 }
 
 void OAuth2LoginManager::RestoreSessionFromSavedTokens() {
-  // Just return if there is a pending TokenService::LoadCredentials call.
-  // Session restore continues in OnRefreshTokenAvailable when the call
-  // finishes.
-  if (pending_token_service_load_)
-    return;
-
   ProfileOAuth2TokenService* token_service = GetTokenService();
   const std::string primary_account_id = GetPrimaryAccountId();
   if (token_service->RefreshTokenIsAvailable(primary_account_id)) {
     VLOG(1) << "OAuth2 refresh token is already loaded.";
-    FireRefreshTokensLoaded();
     VerifySessionCookies();
   } else {
-    VLOG(1) << "Loading OAuth2 refresh token from database.";
+    VLOG(1) << "Waiting for OAuth2 refresh token being loaded from database.";
 
     // Flag user with unknown token status in case there are no saved tokens
     // and OnRefreshTokenAvailable is not called. Flagging it here would
@@ -106,14 +95,10 @@ void OAuth2LoginManager::RestoreSessionFromSavedTokens() {
     user_manager::UserManager::Get()->SaveUserOAuthStatus(
         AccountId::FromUserEmail(primary_account_id),
         user_manager::User::OAUTH_TOKEN_STATUS_UNKNOWN);
-
-    pending_token_service_load_ = true;
-    token_service->LoadCredentials(primary_account_id);
   }
 }
 
 void OAuth2LoginManager::Stop() {
-  oauth2_token_fetcher_.reset();
   login_verifier_.reset();
 }
 
@@ -153,7 +138,6 @@ void OAuth2LoginManager::OnRefreshTokenAvailable(
         AccountId::FromUserEmail(user_email),
         user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
 
-    pending_token_service_load_ = false;
     VerifySessionCookies();
   }
 }
@@ -163,10 +147,9 @@ ProfileOAuth2TokenService* OAuth2LoginManager::GetTokenService() {
 }
 
 std::string OAuth2LoginManager::GetPrimaryAccountId() {
-  SigninManagerBase* signin_manager =
-      SigninManagerFactory::GetForProfile(user_profile_);
   const std::string primary_account_id =
-      signin_manager->GetAuthenticatedAccountId();
+      IdentityManagerFactory::GetForProfile(user_profile_)
+          ->GetPrimaryAccountId();
   LOG_IF(ERROR, primary_account_id.empty()) << "Primary account id is empty.";
   return primary_account_id;
 }
@@ -180,30 +163,9 @@ void OAuth2LoginManager::UpdateCredentials(const std::string& account_id) {
   DCHECK(!refresh_token_.empty());
   // |account_id| is assumed to be already canonicalized if it's an email.
   GetTokenService()->UpdateCredentials(account_id, refresh_token_);
-  FireRefreshTokensLoaded();
 
   for (auto& observer : observer_list_)
     observer.OnNewRefreshTokenAvaiable(user_profile_);
-}
-
-void OAuth2LoginManager::FireRefreshTokensLoaded() {
-  // TODO(570218): Figure out the right way to plumb this.
-  GetTokenService()->LoadCredentials(std::string());
-}
-
-void OAuth2LoginManager::OnOAuth2TokensAvailable(
-    const GaiaAuthConsumer::ClientOAuthResult& oauth2_tokens) {
-  VLOG(1) << "OAuth2 tokens fetched";
-  DCHECK(refresh_token_.empty());
-  refresh_token_.assign(oauth2_tokens.refresh_token);
-  oauthlogin_access_token_ = oauth2_tokens.access_token;
-  StoreOAuth2Token();
-}
-
-void OAuth2LoginManager::OnOAuth2TokensFetchFailed() {
-  LOG(ERROR) << "OAuth2 tokens fetch failed!";
-  RecordSessionRestoreOutcome(SESSION_RESTORE_TOKEN_FETCH_FAILED,
-                              SESSION_RESTORE_FAILED);
 }
 
 void OAuth2LoginManager::VerifySessionCookies() {
@@ -228,7 +190,6 @@ void OAuth2LoginManager::RestoreSessionCookies() {
 void OAuth2LoginManager::Shutdown() {
   GetTokenService()->RemoveObserver(this);
   login_verifier_.reset();
-  oauth2_token_fetcher_.reset();
 }
 
 void OAuth2LoginManager::OnSessionMergeSuccess() {

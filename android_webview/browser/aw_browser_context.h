@@ -23,6 +23,10 @@
 class GURL;
 class PrefService;
 
+namespace autofill {
+class AutocompleteHistoryManager;
+}
+
 namespace content {
 class PermissionControllerDelegate;
 class ResourceContext;
@@ -79,6 +83,8 @@ class AwBrowserContext : public content::BrowserContext,
   static AwBrowserContext* FromWebContents(
       content::WebContents* web_contents);
 
+  static base::FilePath GetCacheDir();
+
   // Maps to BrowserMainParts::PreMainMessageLoopRun.
   void PreMainMessageLoopRun(net::NetLog* net_log);
 
@@ -88,12 +94,12 @@ class AwBrowserContext : public content::BrowserContext,
   AwQuotaManagerBridge* GetQuotaManagerBridge();
   AwFormDatabaseService* GetFormDatabaseService();
   AwURLRequestContextGetter* GetAwURLRequestContext();
+  autofill::AutocompleteHistoryManager* GetAutocompleteHistoryManager();
 
   web_restrictions::WebRestrictionsClient* GetWebRestrictionProvider();
 
   // content::BrowserContext implementation.
   base::FilePath GetPath() const override;
-  base::FilePath GetCachePath() const override;
   bool IsOffTheRecord() const override;
   content::ResourceContext* GetResourceContext() override;
   content::DownloadManagerDelegate* GetDownloadManagerDelegate() override;
@@ -102,6 +108,8 @@ class AwBrowserContext : public content::BrowserContext,
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   content::PermissionControllerDelegate* GetPermissionControllerDelegate()
+      override;
+  content::ClientHintsControllerDelegate* GetClientHintsControllerDelegate()
       override;
   content::BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
@@ -137,6 +145,8 @@ class AwBrowserContext : public content::BrowserContext,
   scoped_refptr<AwURLRequestContextGetter> url_request_context_getter_;
   scoped_refptr<AwQuotaManagerBridge> quota_manager_bridge_;
   std::unique_ptr<AwFormDatabaseService> form_database_service_;
+  std::unique_ptr<autofill::AutocompleteHistoryManager>
+      autocomplete_history_manager_;
 
   std::unique_ptr<visitedlink::VisitedLinkMaster> visitedlink_master_;
   std::unique_ptr<content::ResourceContext> resource_context_;

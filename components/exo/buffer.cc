@@ -14,12 +14,12 @@
 
 #include "base/callback_helpers.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
-#include "base/trace_event/trace_event_argument.h"
+#include "base/trace_event/traced_value.h"
 #include "components/exo/layer_tree_frame_sink_holder.h"
 #include "components/exo/wm_helper.h"
 #include "components/viz/common/gpu/context_provider.h"
@@ -41,6 +41,8 @@ namespace {
 // GetQueryObjectuivEXT(GL_QUERY_RESULT_EXT).
 const int kWaitForReleaseDelayMs = 500;
 
+constexpr char kBufferInUse[] = "BufferInUse";
+
 GLenum GLInternalFormat(gfx::BufferFormat format) {
   const GLenum kGLInternalFormats[] = {
       GL_R8_EXT,                           // R_8
@@ -59,7 +61,7 @@ GLenum GLInternalFormat(gfx::BufferFormat format) {
       GL_RGB_YCBCR_420V_CHROMIUM,          // YUV_420_BIPLANAR
       GL_RGB_YCBCR_422_CHROMIUM,           // UYVY_422
   };
-  static_assert(arraysize(kGLInternalFormats) ==
+  static_assert(base::size(kGLInternalFormats) ==
                     (static_cast<int>(gfx::BufferFormat::LAST) + 1),
                 "BufferFormat::LAST must be last value of kGLInternalFormats");
 
@@ -252,7 +254,7 @@ gpu::SyncToken Buffer::Texture::BindTexImage() {
     // BindTexImage2DCHROMIUM call is processed before issuing any commands
     // that will read from the texture on a different context.
     gles2->GenUnverifiedSyncTokenCHROMIUM(sync_token.GetData());
-    TRACE_EVENT_ASYNC_STEP_INTO0("exo", "BufferInUse", gpu_memory_buffer_,
+    TRACE_EVENT_ASYNC_STEP_INTO0("exo", kBufferInUse, gpu_memory_buffer_,
                                  "bound");
   }
   return sync_token;
@@ -327,7 +329,7 @@ void Buffer::Texture::ReleaseWhenQueryResultIsAvailable(
   release_callback_ = callback;
   wait_for_release_time_ = base::TimeTicks::Now() + wait_for_release_delay_;
   ScheduleWaitForRelease(wait_for_release_delay_);
-  TRACE_EVENT_ASYNC_STEP_INTO0("exo", "BufferInUse", gpu_memory_buffer_,
+  TRACE_EVENT_ASYNC_STEP_INTO0("exo", kBufferInUse, gpu_memory_buffer_,
                                "pending_query");
   context_provider_->ContextSupport()->SignalQuery(
       query_id_, base::BindOnce(&Buffer::Texture::Released,
@@ -388,18 +390,21 @@ Buffer::Buffer(std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer)
              GL_TEXTURE_2D /* texture_target */,
              GL_COMMANDS_COMPLETED_CHROMIUM /* query_type */,
              true /* use_zero_copy */,
-             false /* is_overlay_candidate */) {}
+             false /* is_overlay_candidate */,
+             false /* y_invert */) {}
 
 Buffer::Buffer(std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer,
                unsigned texture_target,
                unsigned query_type,
                bool use_zero_copy,
-               bool is_overlay_candidate)
+               bool is_overlay_candidate,
+               bool y_invert)
     : gpu_memory_buffer_(std::move(gpu_memory_buffer)),
       texture_target_(texture_target),
       query_type_(query_type),
       use_zero_copy_(use_zero_copy),
       is_overlay_candidate_(is_overlay_candidate),
+      y_invert_(y_invert),
       wait_for_release_delay_(
           base::TimeDelta::FromMilliseconds(kWaitForReleaseDelayMs)) {}
 
@@ -409,7 +414,8 @@ bool Buffer::ProduceTransferableResource(
     LayerTreeFrameSinkHolder* layer_tree_frame_sink_holder,
     bool secure_output_only,
     viz::TransferableResource* resource) {
-  TRACE_EVENT0("exo", "Buffer::ProduceTransferableResource");
+  TRACE_EVENT1("exo", "Buffer::ProduceTransferableResource", "buffer_id",
+               gfx_buffer());
   DCHECK(attach_count_);
 
   // If textures are lost, destroy them to ensure that we create new ones below.
@@ -446,7 +452,8 @@ bool Buffer::ProduceTransferableResource(
   Texture* contents_texture = contents_texture_.get();
 
   if (release_contents_callback_.IsCancelled())
-    TRACE_EVENT_ASYNC_BEGIN0("exo", "BufferInUse", gpu_memory_buffer_.get());
+    TRACE_EVENT_ASYNC_BEGIN1("exo", kBufferInUse, gpu_memory_buffer_.get(),
+                             "buffer_id", gfx_buffer());
 
   // Cancel pending contents release callback.
   release_contents_callback_.Reset(
@@ -504,11 +511,15 @@ bool Buffer::ProduceTransferableResource(
 void Buffer::OnAttach() {
   DLOG_IF(WARNING, attach_count_)
       << "Reattaching a buffer that is already attached to another surface.";
+  TRACE_EVENT2("exo", "Buffer::OnAttach", "buffer_id", gfx_buffer(), "count",
+               attach_count_);
   ++attach_count_;
 }
 
 void Buffer::OnDetach() {
   DCHECK_GT(attach_count_, 0u);
+  TRACE_EVENT2("exo", "Buffer::OnAttach", "buffer_id", gfx_buffer(), "count",
+               attach_count_);
   --attach_count_;
 
   // Release buffer if no longer attached to a surface and content has been
@@ -525,22 +536,11 @@ gfx::BufferFormat Buffer::GetFormat() const {
   return gpu_memory_buffer_->GetFormat();
 }
 
-std::unique_ptr<base::trace_event::TracedValue> Buffer::AsTracedValue() const {
-  std::unique_ptr<base::trace_event::TracedValue> value(
-      new base::trace_event::TracedValue());
-  gfx::Size size = gpu_memory_buffer_->GetSize();
-  value->SetInteger("width", size.width());
-  value->SetInteger("height", size.height());
-  value->SetInteger("format",
-                    static_cast<int>(gpu_memory_buffer_->GetFormat()));
-  return value;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Buffer, private:
 
 void Buffer::Release() {
-  TRACE_EVENT_ASYNC_END0("exo", "BufferInUse", gpu_memory_buffer_.get());
+  TRACE_EVENT_ASYNC_END0("exo", kBufferInUse, gpu_memory_buffer_.get());
 
   // Run release callback to notify the client that buffer has been released.
   if (!release_callback_.is_null())
@@ -558,13 +558,13 @@ void Buffer::ReleaseContentsTexture(std::unique_ptr<Texture> texture,
 }
 
 void Buffer::ReleaseContents() {
-  TRACE_EVENT0("exo", "Buffer::ReleaseContents");
+  TRACE_EVENT1("exo", "Buffer::ReleaseContents", "buffer_id", gfx_buffer());
 
   // Cancel callback to indicate that buffer has been released.
   release_contents_callback_.Cancel();
 
   if (attach_count_) {
-    TRACE_EVENT_ASYNC_STEP_INTO0("exo", "BufferInUse", gpu_memory_buffer_.get(),
+    TRACE_EVENT_ASYNC_STEP_INTO0("exo", kBufferInUse, gpu_memory_buffer_.get(),
                                  "attached");
   } else {
     // Release buffer if not attached to surface.

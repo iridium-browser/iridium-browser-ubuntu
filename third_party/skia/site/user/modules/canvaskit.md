@@ -55,7 +55,7 @@ Samples
   <figure>
     <canvas id=patheffect width=400 height=400></canvas>
     <figcaption>
-      <a href="https://jsfiddle.skia.org/canvaskit/79bc0e7a670ef4aa45254acfcd537ffe787b5b3333c45b4107e1ab8c898fc834"
+      <a href="https://jsfiddle.skia.org/canvaskit/28004d8841e7e497013263598241a3c1edc21dc1cf87a679abba307f39fa5fe6"
           target=_blank rel=noopener>
         Star JSFiddle</a>
     </figcaption>
@@ -63,26 +63,26 @@ Samples
   <figure>
     <canvas id=ink width=400 height=400></canvas>
     <figcaption>
-      <a href="https://jsfiddle.skia.org/canvaskit/4279ce869f9a08b04288a81d740eef5b3d54191f30a4aea510a64596118a5d62"
+      <a href="https://jsfiddle.skia.org/canvaskit/43475699d6d7d3d7dad1004c29f84015752a6a6dee2bb90f2e891b53e31d45cc"
           target=_blank rel=noopener>
         Ink JSFiddle</a>
     </figcaption>
   </figure>
 
   <h3>Skottie (click for fiddles)</h3>
-  <a href="https://jsfiddle.skia.org/canvaskit/00ad983919d3925499345202c2e8e28da1c127093593ae86e268e519c6c2b1bc"
+  <a href="https://jsfiddle.skia.org/canvaskit/092690b273b41076d2f00f0d43d004893d6bb9992c387c0385efa8e6f6bc83d7"
      target=_blank rel=noopener>
     <canvas id=sk_legos width=300 height=300></canvas>
   </a>
-  <a href="https://jsfiddle.skia.org/canvaskit/93a4d65d8b467053fbed26a6bc08968f9ff9f5986528ad9583e7fe2a0d98192f"
+  <a href="https://jsfiddle.skia.org/canvaskit/e7ac983d9859f89aff1b6d385190919202c2eb53d028a79992892cacceffd209"
      target=_blank rel=noopener>
     <canvas id=sk_drinks width=500 height=500></canvas>
   </a>
-  <a href="https://jsfiddle.skia.org/canvaskit/9d2ce26e5e14b6d72701466ee46c60aadecc3650ed709a57e35a04fc8f98366e"
+  <a href="https://jsfiddle.skia.org/canvaskit/0e06547181759731e7369d3e3613222a0826692f48c41b16504ed68d671583e1"
      target=_blank rel=noopener>
     <canvas id=sk_party width=500 height=500></canvas>
   </a>
-  <a href="https://jsfiddle.skia.org/canvaskit/13d92f4a7238425dcb68211010a1c313e18e429aae3a81ff630788307e31771e"
+  <a href="https://jsfiddle.skia.org/canvaskit/be3fc1c5c351e7f43cc2840033f80b44feb3475925264808f321bb9e2a21174a"
      target=_blank rel=noopener>
     <canvas id=sk_onboarding width=500 height=500></canvas>
   </a>
@@ -96,7 +96,7 @@ Samples
   var locate_file = '';
   if (window.WebAssembly && typeof window.WebAssembly.compile === 'function') {
     console.log('WebAssembly is supported!');
-    locate_file = 'https://storage.googleapis.com/skia-cdn/canvaskit-wasm/0.1.0/bin/';
+    locate_file = 'https://unpkg.com/canvaskit-wasm@0.3.0/bin/';
   } else {
     console.log('WebAssembly is not supported (yet) on this browser.');
     document.getElementById('demo').innerHTML = "<div>WASM not supported by your browser. Try a recent version of Chrome, Firefox, Edge, or Safari.</div>";
@@ -113,7 +113,6 @@ Samples
   CanvasKitInit({
     locateFile: (file) => locate_file + file,
   }).then((CK) => {
-    CK.initFonts();
     CanvasKit = CK;
     DrawingExample(CanvasKit);
     InkExample(CanvasKit);
@@ -162,7 +161,7 @@ Samples
   }
 
   function DrawingExample(CanvasKit) {
-    const surface = CanvasKit.getWebGLSurface('patheffect');
+    const surface = CanvasKit.MakeCanvasSurface('patheffect');
     if (!surface) {
       console.log('Could not make surface');
     }
@@ -189,7 +188,7 @@ Samples
       i++;
 
       paint.setPathEffect(dpe);
-      paint.setStyle(CanvasKit.PaintStyle.STROKE);
+      paint.setStyle(CanvasKit.PaintStyle.Stroke);
       paint.setStrokeWidth(5.0 + -3 * Math.cos(i/30));
       paint.setAntiAlias(true);
       paint.setColor(CanvasKit.Color(66, 129, 164, 1.0));
@@ -222,7 +221,7 @@ Samples
   }
 
   function InkExample(CanvasKit) {
-    const surface = CanvasKit.getWebGLSurface('ink');
+    const surface = CanvasKit.MakeCanvasSurface('ink');
     if (!surface) {
       console.log('Could not make surface');
     }
@@ -233,7 +232,7 @@ Samples
     let paint = new CanvasKit.SkPaint();
     paint.setAntiAlias(true);
     paint.setColor(CanvasKit.Color(0, 0, 0, 1.0));
-    paint.setStyle(CanvasKit.PaintStyle.STROKE);
+    paint.setStyle(CanvasKit.PaintStyle.Stroke);
     paint.setStrokeWidth(4.0);
     // This effect smooths out the drawn lines a bit.
     paint.setPathEffect(CanvasKit.MakeSkCornerPathEffect(50));
@@ -315,7 +314,7 @@ Samples
     let c = document.getElementById(id);
     bounds = bounds || {fLeft: 0, fTop: 0, fRight: size.w, fBottom: size.h};
 
-    const surface = CanvasKit.getWebGLSurface(id);
+    const surface = CanvasKit.MakeCanvasSurface(id);
     if (!surface) {
       console.log('Could not make surface');
     }
@@ -343,11 +342,10 @@ Samples
 </script>
 
 Lottie files courtesy of the lottiefiles.com community:
-[Lego Loader](https://www.lottiefiles.com/410-lego-loader), [I'm
-thirsty](https://www.lottiefiles.com/77-im-thirsty),
+[Lego Loader](https://www.lottiefiles.com/410-lego-loader),
+[I'm thirsty](https://www.lottiefiles.com/77-im-thirsty),
 [Confetti](https://www.lottiefiles.com/1370-confetti),
 [Onboarding](https://www.lottiefiles.com/1134-onboarding-1)
-
 
 Test server
 -----------
@@ -355,4 +353,4 @@ Test your code on our [CanvasKit Fiddle](https://jsfiddle.skia.org/canvaskit)
 
 Download
 --------
-Work is underway on an npm download. Check back soon.
+Get [CanvasKit on NPM](https://www.npmjs.com/package/canvaskit-wasm)

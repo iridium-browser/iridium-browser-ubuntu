@@ -20,6 +20,7 @@
 #include "base/strings/stringprintf.h"
 #include "cc/trees/layer_tree_frame_sink.h"
 #include "services/ws/public/mojom/window_tree_constants.mojom.h"
+#include "third_party/skia/include/core/SkPath.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
@@ -48,7 +49,6 @@
 #include "ui/events/event_target_iterator.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/path.h"
 #include "ui/gfx/scoped_canvas.h"
 
 namespace aura {
@@ -317,9 +317,9 @@ std::unique_ptr<WindowTargeter> Window::SetEventTargeter(
 }
 
 void Window::SetBounds(const gfx::Rect& new_bounds) {
-  if (parent_ && parent_->layout_manager())
+  if (parent_ && parent_->layout_manager()) {
     parent_->layout_manager()->SetChildBounds(this, new_bounds);
-  else {
+  } else {
     // Ensure we don't go smaller than our minimum bounds.
     gfx::Rect final_bounds(new_bounds);
     if (delegate_) {
@@ -334,14 +334,27 @@ void Window::SetBounds(const gfx::Rect& new_bounds) {
 
 void Window::SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen,
                                const display::Display& dst_display) {
-  Window* root = GetRootWindow();
-  if (root) {
-    aura::client::ScreenPositionClient* screen_position_client =
-        aura::client::GetScreenPositionClient(root);
-    screen_position_client->SetBounds(this, new_bounds_in_screen, dst_display);
-    return;
+  WindowTreeHost* host = GetHost();
+  bool is_moving = false;
+  if (host && host->GetDisplayId() != dst_display.id()) {
+    is_moving = true;
+    for (auto& observer : observers_)
+      observer.OnWillMoveWindowToDisplay(this, dst_display.id());
   }
-  SetBounds(new_bounds_in_screen);
+
+  aura::client::ScreenPositionClient* screen_position_client = nullptr;
+  Window* root = GetRootWindow();
+  if (root)
+    screen_position_client = aura::client::GetScreenPositionClient(root);
+  if (screen_position_client)
+    screen_position_client->SetBounds(this, new_bounds_in_screen, dst_display);
+  else
+    SetBounds(new_bounds_in_screen);
+
+  if (is_moving) {
+    for (auto& observer : observers_)
+      observer.OnDidMoveWindowToDisplay(this);
+  }
 }
 
 gfx::Rect Window::GetTargetBounds() const {
@@ -537,12 +550,10 @@ bool Window::ShouldRestackTransientChildren() {
 }
 
 void Window::AddObserver(WindowObserver* observer) {
-  observer->OnObservingWindow(this);
   observers_.AddObserver(observer);
 }
 
 void Window::RemoveObserver(WindowObserver* observer) {
-  observer->OnUnobservingWindow(this);
   observers_.RemoveObserver(observer);
 }
 
@@ -551,6 +562,20 @@ bool Window::HasObserver(const WindowObserver* observer) const {
 }
 
 void Window::SetEventTargetingPolicy(ws::mojom::EventTargetingPolicy policy) {
+#if DCHECK_IS_ON()
+  const bool old_window_accepts_events =
+      (event_targeting_policy_ ==
+       ws::mojom::EventTargetingPolicy::TARGET_ONLY) ||
+      (event_targeting_policy_ ==
+       ws::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS);
+  const bool new_window_accepts_events =
+      (policy == ws::mojom::EventTargetingPolicy::TARGET_ONLY) ||
+      (policy == ws::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS);
+  if (new_window_accepts_events != old_window_accepts_events) {
+    DCHECK(!created_layer_tree_frame_sink_);
+  }
+#endif
+
   if (event_targeting_policy_ == policy)
     return;
 
@@ -663,21 +688,6 @@ bool Window::CanFocus() const {
     return false;
 
   return parent_->CanFocus();
-}
-
-bool Window::CanReceiveEvents() const {
-  // TODO(sky): this may want to delegate to the WindowPort as for mus there
-  // isn't a point in descending into windows owned by the client.
-  if (IsRootWindow())
-    return IsVisible();
-
-  // The client may forbid certain windows from receiving events at a given
-  // point in time.
-  client::EventClient* client = client::GetEventClient(GetRootWindow());
-  if (client && !client->CanProcessEventsWithinSubtree(this))
-    return false;
-
-  return parent_ && IsVisible() && parent_->CanReceiveEvents();
 }
 
 void Window::SetCapture() {
@@ -806,7 +816,7 @@ bool Window::HitTest(const gfx::Point& local_point) {
   if (!delegate_ || !delegate_->HasHitTestMask())
     return local_bounds.Contains(local_point);
 
-  gfx::Path mask;
+  SkPath mask;
   delegate_->GetHitTestMask(&mask);
 
   SkRegion clip_region;
@@ -860,11 +870,17 @@ void Window::SetVisible(bool visible) {
   NotifyWindowVisibilityChanged(this, visible);
 }
 
-void Window::SetOcclusionState(OcclusionState occlusion_state) {
-  if (occlusion_state != occlusion_state_) {
+void Window::SetOcclusionInfo(OcclusionState occlusion_state,
+                              const SkRegion& occluded_region) {
+  if (occlusion_state != occlusion_state_ ||
+      occluded_region_ != occluded_region) {
     occlusion_state_ = occlusion_state;
+    occluded_region_ = occluded_region;
     if (delegate_)
-      delegate_->OnWindowOcclusionChanged(occlusion_state);
+      delegate_->OnWindowOcclusionChanged(occlusion_state, occluded_region);
+
+    for (WindowObserver& observer : observers_)
+      observer.OnWindowOcclusionChanged(this);
   }
 }
 
@@ -1030,7 +1046,7 @@ void Window::NotifyWindowHierarchyChangeAtReceiver(
 void Window::NotifyWindowVisibilityChanged(aura::Window* target,
                                            bool visible) {
   if (!NotifyWindowVisibilityChangedDown(target, visible))
-    return; // |this| has been deleted.
+    return;  // |this| has been deleted.
   NotifyWindowVisibilityChangedUp(target, visible);
 }
 
@@ -1049,7 +1065,7 @@ bool Window::NotifyWindowVisibilityChangedAtReceiver(aura::Window* target,
 bool Window::NotifyWindowVisibilityChangedDown(aura::Window* target,
                                                bool visible) {
   if (!NotifyWindowVisibilityChangedAtReceiver(target, visible))
-    return false; // |this| was deleted.
+    return false;  // |this| was deleted.
 
   WindowTracker this_tracker;
   this_tracker.Add(this);
@@ -1088,20 +1104,19 @@ std::unique_ptr<cc::LayerTreeFrameSink> Window::CreateLayerTreeFrameSink() {
   auto sink = port_->CreateLayerTreeFrameSink();
   DCHECK(frame_sink_id_.is_valid());
   DCHECK(embeds_external_client_);
-  DCHECK(GetLocalSurfaceId().is_valid());
+  DCHECK(GetLocalSurfaceIdAllocation().local_surface_id().is_valid());
+  created_layer_tree_frame_sink_ = true;
   return sink;
 }
 
 viz::SurfaceId Window::GetSurfaceId() const {
-  return viz::SurfaceId(GetFrameSinkId(), port_->GetLocalSurfaceId());
+  return viz::SurfaceId(
+      GetFrameSinkId(),
+      port_->GetLocalSurfaceIdAllocation().local_surface_id());
 }
 
 void Window::AllocateLocalSurfaceId() {
   port_->AllocateLocalSurfaceId();
-}
-
-bool Window::IsLocalSurfaceIdAllocationSuppressed() const {
-  return port_->IsLocalSurfaceIdAllocationSuppressed();
 }
 
 viz::ScopedSurfaceIdAllocator Window::GetSurfaceIdAllocator(
@@ -1109,16 +1124,21 @@ viz::ScopedSurfaceIdAllocator Window::GetSurfaceIdAllocator(
   return port_->GetSurfaceIdAllocator(std::move(allocation_task));
 }
 
-const viz::LocalSurfaceId& Window::GetLocalSurfaceId() const {
-  return port_->GetLocalSurfaceId();
+const viz::LocalSurfaceIdAllocation& Window::GetLocalSurfaceIdAllocation()
+    const {
+  return port_->GetLocalSurfaceIdAllocation();
+}
+
+void Window::InvalidateLocalSurfaceId() {
+  port_->InvalidateLocalSurfaceId();
 }
 
 void Window::UpdateLocalSurfaceIdFromEmbeddedClient(
-    const base::Optional<viz::LocalSurfaceId>&
-        embedded_client_local_surface_id) {
-  if (embedded_client_local_surface_id) {
+    const base::Optional<viz::LocalSurfaceIdAllocation>&
+        embedded_client_local_surface_id_allocation) {
+  if (embedded_client_local_surface_id_allocation) {
     port_->UpdateLocalSurfaceIdFromEmbeddedClient(
-        *embedded_client_local_surface_id);
+        *embedded_client_local_surface_id_allocation);
   } else {
     port_->AllocateLocalSurfaceId();
   }
@@ -1148,7 +1168,7 @@ bool Window::IsEmbeddingClient() const {
 }
 
 void Window::TrackOcclusionState() {
-  env_->GetWindowOcclusionTracker()->Track(this);
+  port_->TrackOcclusionState();
 }
 
 bool Window::RequiresDoubleTapGestureEvents() const {
@@ -1303,7 +1323,7 @@ std::unique_ptr<ui::Layer> Window::RecreateLayer() {
 }
 
 void Window::UpdateLayerName() {
-#if !defined(NDEBUG)
+#if DCHECK_IS_ON()
   DCHECK(layer());
 
   std::string layer_name(GetName());

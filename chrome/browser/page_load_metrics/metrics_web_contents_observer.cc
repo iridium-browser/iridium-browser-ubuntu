@@ -270,6 +270,11 @@ PageLoadTracker* MetricsWebContentsObserver::GetTrackerOrNullForRequest(
     if (resource_type == content::RESOURCE_TYPE_SUB_FRAME)
       return committed_load_.get();
 
+    // This was originally a DCHECK but it fails when the document load happened
+    // after client certificate selection.
+    if (!render_frame_host_or_null)
+      return nullptr;
+
     // There is a race here: a completed resource for the previously committed
     // page can arrive after the new page has committed. In this case, we may
     // attribute the resource to the wrong page load. We do our best to guard
@@ -280,7 +285,6 @@ PageLoadTracker* MetricsWebContentsObserver::GetTrackerOrNullForRequest(
     //
     // TODO(crbug.com/738577): use a DocumentId here instead, to eliminate this
     // race.
-    DCHECK(render_frame_host_or_null != nullptr);
     content::RenderFrameHost* main_frame_for_resource =
         GetMainFrame(render_frame_host_or_null);
     if (main_frame_for_resource == web_contents()->GetMainFrame())
@@ -324,6 +328,12 @@ void MetricsWebContentsObserver::ResourceLoadComplete(
             resource_load_info.load_timing_info));
     tracker->OnLoadedResource(extra_request_complete_info);
   }
+}
+
+void MetricsWebContentsObserver::FrameReceivedFirstUserActivation(
+    content::RenderFrameHost* render_frame_host) {
+  if (committed_load_)
+    committed_load_->FrameReceivedFirstUserActivation(render_frame_host);
 }
 
 void MetricsWebContentsObserver::OnRequestComplete(
@@ -639,10 +649,11 @@ MetricsWebContentsObserver::NotifyAbortedProvisionalLoadsNewNavigation(
 
 void MetricsWebContentsObserver::OnTimingUpdated(
     content::RenderFrameHost* render_frame_host,
-    const mojom::PageLoadTiming& timing,
-    const mojom::PageLoadMetadata& metadata,
-    const mojom::PageLoadFeatures& new_features,
-    const std::vector<mojom::ResourceDataUpdatePtr>& resources) {
+    mojom::PageLoadTimingPtr timing,
+    mojom::PageLoadMetadataPtr metadata,
+    mojom::PageLoadFeaturesPtr new_features,
+    const std::vector<mojom::ResourceDataUpdatePtr>& resources,
+    mojom::PageRenderDataPtr render_data) {
   // We may receive notifications from frames that have been navigated away
   // from. We simply ignore them.
   if (GetMainFrame(render_frame_host) != web_contents()->GetMainFrame()) {
@@ -675,19 +686,21 @@ void MetricsWebContentsObserver::OnTimingUpdated(
 
   if (committed_load_) {
     committed_load_->metrics_update_dispatcher()->UpdateMetrics(
-        render_frame_host, timing, metadata, new_features, resources);
+        render_frame_host, std::move(timing), std::move(metadata),
+        std::move(new_features), resources, std::move(render_data));
   }
 }
 
 void MetricsWebContentsObserver::UpdateTiming(
-    const mojom::PageLoadTimingPtr timing,
-    const mojom::PageLoadMetadataPtr metadata,
-    const mojom::PageLoadFeaturesPtr new_features,
-    const std::vector<mojom::ResourceDataUpdatePtr> resources) {
+    mojom::PageLoadTimingPtr timing,
+    mojom::PageLoadMetadataPtr metadata,
+    mojom::PageLoadFeaturesPtr new_features,
+    std::vector<mojom::ResourceDataUpdatePtr> resources,
+    mojom::PageRenderDataPtr render_data) {
   content::RenderFrameHost* render_frame_host =
       page_load_metrics_binding_.GetCurrentTargetFrame();
-  OnTimingUpdated(render_frame_host, *timing, *metadata, *new_features,
-                  resources);
+  OnTimingUpdated(render_frame_host, std::move(timing), std::move(metadata),
+                  std::move(new_features), resources, std::move(render_data));
 }
 
 bool MetricsWebContentsObserver::ShouldTrackNavigation(
@@ -749,5 +762,7 @@ void MetricsWebContentsObserver::BroadcastEventToObservers(
   if (committed_load_)
     committed_load_->BroadcastEventToObservers(event_key);
 }
+
+WEB_CONTENTS_USER_DATA_KEY_IMPL(MetricsWebContentsObserver)
 
 }  // namespace page_load_metrics

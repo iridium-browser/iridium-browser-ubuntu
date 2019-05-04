@@ -3,100 +3,214 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/paint/text_paint_timing_detector.h"
-#include "third_party/blink/renderer/core/paint/paint_tracker.h"
+#include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
-class TextPaintTimingDetectorTest : public RenderingTest {
+class TextPaintTimingDetectorTest
+    : public RenderingTest,
+      private ScopedFirstContentfulPaintPlusPlusForTest {
  public:
-  void SetUp() override {
-    RenderingTest::SetUp();
-    RuntimeEnabledFeatures::SetPaintTrackingEnabled(true);
-  }
+  TextPaintTimingDetectorTest()
+      : ScopedFirstContentfulPaintPlusPlusForTest(true) {}
+  void SetUp() override { RenderingTest::SetUp(); }
 
  protected:
   LocalFrameView& GetFrameView() { return *GetFrame().View(); }
-  PaintTracker& GetPaintTracker() { return GetFrameView().GetPaintTracker(); }
+  PaintTimingDetector& GetPaintTimingDetector() {
+    return GetFrameView().GetPaintTimingDetector();
+  }
+
+  unsigned CountRecords() {
+    return GetPaintTimingDetector()
+        .GetTextPaintTimingDetector()
+        .recorded_text_node_ids_.size();
+  }
+
+  void InvokeCallback() {
+    TextPaintTimingDetector& detector =
+        GetPaintTimingDetector().GetTextPaintTimingDetector();
+    detector.ReportSwapTime(WebLayerTreeView::SwapResult::kDidSwap,
+                            CurrentTimeTicks());
+  }
+
+  TimeTicks LargestPaintStoredResult() {
+    return GetPaintTimingDetector()
+        .GetTextPaintTimingDetector()
+        .largest_text_paint_;
+  }
+
+  TimeTicks LastPaintStoredResult() {
+    return GetPaintTimingDetector()
+        .GetTextPaintTimingDetector()
+        .last_text_paint_;
+  }
 
   void UpdateAllLifecyclePhasesAndSimulateSwapTime() {
-    GetFrameView().UpdateAllLifecyclePhases();
+    GetFrameView().UpdateAllLifecyclePhases(
+        DocumentLifecycle::LifecycleUpdateReason::kTest);
     TextPaintTimingDetector& detector =
-        GetPaintTracker().GetTextPaintTimingDetector();
+        GetPaintTimingDetector().GetTextPaintTimingDetector();
     if (detector.texts_to_record_swap_time_.size() > 0) {
       detector.ReportSwapTime(WebLayerTreeView::SwapResult::kDidSwap,
                               CurrentTimeTicks());
     }
   }
+
+  void SimulateAnalyze() {
+    GetPaintTimingDetector().GetTextPaintTimingDetector().Analyze();
+  }
+
+  Element* AppendFontElementToBody(String content) {
+    Element* element = GetDocument().CreateRawElement(html_names::kFontTag);
+    element->setAttribute(html_names::kSizeAttr, AtomicString("5"));
+    Text* text = GetDocument().createTextNode(content);
+    element->AppendChild(text);
+    GetDocument().body()->AppendChild(element);
+    return element;
+  }
+
+  Element* AppendDivElementToBody(String content, String style = "") {
+    Element* div = GetDocument().CreateRawElement(html_names::kDivTag);
+    div->setAttribute(html_names::kStyleAttr, AtomicString(style));
+    Text* text = GetDocument().createTextNode(content);
+    div->AppendChild(text);
+    GetDocument().body()->AppendChild(div);
+    return div;
+  }
+
+  DOMNodeId NodeIdOfText(Element* element) {
+    DCHECK_EQ(element->CountChildren(), 1u);
+    DCHECK(element->firstChild()->IsTextNode());
+    DCHECK(!element->firstChild()->hasChildren());
+    return DOMNodeIds::IdForNode(element->firstChild());
+  }
+
+  TextRecord* TextRecordOfLargestTextPaint() {
+    return GetPaintTimingDetector()
+        .GetTextPaintTimingDetector()
+        .FindLargestPaintCandidate();
+  }
+
+  TextRecord* TextRecordOfLastTextPaint() {
+    return GetPaintTimingDetector()
+        .GetTextPaintTimingDetector()
+        .FindLastPaintCandidate();
+  }
+
+  void SetFontSize(Element* font_element, uint8_t font_size) {
+    DCHECK_EQ(font_element->nodeName(), "FONT");
+    font_element->setAttribute(html_names::kSizeAttr,
+                               AtomicString(WTF::String::Number(font_size)));
+  }
+
+  void SetElementStyle(Element* element, String style) {
+    element->setAttribute(html_names::kStyleAttr, AtomicString(style));
+  }
+
+  void RemoveElement(Element* element) {
+    element->GetLayoutObject()->Parent()->GetNode()->removeChild(element);
+  }
 };
 
 TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_NoText) {
   SetBodyInnerHTML(R"HTML(
-    <div></div>
+    <body></body>
   )HTML");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  TextRecord* record = GetPaintTracker()
-                           .GetTextPaintTimingDetector()
-                           .FindLargestPaintCandidate();
-  EXPECT_FALSE(record);
+  EXPECT_FALSE(TextRecordOfLargestTextPaint());
 }
 
 TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_OneText) {
   SetBodyInnerHTML(R"HTML(
-    <div>The only text</div>
+    <body></body>
   )HTML");
+  Element* only_text = AppendDivElementToBody("The only text");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  TextRecord* record = GetPaintTracker()
-                           .GetTextPaintTimingDetector()
-                           .FindLargestPaintCandidate();
-  EXPECT_TRUE(record);
-  EXPECT_EQ(record->text, "The only text");
+  EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id, NodeIdOfText(only_text));
+}
+
+TEST_F(TextPaintTimingDetectorTest, NodeRemovedBeforeAssigningSwapTime) {
+  SetBodyInnerHTML(R"HTML(
+    <div id="parent">
+      <div id="remove">The only text</div>
+    </div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+  GetDocument().getElementById("parent")->RemoveChild(
+      GetDocument().getElementById("remove"));
+  InvokeCallback();
+  EXPECT_EQ(CountRecords(), 0u);
 }
 
 TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_LargestText) {
   SetBodyInnerHTML(R"HTML(
-    <div>medium text</div>
+    <body></body>
+  )HTML");
+  AppendDivElementToBody("medium text");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+
+  Element* large_text = AppendDivElementToBody("a long-long-long text");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+
+  AppendDivElementToBody("small");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+
+  EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id, NodeIdOfText(large_text));
+}
+
+TEST_F(TextPaintTimingDetectorTest, UpdateResultWhenCandidateChanged) {
+  TimeTicks time1 = CurrentTimeTicks();
+  SetBodyInnerHTML(R"HTML(
+    <div>small text</div>
   )HTML");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  SimulateAnalyze();
+  TimeTicks time2 = CurrentTimeTicks();
+  TimeTicks first_largest = LargestPaintStoredResult();
+  TimeTicks first_last = LastPaintStoredResult();
+  EXPECT_GE(first_largest, time1);
+  EXPECT_GE(time2, first_largest);
+  EXPECT_GE(first_last, time1);
+  EXPECT_GE(time2, first_last);
 
   Text* larger_text = GetDocument().createTextNode("a long-long-long text");
   GetDocument().body()->AppendChild(larger_text);
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-
-  Text* tiny_text = GetDocument().createTextNode("small");
-  GetDocument().body()->AppendChild(tiny_text);
-  UpdateAllLifecyclePhasesAndSimulateSwapTime();
-
-  TextRecord* record = GetPaintTracker()
-                           .GetTextPaintTimingDetector()
-                           .FindLargestPaintCandidate();
-  EXPECT_EQ(record->text, "a long-long-long text");
+  SimulateAnalyze();
+  TimeTicks time3 = CurrentTimeTicks();
+  TimeTicks second_largest = LargestPaintStoredResult();
+  TimeTicks second_last = LastPaintStoredResult();
+  EXPECT_GE(second_largest, time2);
+  EXPECT_GE(time3, second_largest);
+  EXPECT_GE(second_last, time2);
+  EXPECT_GE(time3, second_last);
 }
 
 TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_ReportFirstPaintTime) {
   TimeTicks time1 = CurrentTimeTicks();
   SetBodyInnerHTML(R"HTML(
-    <div>
-      <div id='b'>size-changing block</div>
-      <div>a long-long-long-long moving text</div>
-    </div>
+    <body></body>
   )HTML");
+  Element* size_changing_text = AppendFontElementToBody("size-changing text");
+  Element* long_text =
+      AppendFontElementToBody("a long-long-long-long moving text");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
   TimeTicks time2 = CurrentTimeTicks();
-  GetDocument().getElementById("b")->setAttribute(HTMLNames::styleAttr,
-                                                  AtomicString("height:50px"));
+  SetFontSize(size_changing_text, 50);
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  GetDocument().getElementById("b")->setAttribute(HTMLNames::styleAttr,
-                                                  AtomicString("height:100px"));
+  SetFontSize(long_text, 100);
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  TextRecord* record = GetPaintTracker()
+  TextRecord* record = GetPaintTimingDetector()
                            .GetTextPaintTimingDetector()
                            .FindLargestPaintCandidate();
-  EXPECT_EQ(record->text, "a long-long-long-long moving text");
+  EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id, NodeIdOfText(long_text));
   TimeTicks firing_time = record->first_paint_time;
   EXPECT_GE(firing_time, time1);
   EXPECT_GE(time2, firing_time);
@@ -114,64 +228,72 @@ TEST_F(TextPaintTimingDetectorTest,
     <div class='out'>text outside of viewport</div>
   )HTML");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  EXPECT_FALSE(GetPaintTracker()
+  EXPECT_FALSE(GetPaintTimingDetector()
                    .GetTextPaintTimingDetector()
                    .FindLargestPaintCandidate());
-  EXPECT_FALSE(
-      GetPaintTracker().GetTextPaintTimingDetector().FindLastPaintCandidate());
+  EXPECT_FALSE(GetPaintTimingDetector()
+                   .GetTextPaintTimingDetector()
+                   .FindLastPaintCandidate());
 }
 
 TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_IgnoreRemovedText) {
   SetBodyInnerHTML(R"HTML(
-    <div id='parent'>
-      <div id='earlyLargeText'>(large text)(large text)(large text)(large text)(large text)(large text)</div>
-      <div>small text</div>
-    </div>
+    <body></body>
   )HTML");
+  Element* large_text = AppendDivElementToBody(
+      "(large text)(large text)(large text)(large text)(large text)(large "
+      "text)");
+  Element* small_text = AppendDivElementToBody("small text");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  GetDocument().getElementById("parent")->RemoveChild(
-      GetDocument().getElementById("earlyLargeText"));
+  EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id, NodeIdOfText(large_text));
+
+  RemoveElement(large_text);
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  TextRecord* record = GetPaintTracker()
-                           .GetTextPaintTimingDetector()
-                           .FindLargestPaintCandidate();
-  EXPECT_EQ(record->text, "small text");
+  EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id, NodeIdOfText(small_text));
+}
+
+TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_ReportLastNullCandidate) {
+  SetBodyInnerHTML(R"HTML(
+    <body></body>
+  )HTML");
+  Element* text = AppendDivElementToBody("text to remove");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  SimulateAnalyze();
+  EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id, NodeIdOfText(text));
+  EXPECT_NE(LargestPaintStoredResult(), base::TimeTicks());
+
+  RemoveElement(text);
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  SimulateAnalyze();
+  EXPECT_FALSE(TextRecordOfLargestTextPaint());
+  EXPECT_EQ(LargestPaintStoredResult(), base::TimeTicks());
 }
 
 TEST_F(TextPaintTimingDetectorTest,
        LargestTextPaint_CompareVisualSizeNotActualSize) {
   SetBodyInnerHTML(R"HTML(
-    <div>
-      <div>short</div>
-      <div style="position:fixed;left:-10px">a long text</div>
-    </div>
+    <body></body>
   )HTML");
+  AppendDivElementToBody("a long text", "position:fixed;left:-10px");
+  Element* short_text = AppendDivElementToBody("short");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  TextRecord* record = GetPaintTracker()
-                           .GetTextPaintTimingDetector()
-                           .FindLargestPaintCandidate();
-  EXPECT_EQ(record->text, "short");
+  EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id, NodeIdOfText(short_text));
 }
 
+// Depite that the l
 TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_CompareSizesAtFirstPaint) {
   SetBodyInnerHTML(R"HTML(
-    <div>
-      <div id="shorteningText">large-to-small text</div>
-      <div>a medium text</div>
-    </div>
+    <body></body>
   )HTML");
+  Element* shortening_long_text = AppendDivElementToBody("123456789");
+  AppendDivElementToBody("12345678");  // 1 letter shorter than the above.
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
   // The visual size becomes smaller when less portion intersecting with
   // viewport.
-  GetDocument()
-      .getElementById("shorteningText")
-      ->setAttribute(HTMLNames::styleAttr,
-                     AtomicString("position:fixed;left:-10px"));
+  SetElementStyle(shortening_long_text, "position:fixed;left:-10px");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  TextRecord* record = GetPaintTracker()
-                           .GetTextPaintTimingDetector()
-                           .FindLargestPaintCandidate();
-  EXPECT_EQ(record->text, "large-to-small text");
+  EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id,
+            NodeIdOfText(shortening_long_text));
 }
 
 TEST_F(TextPaintTimingDetectorTest, LastTextPaint_NoText) {
@@ -179,65 +301,57 @@ TEST_F(TextPaintTimingDetectorTest, LastTextPaint_NoText) {
     <div></div>
   )HTML");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  TextRecord* record =
-      GetPaintTracker().GetTextPaintTimingDetector().FindLastPaintCandidate();
+  TextRecord* record = GetPaintTimingDetector()
+                           .GetTextPaintTimingDetector()
+                           .FindLastPaintCandidate();
   EXPECT_FALSE(record);
 }
 
 TEST_F(TextPaintTimingDetectorTest, LastTextPaint_OneText) {
   SetBodyInnerHTML(R"HTML(
-    <div>The only text</div>
+    <body></body>
   )HTML");
+  Element* text = AppendDivElementToBody("The only text");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  TextRecord* record =
-      GetPaintTracker().GetTextPaintTimingDetector().FindLastPaintCandidate();
-  EXPECT_EQ(record->text, "The only text");
+  EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id, NodeIdOfText(text));
 }
 
 TEST_F(TextPaintTimingDetectorTest, LastTextPaint_LastText) {
   SetBodyInnerHTML(R"HTML(
     <div>1st text</div>
   )HTML");
+  AppendDivElementToBody("s");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  Text* larger_text = GetDocument().createTextNode("2nd text");
-  GetDocument().body()->AppendChild(larger_text);
+  AppendDivElementToBody("loooooooong");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  Text* tiny_text = GetDocument().createTextNode("3rd text");
-  GetDocument().body()->AppendChild(tiny_text);
+  Element* third_text = AppendDivElementToBody("medium");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  TextRecord* record =
-      GetPaintTracker().GetTextPaintTimingDetector().FindLastPaintCandidate();
-  EXPECT_EQ(record->text, "3rd text");
+  EXPECT_EQ(TextRecordOfLastTextPaint()->node_id, NodeIdOfText(third_text));
 }
 
 TEST_F(TextPaintTimingDetectorTest, LastTextPaint_ReportFirstPaintTime) {
   SetBodyInnerHTML(R"HTML(
-    <div>
-      <div id='b'>size-changing block</div>
-    </div>
+    <body></body>
   )HTML");
+  AppendDivElementToBody("a loooooooooooooooooooong text");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
   TimeTicks time1 = CurrentTimeTicks();
-  Text* tiny_text = GetDocument().createTextNode("latest text");
-  GetDocument().body()->AppendChild(tiny_text);
+  Element* latest_text = AppendFontElementToBody("latest text");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
   TimeTicks time2 = CurrentTimeTicks();
-  GetDocument().getElementById("b")->setAttribute(HTMLNames::styleAttr,
-                                                  AtomicString("height:50px"));
+  SetFontSize(latest_text, 50);
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  GetDocument().getElementById("b")->setAttribute(HTMLNames::styleAttr,
-                                                  AtomicString("height:100px"));
+  SetFontSize(latest_text, 100);
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  TextRecord* record =
-      GetPaintTracker().GetTextPaintTimingDetector().FindLastPaintCandidate();
-  EXPECT_EQ(record->text, "latest text");
+  TextRecord* record = TextRecordOfLastTextPaint();
+  EXPECT_EQ(record->node_id, NodeIdOfText(latest_text));
   TimeTicks firing_time = record->first_paint_time;
   EXPECT_GE(firing_time, time1);
   EXPECT_GE(time2, firing_time);
@@ -245,55 +359,54 @@ TEST_F(TextPaintTimingDetectorTest, LastTextPaint_ReportFirstPaintTime) {
 
 TEST_F(TextPaintTimingDetectorTest, LastTextPaint_IgnoreRemovedText) {
   SetBodyInnerHTML(R"HTML(
-    <body>
-      <div>earliest text</div>
-    </body>
+    <body></body>
   )HTML");
+  Element* first_text = AppendDivElementToBody("1st text");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  Text* tiny_text = GetDocument().createTextNode("latest text");
-  GetDocument().body()->AppendChild(tiny_text);
+  Element* second_text = AppendDivElementToBody("2nd text");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  GetDocument().body()->RemoveChild(GetDocument().body()->lastChild());
+  RemoveElement(second_text);
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  TextRecord* record =
-      GetPaintTracker().GetTextPaintTimingDetector().FindLastPaintCandidate();
-  EXPECT_EQ(record->text, "earliest text");
+  EXPECT_EQ(TextRecordOfLastTextPaint()->node_id, NodeIdOfText(first_text));
 }
 
 TEST_F(TextPaintTimingDetectorTest, LastTextPaint_StopRecordingOverNodeLimit) {
   SetBodyInnerHTML(R"HTML(
-    <body>
-    </body>
+    <body></body>
   )HTML");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  for (int i = 1; i <= 4999; i++) {
-    Element* div = GetDocument().CreateRawElement(HTMLNames::divTag);
-    div->appendChild(GetDocument().createTextNode(WTF::String::Number(i)));
-    div->setAttribute(HTMLNames::styleAttr,
-                      AtomicString("position:fixed;left:0px"));
-    GetDocument().body()->AppendChild(div);
-  }
+  for (int i = 1; i <= 4999; i++)
+    AppendDivElementToBody(WTF::String::Number(i), "position:fixed;left:0px");
+
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  TextRecord* record;
-  Text* text;
-
-  text = GetDocument().createTextNode(WTF::String::Number(5000));
-  GetDocument().body()->AppendChild(text);
+  Element* text_5000 = AppendDivElementToBody(WTF::String::Number(5000));
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  record =
-      GetPaintTracker().GetTextPaintTimingDetector().FindLastPaintCandidate();
-  EXPECT_EQ(record->text, "5000");
+  EXPECT_EQ(TextRecordOfLastTextPaint()->node_id, NodeIdOfText(text_5000));
 
-  text = GetDocument().createTextNode(WTF::String::Number(5001));
-  GetDocument().body()->AppendChild(text);
+  AppendDivElementToBody(WTF::String::Number(5001));
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
-  record =
-      GetPaintTracker().GetTextPaintTimingDetector().FindLastPaintCandidate();
-  EXPECT_EQ(record->text, "5000");
+  EXPECT_EQ(TextRecordOfLastTextPaint()->node_id, NodeIdOfText(text_5000));
+}
+
+TEST_F(TextPaintTimingDetectorTest, LastTextPaint_ReportLastNullCandidate) {
+  SetBodyInnerHTML(R"HTML(
+    <body></body>
+  )HTML");
+  Element* text = AppendDivElementToBody("text");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  SimulateAnalyze();
+  EXPECT_EQ(TextRecordOfLastTextPaint()->node_id, NodeIdOfText(text));
+  EXPECT_NE(LastPaintStoredResult(), base::TimeTicks());
+
+  RemoveElement(text);
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  SimulateAnalyze();
+  EXPECT_FALSE(TextRecordOfLastTextPaint());
+  EXPECT_EQ(LastPaintStoredResult(), base::TimeTicks());
 }
 
 }  // namespace blink

@@ -8,7 +8,6 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/vr/service/vr_service_impl.h"
 #include "chrome/browser/vr/service/xr_runtime_manager.h"
@@ -141,7 +140,7 @@ TEST_F(XRRuntimeManagerTest, AddRemoveDevices) {
   Provider()->AddDevice(base::WrapUnique(device));
 
   device::mojom::XRSessionOptions options = {};
-  options.provide_passthrough_camera = true;
+  options.environment_integration = true;
   EXPECT_TRUE(DeviceManager()->GetRuntimeForOptions(&options));
   Provider()->RemoveDevice(device->GetId());
   EXPECT_TRUE(!DeviceManager()->GetRuntimeForOptions(&options));

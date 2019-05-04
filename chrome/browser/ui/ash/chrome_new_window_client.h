@@ -35,13 +35,13 @@ class ChromeNewWindowClient : public ash::mojom::NewWindowClient,
   void OpenCrosh() override;
   void OpenGetHelp() override;
   void RestoreTab() override;
-  void ShowKeyboardOverlay() override;
   void ShowKeyboardShortcutViewer() override;
   void ShowTaskManager() override;
-  void OpenFeedbackPage() override;
+  void OpenFeedbackPage(bool from_assistant) override;
 
   // arc::OpenUrlDelegate:
   void OpenUrlFromArc(const GURL& url) override;
+  void OpenWebAppFromArc(const GURL& url) override;
 
  private:
   class TabRestoreHelper;

@@ -6,7 +6,6 @@
 
 #include <gtk/gtk.h>
 
-#include "chrome/browser/ui/libgtkui/chrome_gtk_menu_subclasses.h"
 #include "chrome/browser/ui/libgtkui/gtk_util.h"
 #include "chrome/browser/ui/libgtkui/skia_utils_gtk.h"
 #include "ui/gfx/color_palette.h"
@@ -133,6 +132,13 @@ SkColor SkColorFromColorId(ui::NativeTheme::ColorId color_id) {
     case ui::NativeTheme::kColorId_TouchableMenuItemLabelColor:
     case ui::NativeTheme::kColorId_ActionableSubmenuVerticalSeparatorColor:
       return gfx::kPlaceholderColor;
+    // Fallback to the same colors as Aura.
+    case ui::NativeTheme::kColorId_HighlightedMenuItemBackgroundColor:
+    case ui::NativeTheme::kColorId_HighlightedMenuItemForegroundColor:
+    case ui::NativeTheme::kColorId_FocusedHighlightedMenuItemBackgroundColor:
+    case ui::NativeTheme::kColorId_MenuItemAlertBackgroundColor:
+      return ui::NativeTheme::GetInstanceForNativeUi()->GetSystemColor(
+          color_id);
 
     // Label
     case ui::NativeTheme::kColorId_LabelEnabledColor:
@@ -191,27 +197,9 @@ SkColor SkColorFromColorId(ui::NativeTheme::ColorId color_id) {
     case ui::NativeTheme::kColorId_ButtonPressedShade:
       return SK_ColorTRANSPARENT;
 
-    // BlueButton
-    case ui::NativeTheme::kColorId_BlueButtonEnabledColor:
-      return GetFgColor(
-          "GtkButton#button.text-button.default.suggested-action GtkLabel");
-    case ui::NativeTheme::kColorId_BlueButtonDisabledColor:
-      return GetFgColor(
-          "GtkButton#button.text-button.default.suggested-action:disabled "
-          "GtkLabel");
-    case ui::NativeTheme::kColorId_BlueButtonHoverColor:
-      return GetFgColor(
-          "GtkButton#button.text-button.default.suggested-action:hover "
-          "GtkLabel");
-    case ui::NativeTheme::kColorId_BlueButtonPressedColor:
-      return GetFgColor(
-          "GtkButton#button.text-button.default.suggested-action:hover:active "
-          "GtkLabel");
-    case ui::NativeTheme::kColorId_BlueButtonShadowColor:
-      return SK_ColorTRANSPARENT;
-
     // ProminentButton
     case ui::NativeTheme::kColorId_ProminentButtonColor:
+    case ui::NativeTheme::kColorId_ProminentButtonFocusedColor:
       return GetBgColor(
           "GtkTreeView#treeview.view "
           "GtkTreeView#treeview.view.cell:selected:focus");
@@ -219,6 +207,10 @@ SkColor SkColorFromColorId(ui::NativeTheme::ColorId color_id) {
       return GetFgColor(
           "GtkTreeView#treeview.view "
           "GtkTreeView#treeview.view.cell:selected:focus GtkLabel");
+    case ui::NativeTheme::kColorId_ProminentButtonDisabledColor:
+      return GetBgColor("GtkButton#button.text-button:disabled");
+    case ui::NativeTheme::kColorId_ButtonBorderColor:
+      return GetBorderColor("GtkButton#button.text-button");
 
     // TabbedPane
     case ui::NativeTheme::kColorId_TabTitleColorActive:
@@ -306,7 +298,7 @@ SkColor SkColorFromColorId(ui::NativeTheme::ColorId color_id) {
               ui::NativeTheme::kColorId_TextfieldDefaultBackground),
           SkColorFromColorId(
               ui::NativeTheme::kColorId_TextfieldSelectionBackgroundFocused),
-          0x80);
+          0.5f);
     case ui::NativeTheme::kColorId_ResultsTableNormalText:
       return SkColorFromColorId(
           ui::NativeTheme::kColorId_TextfieldDefaultColor);
@@ -315,7 +307,7 @@ SkColor SkColorFromColorId(ui::NativeTheme::ColorId color_id) {
           SkColorFromColorId(ui::NativeTheme::kColorId_TextfieldDefaultColor),
           SkColorFromColorId(
               ui::NativeTheme::kColorId_TextfieldDefaultBackground),
-          0x80);
+          0.5f);
 
     // Throbber
     // TODO(thomasanderson): Render GtkSpinner directly.

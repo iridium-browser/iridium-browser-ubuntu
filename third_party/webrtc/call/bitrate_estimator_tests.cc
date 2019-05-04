@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 
+#include "absl/memory/memory.h"
 #include "call/call.h"
 #include "call/fake_network_pipe.h"
 #include "call/simulated_network.h"
@@ -46,8 +47,6 @@ class LogObserver {
  private:
   class Callback : public rtc::LogSink {
    public:
-    Callback() : done_(false, false) {}
-
     void OnLogMessage(const std::string& message) override {
       rtc::CritScope lock(&crit_sect_);
       // Ignore log lines that are due to missing AST extensions, these are
@@ -126,6 +125,8 @@ class BitrateEstimatorTest : public test::CallTest {
       video_send_config.rtp.ssrcs.push_back(kVideoSendSsrcs[0]);
       video_send_config.encoder_settings.encoder_factory =
           &fake_encoder_factory_;
+      video_send_config.encoder_settings.bitrate_allocator_factory =
+          bitrate_allocator_factory_.get();
       video_send_config.rtp.payload_name = "FAKE";
       video_send_config.rtp.payload_type = kFakeVideoSendPayloadType;
       SetVideoSendConfig(video_send_config);
@@ -183,7 +184,6 @@ class BitrateEstimatorTest : public test::CallTest {
       send_stream_->SetSource(frame_generator_capturer_.get(),
                               DegradationPreference::MAINTAIN_FRAMERATE);
       send_stream_->Start();
-      frame_generator_capturer_->Start();
 
       VideoReceiveStream::Decoder decoder;
       decoder.decoder_factory = &decoder_factory_;
@@ -215,7 +215,6 @@ class BitrateEstimatorTest : public test::CallTest {
 
     void StopSending() {
       if (is_sending_receiving_) {
-        frame_generator_capturer_->Stop();
         send_stream_->Stop();
         if (video_receive_stream_) {
           video_receive_stream_->Stop();

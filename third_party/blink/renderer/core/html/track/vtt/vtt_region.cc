@@ -94,7 +94,7 @@ VTTRegion::VTTRegion()
       viewport_anchor_(DoublePoint(kDefaultAnchorPointX, kDefaultAnchorPointY)),
       scroll_(kDefaultScroll),
       current_top_(0),
-      scroll_timer_(Platform::Current()->CurrentThread()->GetTaskRunner(),
+      scroll_timer_(Thread::Current()->GetTaskRunner(),
                     this,
                     &VTTRegion::ScrollTimerFired) {}
 
@@ -413,7 +413,7 @@ void VTTRegion::ScrollTimerFired(TimerBase*) {
   DisplayLastVTTCueBox();
 }
 
-void VTTRegion::Trace(blink::Visitor* visitor) {
+void VTTRegion::Trace(Visitor* visitor) {
   visitor->Trace(cue_container_);
   visitor->Trace(region_display_tree_);
   ScriptWrappable::Trace(visitor);

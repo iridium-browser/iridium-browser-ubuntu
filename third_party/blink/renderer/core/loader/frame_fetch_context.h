@@ -37,48 +37,40 @@ n * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/loader/base_fetch_context.h"
-#include "third_party/blink/renderer/core/script/fetch_client_settings_object_impl.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/client_hints_preferences.h"
-#include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/network/content_security_policy_parsers.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
 
 class ClientHintsPreferences;
-class ContentSettingsClient;
+class CoreProbeSink;
 class Document;
 class DocumentLoader;
+class FrameOrImportedDocument;
+class FrameResourceFetcherProperties;
 class LocalFrame;
 class LocalFrameClient;
 class ResourceError;
 class ResourceResponse;
 class Settings;
+class WebContentSettingsClient;
 struct WebEnabledClientHints;
 
 class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
  public:
-  static ResourceFetcher* CreateFetcherFromDocumentLoader(
-      DocumentLoader* loader) {
-    return CreateFetcher(loader, nullptr);
-  }
+  static ResourceFetcher* CreateFetcher(const FrameResourceFetcherProperties&);
   // Used for creating a FrameFetchContext for an imported Document.
   // |document_loader_| will be set to nullptr.
-  static ResourceFetcher* CreateFetcherFromDocument(Document* document) {
-    return CreateFetcher(nullptr, document);
-  }
+  static ResourceFetcher* CreateFetcherForImportedDocument(Document* document);
 
-  static void ProvideDocumentToContext(FetchContext&, Document*);
-
-  ~FrameFetchContext() override;
-
-  bool IsFrameFetchContext() override { return true; }
-
-  void RecordDataUriWithOctothorpe() override;
+  explicit FrameFetchContext(const FrameOrImportedDocument&);
+  ~FrameFetchContext() override = default;
 
   void AddAdditionalRequestHeaders(ResourceRequest&,
                                    FetchResourceType) override;
@@ -96,27 +88,26 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
   void DispatchDidChangeResourcePriority(unsigned long identifier,
                                          ResourceLoadPriority,
                                          int intra_priority_value) override;
-  void PrepareRequest(ResourceRequest&, RedirectType) override;
+  void PrepareRequest(ResourceRequest&,
+                      WebScopedVirtualTimePauser&,
+                      RedirectType) override;
   void DispatchWillSendRequest(
       unsigned long identifier,
       ResourceRequest&,
       const ResourceResponse& redirect_response,
       ResourceType,
       const FetchInitiatorInfo& = FetchInitiatorInfo()) override;
-  void DispatchDidLoadResourceFromMemoryCache(unsigned long identifier,
-                                              const ResourceRequest&,
-                                              const ResourceResponse&) override;
+  // Resource* can be null for navigations.
   void DispatchDidReceiveResponse(unsigned long identifier,
+                                  const ResourceRequest&,
                                   const ResourceResponse&,
-                                  network::mojom::RequestContextFrameType,
-                                  mojom::RequestContextType,
                                   Resource*,
                                   ResourceResponseType) override;
   void DispatchDidReceiveData(unsigned long identifier,
                               const char* data,
-                              int data_length) override;
+                              uint64_t data_length) override;
   void DispatchDidReceiveEncodedData(unsigned long identifier,
-                                     int encoded_data_length) override;
+                                     size_t encoded_data_length) override;
   void DispatchDidDownloadToBlob(unsigned long identifier,
                                  BlobDataHandle*) override;
   void DispatchDidFinishLoading(unsigned long identifier,
@@ -130,25 +121,14 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
                        int64_t encoded_data_length,
                        bool is_internal_request) override;
 
-  bool ShouldLoadNewResource(ResourceType) const override;
   void RecordLoadingActivity(const ResourceRequest&,
                              ResourceType,
                              const AtomicString& fetch_initiator_name) override;
   void DidLoadResource(Resource*) override;
+  void DidObserveLoadingBehavior(WebLoadingBehaviorFlag) override;
 
   void AddResourceTiming(const ResourceTimingInfo&) override;
   bool AllowImage(bool images_enabled, const KURL&) const override;
-  blink::mojom::ControllerServiceWorkerMode IsControlledByServiceWorker()
-      const override;
-  int64_t ServiceWorkerID() const override;
-  int ApplicationCacheHostID() const override;
-
-  bool IsMainFrame() const override;
-  bool DefersLoading() const override;
-  bool IsLoadComplete() const override;
-  bool UpdateTimingInfoForIFrameNavigation(ResourceTimingInfo*) override;
-
-  const SecurityOrigin* GetSecurityOrigin() const override;
 
   void PopulateResourceRequest(ResourceType,
                                const ClientHintsPreferences&,
@@ -161,18 +141,9 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
                                  const FetchParameters::ResourceWidth&,
                                  ResourceRequest&);
 
-  MHTMLArchive* Archive() const override;
-
   std::unique_ptr<WebURLLoader> CreateURLLoader(
       const ResourceRequest&,
       const ResourceLoaderOptions&) override;
-
-  ResourceLoadScheduler::ThrottlingPolicy InitialLoadThrottlingPolicy()
-      const override {
-    // Frame loading should normally start with |kTight| throttling, as the
-    // frame will be in layout-blocking state until the <body> tag is inserted.
-    return ResourceLoadScheduler::ThrottlingPolicy::kTight;
-  }
 
   bool IsDetached() const override { return frozen_state_; }
 
@@ -185,32 +156,32 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
   void DispatchNetworkQuiet() override;
 
  private:
+  class FrameConsoleLogger;
   friend class FrameFetchContextTest;
 
   struct FrozenState;
 
-  static ResourceFetcher* CreateFetcher(DocumentLoader*, Document*);
-
-  FrameFetchContext(DocumentLoader*, Document*);
+  // TODO(altimin): This is used when creating a URLLoader, and
+  // FetchContext::GetLoadingTaskRunner is used whenever asynchronous tasks
+  // around resource loading are posted. Modify the code so that all
+  // the tasks related to loading a resource use the resource loader handle's
+  // task runner.
+  std::unique_ptr<scheduler::WebResourceLoadingTaskRunnerHandle>
+  CreateResourceLoadingTaskRunnerHandle();
 
   // Convenient accessors below can be used to transparently access the
   // relevant document loader or frame in either cases without null-checks.
   //
   // TODO(kinuko): Remove constness, these return non-const members.
+  DocumentLoader* GetDocumentLoader() const;
   DocumentLoader* MasterDocumentLoader() const;
   LocalFrame* GetFrame() const;
   LocalFrameClient* GetLocalFrameClient() const;
-  LocalFrame* FrameOfImportsController() const;
 
   // FetchContext overrides:
   FrameScheduler* GetFrameScheduler() const override;
-  scoped_refptr<base::SingleThreadTaskRunner> GetLoadingTaskRunner() override;
-  std::unique_ptr<scheduler::WebResourceLoadingTaskRunnerHandle>
-  CreateResourceLoadingTaskRunnerHandle() override;
 
   // BaseFetchContext overrides:
-  const FetchClientSettingsObject* GetFetchClientSettingsObject()
-      const override;
   KURL GetSiteForCookies() const override;
   SubresourceFilter* GetSubresourceFilter() const override;
   PreviewsResourceLoadingHints* GetPreviewsResourceLoadingHints()
@@ -243,7 +214,7 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
   const ContentSecurityPolicy* GetContentSecurityPolicy() const override;
   void AddConsoleMessage(ConsoleMessage*) const override;
 
-  ContentSettingsClient* GetContentSettingsClient() const;
+  WebContentSettingsClient* GetContentSettingsClient() const;
   Settings* GetSettings() const;
   String GetUserAgent() const;
   const ClientHintsPreferences GetClientHintsPreferences() const;
@@ -252,14 +223,14 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
                             const ClientHintsPreferences&,
                             const WebEnabledClientHints&) const;
   // Checks if the origin requested persisting the client hints, and notifies
-  // the |ContentSettingsClient| with the list of client hints and the
+  // the |WebContentSettingsClient| with the list of client hints and the
   // persistence duration.
   void ParseAndPersistClientHints(const ResourceResponse&);
   void SetFirstPartyCookie(ResourceRequest&);
 
   // Returns true if execution of scripts from the url are allowed. Compared to
   // AllowScriptFromSource(), this method does not generate any
-  // notification to the |ContentSettingsClient| that the execution of the
+  // notification to the |WebContentSettingsClient| that the execution of the
   // script was blocked. This method should be called only when there is a need
   // to check the settings, and where blocked setting doesn't really imply that
   // JavaScript was blocked from being executed.
@@ -269,8 +240,12 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
   // frame's main resource.
   bool IsFirstPartyOrigin(const KURL& url) const;
 
-  Member<DocumentLoader> document_loader_;
-  Member<Document> document_;
+  // Returns the origin of the top frame in the document.
+  scoped_refptr<const SecurityOrigin> GetTopFrameOrigin() const;
+
+  CoreProbeSink* Probe() const;
+
+  Member<const FrameOrImportedDocument> frame_or_imported_document_;
 
   // The value of |save_data_enabled_| is read once per frame from
   // NetworkStateNotifier, which is guarded by a mutex lock, and cached locally
@@ -279,8 +254,6 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
 
   // Non-null only when detached.
   Member<const FrozenState> frozen_state_;
-
-  Member<FetchClientSettingsObject> fetch_client_settings_object_;
 };
 
 }  // namespace blink

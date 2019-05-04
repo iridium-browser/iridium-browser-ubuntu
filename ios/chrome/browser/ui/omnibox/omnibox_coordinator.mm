@@ -5,6 +5,8 @@
 #import "ios/chrome/browser/ui/omnibox/omnibox_coordinator.h"
 
 #include "base/logging.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/strings/grit/components_strings.h"
@@ -63,13 +65,17 @@
   self.viewController.emptyTextLeadingImage = GetOmniboxSuggestionIcon(SEARCH);
 
   self.viewController.dispatcher =
-      static_cast<id<LoadQueryCommands, OmniboxFocuser>>(self.dispatcher);
+      static_cast<id<BrowserCommands, LoadQueryCommands, OmniboxFocuser>>(
+          self.dispatcher);
   self.mediator = [[OmniboxMediator alloc] init];
   self.mediator.consumer = self.viewController;
 
   DCHECK(self.editController);
+
+  id<OmniboxFocuser> focuser = static_cast<id<OmniboxFocuser>>(self.dispatcher);
   _editView = std::make_unique<OmniboxViewIOS>(
-      self.textField, self.editController, self.mediator, self.browserState);
+      self.textField, self.editController, self.mediator, self.browserState,
+      focuser);
 
   // Configure the textfield.
   self.textField.suggestionCommandsEndpoint =
@@ -104,11 +110,15 @@
 }
 
 - (void)focusOmnibox {
-  [self.textField becomeFirstResponder];
+  if (![self.textField isFirstResponder]) {
+    base::RecordAction(base::UserMetricsAction("MobileOmniboxFocused"));
+    [self.textField becomeFirstResponder];
+  }
 }
 
 - (void)endEditing {
-  _editView->HideKeyboardAndEndEditing();
+  [self.textField resignFirstResponder];
+  _editView->EndEditing();
 }
 
 - (void)insertTextToOmnibox:(NSString*)text {

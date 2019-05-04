@@ -266,6 +266,7 @@ type clientHelloMsg struct {
 	supportedPoints         []uint8
 	hasKeyShares            bool
 	keyShares               []keyShareEntry
+	keySharesRaw            []byte
 	trailingKeyShareData    bool
 	pskIdentities           []pskIdentity
 	pskKEModes              []byte
@@ -350,6 +351,18 @@ func (m *clientHelloMsg) equal(i interface{}) bool {
 		m.emptyExtensions == m1.emptyExtensions &&
 		m.pad == m1.pad &&
 		eqUint16s(m.compressedCertAlgs, m1.compressedCertAlgs)
+}
+
+func (m *clientHelloMsg) marshalKeyShares(bb *byteBuilder) {
+	keyShares := bb.addU16LengthPrefixed()
+	for _, keyShare := range m.keyShares {
+		keyShares.addU16(uint16(keyShare.group))
+		keyExchange := keyShares.addU16LengthPrefixed()
+		keyExchange.addBytes(keyShare.keyExchange)
+	}
+	if m.trailingKeyShareData {
+		keyShares.addU8(0)
+	}
 }
 
 func (m *clientHelloMsg) marshal() []byte {
@@ -456,17 +469,7 @@ func (m *clientHelloMsg) marshal() []byte {
 	if m.hasKeyShares {
 		extensions.addU16(extensionKeyShare)
 		keyShareList := extensions.addU16LengthPrefixed()
-
-		keyShares := keyShareList.addU16LengthPrefixed()
-		for _, keyShare := range m.keyShares {
-			keyShares.addU16(uint16(keyShare.group))
-			keyExchange := keyShares.addU16LengthPrefixed()
-			keyExchange.addBytes(keyShare.keyExchange)
-		}
-
-		if m.trailingKeyShareData {
-			keyShares.addU8(0)
-		}
+		m.marshalKeyShares(keyShareList)
 	}
 	if len(m.pskKEModes) > 0 {
 		extensions.addU16(extensionPSKKeyExchangeModes)
@@ -650,6 +653,23 @@ func parseSignatureAlgorithms(reader *byteReader, out *[]signatureAlgorithm, all
 	return true
 }
 
+func checkDuplicateExtensions(extensions byteReader) bool {
+	seen := make(map[uint16]struct{})
+	for len(extensions) > 0 {
+		var extension uint16
+		var body byteReader
+		if !extensions.readU16(&extension) ||
+			!extensions.readU16LengthPrefixed(&body) {
+			return false
+		}
+		if _, ok := seen[extension]; ok {
+			return false
+		}
+		seen[extension] = struct{}{}
+	}
+	return true
+}
+
 func (m *clientHelloMsg) unmarshal(data []byte) bool {
 	m.raw = data
 	reader := byteReader(data[4:])
@@ -704,7 +724,7 @@ func (m *clientHelloMsg) unmarshal(data []byte) bool {
 	}
 
 	var extensions byteReader
-	if !reader.readU16LengthPrefixed(&extensions) || len(reader) != 0 {
+	if !reader.readU16LengthPrefixed(&extensions) || len(reader) != 0 || !checkDuplicateExtensions(extensions) {
 		return false
 	}
 	for len(extensions) > 0 {
@@ -763,11 +783,12 @@ func (m *clientHelloMsg) unmarshal(data []byte) bool {
 			m.sessionTicket = []byte(body)
 		case extensionKeyShare:
 			// https://tools.ietf.org/html/rfc8446#section-4.2.8
+			m.hasKeyShares = true
+			m.keySharesRaw = body
 			var keyShares byteReader
 			if !body.readU16LengthPrefixed(&keyShares) || len(body) != 0 {
 				return false
 			}
-			m.hasKeyShares = true
 			for len(keyShares) > 0 {
 				var entry keyShareEntry
 				var group uint16
@@ -919,6 +940,13 @@ func (m *clientHelloMsg) unmarshal(data []byte) bool {
 				seen[algID] = struct{}{}
 				m.compressedCertAlgs = append(m.compressedCertAlgs, algID)
 			}
+		case extensionPadding:
+			// Padding bytes must be all zero.
+			for _, b := range body {
+				if b != 0 {
+					return false
+				}
+			}
 		}
 
 		if isGREASEValue(extension) {
@@ -1063,7 +1091,7 @@ func (m *serverHelloMsg) unmarshal(data []byte) bool {
 	}
 
 	var extensions byteReader
-	if !reader.readU16LengthPrefixed(&extensions) || len(reader) != 0 {
+	if !reader.readU16LengthPrefixed(&extensions) || len(reader) != 0 || !checkDuplicateExtensions(extensions) {
 		return false
 	}
 
@@ -1325,6 +1353,10 @@ func (m *serverExtensions) marshal(extensions *byteBuilder) {
 func (m *serverExtensions) unmarshal(data byteReader, version uint16) bool {
 	// Reset all fields.
 	*m = serverExtensions{}
+
+	if !checkDuplicateExtensions(data) {
+		return false
+	}
 
 	for len(data) > 0 {
 		var extension uint16
@@ -1647,7 +1679,7 @@ func (m *certificateMsg) unmarshal(data []byte) bool {
 		}
 		if m.hasRequestContext {
 			var extensions byteReader
-			if !certs.readU16LengthPrefixed(&extensions) {
+			if !certs.readU16LengthPrefixed(&extensions) || !checkDuplicateExtensions(extensions) {
 				return false
 			}
 			for len(extensions) > 0 {
@@ -2006,7 +2038,8 @@ func (m *certificateRequestMsg) unmarshal(data []byte) bool {
 		var extensions byteReader
 		if !reader.readU8LengthPrefixedBytes(&m.requestContext) ||
 			!reader.readU16LengthPrefixed(&extensions) ||
-			len(reader) != 0 {
+			len(reader) != 0 ||
+			!checkDuplicateExtensions(extensions) {
 			return false
 		}
 		for len(extensions) > 0 {

@@ -24,7 +24,7 @@ class CFX_XMLElement final : public CFX_XMLNode {
   CFX_XMLNode* Clone(CFX_XMLDocument* doc) override;
   void Save(const RetainPtr<IFX_SeekableWriteStream>& pXMLStream) override;
 
-  WideString GetName() const { return name_; }
+  const WideString& GetName() const { return name_; }
 
   const std::map<WideString, WideString>& GetAttributes() const {
     return attrs_;
@@ -35,9 +35,8 @@ class CFX_XMLElement final : public CFX_XMLNode {
 
   void RemoveAttribute(const WideString& name);
 
-  CFX_XMLElement* GetFirstChildNamed(const WideStringView& name) const;
-  CFX_XMLElement* GetNthChildNamed(const WideStringView& name,
-                                   size_t idx) const;
+  CFX_XMLElement* GetFirstChildNamed(WideStringView name) const;
+  CFX_XMLElement* GetNthChildNamed(WideStringView name, size_t idx) const;
 
   WideString GetLocalTagName() const;
   WideString GetNamespacePrefix() const;
@@ -48,7 +47,7 @@ class CFX_XMLElement final : public CFX_XMLNode {
  private:
   WideString AttributeToString(const WideString& name, const WideString& value);
 
-  WideString name_;
+  const WideString name_;
   std::map<WideString, WideString> attrs_;
 };
 

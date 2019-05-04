@@ -17,6 +17,7 @@
 #include "content/browser/indexed_db/indexed_db_database.h"
 #include "content/browser/indexed_db/indexed_db_transaction.h"
 #include "third_party/blink/public/common/indexeddb/web_idb_types.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h"
 
 namespace content {
 
@@ -24,11 +25,13 @@ class CONTENT_EXPORT IndexedDBCursor {
  public:
   IndexedDBCursor(std::unique_ptr<IndexedDBBackingStore::Cursor> cursor,
                   indexed_db::CursorType cursor_type,
-                  blink::WebIDBTaskType task_type,
+                  blink::mojom::IDBTaskType task_type,
                   IndexedDBTransaction* transaction);
   ~IndexedDBCursor();
 
-  void Advance(uint32_t count, scoped_refptr<IndexedDBCallbacks> callbacks);
+  void Advance(uint32_t count,
+               base::WeakPtr<IndexedDBDispatcherHost> dispatcher_host,
+               blink::mojom::IDBCursor::AdvanceCallback callback);
   void Continue(std::unique_ptr<blink::IndexedDBKey> key,
                 std::unique_ptr<blink::IndexedDBKey> primary_key,
                 scoped_refptr<IndexedDBCallbacks> callbacks);
@@ -54,15 +57,24 @@ class CONTENT_EXPORT IndexedDBCursor {
       IndexedDBTransaction* transaction);
   leveldb::Status CursorAdvanceOperation(
       uint32_t count,
-      scoped_refptr<IndexedDBCallbacks> callbacks,
+      base::WeakPtr<IndexedDBDispatcherHost> dispatcher_host,
+      blink::mojom::IDBCursor::AdvanceCallback callback,
       IndexedDBTransaction* transaction);
   leveldb::Status CursorPrefetchIterationOperation(
       int number_to_fetch,
       scoped_refptr<IndexedDBCallbacks> callbacks,
       IndexedDBTransaction* transaction);
 
+  static IndexedDBDatabaseError CreateError(uint16_t code,
+                                            const char* message,
+                                            IndexedDBTransaction* transaction);
+  static blink::mojom::IDBErrorPtr CreateIDBError(
+      uint16_t code,
+      const base::string16& message,
+      IndexedDBTransaction* transaction);
+
  private:
-  blink::WebIDBTaskType task_type_;
+  blink::mojom::IDBTaskType task_type_;
   indexed_db::CursorType cursor_type_;
 
   // We rely on the transaction calling Close() to clear this.

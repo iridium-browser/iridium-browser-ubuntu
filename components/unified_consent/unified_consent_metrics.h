@@ -7,55 +7,13 @@
 
 #include "components/unified_consent/unified_consent_service_client.h"
 
+namespace syncer {
+class SyncUserSettings;
+}
+
 namespace unified_consent {
 
 namespace metrics {
-
-// Histogram enum: UnifiedConsentBumpAction.
-enum class UnifiedConsentBumpAction : int {
-  kUnifiedConsentBumpActionDefaultOptIn = 0,
-  kUnifiedConsentBumpActionMoreOptionsOptIn,
-  kUnifiedConsentBumpActionMoreOptionsReviewSettings,
-  kUnifiedConsentBumpActionMoreOptionsNoChanges,
-  kUnifiedConsentBumpActionMoreOptionsMax,
-};
-
-// Histogram enum: UnifiedConsentRevokeReason.
-enum class UnifiedConsentRevokeReason : int {
-  kUserSignedOut = 0,
-  kServiceWasDisabled,
-  kCustomPassphrase,
-  kUserDisabledSettingsToggle,
-  kMaxValue = kUserDisabledSettingsToggle
-};
-
-// Used in histograms. Do not change existing values, append new values at the
-// end.
-enum class ConsentBumpSuppressReason {
-  // There is no suppress reason. The consent bump was shown.
-  kNone,
-  // The user wasn't signed in during the migration.
-  kNotSignedIn,
-  // The user wasn't syncing everything during the migration.
-  kSyncEverythingOff,
-  // The user didn't have all on-by-default privacy settings enabled during
-  // migration.
-  kPrivacySettingOff,
-  kSettingsOptIn,
-  // The user was eligible for seeing the consent bump, but then signed out.
-  kUserSignedOut,
-  kSyncPaused,
-  // The user was eligible for seeing the consent bump, but turned an individual
-  // sync data type off.
-  kUserTurnedSyncDatatypeOff,
-  // The user was eligible for seeing the consent bump, but turned an
-  // on-by-default privacy setting off.
-  kUserTurnedPrivacySettingOff,
-  // The user has a custom passphrase tied to their sync account.
-  kCustomPassphrase,
-
-  kMaxValue = kCustomPassphrase
-};
 
 // Google services that can be toggled in user settings.
 // Used in histograms. Do not change existing values, append new values at the
@@ -67,38 +25,39 @@ enum class SettingsHistogramValue {
   kUrlKeyedAnonymizedDataCollection = 3,
   kSafeBrowsingExtendedReporting = 4,
   kSpellCheck = 5,
+  kAllServicesWereEnabled = 6,
 
-  kMaxValue = kSpellCheck
+  kMaxValue = kAllServicesWereEnabled
 };
 
-// Records histogram action for the unified consent bump.
-void RecordConsentBumpMetric(UnifiedConsentBumpAction action);
+// Sync data types that can be customized in settings.
+// Used in histograms. Do not change existing values, append new values at the
+// end.
+enum class SyncDataType {
+  kNone = 0,
+  kApps = 1,
+  kBookmarks = 2,
+  kExtensions = 3,
+  kHistory = 4,
+  kSettings = 5,
+  kThemes = 6,
+  kTabs = 7,
+  kPasswords = 8,
+  kAutofill = 9,
+  kPayments = 10,
 
-// Records whether the user is eligible for the consent bump. This method should
-// be called at startup.
-void RecordConsentBumpEligibility(bool eligible);
+  kMaxValue = kPayments
+};
 
-// Records the reason why the unified consent was revoked.
-void RecordUnifiedConsentRevoked(UnifiedConsentRevokeReason reason);
+// Records settings entries in the SyncAndGoogleServicesSettings.
+// kNone is recorded when none of the settings is enabled.
+void RecordSettingsHistogram(UnifiedConsentServiceClient* service_client,
+                             PrefService* pref_service);
 
-// Records a sample in the kSyncAndGoogleServicesSettingsHistogram. Wrapped in a
-// function to avoid code size issues caused by histogram macros.
-void RecordSettingsHistogramSample(SettingsHistogramValue value);
-
-// Checks if a pref is enabled and if so, records a sample in the
-// kSyncAndGoogleServicesSettingsHistogram. Returns true if a sample was
-// recorded.
-bool RecordSettingsHistogramFromPref(const char* pref_name,
-                                     PrefService* pref_service,
-                                     SettingsHistogramValue value);
-
-// Checks if a service is enabled and if so, records a sample in the
-// kSyncAndGoogleServicesSettingsHistogram. Returns true if a sample was
-// recorded.
-bool RecordSettingsHistogramFromService(
-    UnifiedConsentServiceClient* client,
-    UnifiedConsentServiceClient::Service service,
-    SettingsHistogramValue value);
+// Records the sync data types that were turned off during the advanced sync
+// opt-in flow. When none of the data types were turned off, kNone is recorded.
+void RecordSyncSetupDataTypesHistrogam(syncer::SyncUserSettings* sync_settings,
+                                       PrefService* pref_service);
 
 }  // namespace metrics
 

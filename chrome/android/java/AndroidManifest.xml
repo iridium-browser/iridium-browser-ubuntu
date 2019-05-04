@@ -41,7 +41,7 @@ by a child template that "extends" this file.
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" />
-    {% if target_sdk_version|int > 27 or target_sdk_version == "P" %}
+    {% if target_sdk_version|int > 27 or target_sdk_version == "Q" %}
         <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     {% endif %}
     <uses-permission android:name="android.permission.GET_ACCOUNTS"/>
@@ -124,7 +124,7 @@ by a child template that "extends" this file.
     <application android:name="{% block application_name %}org.chromium.chrome.browser.ChromeApplication{% endblock %}"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher_round"
-        android:label="@string/app_name"
+        android:label="{% block application_label %}@string/app_name{% endblock %}"
         android:largeHeap="false"
         android:manageSpaceActivity="@string/manage_space_activity"
         android:supportsRtl="true"
@@ -165,15 +165,25 @@ by a child template that "extends" this file.
         <meta-data android:name="android.content.APP_RESTRICTIONS"
             android:resource="@xml/app_restrictions"/>
 
-        {% if enable_arcore %}
+        {% if include_arcore_manifest_flag == 'true' %}
         <!-- ARCore APK integration -->
         <!-- This tag indicates that this application optionally uses ARCore. -->
         <meta-data android:name="com.google.ar.core" android:value="optional" />
-        <!-- This value referes to ARCore 1.1.
-             This value should be updated when ARCore features require
-             a newer version of the ARCore SDK. -->
+        <!-- This value must match value present in ARCore SDK's .aar -->
+        <!-- TODO(https://crbug.com/917406): modify build scripts to
+             automatically pull this value in - the problem exists because in
+             bundle mode, the ARCore SDK is packaged into AR module and
+             the module installation will not automatically bring in DFM's
+             manifest entries. -->
         <meta-data android:name="com.google.ar.core.min_apk_version"
-            android:value="180226000"/>
+            android:value="181012000"/>
+        <activity
+            android:name="com.google.ar.core.InstallActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.Material.Light.Dialog.Alert" />
         {% endif %}
 
         <!-- Cast support -->
@@ -320,6 +330,8 @@ by a child template that "extends" this file.
                 <data android:mimeType="audio/*" />
                 <data android:mimeType="image/*" />
                 <data android:mimeType="video/*" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
             </intent-filter>
         </activity>
 
@@ -347,6 +359,14 @@ by a child template that "extends" this file.
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Locale related -->
+        <receiver android:name="org.chromium.chrome.browser.locale.LocaleChangedBroadcastReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
             </intent-filter>
         </receiver>
 
@@ -511,10 +531,10 @@ by a child template that "extends" this file.
             {{ self.chrome_activity_common() }}>
             {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
-        <activity android:name="org.chromium.chrome.browser.FullscreenActivity"
+        <activity android:name="org.chromium.chrome.browser.touchless.NoTouchActivity"
             android:theme="@style/MainTheme"
             android:exported="false"
-            android:noHistory="true"
+            android:launchMode="singleTask"
             {{ self.chrome_activity_common() }}
             {{ self.supports_video_persistence() }} >
             {{ self.extra_web_rendering_activity_definitions() }}
@@ -688,6 +708,17 @@ by a child template that "extends" this file.
         </activity-alias>
         {% endfor %}
         <!-- Activities for WebAPKs. -->
+        <activity android:name="org.chromium.chrome.browser.webapps.SameTaskWebApkActivity"
+            android:theme="@style/WebappTheme"
+            android:label="@string/webapp_activity_title"
+            android:exported="false"
+            android:persistableMode="persistNever"
+            {{ self.supports_video_persistence() }}
+            {{ self.chrome_activity_common() }}
+        >
+            {{ self.supports_vr() }}
+            {{ self.extra_web_rendering_activity_definitions() }}
+        </activity>
         <activity android:name="org.chromium.chrome.browser.webapps.WebApkActivity"
             android:theme="@style/WebappTheme"
             android:label="@string/webapp_activity_title"
@@ -728,6 +759,16 @@ by a child template that "extends" this file.
             android:excludeFromRecents="true">
         </activity>
 
+        <activity android:name="org.chromium.chrome.browser.media.router.caf.remoting.CafExpandedControllerActivity"
+            android:theme="@style/MainTheme"
+            android:label="Chrome.CafExpandedControllerActivity"
+            android:hardwareAccelerated="true"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
+            android:excludeFromRecents="true">
+        </activity>
+
         <!-- This activity is used to restart the main Chrome process.  Should never be exported. -->
         <activity android:name="org.chromium.chrome.browser.BrowserRestartActivity"
             android:launchMode="singleInstance"
@@ -753,7 +794,24 @@ by a child template that "extends" this file.
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
-        </activity>
+          </activity>
+
+         <activity
+            android:name="org.chromium.chrome.browser.send_tab_to_self.SendTabToSelfShareActivity"
+            android:icon="@drawable/ic_launcher"
+            android:label="@string/send_tab_to_self_share_activity_title"
+            android:enabled="false"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize" >
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+          </activity>
 
         <!-- Activity for dispatching intents to Instant Apps. -->
         <activity
@@ -795,14 +853,41 @@ by a child template that "extends" this file.
         </service>
 
         <!-- Components for Trusted Web Activities -->
-        <receiver android:name="org.chromium.chrome.browser.browserservices.ClearDataBroadcastReceiver"
+        <receiver android:name="org.chromium.chrome.browser.browserservices.ClientAppBroadcastReceiver"
             android:exported="true">
             <intent-filter>
                 <data android:scheme="package" />
                 <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
                 <action android:name="android.intent.action.PACKAGE_DATA_CLEARED" />
             </intent-filter>
+            {% if channel in ['default'] %}
+            <intent-filter>
+                <action android:name="org.chromium.chrome.browser.browserservices.ClientAppBroadcastReceiver.DEBUG" />
+            </intent-filter>
+            {% endif %}
         </receiver>
+
+        {% if channel in ['default'] %}
+        <!-- Not used at this point -->
+        <service android:name="org.chromium.chrome.browser.browserservices.ClearDataService"
+            android:exported="false">
+        </service>
+        {% endif %}
+
+        <activity android:name="org.chromium.chrome.browser.browserservices.ClearDataDialogActivity"
+            android:theme="@style/ClearDataDialogActivityTheme"
+            android:exported="false"/>
+
+        <activity
+            android:name="org.chromium.chrome.browser.browserservices.ManageTrustedWebActivityDataActivity"
+            android:theme="@style/FullscreenTransparentActivityTheme"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.support.customtabs.action.ACTION_MANAGE_TRUSTED_WEB_ACTIVITY_DATA" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="https"/>
+            </intent-filter>
+        </activity>
 
         <!-- Service for decoding images in a sandboxed process. -->
         <service
@@ -853,11 +938,6 @@ by a child template that "extends" this file.
 
         <!-- Download broadcast manager service -->
         <service android:name="org.chromium.chrome.browser.download.DownloadBroadcastManager"
-            android:exported="false">
-        </service>
-
-        <!-- Download service -->
-        <service android:name="org.chromium.chrome.browser.download.DownloadNotificationService"
             android:exported="false">
         </service>
 
@@ -1052,7 +1132,7 @@ by a child template that "extends" this file.
             {% endif %} />
         {% endfor %}
 
-        {% set num_privileged_services = 3 %}
+        {% set num_privileged_services = 5 %}
         <meta-data android:name="org.chromium.content.browser.NUM_PRIVILEGED_SERVICES"
             android:value="{{ num_privileged_services }}"/>
 
@@ -1075,6 +1155,9 @@ android:value="true" />
             </intent-filter>
         </receiver>
 
+        <receiver android:name="org.chromium.chrome.browser.notifications.NotificationIntentInterceptor$Receiver"
+            android:exported="false"/>
+
         <receiver android:name="org.chromium.chrome.browser.ntp.ContentSuggestionsNotifier$OpenUrlReceiver"
             android:exported="false"/>
         <receiver android:name="org.chromium.chrome.browser.ntp.ContentSuggestionsNotifier$DeleteReceiver"
@@ -1085,6 +1168,11 @@ android:value="true" />
         <receiver android:name="org.chromium.chrome.browser.offlinepages.prefetch.PrefetchedPagesNotifier$ClickReceiver"
             android:exported="false"/>
         <receiver android:name="org.chromium.chrome.browser.offlinepages.prefetch.PrefetchedPagesNotifier$SettingsReceiver"
+            android:exported="false"/>
+
+        <receiver android:name="org.chromium.chrome.browser.offlinepages.AutoFetchNotifier$CompleteNotificationReceiver"
+            android:exported="false"/>
+        <receiver android:name="org.chromium.chrome.browser.offlinepages.AutoFetchNotifier$InProgressCancelReceiver"
             android:exported="false"/>
 
         <service android:name="org.chromium.chrome.browser.media.MediaCaptureNotificationService"
@@ -1126,6 +1214,10 @@ android:value="true" />
         </receiver>
 
 
+        <service android:name="org.chromium.chrome.browser.tracing.TracingNotificationService"
+            android:exported="false"/>
+
+
         <meta-data android:name="org.chromium.content.browser.SMART_CLIP_PROVIDER"
             android:value="org.chromium.content_public.browser.SmartClipProvider"/>
 
@@ -1143,5 +1235,9 @@ android:value="true" />
             android:value="org.chromium.chrome.browser.media.remote.DefaultMediaRouteController"/>
 
         {% endblock %}
+        {% block extra_application_definitions_for_test %}
+        {% endblock %}
     </application>
+    {% block extra_root_definitions %}
+    {% endblock %}
 </manifest>

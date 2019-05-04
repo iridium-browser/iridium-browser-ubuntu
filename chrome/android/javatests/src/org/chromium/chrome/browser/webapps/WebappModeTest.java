@@ -83,8 +83,7 @@ public class WebappModeTest {
         if (addMac) {
             // Needed for security reasons.  If the MAC is excluded, the URL of the webapp is opened
             // in a browser window, instead.
-            String mac =
-                    ShortcutHelper.getEncodedMac(InstrumentationRegistry.getTargetContext(), url);
+            String mac = ShortcutHelper.getEncodedMac(url);
             intent.putExtra(ShortcutHelper.EXTRA_MAC, mac);
         }
 
@@ -92,7 +91,7 @@ public class WebappModeTest {
                 null, WebDisplayMode.STANDALONE, ScreenOrientationValues.PORTRAIT,
                 ShortcutSource.UNKNOWN, ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING,
                 ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING, null, false /* isIconGenerated */,
-                false /* forceNavigation */);
+                false /* isIconAdaptive */, false /* forceNavigation */);
         webappInfo.setWebappIntentExtras(intent);
 
         return intent;

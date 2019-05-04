@@ -22,7 +22,6 @@ class NGConstraintSpace;
 class NGLayoutResult;
 class NGPaintFragment;
 class NGPhysicalFragment;
-struct NGBaseline;
 struct NGInlineNodeData;
 struct NGPhysicalOffset;
 
@@ -40,6 +39,7 @@ class LayoutNGMixin : public Base {
   NGInlineNodeData* TakeNGInlineNodeData() final;
   NGInlineNodeData* GetNGInlineNodeData() const final;
   void ResetNGInlineNodeData() final;
+  void ClearNGInlineNodeData() final;
   bool HasNGInlineNodeData() const final { return ng_inline_node_data_.get(); }
 
   LayoutUnit FirstLineBoxBaseline() const final;
@@ -56,50 +56,52 @@ class LayoutNGMixin : public Base {
 
   PositionWithAffinity PositionForPoint(const LayoutPoint&) const final;
 
+  void ComputeSelfHitTestRects(Vector<LayoutRect>&,
+                               const LayoutPoint& layer_offset) const override;
+
   // Returns the last layout result for this block flow with the given
   // constraint space and break token, or null if it is not up-to-date or
   // otherwise unavailable.
-  scoped_refptr<NGLayoutResult> CachedLayoutResult(
-      const NGConstraintSpace&,
-      const NGBreakToken*) const final;
+  scoped_refptr<NGLayoutResult> CachedLayoutResult(const NGConstraintSpace&,
+                                                   const NGBreakToken*) final;
 
   void SetCachedLayoutResult(const NGConstraintSpace&,
                              const NGBreakToken*,
                              const NGLayoutResult&) final;
   void ClearCachedLayoutResult() final;
+  bool AreCachedLinesValidFor(const NGConstraintSpace&) const final;
 
   // For testing only.
   scoped_refptr<const NGLayoutResult> CachedLayoutResultForTesting() final;
 
   NGPaintFragment* PaintFragment() const final { return paint_fragment_.get(); }
-  void SetPaintFragment(const NGBreakToken*,
+  void SetPaintFragment(const NGBlockBreakToken*,
                         scoped_refptr<const NGPhysicalFragment>,
                         NGPhysicalOffset) final;
   void UpdatePaintFragmentFromCachedLayoutResult(
-      const NGBreakToken*,
+      const NGBlockBreakToken*,
       scoped_refptr<const NGPhysicalFragment>,
       NGPhysicalOffset) final;
 
  protected:
   bool IsOfType(LayoutObject::LayoutObjectType) const override;
 
-  void AddVisualOverflowFromChildren() final;
+  void ComputeIntrinsicLogicalWidths(
+      LayoutUnit& min_logical_width,
+      LayoutUnit& max_logical_width) const override;
+
+  void ComputeVisualOverflow(bool recompute_floats) final;
+
+  void AddVisualOverflowFromChildren();
   void AddLayoutOverflowFromChildren() final;
 
- private:
-  void AddScrollingOverflowFromChildren();
-  void SetPaintFragment(scoped_refptr<const NGPhysicalFragment> fragment,
-                        NGPhysicalOffset offset,
-                        scoped_refptr<NGPaintFragment>* current);
-
- protected:
   void AddOutlineRects(Vector<LayoutRect>&,
                        const LayoutPoint& additional_offset,
                        NGOutlineType) const final;
 
   const NGPhysicalBoxFragment* CurrentFragment() const final;
 
-  const NGBaseline* FragmentBaseline(NGBaselineAlgorithmType) const;
+  base::Optional<LayoutUnit> FragmentBaseline(NGBaselineAlgorithmType) const;
 
   void DirtyLinesFromChangedChild(LayoutObject* child,
                                   MarkingBehavior marking_behavior) final;
@@ -110,6 +112,10 @@ class LayoutNGMixin : public Base {
   scoped_refptr<NGPaintFragment> paint_fragment_;
 
   friend class NGBaseLayoutAlgorithmTest;
+
+ private:
+  void AddScrollingOverflowFromChildren();
+  bool NeedsRelativePositionedLayoutOnly() const;
 };
 
 extern template class CORE_EXTERN_TEMPLATE_EXPORT

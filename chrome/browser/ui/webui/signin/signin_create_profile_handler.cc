@@ -218,7 +218,7 @@ void SigninCreateProfileHandler::CreateShortcutAndShowSuccess(
     // have been run, to give them a chance to initialize the profile.
     OpenNewWindowForProfile(profile, Profile::CREATE_STATUS_INITIALIZED);
   } else if (is_force_signin_enabled) {
-    OpenSigninDialogForProfile(profile);
+    OpenForceSigninDialogForProfile(profile);
   }
   profile_creation_type_ = NO_CREATION_IN_PROGRESS;
 }
@@ -230,17 +230,17 @@ void SigninCreateProfileHandler::OpenNewWindowForProfile(
       base::Bind(&SigninCreateProfileHandler::OnBrowserReadyCallback,
                  weak_ptr_factory_.GetWeakPtr()),
       false,  // Don't create a window if one already exists.
-      true,  // Create a first run window.
-      profile,
-      status);
+      true,   // Create a first run window.
+      false,  // There is no need to unblock all extensions because we only open
+              // browser window if the Profile is not locked. Hence there is no
+              // extension blocked.
+      profile, status);
 }
 
-void SigninCreateProfileHandler::OpenSigninDialogForProfile(Profile* profile) {
-  UserManagerProfileDialog::ShowSigninDialog(
-      web_ui()->GetWebContents()->GetBrowserContext(), profile->GetPath(),
-      signin_util::IsForceSigninEnabled()
-          ? signin_metrics::Reason::REASON_FORCED_SIGNIN_PRIMARY_ACCOUNT
-          : signin_metrics::Reason::REASON_SIGNIN_PRIMARY_ACCOUNT);
+void SigninCreateProfileHandler::OpenForceSigninDialogForProfile(
+    Profile* profile) {
+  UserManagerProfileDialog::ShowForceSigninDialog(
+      web_ui()->GetWebContents()->GetBrowserContext(), profile->GetPath());
 }
 
 void SigninCreateProfileHandler::ShowProfileCreationError(

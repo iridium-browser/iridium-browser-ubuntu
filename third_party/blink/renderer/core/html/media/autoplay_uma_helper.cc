@@ -52,24 +52,19 @@ int64_t GetUserGestureStatusForUkmMetric(LocalFrame* frame) {
 }  // namespace
 
 AutoplayUmaHelper* AutoplayUmaHelper::Create(HTMLMediaElement* element) {
-  return new AutoplayUmaHelper(element);
+  return MakeGarbageCollected<AutoplayUmaHelper>(element);
 }
 
 AutoplayUmaHelper::AutoplayUmaHelper(HTMLMediaElement* element)
-    : EventListener(kCPPEventListenerType),
-      ContextLifecycleObserver(nullptr),
+    : ContextLifecycleObserver(nullptr),
       element_(element),
       muted_video_play_method_visibility_observer_(nullptr),
       is_visible_(false),
       muted_video_offscreen_duration_visibility_observer_(nullptr) {
-  element->addEventListener(EventTypeNames::loadstart, this, false);
+  element->addEventListener(event_type_names::kLoadstart, this, false);
 }
 
 AutoplayUmaHelper::~AutoplayUmaHelper() = default;
-
-bool AutoplayUmaHelper::operator==(const EventListener& other) const {
-  return this == &other;
-}
 
 void AutoplayUmaHelper::OnLoadStarted() {
   if (element_->GetLoadType() == WebMediaPlayer::kLoadTypeURL)
@@ -167,28 +162,15 @@ void AutoplayUmaHelper::OnAutoplayInitiated(AutoplaySource source) {
     }
   }
 
-  // Record if it will be blocked by Data Saver or Autoplay setting.
+  // Record if it will be blocked by the Autoplay setting.
   if (element_->IsHTMLVideoElement() && element_->muted() &&
       AutoplayPolicy::DocumentShouldAutoplayMutedVideos(
-          element_->GetDocument())) {
-    bool data_saver_enabled_for_autoplay =
-        GetNetworkStateNotifier().SaveDataEnabled() &&
-        element_->GetDocument().GetSettings() &&
-        !element_->GetDocument().GetSettings()->GetDataSaverHoldbackMediaApi();
-    bool blocked_by_setting =
-        !element_->GetAutoplayPolicy().IsAutoplayAllowedPerSettings();
-
-    if (data_saver_enabled_for_autoplay && blocked_by_setting) {
-      blocked_muted_video_histogram.Count(
-          kAutoplayBlockedReasonDataSaverAndSetting);
-    } else if (data_saver_enabled_for_autoplay) {
-      blocked_muted_video_histogram.Count(kAutoplayBlockedReasonDataSaver);
-    } else if (blocked_by_setting) {
-      blocked_muted_video_histogram.Count(kAutoplayBlockedReasonSetting);
-    }
+          element_->GetDocument()) &&
+      !element_->GetAutoplayPolicy().IsAutoplayAllowedPerSettings()) {
+    blocked_muted_video_histogram.Count(kAutoplayBlockedReasonSetting);
   }
 
-  element_->addEventListener(EventTypeNames::playing, this, false);
+  element_->addEventListener(event_type_names::kPlaying, this, false);
 
   // Record UKM autoplay event.
   if (!element_->GetDocument().IsActive())
@@ -356,13 +338,13 @@ void AutoplayUmaHelper::OnVisibilityChangedForMutedVideoOffscreenDuration(
   is_visible_ = is_visible;
 }
 
-void AutoplayUmaHelper::handleEvent(ExecutionContext* execution_context,
-                                    Event* event) {
-  if (event->type() == EventTypeNames::loadstart)
+void AutoplayUmaHelper::Invoke(ExecutionContext* execution_context,
+                               Event* event) {
+  if (event->type() == event_type_names::kLoadstart)
     OnLoadStarted();
-  else if (event->type() == EventTypeNames::playing)
+  else if (event->type() == event_type_names::kPlaying)
     HandlePlayingEvent();
-  else if (event->type() == EventTypeNames::pause)
+  else if (event->type() == event_type_names::kPause)
     HandlePauseEvent();
   else
     NOTREACHED();
@@ -372,7 +354,7 @@ void AutoplayUmaHelper::HandlePlayingEvent() {
   MaybeStartRecordingMutedVideoPlayMethodBecomeVisible();
   MaybeStartRecordingMutedVideoOffscreenDuration();
 
-  element_->removeEventListener(EventTypeNames::playing, this, false);
+  element_->removeEventListener(event_type_names::kPlaying, this, false);
 }
 
 void AutoplayUmaHelper::HandlePauseEvent() {
@@ -394,11 +376,13 @@ void AutoplayUmaHelper::MaybeStartRecordingMutedVideoPlayMethodBecomeVisible() {
       !element_->IsHTMLVideoElement() || !element_->muted())
     return;
 
-  muted_video_play_method_visibility_observer_ = new ElementVisibilityObserver(
-      element_, WTF::BindRepeating(
-                    &AutoplayUmaHelper::
-                        OnVisibilityChangedForMutedVideoPlayMethodBecomeVisible,
-                    WrapWeakPersistent(this)));
+  muted_video_play_method_visibility_observer_ =
+      MakeGarbageCollected<ElementVisibilityObserver>(
+          element_,
+          WTF::BindRepeating(
+              &AutoplayUmaHelper::
+                  OnVisibilityChangedForMutedVideoPlayMethodBecomeVisible,
+              WrapWeakPersistent(this)));
   muted_video_play_method_visibility_observer_->Start();
   SetContext(&element_->GetDocument());
 }
@@ -425,14 +409,14 @@ void AutoplayUmaHelper::MaybeStartRecordingMutedVideoOffscreenDuration() {
   // Start recording muted video playing offscreen duration.
   muted_video_autoplay_offscreen_start_time_ = CurrentTimeTicks();
   is_visible_ = false;
-  muted_video_offscreen_duration_visibility_observer_ =
-      new ElementVisibilityObserver(
-          element_, WTF::BindRepeating(
-                        &AutoplayUmaHelper::
-                            OnVisibilityChangedForMutedVideoOffscreenDuration,
-                        WrapWeakPersistent(this)));
+  muted_video_offscreen_duration_visibility_observer_ = MakeGarbageCollected<
+      ElementVisibilityObserver>(
+      element_,
+      WTF::BindRepeating(
+          &AutoplayUmaHelper::OnVisibilityChangedForMutedVideoOffscreenDuration,
+          WrapWeakPersistent(this)));
   muted_video_offscreen_duration_visibility_observer_->Start();
-  element_->addEventListener(EventTypeNames::pause, this, false);
+  element_->addEventListener(event_type_names::kPause, this, false);
   SetContext(&element_->GetDocument());
 }
 
@@ -475,7 +459,7 @@ void AutoplayUmaHelper::MaybeUnregisterMediaElementPauseListener() {
     return;
   if (ShouldRecordUserPausedAutoplayingCrossOriginVideo())
     return;
-  element_->removeEventListener(EventTypeNames::pause, this, false);
+  element_->removeEventListener(event_type_names::kPause, this, false);
 }
 
 bool AutoplayUmaHelper::ShouldListenToContextDestroyed() const {
@@ -491,8 +475,8 @@ bool AutoplayUmaHelper::ShouldRecordUserPausedAutoplayingCrossOriginVideo()
              CrossOriginAutoplayResult::kUserPaused);
 }
 
-void AutoplayUmaHelper::Trace(blink::Visitor* visitor) {
-  EventListener::Trace(visitor);
+void AutoplayUmaHelper::Trace(Visitor* visitor) {
+  NativeEventListener::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);
   visitor->Trace(element_);
   visitor->Trace(muted_video_play_method_visibility_observer_);

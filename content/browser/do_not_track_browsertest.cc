@@ -16,7 +16,7 @@
 #include "net/test/embedded_test_server/http_response.h"
 
 #if defined(OS_ANDROID)
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #endif
 
 namespace content {
@@ -27,13 +27,34 @@ class MockContentBrowserClient final : public ContentBrowserClient {
  public:
   void UpdateRendererPreferencesForWorker(BrowserContext*,
                                           RendererPreferences* prefs) override {
-    prefs->enable_do_not_track = true;
-    prefs->enable_referrers = true;
+    if (do_not_track_enabled_) {
+      prefs->enable_do_not_track = true;
+      prefs->enable_referrers = true;
+    }
   }
+
+  void EnableDoNotTrack() { do_not_track_enabled_ = true; }
+
+ private:
+  bool do_not_track_enabled_ = false;
 };
 
 class DoNotTrackTest : public ContentBrowserTest {
  protected:
+  void SetUpOnMainThread() override {
+#if defined(OS_ANDROID)
+    // TODO(crbug.com/864403): It seems that we call unsupported Android APIs on
+    // KitKat when we set a ContentBrowserClient. Don't call such APIs and make
+    // this test available on KitKat.
+    int32_t major_version = 0, minor_version = 0, bugfix_version = 0;
+    base::SysInfo::OperatingSystemVersionNumbers(&major_version, &minor_version,
+                                                 &bugfix_version);
+    if (major_version < 5)
+      return;
+#endif
+
+    original_client_ = SetBrowserClientForTesting(&client_);
+  }
   void TearDownOnMainThread() override {
     if (original_client_)
       SetBrowserClientForTesting(original_client_);
@@ -41,18 +62,10 @@ class DoNotTrackTest : public ContentBrowserTest {
 
   // Returns false if we cannot enable do not track. It happens only when
   // Android Kitkat or older systems.
-  // TODO(crbug.com/864403): It seems that we call unsupported Android APIs on
-  // KitKat when we set a ContentBrowserClient. Don't call such APIs and make
-  // this test available on KitKat.
   bool EnableDoNotTrack() {
-#if defined(OS_ANDROID)
-    int32_t major_version = 0, minor_version = 0, bugfix_version = 0;
-    base::SysInfo::OperatingSystemVersionNumbers(&major_version, &minor_version,
-                                                 &bugfix_version);
-    if (major_version < 5)
+    if (!original_client_)
       return false;
-#endif
-    original_client_ = SetBrowserClientForTesting(&client_);
+    client_.EnableDoNotTrack();
     RendererPreferences* prefs =
         shell()->web_contents()->GetMutableRendererPrefs();
     EXPECT_FALSE(prefs->enable_do_not_track);
@@ -88,9 +101,11 @@ class DoNotTrackTest : public ContentBrowserTest {
   MockContentBrowserClient client_;
 };
 
-std::unique_ptr<net::test_server::HttpResponse> CaptureHeaderHandler(
+std::unique_ptr<net::test_server::HttpResponse>
+CaptureHeaderHandlerAndReturnScript(
     const std::string& path,
     net::test_server::HttpRequest::HeaderMap* header_map,
+    const std::string& script,
     base::OnceClosure done_callback,
     const net::test_server::HttpRequest& request) {
   GURL request_url = request.GetURL();
@@ -99,7 +114,10 @@ std::unique_ptr<net::test_server::HttpResponse> CaptureHeaderHandler(
 
   *header_map = request.headers;
   std::move(done_callback).Run();
-  return std::make_unique<net::test_server::BasicHttpResponse>();
+  auto response = std::make_unique<net::test_server::BasicHttpResponse>();
+  response->set_content_type("text/javascript");
+  response->set_content(script);
+  return response;
 }
 
 // Checks that the DNT header is not sent by default.
@@ -145,10 +163,12 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, DOMProperty) {
 // Checks that the DNT header is sent in a request for a dedicated worker
 // script.
 IN_PROC_BROWSER_TEST_F(DoNotTrackTest, Worker) {
+  const std::string kWorkerScript = R"(postMessage('DONE');)";
   net::test_server::HttpRequest::HeaderMap header_map;
   base::RunLoop loop;
-  embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
-      &CaptureHeaderHandler, "/capture", &header_map, loop.QuitClosure()));
+  embedded_test_server()->RegisterRequestHandler(
+      base::BindRepeating(&CaptureHeaderHandlerAndReturnScript, "/capture",
+                          &header_map, kWorkerScript, loop.QuitClosure()));
   ASSERT_TRUE(embedded_test_server()->Start());
   if (!EnableDoNotTrack())
     return;
@@ -158,6 +178,9 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, Worker) {
 
   EXPECT_TRUE(header_map.find("DNT") != header_map.end());
   EXPECT_EQ("1", header_map["DNT"]);
+
+  // Wait until the worker script is loaded.
+  EXPECT_EQ("DONE", EvalJs(shell(), "waitForMessage();"));
 }
 
 // Checks that the DNT header is sent in a request for shared worker script.
@@ -169,10 +192,13 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, Worker) {
 #define MAYBE_SharedWorker SharedWorker
 #endif
 IN_PROC_BROWSER_TEST_F(DoNotTrackTest, MAYBE_SharedWorker) {
+  const std::string kWorkerScript =
+      R"(self.onconnect = e => { e.ports[0].postMessage('DONE'); };)";
   net::test_server::HttpRequest::HeaderMap header_map;
   base::RunLoop loop;
-  embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
-      &CaptureHeaderHandler, "/capture", &header_map, loop.QuitClosure()));
+  embedded_test_server()->RegisterRequestHandler(
+      base::BindRepeating(&CaptureHeaderHandlerAndReturnScript, "/capture",
+                          &header_map, kWorkerScript, loop.QuitClosure()));
   ASSERT_TRUE(embedded_test_server()->Start());
   if (!EnableDoNotTrack())
     return;
@@ -183,26 +209,34 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, MAYBE_SharedWorker) {
 
   EXPECT_TRUE(header_map.find("DNT") != header_map.end());
   EXPECT_EQ("1", header_map["DNT"]);
+
+  // Wait until the worker script is loaded.
+  EXPECT_EQ("DONE", EvalJs(shell(), "waitForMessage();"));
 }
 
 // Checks that the DNT header is sent in a request for a service worker
 // script.
 IN_PROC_BROWSER_TEST_F(DoNotTrackTest, ServiceWorker) {
+  const std::string kWorkerScript = "// empty";
   net::test_server::HttpRequest::HeaderMap header_map;
   base::RunLoop loop;
-  embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
-      &CaptureHeaderHandler, "/capture", &header_map, loop.QuitClosure()));
+  embedded_test_server()->RegisterRequestHandler(
+      base::BindRepeating(&CaptureHeaderHandlerAndReturnScript, "/capture",
+                          &header_map, kWorkerScript, loop.QuitClosure()));
   ASSERT_TRUE(embedded_test_server()->Start());
   if (!EnableDoNotTrack())
     return;
   NavigateToURL(shell(), GetURL("/service_worker/create_service_worker.html"));
-  // We only verify the request for the worker script so we don't check the
-  // result of register().
-  EXPECT_TRUE(ExecJs(shell(), "register('/capture');"));
+
+  EXPECT_EQ("DONE", EvalJs(shell(), "register('/capture');"));
   loop.Run();
 
   EXPECT_TRUE(header_map.find("DNT") != header_map.end());
   EXPECT_EQ("1", header_map["DNT"]);
+
+  // Service worker doesn't have to wait for onmessage event because
+  // navigator.serviceWorker.ready can ensure that the script load has
+  // been completed.
 }
 
 // Checks that the DNT header is preserved when fetching from a dedicated

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 package org.chromium.support_lib_boundary.util;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.os.Build;
 
@@ -10,10 +11,15 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.Arrays;
+import java.util.Collection;
 
 /**
  * A set of utility methods used for calling across the support library boundary.
  */
+// Although this is not enforced in chromium, this is a requirement enforced when this file is
+// mirrored into AndroidX. See http://b/120770118 for details.
+@SuppressLint("BanTargetApiAnnotation")
 public class BoundaryInterfaceReflectionUtil {
     /**
      * Check if an object is an instance of {@code className}, resolving {@code className} in
@@ -74,6 +80,20 @@ public class BoundaryInterfaceReflectionUtil {
     }
 
     /**
+     * Plural version of {@link #createInvocationHandlerFor(Object)}.
+     */
+    @TargetApi(Build.VERSION_CODES.KITKAT)
+    public static InvocationHandler[] createInvocationHandlersForArray(final Object[] delegates) {
+        if (delegates == null) return null;
+
+        InvocationHandler[] handlers = new InvocationHandler[delegates.length];
+        for (int i = 0; i < handlers.length; i++) {
+            handlers[i] = createInvocationHandlerFor(delegates[i]);
+        }
+        return handlers;
+    }
+
+    /**
      * Assuming that the given InvocationHandler was created in the current classloader and is an
      * InvocationHandlerWithDelegateGetter, return the object the InvocationHandler delegates its
      * method calls to.
@@ -116,13 +136,24 @@ public class BoundaryInterfaceReflectionUtil {
     }
 
     /**
+     * Check if this is a debuggable build of Android. Note: we copy BuildInfo's method because we
+     * cannot depend on the base-layer here (this folder is mirrored into Android).
+     */
+    private static boolean isDebuggable() {
+        return "eng".equals(Build.TYPE) || "userdebug".equals(Build.TYPE);
+    }
+
+    /**
      * Check whether a set of features {@param features} contains a certain feature {@param
      * soughtFeature}.
      */
+    public static boolean containsFeature(Collection<String> features, String soughtFeature) {
+        assert !soughtFeature.endsWith(Features.DEV_SUFFIX);
+        return features.contains(soughtFeature)
+                || (isDebuggable() && features.contains(soughtFeature + Features.DEV_SUFFIX));
+    }
+
     public static boolean containsFeature(String[] features, String soughtFeature) {
-        for (String feature : features) {
-            if (feature.equals(soughtFeature)) return true;
-        }
-        return false;
+        return containsFeature(Arrays.asList(features), soughtFeature);
     }
 }

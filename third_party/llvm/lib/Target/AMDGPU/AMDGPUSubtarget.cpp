@@ -74,6 +74,9 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
   // We want to be able to turn these off, but making this a subtarget feature
   // for SI has the unhelpful behavior that it unsets everything else if you
   // disable it.
+  //
+  // Similarly we want enable-prt-strict-null to be on by default and not to
+  // unset everything else if it is disabled
 
   SmallString<256> FullFS("+promote-alloca,+dx10-clamp,+load-store-opt,");
 
@@ -88,6 +91,8 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
   } else {
     FullFS += "-fp32-denormals,";
   }
+
+  FullFS += "+enable-prt-strict-null,"; // This is overridden by a disable in FS
 
   FullFS += FS;
 
@@ -171,11 +176,11 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     DebuggerEmitPrologue(false),
 
     EnableHugePrivateBuffer(false),
-    EnableVGPRSpilling(false),
     EnableLoadStoreOpt(false),
     EnableUnsafeDSOffsetFolding(false),
     EnableSIScheduler(false),
     EnableDS128(false),
+    EnablePRTStrictNull(false),
     DumpCode(false),
 
     FP64(false),
@@ -199,7 +204,8 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     HasDPP(false),
     HasR128A16(false),
     HasDLInsts(false),
-    D16PreservesUnusedBits(false),
+    HasDotInsts(false),
+    EnableSRAMECC(false),
     FlatAddressSpace(false),
     FlatInstOffsets(false),
     FlatGlobalInsts(false),
@@ -478,10 +484,6 @@ void GCNSubtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,
   // Enabling ShouldTrackLaneMasks crashes the SI Machine Scheduler.
   if (!enableSIScheduler())
     Policy.ShouldTrackLaneMasks = true;
-}
-
-bool GCNSubtarget::isVGPRSpillingEnabled(const Function& F) const {
-  return EnableVGPRSpilling || !AMDGPU::isShader(F.getCallingConv());
 }
 
 unsigned GCNSubtarget::getOccupancyWithNumSGPRs(unsigned SGPRs) const {

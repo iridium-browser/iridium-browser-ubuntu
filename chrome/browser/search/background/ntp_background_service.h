@@ -37,12 +37,7 @@ class NtpBackgroundService : public KeyedService {
  public:
   NtpBackgroundService(
       identity::IdentityManager* const identity_manager,
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      const base::Optional<GURL>& collections_api_url_override,
-      const base::Optional<GURL>& collection_images_api_url_override,
-      const base::Optional<GURL>& albums_api_url_override,
-      const base::Optional<GURL>& photos_api_base_url_override,
-      const base::Optional<std::string>& image_options_override);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
   ~NtpBackgroundService() override;
 
   // KeyedService implementation.
@@ -75,6 +70,11 @@ class NtpBackgroundService : public KeyedService {
   // NtpBackgroundService is destroyed.
   void AddObserver(NtpBackgroundServiceObserver* observer);
   void RemoveObserver(NtpBackgroundServiceObserver* observer);
+
+  // Check that url is contained in collection_images.
+  bool IsValidBackdropUrl(const GURL& url) const;
+
+  void AddValidBackdropUrlForTesting(const GURL& url);
 
   // Returns the currently cached CollectionInfo, if any.
   const std::vector<CollectionInfo>& collection_info() const {
@@ -110,6 +110,7 @@ class NtpBackgroundService : public KeyedService {
   // Returns the currently cached AlbumPhotos, if any.
   const std::vector<AlbumPhoto>& album_photos() const { return album_photos_; }
 
+  std::string GetImageOptionsForTesting();
   GURL GetCollectionsLoadURLForTesting() const;
   GURL GetImagesURLForTesting() const;
   GURL GetAlbumsURLForTesting() const;

@@ -6,6 +6,7 @@
 #define CHROME_CREDENTIAL_PROVIDER_GAIACP_GCP_UTILS_H_
 
 #include "base/callback.h"
+#include "base/files/file_path.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
 #include "base/win/scoped_handle.h"
@@ -23,28 +24,30 @@
 #define DIRECTORY_CREATE_SUBDIRECTORY 0x00000008
 #define DIRECTORY_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | 0xF)
 
+namespace base {
+
+class CommandLine;
+class FilePath;
+
+}  // namespace base
+
 namespace credential_provider {
+
+// Windows supports a maximum of 20 characters plus null in username.
+constexpr int kWindowsUsernameBufferLength = 21;
 
 // Because of some strange dependency problems with windows header files,
 // define STATUS_SUCCESS here instead of including ntstatus.h or SubAuth.h
 #define STATUS_SUCCESS ((NTSTATUS)0x00000000L)
 
-// The the UI process can exit with the following exit code.
-enum UiExitCodes {
-  // The user completed the sign in successfully.
-  kUiecSuccess,
+// A bitfield indicating which standard handles are to be created.
+using StdHandlesToCreate = uint32_t;
 
-  // The sign in was aborted by the user.
-  kUiecAbort,
-
-  // The sign in timed out.
-  kUiecTimeout,
-
-  // The process was killed by the GCP.
-  kUiecKilled,
-
-  // The email does not match the required pattern.
-  kUiecEMailMissmatch,
+enum : uint32_t {
+  kStdOutput = 1 << 0,
+  kStdInput = 1 << 1,
+  kStdError = 1 << 2,
+  kAllStdHandles = kStdOutput | kStdInput | kStdError
 };
 
 // Filled in by InitializeStdHandles to return the parent side of stdin/stdout/
@@ -81,6 +84,17 @@ class ScopedStartupInfo {
   base::string16 desktop_;
 };
 
+// Gets the brand specific path in which to install GCPW.
+base::FilePath::StringType GetInstallParentDirectoryName();
+
+// Gets the directory where the GCP is installed
+base::FilePath GetInstallDirectory();
+
+// Deletes versions of GCP found under |gcp_path| except for version
+// |product_version|.
+void DeleteVersionsExcept(const base::FilePath& gcp_path,
+                          const base::string16& product_version);
+
 // Waits for the process specified by |procinfo| to terminate.  The handles
 // in |read_handles| can be used to read stdout/err from the process.  Upon
 // return, |exit_code| contains one of the UIEC_xxx constants listed above,
@@ -89,13 +103,13 @@ class ScopedStartupInfo {
 HRESULT WaitForProcess(base::win::ScopedHandle::Handle process_handle,
                        const StdParentHandles& parent_handles,
                        DWORD* exit_code,
-                       char* stdout_buffer,
-                       char* stderr_buffer,
+                       char* output_buffer,
                        int buffer_size);
 
-// Creates a restricted, batch login token for the given user.
+// Creates a restricted, batch or interactive login token for the given user.
 HRESULT CreateLogonToken(const wchar_t* username,
                          const wchar_t* password,
+                         bool interactive,
                          base::win::ScopedHandle* token);
 
 HRESULT CreateJobForSignin(base::win::ScopedHandle* job);
@@ -130,15 +144,33 @@ enum class CommDirection {
   kBidirectional,
 };
 HRESULT InitializeStdHandles(CommDirection direction,
+                             StdHandlesToCreate to_create,
                              ScopedStartupInfo* startupinfo,
                              StdParentHandles* parent_handles);
 
+// Fills |path_to_dll| with the short path to the dll referenced by
+// |dll_handle|. The short path is needed to correctly call rundll32.exe in
+// cases where there might be quotes or spaces in the path.
+HRESULT GetPathToDllFromHandle(HINSTANCE dll_handle,
+                               base::FilePath* path_to_dll);
+
+// This function gets a correctly formatted entry point argument to pass to
+// rundll32.exe for a dll referenced by the handle |dll_handle| and an entry
+// point function with the name |entrypoint|. |entrypoint_arg| will be filled
+// with the argument value.
+HRESULT GetEntryPointArgumentForRunDll(HINSTANCE dll_handle,
+                                       const wchar_t* entrypoint,
+                                       base::string16* entrypoint_arg);
+
 // This function is used to build the command line for rundll32 to call an
-// exported entrypoint from the DLL given by |hDll|.
-HRESULT GetCommandLineForEntrypoint(HINSTANCE hDll,
+// exported entrypoint from the DLL given by |dll_handle|.
+// Returns S_FALSE if a command line can successfully be built but if the
+// path to the "dll" actually points to a non ".dll" file. This allows
+// detection of calls to this function via a unit test which will be
+// running under an ".exe" module.
+HRESULT GetCommandLineForEntrypoint(HINSTANCE dll_handle,
                                     const wchar_t* entrypoint,
-                                    wchar_t* command_line,
-                                    size_t command_line_length);
+                                    base::CommandLine* command_line);
 
 // Enrolls the machine to with the Google MDM server if not already.
 HRESULT EnrollToGoogleMdmIfNeeded(const base::DictionaryValue& properties);
@@ -146,8 +178,17 @@ HRESULT EnrollToGoogleMdmIfNeeded(const base::DictionaryValue& properties);
 // Gets the auth package id for NEGOSSP_NAME_A.
 HRESULT GetAuthenticationPackageId(ULONG* id);
 
+// Handles the writing and deletion of a startup sentinel file used to ensure
+// that the GCPW does not crash continuously on startup and render the
+// winlogon process unusable.
+bool VerifyStartupSentinel();
+void DeleteStartupSentinel();
+
 // Gets a string resource from the DLL with the given id.
-base::string16 GetStringResource(UINT id);
+base::string16 GetStringResource(int base_message_id);
+
+// Gets the language selected by the base::win::i18n::LanguageSelector.
+base::string16 GetSelectedLanguage();
 
 // Helpers to get strings from DictionaryValues.
 base::string16 GetDictString(const base::DictionaryValue* dict,
@@ -157,10 +198,11 @@ base::string16 GetDictString(const std::unique_ptr<base::DictionaryValue>& dict,
 std::string GetDictStringUTF8(const base::DictionaryValue* dict,
                               const char* name);
 std::string GetDictStringUTF8(
-  const std::unique_ptr<base::DictionaryValue>& dict,
-  const char* name);
+    const std::unique_ptr<base::DictionaryValue>& dict,
+    const char* name);
 
 class OSUserManager;
+class OSProcessManager;
 
 // This structure is used in tests to set fake objects in the credential
 // provider dll.  See the function SetFakesForTesting() for details.
@@ -169,7 +211,8 @@ struct FakesForTesting {
   ~FakesForTesting();
 
   ScopedLsaPolicy::CreatorCallback scoped_lsa_policy_creator;
-  OSUserManager* os_manager_for_testing = nullptr;
+  OSUserManager* os_user_manager_for_testing = nullptr;
+  OSProcessManager* os_process_manager_for_testing = nullptr;
 };
 
 // DLL entrypoint signature for settings testing fakes.  This is used by

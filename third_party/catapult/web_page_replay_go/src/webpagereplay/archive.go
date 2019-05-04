@@ -26,35 +26,60 @@ var ErrNotFound = errors.New("not found")
 // ArchivedRequest contains a single request and its response.
 // Immutable after creation.
 type ArchivedRequest struct {
-	SerializedRequest  []byte
-	SerializedResponse []byte // if empty, the request failed
+	SerializedRequest   []byte
+	SerializedResponse  []byte // if empty, the request failed
+	LastServedSessionId uint32
+}
+
+// RequestMatch represents a match when querying the archive for responses to a request
+type RequestMatch struct {
+	Match      *ArchivedRequest
+	Request    *http.Request
+	Response   *http.Response
+	MatchRatio float64
+}
+
+func (requestMatch *RequestMatch) SetMatch(
+		match *ArchivedRequest,
+		request *http.Request,
+		response *http.Response,
+		ratio float64) {
+	requestMatch.Match = match
+	requestMatch.Request = request
+	requestMatch.Response = response
+	requestMatch.MatchRatio = ratio
 }
 
 func serializeRequest(req *http.Request, resp *http.Response) (*ArchivedRequest, error) {
-	url := req.URL.String()
 	ar := &ArchivedRequest{}
 	{
 		var buf bytes.Buffer
 		if err := req.Write(&buf); err != nil {
-			return nil, fmt.Errorf("failed writing request for %s: %v", url, err)
+			return nil, fmt.Errorf("failed writing request for %s: %v", req.URL.String(), err)
 		}
 		ar.SerializedRequest = buf.Bytes()
 	}
 	{
 		var buf bytes.Buffer
 		if err := resp.Write(&buf); err != nil {
-			return nil, fmt.Errorf("failed writing response for %s: %v", url, err)
+			return nil, fmt.Errorf("failed writing response for %s: %v", req.URL.String(), err)
 		}
 		ar.SerializedResponse = buf.Bytes()
 	}
 	return ar, nil
 }
 
-func (ar *ArchivedRequest) unmarshal() (*http.Request, *http.Response, error) {
+func (ar *ArchivedRequest) unmarshal(scheme string) (*http.Request, *http.Response, error) {
 	req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(ar.SerializedRequest)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("couldn't unmarshal request: %v", err)
 	}
+
+	if req.URL.Host == "" {
+		req.URL.Host = req.Host
+		req.URL.Scheme = scheme
+	}
+
 	resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(ar.SerializedResponse)), req)
 	if err != nil {
 		if req.Body != nil {
@@ -65,7 +90,8 @@ func (ar *ArchivedRequest) unmarshal() (*http.Request, *http.Response, error) {
 	return req, resp, nil
 }
 
-// Archive contains an archive of requests. Immutable except when embedded in a WritableArchive.
+// Archive contains an archive of requests. Immutable except when embedded in
+// a WritableArchive.
 // Fields are exported to enabled JSON encoding.
 type Archive struct {
 	// Requests maps host(url) => url => []request.
@@ -79,10 +105,25 @@ type Archive struct {
 	NegotiatedProtocol map[string]string
 	// The time seed that was used to initialize deterministic.js.
 	DeterministicTimeSeedMs int64
+	// When an incoming request matches multiple recorded responses, whether to
+	// serve the responses in the chronological sequence in which wpr_go
+	// recorded them.
+	ServeResponseInChronologicalSequence bool
+	// Records the current session id.
+	// Archive can serve responses in chronological order. If a client wants to
+	// reset the Archive to serve responses from the start, the client may do so
+	// by incrementing its session id.
+	CurrentSessionId uint32
 }
 
 func newArchive() Archive {
 	return Archive{Requests: make(map[string]map[string][]*ArchivedRequest)}
+}
+
+func prepareArchiveForReplay(a *Archive) {
+	// Initialize the session id mechanism that Archive uses to keep state
+	// information about clients.
+	a.CurrentSessionId = 1
 }
 
 // OpenArchive opens an archive file previously written by OpenWritableArchive.
@@ -106,23 +147,28 @@ func OpenArchive(path string) (*Archive, error) {
 	if err := json.Unmarshal(buf, &a); err != nil {
 		return nil, fmt.Errorf("json unmarshal failed: %v", err)
 	}
+	prepareArchiveForReplay(&a);
 	return &a, nil
 }
 
 // ForEach applies f to all requests in the archive.
-func (a *Archive) ForEach(f func(req *http.Request, resp *http.Response)) {
+func (a *Archive) ForEach(f func(req *http.Request, resp *http.Response) error) error {
 	for _, urlmap := range a.Requests {
-		for url, requests := range urlmap {
-			for k, ar := range requests {
-				req, resp, err := ar.unmarshal()
+		for urlString, requests := range urlmap {
+			fullURL, _ := url.Parse(urlString)
+			for index, archivedRequest := range requests {
+				req, resp, err := archivedRequest.unmarshal(fullURL.Scheme)
 				if err != nil {
-					log.Printf("Error unmarshaling request #%d for %s: %v", k, url, err)
+					log.Printf("Error unmarshaling request #%d for %s: %v", index, urlString, err)
 					continue
 				}
-				f(req, resp)
+				if err := f(req, resp); err != nil {
+					return err
+				}
 			}
 		}
 	}
+	return nil
 }
 
 // Returns the der encoded cert and negotiated protocol.
@@ -140,57 +186,28 @@ func (a *Archive) findHostNegotiatedProtocol(host string) string {
 	return "http/1.1"
 }
 
+func assertCompleteURL(url *url.URL) {
+	if url.Host == "" || url.Scheme == "" {
+		log.Printf("Missing host and scheme: %v\n", url)
+		os.Exit(1)
+	}
+}
+
 // FindRequest searches for the given request in the archive.
 // Returns ErrNotFound if the request could not be found. Does not consume req.Body.
 // TODO: conditional requests
-func (a *Archive) FindRequest(req *http.Request, scheme string) (*http.Request, *http.Response, error) {
+func (a *Archive) FindRequest(req *http.Request) (*http.Request, *http.Response, error) {
 	hostMap := a.Requests[req.Host]
 	if len(hostMap) == 0 {
 		return nil, nil, ErrNotFound
 	}
 
 	// Exact match. Note that req may be relative, but hostMap keys are always absolute.
-	u := *req.URL
-	if u.Host == "" {
-		u.Host = req.Host
-		u.Scheme = scheme
-	}
-	var bestRatio float64
-	if len(hostMap[u.String()]) > 0 {
-		var bestRequest *http.Request
-		var bestResponse *http.Response
-		// There can be multiple requests with the same URL string. If that's the case,
-		// break the tie by the number of headers that match.
-		for _, r := range hostMap[u.String()] {
-			curReq, curResp, err := r.unmarshal()
-			if err != nil {
-				log.Println("Error unmarshaling request")
-				continue
-			}
-			if curReq.Method != req.Method {
-				continue
-			}
-			rh := curReq.Header
-			reqh := req.Header
-			m := 1
-			t := len(rh) + len(reqh)
-			for k, v := range rh {
-				if reflect.DeepEqual(v, reqh[k]) {
-					m++
-				}
-			}
-			ratio := 2 * float64(m) / float64(t)
-			// Note that since |m| starts from 1. The ratio will be more than 0
-			// even if no header matches.
-			if ratio > bestRatio {
-				bestRequest = curReq
-				bestResponse = curResp
-				bestRatio = ratio
-			}
-		}
-		if bestRequest != nil && bestResponse != nil {
-			return bestRequest, bestResponse, nil
-		}
+	assertCompleteURL(req.URL)
+	reqUrl := req.URL.String()
+
+	if len(hostMap[reqUrl]) > 0 {
+		return a.findBestMatchInArchivedRequestSet(req, hostMap[reqUrl])
 	}
 
 	// For all URLs with a matching path, pick the URL that has the most matching query parameters.
@@ -200,6 +217,7 @@ func (a *Archive) FindRequest(req *http.Request, scheme string) (*http.Request, 
 	aq := req.URL.Query()
 
 	var bestURL string
+	var bestRatio float64
 
 	for ustr := range hostMap {
 		u, err := url.Parse(ustr)
@@ -226,80 +244,208 @@ func (a *Archive) FindRequest(req *http.Request, scheme string) (*http.Request, 
 		}
 	}
 
-	// TODO: Try each until one succeeds with a matching request method.
 	if bestURL != "" {
-		return findExactMatch(hostMap[bestURL], req.Method)
+		return a.findBestMatchInArchivedRequestSet(req, hostMap[bestURL])
 	}
 
 	return nil, nil, ErrNotFound
 }
 
-// findExactMatch returns the first request that exactly matches the given request method.
-func findExactMatch(requests []*ArchivedRequest, method string) (*http.Request, *http.Response, error) {
-	for _, ar := range requests {
-		req, resp, err := ar.unmarshal()
+// Given an incoming request and a set of matches in the archive, identify the best match,
+// based on request headers.
+func (a *Archive) findBestMatchInArchivedRequestSet(
+		incomingReq *http.Request,
+		archivedReqs []*ArchivedRequest) (
+		*http.Request, *http.Response, error) {
+	scheme := incomingReq.URL.Scheme
+
+	if len(archivedReqs) == 0 {
+		return nil, nil, ErrNotFound
+	} else if len(archivedReqs) == 1 {
+		archivedReq, archivedResp, err := archivedReqs[0].unmarshal(scheme)
 		if err != nil {
-			log.Printf("Error unmarshaling request: %v\nAR.Request: %q\nAR.Response: %q", err, ar.SerializedRequest, ar.SerializedResponse)
+			log.Println("Error unmarshaling request")
+			return nil, nil, err
+		}
+		return archivedReq, archivedResp, err
+	}
+
+	// There can be multiple requests with the same URL string. If that's the
+	// case, break the tie by the number of headers that match.
+	var bestMatch RequestMatch
+	var bestInSequenceMatch RequestMatch
+
+	for _, r := range archivedReqs {
+		archivedReq, archivedResp, err := r.unmarshal(scheme)
+		if err != nil {
+			log.Println("Error unmarshaling request")
 			continue
 		}
-		if req.Method == method {
-			return req, resp, nil
+
+		// Skip this archived request if the request methods does not match that
+		// of the incoming request.
+		if archivedReq.Method != incomingReq.Method {
+			continue
 		}
+
+		// Count the number of header matches
+		numMatchingHeaders := 1
+		numTotalHeaders := len(incomingReq.Header) + len(archivedReq.Header)
+		for key, val := range archivedReq.Header {
+			if reflect.DeepEqual(val, incomingReq.Header[key]) {
+				numMatchingHeaders++
+			}
+		}
+		// Note that since |m| starts from 1. The ratio will be more than 0
+		// even if no header matches.
+		ratio := 2 * float64(numMatchingHeaders) / float64(numTotalHeaders)
+
+		if a.ServeResponseInChronologicalSequence &&
+			r.LastServedSessionId != a.CurrentSessionId &&
+			ratio > bestInSequenceMatch.MatchRatio {
+			bestInSequenceMatch.SetMatch(r, archivedReq, archivedResp, ratio)
+		}
+		if ratio > bestMatch.MatchRatio {
+			bestMatch.SetMatch(r, archivedReq, archivedResp, ratio)
+		}
+	}
+
+	if a.ServeResponseInChronologicalSequence &&
+		bestInSequenceMatch.Match != nil {
+		bestInSequenceMatch.Match.LastServedSessionId = a.CurrentSessionId
+		return bestInSequenceMatch.Request, bestInSequenceMatch.Response, nil
+	} else if bestMatch.Match != nil {
+		bestMatch.Match.LastServedSessionId = a.CurrentSessionId
+		return bestMatch.Request, bestMatch.Response, nil
 	}
 
 	return nil, nil, ErrNotFound
 }
 
-func (a *Archive) addArchivedRequest(scheme string, req *http.Request, resp *http.Response) error {
-	ar, err := serializeRequest(req, resp)
+type AddMode int
+
+const (
+	AddModeAppend            AddMode = 0
+	AddModeOverwriteExisting AddMode = 1
+	AddModeSkipExisting      AddMode = 2
+)
+
+func (a *Archive) addArchivedRequest(req *http.Request, resp *http.Response, mode AddMode) error {
+	// Always use the absolute URL in this mapping.
+	assertCompleteURL(req.URL)
+	archivedRequest, err := serializeRequest(req, resp)
 	if err != nil {
 		return err
 	}
+
 	if a.Requests[req.Host] == nil {
 		a.Requests[req.Host] = make(map[string][]*ArchivedRequest)
 	}
-	// Always use the absolute URL in this mapping.
-	u := *req.URL
-	if u.Host == "" {
-		u.Host = req.Host
-		u.Scheme = scheme
+
+	urlStr := req.URL.String()
+	requests := a.Requests[req.Host][urlStr]
+	if mode == AddModeAppend {
+		requests = append(requests, archivedRequest)
+	} else if mode == AddModeOverwriteExisting {
+		log.Printf("Overwriting existing request")
+		requests = []*ArchivedRequest{archivedRequest}
+	} else if mode == AddModeSkipExisting {
+		if requests != nil {
+			log.Printf("Skipping existing request: %s", urlStr)
+			return nil
+		}
+		requests = append(requests, archivedRequest)
 	}
-	ustr := u.String()
-	a.Requests[req.Host][ustr] = append(a.Requests[req.Host][ustr], ar)
+	a.Requests[req.Host][urlStr] = requests
 	return nil
+}
+
+// Start a new replay session so that the archive serves responses from the start.
+// If an archive contains multiple identical requests with different responses, the archive
+// can serve the responses in chronological order. This function resets the archive serving
+// order to the start.
+func (a *Archive) StartNewReplaySession() {
+	a.CurrentSessionId++
 }
 
 // Edit iterates over all requests in the archive. For each request, it calls f to
 // edit the request. If f returns a nil pair, the request is deleted.
 // The edited archive is returned, leaving the current archive is unchanged.
-func (a *Archive) Edit(f func(req *http.Request, resp *http.Response) (*http.Request, *http.Response, error)) (*Archive, error) {
+func (a *Archive) Edit(edit func(req *http.Request, resp *http.Response) (*http.Request, *http.Response, error)) (*Archive, error) {
 	clone := newArchive()
-	for _, urlmap := range a.Requests {
-		for ustr, requests := range urlmap {
-			u, _ := url.Parse(ustr)
-			for k, ar := range requests {
-				oldReq, oldResp, err := ar.unmarshal()
-				if err != nil {
-					return nil, fmt.Errorf("Error unmarshaling request #%d for %s: %v", k, ustr, err)
+	err := a.ForEach(func(oldReq *http.Request, oldResp *http.Response) error {
+		newReq, newResp, err := edit(oldReq, oldResp)
+		if err != nil {
+			return err
+		}
+		if newReq == nil || newResp == nil {
+			if newReq != nil || newResp != nil {
+				panic("programming error: newReq/newResp must both be nil or non-nil")
+			}
+			return nil
+		}
+		// TODO: allow changing scheme or protocol?
+		return clone.addArchivedRequest(newReq, newResp, AddModeAppend)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &clone, nil
+}
+
+// Merge adds all the request of the provided archive to the receiver.
+func (a *Archive) Merge(other *Archive) error {
+	var numAddedRequests = 0
+	var numSkippedRequests = 0
+	err := other.ForEach(func(req *http.Request, resp *http.Response) error {
+		foundReq, _, notFoundErr := a.FindRequest(req)
+		if notFoundErr == ErrNotFound || req.URL.String() != foundReq.URL.String() {
+			if err := a.addArchivedRequest(req, resp, AddModeAppend); err != nil {
+				return err
+			}
+			numAddedRequests++
+		} else {
+			numSkippedRequests++
+		}
+		return nil
+	})
+	log.Printf("Merged requests: added=%d duplicates=%d \n", numAddedRequests, numSkippedRequests)
+	return err
+}
+
+// Add the result of a get request to the receiver.
+func (a *Archive) Add(method string, urlString string, mode AddMode) error {
+	req, err := http.NewRequest(method, urlString, nil)
+	if err != nil {
+		return fmt.Errorf("Error creating request object: %v", err)
+	}
+
+	url, _ := url.Parse(urlString)
+	// Print a warning for duplicate requests since the replay server will only
+	// return the first found response.
+	if mode == AddModeAppend || mode == AddModeSkipExisting {
+		if foundReq, _, notFoundErr := a.FindRequest(req); notFoundErr != ErrNotFound {
+			if foundReq.URL.String() == url.String() {
+				if mode == AddModeSkipExisting {
+					log.Printf("Skipping existing request: %s %s", req.Method, urlString)
+					return nil
 				}
-				newReq, newResp, err := f(oldReq, oldResp)
-				if err != nil {
-					return nil, err
-				}
-				if newReq == nil || newResp == nil {
-					if newReq != nil || newResp != nil {
-						panic("programming error: newReq/newResp must both be nil or non-nil")
-					}
-					continue
-				}
-				// TODO: allow changing scheme or protocol?
-				if err := clone.addArchivedRequest(u.Scheme, newReq, newResp); err != nil {
-					return nil, err
-				}
+				log.Printf("Adding duplicate request:")
 			}
 		}
 	}
-	return &clone, nil
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("Error fetching url: %v", err)
+	}
+
+	if err = a.addArchivedRequest(req, resp, mode); err != nil {
+		return err
+	}
+
+	fmt.Printf("Added request: (%s %s) %s\n", req.Method, resp.Status, urlString)
+	return nil
 }
 
 // Serialize serializes this archive to the given writer.
@@ -330,10 +476,10 @@ func OpenWritableArchive(path string) (*WritableArchive, error) {
 }
 
 // RecordRequest records a request/response pair in the archive.
-func (a *WritableArchive) RecordRequest(scheme string, req *http.Request, resp *http.Response) error {
+func (a *WritableArchive) RecordRequest(req *http.Request, resp *http.Response) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.addArchivedRequest(scheme, req, resp)
+	return a.addArchivedRequest(req, resp, AddModeAppend)
 }
 
 // RecordTlsConfig records the cert used and protocol negotiated for a host.

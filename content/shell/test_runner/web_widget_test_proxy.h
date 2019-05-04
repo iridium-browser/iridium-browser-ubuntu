@@ -56,13 +56,14 @@ class TEST_RUNNER_EXPORT WebWidgetTestProxyBase {
     web_view_test_proxy_base_ = web_view_test_proxy_base;
   }
 
+  bool main_frame_widget() const { return main_frame_widget_; }
   EventSender* event_sender() { return event_sender_.get(); }
 
   void Reset();
   void BindTo(blink::WebLocalFrame* frame);
 
  protected:
-  WebWidgetTestProxyBase();
+  explicit WebWidgetTestProxyBase(bool main_frame_widget);
   ~WebWidgetTestProxyBase();
 
   blink::WebWidgetClient* widget_test_client() {
@@ -70,6 +71,7 @@ class TEST_RUNNER_EXPORT WebWidgetTestProxyBase {
   }
 
  private:
+  const bool main_frame_widget_;
   blink::WebWidget* web_widget_ = nullptr;
   WebViewTestProxyBase* web_view_test_proxy_base_ = nullptr;
   std::unique_ptr<WebWidgetTestClient> widget_test_client_;
@@ -78,9 +80,9 @@ class TEST_RUNNER_EXPORT WebWidgetTestProxyBase {
   DISALLOW_COPY_AND_ASSIGN(WebWidgetTestProxyBase);
 };
 
-// WebWidgetTestProxy is used during LayoutTests. The intent of the class is to
-// wrap RenderWidget for tests purposes in order to reduce the amount of test
-// specific code in the production code.
+// WebWidgetTestProxy is used during running web tests. The intent of the class
+// is to wrap RenderWidget for tests purposes in order to reduce the amount of
+// test specific code in the production code.
 //
 // WebWidgetTestProxy is only doing the glue between RenderWidget and
 // WebWidgetTestProxyBase, that means that there is no logic living in this
@@ -90,7 +92,7 @@ class TEST_RUNNER_EXPORT WebWidgetTestProxyBase {
 //  * when a fooClient has a mock implementation, WebWidgetTestProxy can
 //    override the fooClient() call and have WebWidgetTestProxyBase return the
 //    mock implementation.
-//  * when a value needs to be overridden by LayoutTests, WebWidgetTestProxy can
+//  * when a value needs to be overridden by web tests, WebWidgetTestProxy can
 //    override RenderViewImpl's getter and call a getter from
 //    WebWidgetTestProxyBase instead. In addition, WebWidgetTestProxyBase will
 //    have a public setter that could be called from the TestRunner.
@@ -99,24 +101,24 @@ class TEST_RUNNER_EXPORT WebWidgetTestProxy : public content::RenderWidget,
  public:
   template <typename... Args>
   explicit WebWidgetTestProxy(Args&&... args)
-      : RenderWidget(std::forward<Args>(args)...) {}
+      : RenderWidget(std::forward<Args>(args)...),
+        WebWidgetTestProxyBase(/*main_frame_widget=*/false) {}
   void Initialize(WebTestInterfaces* interfaces,
                   blink::WebWidget* web_widget,
                   content::RenderViewImpl* render_view_for_local_root);
 
   // WebWidgetClient implementation.
-  blink::WebScreenInfo GetScreenInfo() override;
   void ScheduleAnimation() override;
   bool RequestPointerLock() override;
   void RequestPointerUnlock() override;
   bool IsPointerLocked() override;
   void SetToolTipText(const blink::WebString& text,
                       blink::WebTextDirection hint) override;
-  void StartDragging(blink::WebReferrerPolicy policy,
+  void StartDragging(network::mojom::ReferrerPolicy policy,
                      const blink::WebDragData& data,
                      blink::WebDragOperationsMask mask,
                      const SkBitmap& drag_image,
-                     const blink::WebPoint& image_offset) override;
+                     const gfx::Point& image_offset) override;
 
  private:
   // RenderWidet does not have a public destructor.

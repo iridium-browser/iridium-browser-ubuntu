@@ -634,9 +634,8 @@ TEST(LocalFileSystemCopyOrMoveOperationTest,
     {false, FILE_PATH_LITERAL("file 3"), 0},
   };
 
-  helper.VerifyTestCaseFiles(dest,
-                             kMoveDirResultCases,
-                             arraysize(kMoveDirResultCases));
+  helper.VerifyTestCaseFiles(dest, kMoveDirResultCases,
+                             base::size(kMoveDirResultCases));
 }
 
 TEST(LocalFileSystemCopyOrMoveOperationTest, CopySingleFileNoValidator) {
@@ -674,10 +673,11 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, ProgressCallback) {
                                       kRegularFileSystemTestCaseSize));
 
   std::vector<ProgressRecord> records;
-  ASSERT_EQ(base::File::FILE_OK,
-            helper.CopyWithProgress(src, dest,
-                                    base::Bind(&RecordProgressCallback,
-                                               base::Unretained(&records))));
+  ASSERT_EQ(
+      base::File::FILE_OK,
+      helper.CopyWithProgress(src, dest,
+                              base::BindRepeating(&RecordProgressCallback,
+                                                  base::Unretained(&records))));
 
   // Verify progress callback.
   for (size_t i = 0; i < kRegularFileSystemTestCaseSize; ++i) {
@@ -735,7 +735,7 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelper) {
   base::FilePath dest_path = temp_dir.GetPath().AppendASCII("dest");
   const char kTestData[] = "abcdefghijklmnopqrstuvwxyz0123456789";
   base::WriteFile(source_path, kTestData,
-                  arraysize(kTestData) - 1);  // Exclude trailing '\0'.
+                  base::size(kTestData) - 1);  // Exclude trailing '\0'.
 
   base::MessageLoopForIO message_loop;
   base::Thread file_thread("file_thread");
@@ -758,12 +758,13 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelper) {
       std::move(reader), std::move(writer),
       storage::FlushPolicy::NO_FLUSH_ON_COMPLETION,
       10,  // buffer size
-      base::Bind(&RecordFileProgressCallback, base::Unretained(&progress)),
+      base::BindRepeating(&RecordFileProgressCallback,
+                          base::Unretained(&progress)),
       base::TimeDelta());  // For testing, we need all the progress.
 
   base::File::Error error = base::File::FILE_ERROR_FAILED;
   base::RunLoop run_loop;
-  helper.Run(base::Bind(&AssignAndQuit, &run_loop, &error));
+  helper.Run(base::BindOnce(&AssignAndQuit, &run_loop, &error));
   run_loop.Run();
 
   EXPECT_EQ(base::File::FILE_OK, error);
@@ -790,8 +791,7 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelperWithFlush) {
   base::FilePath dest_path = temp_dir.GetPath().AppendASCII("dest");
   const char kTestData[] = "abcdefghijklmnopqrstuvwxyz0123456789";
   base::WriteFile(source_path, kTestData,
-                  arraysize(kTestData) - 1);  // Exclude trailing '\0'.
-
+                  base::size(kTestData) - 1);  // Exclude trailing '\0'.
 
   base::MessageLoopForIO message_loop;
   base::Thread file_thread("file_thread");
@@ -814,12 +814,13 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelperWithFlush) {
       std::move(reader), std::move(writer),
       storage::FlushPolicy::NO_FLUSH_ON_COMPLETION,
       10,  // buffer size
-      base::Bind(&RecordFileProgressCallback, base::Unretained(&progress)),
+      base::BindRepeating(&RecordFileProgressCallback,
+                          base::Unretained(&progress)),
       base::TimeDelta());  // For testing, we need all the progress.
 
   base::File::Error error = base::File::FILE_ERROR_FAILED;
   base::RunLoop run_loop;
-  helper.Run(base::Bind(&AssignAndQuit, &run_loop, &error));
+  helper.Run(base::BindOnce(&AssignAndQuit, &run_loop, &error));
   run_loop.Run();
 
   EXPECT_EQ(base::File::FILE_OK, error);
@@ -842,7 +843,7 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelper_Cancel) {
   base::FilePath dest_path = temp_dir.GetPath().AppendASCII("dest");
   const char kTestData[] = "abcdefghijklmnopqrstuvwxyz0123456789";
   base::WriteFile(source_path, kTestData,
-                  arraysize(kTestData) - 1);  // Exclude trailing '\0'.
+                  base::size(kTestData) - 1);  // Exclude trailing '\0'.
 
   base::MessageLoopForIO message_loop;
   base::Thread file_thread("file_thread");
@@ -865,7 +866,8 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelper_Cancel) {
       std::move(reader), std::move(writer),
       storage::FlushPolicy::NO_FLUSH_ON_COMPLETION,
       10,  // buffer size
-      base::Bind(&RecordFileProgressCallback, base::Unretained(&progress)),
+      base::BindRepeating(&RecordFileProgressCallback,
+                          base::Unretained(&progress)),
       base::TimeDelta());  // For testing, we need all the progress.
 
   // Call Cancel() later.
@@ -876,7 +878,7 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelper_Cancel) {
 
   base::File::Error error = base::File::FILE_ERROR_FAILED;
   base::RunLoop run_loop;
-  helper.Run(base::Bind(&AssignAndQuit, &run_loop, &error));
+  helper.Run(base::BindOnce(&AssignAndQuit, &run_loop, &error));
   run_loop.Run();
 
   EXPECT_EQ(base::File::FILE_ERROR_ABORT, error);

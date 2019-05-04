@@ -18,8 +18,6 @@ const char kFindActionName[] = "Find";
 const char kFindNextActionName[] = "FindNext";
 const char kFindPreviousActionName[] = "FindPrevious";
 
-DEFINE_WEB_STATE_USER_DATA_KEY(FindTabHelper);
-
 FindTabHelper::FindTabHelper(web::WebState* web_state) {
   web_state->AddObserver(this);
   controller_ = [[FindInPageController alloc] initWithWebState:web_state];
@@ -87,9 +85,9 @@ void FindTabHelper::RestoreSearchTerm() {
   [controller_ restoreSearchTerm];
 }
 
-void FindTabHelper::NavigationItemCommitted(
+void FindTabHelper::DidFinishNavigation(
     web::WebState* web_state,
-    const web::LoadCommittedDetails& load_details) {
+    web::NavigationContext* navigation_context) {
   StopFinding(nil);
 }
 

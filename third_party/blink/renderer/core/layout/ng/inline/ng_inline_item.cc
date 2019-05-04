@@ -6,7 +6,6 @@
 
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_outline_utils.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_result_buffer.h"
 
@@ -23,32 +22,37 @@ const char* kNGInlineItemTypeStrings[] = {
 // While the spec defines "non-zero margins, padding, or borders" prevents
 // line boxes to be zero-height, tests indicate that only inline direction
 // of them do so. https://drafts.csswg.org/css2/visuren.html
-bool IsInlineBoxEmpty(const ComputedStyle& style,
-                      const LayoutObject& layout_object) {
-  if (style.BorderStart().NonZero() || !style.PaddingStart().IsZero() ||
-      style.BorderEnd().NonZero() || !style.PaddingEnd().IsZero())
+bool IsInlineBoxStartEmpty(const ComputedStyle& style,
+                           const LayoutObject& layout_object) {
+  if (style.BorderStartWidth() || !style.PaddingStart().IsZero())
     return false;
 
   // Non-zero margin can prevent "empty" only in non-quirks mode.
   // https://quirks.spec.whatwg.org/#the-line-height-calculation-quirk
-  if ((!style.MarginStart().IsZero() || !style.MarginEnd().IsZero()) &&
+  if (!style.MarginStart().IsZero() &&
       !layout_object.GetDocument().InLineHeightQuirksMode())
     return false;
 
   return true;
 }
 
-// TODO(xiaochengh): Deduplicate with a similar function in ng_paint_fragment.cc
-// ::before, ::after and ::first-letter can be hit test targets.
-bool CanBeHitTestTargetPseudoNodeStyle(const ComputedStyle& style) {
-  switch (style.StyleType()) {
-    case kPseudoIdBefore:
-    case kPseudoIdAfter:
-    case kPseudoIdFirstLetter:
-      return true;
-    default:
-      return false;
-  }
+// Determines if the end of a box is "empty" as defined above.
+//
+// Keeping the "empty" state for start and end separately is important when they
+// belong to different lines, as non-empty item can force the line it belongs to
+// as non-empty.
+bool IsInlineBoxEndEmpty(const ComputedStyle& style,
+                         const LayoutObject& layout_object) {
+  if (style.BorderEndWidth() || !style.PaddingEnd().IsZero())
+    return false;
+
+  // Non-zero margin can prevent "empty" only in non-quirks mode.
+  // https://quirks.spec.whatwg.org/#the-line-height-calculation-quirk
+  if (!style.MarginEnd().IsZero() &&
+      !layout_object.GetDocument().InLineHeightQuirksMode())
+    return false;
+
+  return true;
 }
 
 }  // namespace
@@ -63,13 +67,10 @@ NGInlineItem::NGInlineItem(NGInlineItemType type,
       style_(style),
       layout_object_(layout_object),
       type_(type),
-      script_(0),
-      font_fallback_priority_(0),
-      render_orientation_(0),
+      segment_data_(0),
       bidi_level_(UBIDI_LTR),
       shape_options_(kPreContext | kPostContext),
       is_empty_item_(false),
-      should_create_box_fragment_(false),
       style_variant_(static_cast<unsigned>(NGStyleVariant::kStandard)),
       end_collapse_type_(kNotCollapsible),
       is_end_collapsible_newline_(false),
@@ -89,13 +90,10 @@ NGInlineItem::NGInlineItem(const NGInlineItem& other,
       style_(other.style_),
       layout_object_(other.layout_object_),
       type_(other.type_),
-      script_(other.script_),
-      font_fallback_priority_(other.font_fallback_priority_),
-      render_orientation_(other.render_orientation_),
+      segment_data_(other.segment_data_),
       bidi_level_(other.bidi_level_),
       shape_options_(other.shape_options_),
       is_empty_item_(other.is_empty_item_),
-      should_create_box_fragment_(other.should_create_box_fragment_),
       style_variant_(other.style_variant_),
       end_collapse_type_(other.end_collapse_type_),
       is_end_collapsible_newline_(other.is_end_collapsible_newline_),
@@ -106,9 +104,20 @@ NGInlineItem::NGInlineItem(const NGInlineItem& other,
 
 NGInlineItem::~NGInlineItem() = default;
 
+bool NGInlineItem::ShouldCreateBoxFragment() const {
+  if (Type() == kOpenTag || Type() == kCloseTag)
+    return ToLayoutInline(layout_object_)->ShouldCreateBoxFragment();
+  DCHECK_EQ(Type(), kAtomicInline);
+  return false;
+}
+
+void NGInlineItem::SetShouldCreateBoxFragment() {
+  DCHECK(Type() == kOpenTag || Type() == kCloseTag);
+  ToLayoutInline(layout_object_)->SetShouldCreateBoxFragment();
+}
+
 void NGInlineItem::ComputeBoxProperties() {
   DCHECK(!is_empty_item_);
-  DCHECK(!should_create_box_fragment_);
 
   if (type_ == NGInlineItem::kText || type_ == NGInlineItem::kAtomicInline ||
       type_ == NGInlineItem::kControl)
@@ -116,24 +125,13 @@ void NGInlineItem::ComputeBoxProperties() {
 
   if (type_ == NGInlineItem::kOpenTag) {
     DCHECK(style_ && layout_object_ && layout_object_->IsLayoutInline());
-    if (style_->HasBoxDecorationBackground() || style_->HasPadding() ||
-        style_->HasMargin()) {
-      is_empty_item_ = IsInlineBoxEmpty(*style_, *layout_object_);
-      should_create_box_fragment_ = true;
-    } else {
-      is_empty_item_ = true;
-      should_create_box_fragment_ =
-          ToLayoutBoxModelObject(layout_object_)->HasSelfPaintingLayer() ||
-          style_->CanContainAbsolutePositionObjects() ||
-          style_->CanContainFixedPositionObjects(false) ||
-          NGOutlineUtils::HasPaintedOutline(*style_,
-                                            layout_object_->GetNode()) ||
-          ToLayoutBoxModelObject(layout_object_)
-              ->ShouldApplyPaintContainment() ||
-          ToLayoutBoxModelObject(layout_object_)
-              ->ShouldApplyLayoutContainment() ||
-          CanBeHitTestTargetPseudoNodeStyle(*style_);
-    }
+    is_empty_item_ = IsInlineBoxStartEmpty(*style_, *layout_object_);
+    return;
+  }
+
+  if (type_ == NGInlineItem::kCloseTag) {
+    DCHECK(style_ && layout_object_ && layout_object_->IsLayoutInline());
+    is_empty_item_ = IsInlineBoxEndEmpty(*style_, *layout_object_);
     return;
   }
 
@@ -149,94 +147,27 @@ const char* NGInlineItem::NGInlineItemTypeToString(int val) const {
   return kNGInlineItemTypeStrings[val];
 }
 
-UScriptCode NGInlineItem::Script() const {
-  return script_ != kInvalidScript ? static_cast<UScriptCode>(script_)
-                                   : USCRIPT_INVALID_CODE;
-}
-
-FontFallbackPriority NGInlineItem::GetFontFallbackPriority() const {
-  return static_cast<enum FontFallbackPriority>(font_fallback_priority_);
-}
-
-OrientationIterator::RenderOrientation NGInlineItem::RenderOrientation() const {
-  return static_cast<OrientationIterator::RenderOrientation>(
-      render_orientation_);
-}
-
 RunSegmenter::RunSegmenterRange NGInlineItem::CreateRunSegmenterRange() const {
-  return {start_offset_, end_offset_, Script(), RenderOrientation(),
-          GetFontFallbackPriority()};
+  return NGInlineItemSegment::UnpackSegmentData(start_offset_, end_offset_,
+                                                segment_data_);
 }
 
 bool NGInlineItem::EqualsRunSegment(const NGInlineItem& other) const {
-  return script_ == other.script_ &&
-         font_fallback_priority_ == other.font_fallback_priority_ &&
-         render_orientation_ == other.render_orientation_;
+  return segment_data_ == other.segment_data_;
 }
 
-void NGInlineItem::SetRunSegment(const RunSegmenter::RunSegmenterRange& range) {
+void NGInlineItem::SetSegmentData(unsigned segment_data) {
   DCHECK_EQ(Type(), NGInlineItem::kText);
-
-  // Orientation should be set in a separate pass. See
-  // NGInlineNode::SegmentScriptRuns().
-  DCHECK_EQ(range.render_orientation, OrientationIterator::kOrientationKeep);
-
-  script_ = static_cast<unsigned>(range.script);
-  font_fallback_priority_ = static_cast<unsigned>(range.font_fallback_priority);
-
-  // Ensure our bit fields are large enough by reading them back.
-  DCHECK_EQ(range.script, Script());
-  DCHECK_EQ(range.font_fallback_priority, GetFontFallbackPriority());
+  segment_data_ = segment_data;
 }
 
-void NGInlineItem::SetFontOrientation(
-    OrientationIterator::RenderOrientation orientation) {
-  DCHECK_EQ(Type(), NGInlineItem::kText);
-
-  // Ensure the value can fit in the bit field.
-  DCHECK_LT(static_cast<unsigned>(orientation), 1u << 1);
-
-  render_orientation_ = orientation != 0;
-}
-
-unsigned NGInlineItem::PopulateItemsFromRun(
-    Vector<NGInlineItem>& items,
-    unsigned index,
-    const RunSegmenter::RunSegmenterRange& range) {
-  DCHECK_GE(range.end, items[index].start_offset_);
-
-  for (;; index++) {
-    NGInlineItem& item = items[index];
-    DCHECK_LE(item.start_offset_, range.end);
-
+void NGInlineItem::SetSegmentData(const RunSegmenter::RunSegmenterRange& range,
+                                  Vector<NGInlineItem>* items) {
+  unsigned segment_data = NGInlineItemSegment::PackSegmentData(range);
+  for (NGInlineItem& item : *items) {
     if (item.Type() == NGInlineItem::kText)
-      item.SetRunSegment(range);
-
-    if (range.end == item.end_offset_)
-      break;
-    if (range.end < item.end_offset_) {
-      Split(items, index, range.end);
-      break;
-    }
+      item.segment_data_ = segment_data;
   }
-  return index + 1;
-}
-
-unsigned NGInlineItem::PopulateItemsFromFontOrientation(
-    Vector<NGInlineItem>& items,
-    unsigned index,
-    unsigned end_offset,
-    OrientationIterator::RenderOrientation orientation) {
-  // FontOrientaiton is set per item, end_offset should be within this item.
-  NGInlineItem& item = items[index];
-  DCHECK_GE(end_offset, item.start_offset_);
-  DCHECK_LE(end_offset, item.end_offset_);
-
-  item.SetFontOrientation(orientation);
-
-  if (end_offset < item.end_offset_)
-    Split(items, index, end_offset);
-  return index + 1;
 }
 
 void NGInlineItem::SetBidiLevel(UBiDiLevel level) {

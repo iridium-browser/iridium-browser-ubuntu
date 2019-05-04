@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/core/layout/layout_multi_column_flow_thread.h"
 #include "third_party/blink/renderer/core/layout/multi_column_fragmentainer_group.h"
 #include "third_party/blink/renderer/core/paint/multi_column_set_painter.h"
+#include "third_party/blink/renderer/core/paint/paint_layer.h"
 
 namespace blink {
 
@@ -520,6 +521,25 @@ LayoutRect LayoutMultiColumnSet::FragmentsBoundingBox(
   return result;
 }
 
+void LayoutMultiColumnSet::ComputeVisualOverflow(
+    bool recompute_floats) {
+  LayoutRect previous_visual_overflow_rect = VisualOverflowRect();
+  ClearVisualOverflow();
+  AddVisualOverflowFromChildren();
+
+  AddVisualEffectOverflow();
+  AddVisualOverflowFromTheme();
+
+  if (recompute_floats || CreatesNewFormattingContext() ||
+      HasSelfPaintingLayer())
+    AddVisualOverflowFromFloats();
+
+  if (VisualOverflowRect() != previous_visual_overflow_rect) {
+    SetShouldCheckForPaintInvalidation();
+    GetFrameView()->SetIntersectionObservationState(LocalFrameView::kDesired);
+  }
+}
+
 void LayoutMultiColumnSet::AddVisualOverflowFromChildren() {
   // It's useless to calculate overflow if we haven't determined the page
   // logical height yet.
@@ -665,7 +685,7 @@ void LayoutMultiColumnSet::UpdateFromNG() {
   DCHECK_EQ(fragmentainer_groups_.size(), 1U);
   auto& group = fragmentainer_groups_[0];
   group.UpdateFromNG(LogicalHeight());
-  ComputeOverflow(LogicalHeight());
+  ComputeLayoutOverflow(LogicalHeight());
 }
 
 }  // namespace blink

@@ -69,7 +69,7 @@ ClientImageTransferCacheEntry::ClientImageTransferCacheEntry(
                             : 0u;
 
   // Compute and cache the size of the data.
-  base::CheckedNumeric<size_t> safe_size;
+  base::CheckedNumeric<uint32_t> safe_size;
   safe_size += PaintOpWriter::HeaderBytes();
   safe_size += sizeof(uint32_t);  // color type
   safe_size += sizeof(uint32_t);  // width
@@ -90,7 +90,7 @@ ClientImageTransferCacheEntry::~ClientImageTransferCacheEntry() = default;
 // static
 base::AtomicSequenceNumber ClientImageTransferCacheEntry::s_next_id_;
 
-size_t ClientImageTransferCacheEntry::SerializedSize() const {
+uint32_t ClientImageTransferCacheEntry::SerializedSize() const {
   return size_;
 }
 
@@ -104,7 +104,7 @@ bool ClientImageTransferCacheEntry::Serialize(base::span<uint8_t> data) const {
   // We don't need to populate the SerializeOptions here since the writer is
   // only used for serializing primitives.
   PaintOp::SerializeOptions options(nullptr, nullptr, nullptr, nullptr, nullptr,
-                                    false, false, 0, 0, SkMatrix::I());
+                                    nullptr, false, false, 0, 0, SkMatrix::I());
   PaintOpWriter writer(data.data(), data.size(), options);
   writer.Write(pixmap_->colorType());
   writer.Write(pixmap_->width());
@@ -144,7 +144,9 @@ bool ServiceImageTransferCacheEntry::Deserialize(
 
   // We don't need to populate the DeSerializeOptions here since the reader is
   // only used for de-serializing primitives.
-  PaintOp::DeserializeOptions options(nullptr, nullptr);
+  std::vector<uint8_t> scratch_buffer;
+  PaintOp::DeserializeOptions options(nullptr, nullptr, nullptr,
+                                      &scratch_buffer);
   PaintOpReader reader(data.data(), data.size(), options);
   SkColorType color_type;
   reader.Read(&color_type);

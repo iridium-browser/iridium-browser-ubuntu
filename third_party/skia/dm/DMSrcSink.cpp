@@ -6,7 +6,6 @@
  */
 
 #include "DMSrcSink.h"
-#include "../src/jumper/SkJumper.h"
 #include "DDLPromiseImageHelper.h"
 #include "DDLTileHelper.h"
 #include "GrBackendSurface.h"
@@ -45,7 +44,6 @@
 #include "SkPictureCommon.h"
 #include "SkPictureData.h"
 #include "SkPictureRecorder.h"
-#include "SkPipe.h"
 #include "SkPDFDocument.h"
 #include "SkRandom.h"
 #include "SkRecordDraw.h"
@@ -66,6 +64,7 @@
 
 #if defined(SK_ENABLE_SKOTTIE)
     #include "Skottie.h"
+    #include "SkottieUtils.h"
 #endif
 
 #if defined(SK_XML)
@@ -974,7 +973,7 @@ void clamp_if_necessary(const SkBitmap& bitmap, SkColorType dstCT) {
         return;
     }
 
-    SkJumper_MemoryCtx ptr = { bitmap.getAddr(0,0), bitmap.rowBytesAsPixels() };
+    SkRasterPipeline_MemoryCtx ptr = { bitmap.getAddr(0,0), bitmap.rowBytesAsPixels() };
 
     SkRasterPipeline_<256> p;
     p.append(SkRasterPipeline::load_f16, &ptr);
@@ -1089,26 +1088,16 @@ Name ColorCodecSrc::name() const {
 
 SKPSrc::SKPSrc(Path path) : fPath(path) { }
 
-static sk_sp<SkPicture> read_skp(const char* path, const SkDeserialProcs* procs = nullptr) {
-    std::unique_ptr<SkStream> stream = SkStream::MakeFromFile(path);
-    if (!stream) {
-        return nullptr;
-    }
-    sk_sp<SkPicture> pic(SkPicture::MakeFromStream(stream.get(), procs));
-    if (!pic) {
-        return nullptr;
-    }
-    stream = nullptr;  // Might as well drop this when we're done with it.
-
-    return pic;
-}
-
 Error SKPSrc::draw(SkCanvas* canvas) const {
-    sk_sp<SkPicture> pic = read_skp(fPath.c_str());
-    if (!pic) {
+    std::unique_ptr<SkStream> stream = SkStream::MakeFromFile(fPath.c_str());
+    if (!stream) {
         return SkStringPrintf("Couldn't read %s.", fPath.c_str());
     }
-
+    sk_sp<SkPicture> pic(SkPicture::MakeFromStream(stream.get()));
+    if (!pic) {
+        return SkStringPrintf("Couldn't parse file %s.", fPath.c_str());
+    }
+    stream = nullptr;  // Might as well drop this when we're done with it.
     canvas->clipRect(SkRect::MakeWH(FLAGS_skpViewportSize, FLAGS_skpViewportSize));
     canvas->drawPicture(pic);
     return "";
@@ -1195,7 +1184,10 @@ Error BisectSrc::draw(SkCanvas* canvas) const {
 SkottieSrc::SkottieSrc(Path path) : fPath(std::move(path)) {}
 
 Error SkottieSrc::draw(SkCanvas* canvas) const {
-    auto animation = skottie::Animation::MakeFromFile(fPath.c_str());
+    auto animation = skottie::Animation::Builder()
+        .setResourceProvider(
+                skottie_utils::FileResourceProvider::Make(SkOSPath::Dirname(fPath.c_str())))
+        .makeFromFile(fPath.c_str());
     if (!animation) {
         return SkStringPrintf("Unable to parse file: %s", fPath.c_str());
     }
@@ -1515,6 +1507,9 @@ Error GPUSink::onDraw(const Src& src, SkBitmap* dst, SkWStream*, SkString* log,
             context->contextPriv().getGpu()->deleteTestingOnlyBackendRenderTarget(backendRT);
         }
     }
+    if (grOptions.fPersistentCache) {
+        context->storeVkPipelineCacheData();
+    }
     return "";
 }
 
@@ -1636,7 +1631,11 @@ Error PDFSink::draw(const Src& src, SkBitmap*, SkWStream* dst, SkString*) const 
     metadata.fCreator = "Skia/DM";
     metadata.fRasterDPI = fRasterDpi;
     metadata.fPDFA = fPDFA;
-    sk_sp<SkDocument> doc = SkPDF::MakeDocument(dst, metadata);
+#if SK_PDF_TEST_EXECUTOR
+    std::unique_ptr<SkExecutor> executor = SkExecutor::MakeFIFOThreadPool();
+    metadata.fExecutor = executor.get();
+#endif
+    auto doc = SkPDF::MakeDocument(dst, metadata);
     if (!doc) {
         return "SkPDF::MakeDocument() returned nullptr";
     }
@@ -1666,9 +1665,9 @@ Error XPSSink::draw(const Src& src, SkBitmap*, SkWStream* dst, SkString*) const 
     if (!factory) {
         return "Failed to create XPS Factory.";
     }
-    sk_sp<SkDocument> doc(SkXPS::MakeDocument(dst, factory.get()));
+    auto doc = SkXPS::MakeDocument(dst, factory.get());
     if (!doc) {
-        return "SkXPS::MAkeDocument() returned nullptr";
+        return "SkXPS::MakeDocument() returned nullptr";
     }
     return draw_skdocument(src, doc.get(), dst);
 }
@@ -1677,14 +1676,6 @@ Error XPSSink::draw(const Src& src, SkBitmap*, SkWStream* dst, SkString*) const 
     return "XPS not supported on this platform.";
 }
 #endif
-
-/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-
-PipeSink::PipeSink() {}
-
-Error PipeSink::draw(const Src& src, SkBitmap*, SkWStream* dst, SkString*) const {
-    return src.draw(SkPipeSerializer().beginWrite(SkRect::Make(src.size()), dst));
-}
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
@@ -1945,10 +1936,8 @@ Error ViaTiles::draw(const Src& src, SkBitmap* bitmap, SkWStream* stream, SkStri
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
-ViaDDL::ViaDDL(int numDivisions, Sink* sink)
-    : Via(sink)
-    , fNumDivisions(numDivisions) {
-}
+ViaDDL::ViaDDL(int numReplays, int numDivisions, Sink* sink)
+        : Via(sink), fNumReplays(numReplays), fNumDivisions(numDivisions) {}
 
 Error ViaDDL::draw(const Src& src, SkBitmap* bitmap, SkWStream* stream, SkString* log) const {
     auto size = src.size();
@@ -1968,42 +1957,60 @@ Error ViaDDL::draw(const Src& src, SkBitmap* bitmap, SkWStream* stream, SkString
     if (!compressedPictureData) {
         return SkStringPrintf("ViaDDL: Couldn't deflate SkPicture");
     }
+    auto draw = [&](SkCanvas* canvas) -> Error {
+        GrContext* context = canvas->getGrContext();
+        if (!context || !context->contextPriv().getGpu()) {
+            return SkStringPrintf("DDLs are GPU only");
+        }
 
-    return draw_to_canvas(fSink.get(), bitmap, stream, log, size,
-                [&](SkCanvas* canvas) -> Error {
-                    GrContext* context = canvas->getGrContext();
-                    if (!context || !context->contextPriv().getGpu()) {
-                        return SkStringPrintf("DDLs are GPU only");
-                    }
+        // This is here bc this is the first point where we have access to the context
+        promiseImageHelper.uploadAllToGPU(context);
+        // We draw N times, with a clear between. Between each run we invalidate and delete half of
+        // the textures backing promise images. So half the images exercise reusing a cached
+        // GrTexture and the other half exercise the case whem the client provides a different
+        // backing texture in fulfill.
+        for (int replay = 0; replay < fNumReplays; ++replay) {
+            if (replay > 0) {
+                // Clear the drawing of the previous replay
+                canvas->clear(SK_ColorTRANSPARENT);
+            }
+            // First, create all the tiles (including their individual dest surfaces)
+            DDLTileHelper tiles(canvas, viewport, fNumDivisions);
 
-                    // This is here bc this is the first point where we have access to the context
-                    promiseImageHelper.uploadAllToGPU(context);
+            // Second, reinflate the compressed picture individually for each thread
+            // This recreates the promise SkImages on each replay iteration. We are currently
+            // relying on this to test using a SkPromiseImageTexture to fulfill different
+            // SkImages. On each replay the promise SkImages are recreated in createSKPPerTile.
+            tiles.createSKPPerTile(compressedPictureData.get(), promiseImageHelper);
 
-                    // First, create all the tiles (including their individual dest surfaces)
-                    DDLTileHelper tiles(canvas, viewport, fNumDivisions);
+            // Third, create the DDLs in parallel
+            tiles.createDDLsInParallel();
 
-                    // Second, reinflate the compressed picture individually for each thread
-                    tiles.createSKPPerTile(compressedPictureData.get(), promiseImageHelper);
+            if (replay == fNumReplays - 1) {
+                // This drops the promiseImageHelper's refs on all the promise images if we're in
+                // the last run.
+                promiseImageHelper.reset();
+            } else {
+                // This ought to ensure that all promise image textures from the last pass are
+                // released.
+                context->contextPriv().getGpu()->testingOnly_flushGpuAndSync();
+                promiseImageHelper.replaceEveryOtherPromiseTexture(context);
+            }
 
-                    // Third, create the DDLs in parallel
-                    tiles.createDDLsInParallel();
+            // Fourth, synchronously render the display lists into the dest tiles
+            // TODO: it would be cool to not wait until all the tiles are drawn to begin
+            // drawing to the GPU and composing to the final surface
+            tiles.drawAllTilesAndFlush(context, false);
 
-                    // This drops the promiseImageHelper's refs on all the promise images
-                    promiseImageHelper.reset();
-
-                    // Fourth, synchronously render the display lists into the dest tiles
-                    // TODO: it would be cool to not wait until all the tiles are drawn to begin
-                    // drawing to the GPU and composing to the final surface
-                    tiles.drawAllTilesAndFlush(context, false);
-
-                    // Finally, compose the drawn tiles into the result
-                    // Note: the separation between the tiles and the final composition better
-                    // matches Chrome but costs us a copy
-                    tiles.composeAllTiles(canvas);
-
-                    context->flush();
-                    return "";
-                });
+            // Finally, compose the drawn tiles into the result
+            // Note: the separation between the tiles and the final composition better
+            // matches Chrome but costs us a copy
+            tiles.composeAllTiles(canvas);
+            context->flush();
+        }
+        return "";
+    };
+    return draw_to_canvas(fSink.get(), bitmap, stream, log, size, draw);
 }
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
@@ -2020,27 +2027,6 @@ Error ViaPicture::draw(const Src& src, SkBitmap* bitmap, SkWStream* stream, SkSt
         }
         pic = recorder.finishRecordingAsPicture();
         canvas->drawPicture(pic);
-        return err;
-    });
-    if (!err.isEmpty()) {
-        return err;
-    }
-
-    return check_against_reference(bitmap, src, fSink.get());
-}
-
-/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-
-Error ViaPipe::draw(const Src& src, SkBitmap* bitmap, SkWStream* stream, SkString* log) const {
-    auto size = src.size();
-    Error err = draw_to_canvas(fSink.get(), bitmap, stream, log, size, [&](SkCanvas* canvas) {
-        SkDynamicMemoryWStream tmpStream;
-        Error err = src.draw(SkPipeSerializer().beginWrite(SkRect::Make(size), &tmpStream));
-        if (!err.isEmpty()) {
-            return err;
-        }
-        sk_sp<SkData> data = tmpStream.detachAsData();
-        SkPipeDeserializer().playback(data->data(), data->size(), canvas);
         return err;
     });
     if (!err.isEmpty()) {

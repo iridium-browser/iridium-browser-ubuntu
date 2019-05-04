@@ -31,13 +31,11 @@ struct StreamsConfig {
   StreamsConfig(const StreamsConfig&);
   ~StreamsConfig();
   Timestamp at_time = Timestamp::PlusInfinity();
-  bool requests_alr_probing = false;
+  absl::optional<bool> requests_alr_probing;
   absl::optional<double> pacing_factor;
   absl::optional<DataRate> min_pacing_rate;
   absl::optional<DataRate> max_padding_rate;
   absl::optional<DataRate> max_total_allocated_bitrate;
-  // The send rate of traffic for which feedback is not received.
-  DataRate unacknowledged_rate_allocation = DataRate::Zero();
 };
 
 struct TargetRateConstraints {
@@ -126,7 +124,7 @@ struct PacketResult {
   PacketResult(const PacketResult&);
   ~PacketResult();
 
-  absl::optional<SentPacket> sent_packet;
+  SentPacket sent_packet;
   Timestamp receive_time = Timestamp::PlusInfinity();
 };
 
@@ -136,9 +134,13 @@ struct TransportPacketsFeedback {
   ~TransportPacketsFeedback();
 
   Timestamp feedback_time = Timestamp::PlusInfinity();
+  Timestamp first_unacked_send_time = Timestamp::PlusInfinity();
   DataSize data_in_flight = DataSize::Zero();
   DataSize prior_in_flight = DataSize::Zero();
   std::vector<PacketResult> packet_feedbacks;
+
+  // Arrival times for messages without send time information.
+  std::vector<Timestamp> sendless_arrival_times;
 
   std::vector<PacketResult> ReceivedWithSendInfo() const;
   std::vector<PacketResult> LostWithSendInfo() const;
@@ -198,7 +200,11 @@ struct NetworkControlUpdate {
 
 // Process control
 struct ProcessInterval {
+  ProcessInterval();
+  ProcessInterval(const ProcessInterval&);
+  ~ProcessInterval();
   Timestamp at_time = Timestamp::PlusInfinity();
+  absl::optional<DataSize> pacer_queue;
 };
 }  // namespace webrtc
 

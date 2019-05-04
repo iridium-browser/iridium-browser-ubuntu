@@ -348,7 +348,7 @@ int TextTrack::TrackIndexRelativeToRenderedTracks() {
 }
 
 const AtomicString& TextTrack::InterfaceName() const {
-  return EventTargetNames::TextTrack;
+  return event_target_names::kTextTrack;
 }
 
 ExecutionContext* TextTrack::GetExecutionContext() const {
@@ -368,7 +368,7 @@ Node* TextTrack::Owner() const {
   return MediaElement();
 }
 
-void TextTrack::Trace(blink::Visitor* visitor) {
+void TextTrack::Trace(Visitor* visitor) {
   visitor->Trace(cues_);
   visitor->Trace(active_cues_);
   visitor->Trace(track_list_);

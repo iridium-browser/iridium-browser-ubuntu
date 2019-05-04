@@ -10,14 +10,14 @@
 #ifndef CALL_SIMULATED_NETWORK_H_
 #define CALL_SIMULATED_NETWORK_H_
 
+#include <stdint.h>
 #include <deque>
 #include <queue>
 #include <vector>
 
-#include "absl/memory/memory.h"
 #include "absl/types/optional.h"
 #include "api/test/simulated_network.h"
-#include "rtc_base/criticalsection.h"
+#include "rtc_base/critical_section.h"
 #include "rtc_base/random.h"
 #include "rtc_base/thread_annotations.h"
 
@@ -49,6 +49,7 @@ class SimulatedNetwork : public NetworkBehaviorInterface {
     int64_t arrival_time_us;
   };
   rtc::CriticalSection config_lock_;
+  bool reset_capacity_delay_error_ RTC_GUARDED_BY(config_lock_) = false;
 
   // |process_lock| guards the data structures involved in delay and loss
   // processes, such as the packet queues.
@@ -56,7 +57,7 @@ class SimulatedNetwork : public NetworkBehaviorInterface {
   std::queue<PacketInfo> capacity_link_ RTC_GUARDED_BY(process_lock_);
   Random random_;
 
-  std::deque<PacketInfo> delay_link_;
+  std::deque<PacketInfo> delay_link_ RTC_GUARDED_BY(process_lock_);
 
   // Link configuration.
   Config config_ RTC_GUARDED_BY(config_lock_);

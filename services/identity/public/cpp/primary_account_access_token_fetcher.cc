@@ -14,7 +14,7 @@ namespace identity {
 PrimaryAccountAccessTokenFetcher::PrimaryAccountAccessTokenFetcher(
     const std::string& oauth_consumer_name,
     IdentityManager* identity_manager,
-    const OAuth2TokenService::ScopeSet& scopes,
+    const identity::ScopeSet& scopes,
     AccessTokenFetcher::TokenCallback callback,
     Mode mode)
     : oauth_consumer_name_(oauth_consumer_name),
@@ -75,8 +75,7 @@ void PrimaryAccountAccessTokenFetcher::OnPrimaryAccountSet(
 }
 
 void PrimaryAccountAccessTokenFetcher::OnRefreshTokenUpdatedForAccount(
-    const AccountInfo& account_info,
-    bool is_valid) {
+    const AccountInfo& account_info) {
   ProcessSigninStateChange();
 }
 

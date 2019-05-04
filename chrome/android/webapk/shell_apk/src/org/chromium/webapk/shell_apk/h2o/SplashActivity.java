@@ -4,27 +4,64 @@
 
 package org.chromium.webapk.shell_apk.h2o;
 
+import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.widget.FrameLayout;
 
 import org.chromium.webapk.lib.common.WebApkMetaDataKeys;
 import org.chromium.webapk.lib.common.WebApkMetaDataUtils;
 import org.chromium.webapk.lib.common.splash.SplashLayout;
 import org.chromium.webapk.shell_apk.HostBrowserLauncher;
-import org.chromium.webapk.shell_apk.HostBrowserLauncherActivity;
 import org.chromium.webapk.shell_apk.HostBrowserLauncherParams;
+import org.chromium.webapk.shell_apk.LaunchHostBrowserSelector;
 import org.chromium.webapk.shell_apk.R;
 import org.chromium.webapk.shell_apk.WebApkUtils;
 
 /** Displays splash screen. */
-public class SplashActivity extends HostBrowserLauncherActivity {
+public class SplashActivity extends Activity {
     @Override
-    protected void showSplashScreen() {
+    protected void onCreate(Bundle savedInstanceState) {
+        final long activityStartTimeMs = SystemClock.elapsedRealtime();
+        super.onCreate(savedInstanceState);
+
+        showSplashScreen();
+        selectHostBrowser(activityStartTimeMs);
+    }
+
+    @Override
+    public void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        selectHostBrowser(-1);
+    }
+
+    private void selectHostBrowser(final long activityStartTimeMs) {
+        new LaunchHostBrowserSelector(this).selectHostBrowser(
+                new LaunchHostBrowserSelector.Callback() {
+                    @Override
+                    public void onBrowserSelected(
+                            String hostBrowserPackageName, boolean dialogShown) {
+                        if (hostBrowserPackageName == null) {
+                            finish();
+                            return;
+                        }
+                        HostBrowserLauncherParams params =
+                                HostBrowserLauncherParams.createForIntent(SplashActivity.this,
+                                        getIntent(), hostBrowserPackageName, dialogShown,
+                                        activityStartTimeMs);
+                        onHostBrowserSelected(params);
+                    }
+                });
+    }
+
+    private void showSplashScreen() {
         Bundle metadata = WebApkUtils.readMetaData(this);
         Resources resources = getResources();
 
@@ -36,8 +73,8 @@ public class SplashActivity extends HostBrowserLauncherActivity {
         setContentView(layout);
 
         int backgroundColor = WebApkUtils.getColor(resources, R.color.background_color);
-        SplashLayout.createLayout(this, layout, icon, iconClassification,
-                resources.getString(R.string.name),
+        SplashLayout.createLayout(this, layout, icon, false /* isIconAdaptive */,
+                iconClassification, resources.getString(R.string.name),
                 WebApkUtils.shouldUseLightForegroundOnBackground(backgroundColor));
 
         int themeColor = (int) WebApkMetaDataUtils.getLongFromMetaData(
@@ -46,8 +83,8 @@ public class SplashActivity extends HostBrowserLauncherActivity {
                 getWindow(), WebApkUtils.getDarkenedColorForStatusBar(themeColor));
     }
 
-    @Override
-    protected void onHostBrowserSelected(HostBrowserLauncherParams params) {
+    /** Called once the host browser has been selected. */
+    private void onHostBrowserSelected(HostBrowserLauncherParams params) {
         if (params == null) {
             finish();
             return;
@@ -55,14 +92,15 @@ public class SplashActivity extends HostBrowserLauncherActivity {
 
         Context appContext = getApplicationContext();
 
-        // TODO(pkotwicz): Pass parameter to tell Chrome not to show splash screen.
-        HostBrowserLauncher.launch(appContext, params);
-
-        if (!H2OLauncher.shouldMainIntentLaunchSplashActivity(params)) {
+        if (!H2OLauncher.shouldIntentLaunchSplashActivity(params)) {
+            HostBrowserLauncher.launch(appContext, params);
             H2OLauncher.changeEnabledComponentsAndKillShellApk(appContext,
-                    new ComponentName(appContext, H2OMainActivity.class), getComponentName());
+                    new ComponentName(appContext, H2OMainActivity.class),
+                    new ComponentName(appContext, H2OOpaqueMainActivity.class));
             finish();
             return;
         }
+
+        H2OLauncher.launch(this, params);
     }
 }

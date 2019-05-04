@@ -122,6 +122,7 @@ class WebAXObject {
   BLINK_EXPORT bool IsCheckable() const;
   BLINK_EXPORT bool IsClickable() const;
   BLINK_EXPORT bool IsControl() const;
+  BLINK_EXPORT bool IsDefault() const;
   BLINK_EXPORT WebAXExpanded IsExpanded() const;
   BLINK_EXPORT bool IsFocused() const;
   BLINK_EXPORT bool IsHovered() const;
@@ -158,6 +159,7 @@ class WebAXObject {
   BLINK_EXPORT WebString FontFamily() const;
   BLINK_EXPORT float FontSize() const;
   BLINK_EXPORT bool CanvasHasFallbackContent() const;
+  BLINK_EXPORT WebAXObject ErrorMessage() const;
   // If this is an image, returns the image (scaled to maxSize) as a data url.
   BLINK_EXPORT WebString ImageDataUrl(const WebSize& max_size) const;
   BLINK_EXPORT WebAXRestriction Restriction() const;
@@ -177,7 +179,8 @@ class WebAXObject {
   BLINK_EXPORT WebString StringValue() const;
   BLINK_EXPORT ax::mojom::TextDirection GetTextDirection() const;
   BLINK_EXPORT ax::mojom::TextPosition GetTextPosition() const;
-  BLINK_EXPORT WebAXTextStyle TextStyle() const;
+  // Bitmask from ax::mojom::TextStyle.
+  BLINK_EXPORT int32_t TextStyle() const;
   BLINK_EXPORT WebURL Url() const;
 
   // Retrieves the accessible name of the object, an enum indicating where the

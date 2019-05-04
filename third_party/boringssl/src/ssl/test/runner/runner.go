@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -42,6 +43,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"boringssl.googlesource.com/boringssl/util/testresult"
 )
 
 var (
@@ -303,6 +306,14 @@ func encodeDERValues(values [][]byte) string {
 	return ret
 }
 
+func decodeHexOrPanic(in string) []byte {
+	ret, err := hex.DecodeString(in)
+	if err != nil {
+		panic(err)
+	}
+	return ret
+}
+
 type testType int
 
 const (
@@ -462,6 +473,11 @@ type testCase struct {
 	sendKeyUpdates int
 	// keyUpdateRequest is the KeyUpdateRequest value to send in KeyUpdate messages.
 	keyUpdateRequest byte
+	// expectUnsolicitedKeyUpdate makes the test expect a one or more KeyUpdate
+	// messages while reading data from the shim. Don't use this in combination
+	// with any of the fields that send a KeyUpdate otherwise any received
+	// KeyUpdate might not be as unsolicited as expected.
+	expectUnsolicitedKeyUpdate bool
 	// expectMessageDropped, if true, means the test message is expected to
 	// be dropped by the client rather than echoed back.
 	expectMessageDropped bool
@@ -480,6 +496,9 @@ type testCase struct {
 	// expectedQUICTransportParams contains the QUIC transport
 	// parameters that are expected to be sent by the peer.
 	expectedQUICTransportParams []byte
+	// exportTrafficSecrets, if true, configures the test to export the TLS 1.3
+	// traffic secrets and confirms that they match.
+	exportTrafficSecrets bool
 }
 
 var testCases []testCase
@@ -758,6 +777,32 @@ func doExchange(test *testCase, config *Config, conn net.Conn, isResume bool, tr
 		}
 	}
 
+	if test.exportTrafficSecrets {
+		secretLenBytes := make([]byte, 2)
+		if _, err := io.ReadFull(tlsConn, secretLenBytes); err != nil {
+			return err
+		}
+		secretLen := binary.LittleEndian.Uint16(secretLenBytes)
+
+		theirReadSecret := make([]byte, secretLen)
+		theirWriteSecret := make([]byte, secretLen)
+		if _, err := io.ReadFull(tlsConn, theirReadSecret); err != nil {
+			return err
+		}
+		if _, err := io.ReadFull(tlsConn, theirWriteSecret); err != nil {
+			return err
+		}
+
+		myReadSecret := tlsConn.in.trafficSecret
+		myWriteSecret := tlsConn.out.trafficSecret
+		if !bytes.Equal(myWriteSecret, theirReadSecret) {
+			return fmt.Errorf("read traffic-secret mismatch; got %x, wanted %x", theirReadSecret, myWriteSecret)
+		}
+		if !bytes.Equal(myReadSecret, theirWriteSecret) {
+			return fmt.Errorf("write traffic-secret mismatch; got %x, wanted %x", theirWriteSecret, myReadSecret)
+		}
+	}
+
 	if test.testTLSUnique {
 		var peersValue [12]byte
 		if _, err := io.ReadFull(tlsConn, peersValue[:]); err != nil {
@@ -908,8 +953,12 @@ func doExchange(test *testCase, config *Config, conn net.Conn, isResume bool, tr
 
 		for i, v := range buf {
 			if v != testMessage[i]^0xff {
-				return fmt.Errorf("bad reply contents at byte %d", i)
+				return fmt.Errorf("bad reply contents at byte %d; got %q and wanted %q", i, buf, testMessage)
 			}
+		}
+
+		if seen := tlsConn.keyUpdateSeen; seen != test.expectUnsolicitedKeyUpdate {
+			return fmt.Errorf("keyUpdateSeen (%t) != expectUnsolicitedKeyUpdate", seen)
 		}
 	}
 
@@ -1111,6 +1160,10 @@ func runTest(test *testCase, shimPath string, mallocNumToFail int64) error {
 	if test.exportKeyingMaterial > 0 || test.exportEarlyKeyingMaterial > 0 {
 		flags = append(flags, "-export-label", test.exportLabel)
 		flags = append(flags, "-export-context", test.exportContext)
+	}
+
+	if test.exportTrafficSecrets {
+		flags = append(flags, "-export-traffic-secrets")
 	}
 
 	if test.expectResumeRejected {
@@ -2782,7 +2835,7 @@ read alert 1 0
 			expectedError: ":WRONG_VERSION_NUMBER:",
 		},
 		{
-			name: "KeyUpdate-Client",
+			name: "KeyUpdate-ToClient",
 			config: Config{
 				MaxVersion: VersionTLS13,
 			},
@@ -2791,12 +2844,29 @@ read alert 1 0
 		},
 		{
 			testType: serverTest,
-			name:     "KeyUpdate-Server",
+			name:     "KeyUpdate-ToServer",
 			config: Config{
 				MaxVersion: VersionTLS13,
 			},
 			sendKeyUpdates:   1,
 			keyUpdateRequest: keyUpdateNotRequested,
+		},
+		{
+			name: "KeyUpdate-FromClient",
+			config: Config{
+				MaxVersion: VersionTLS13,
+			},
+			expectUnsolicitedKeyUpdate: true,
+			flags:                      []string{"-key-update"},
+		},
+		{
+			testType: serverTest,
+			name:     "KeyUpdate-FromServer",
+			config: Config{
+				MaxVersion: VersionTLS13,
+			},
+			expectUnsolicitedKeyUpdate: true,
+			flags:                      []string{"-key-update"},
 		},
 		{
 			name: "KeyUpdate-InvalidRequestMode",
@@ -5016,6 +5086,165 @@ func addStateMachineCoverageTests(config stateMachineTestConfig) {
 						}, flags...),
 						resumeSession: true,
 					})
+					if vers.version >= VersionTLS13 {
+						tests = append(tests, testCase{
+							testType: testType,
+							name:     "EarlyData-RejectTicket-Client-Reverify" + suffix,
+							config: Config{
+								MaxVersion:       vers.version,
+								MaxEarlyDataSize: 16384,
+							},
+							resumeConfig: &Config{
+								MaxVersion:             vers.version,
+								MaxEarlyDataSize:       16384,
+								SessionTicketsDisabled: true,
+							},
+							tls13Variant:         vers.tls13Variant,
+							resumeSession:        true,
+							expectResumeRejected: true,
+							flags: append([]string{
+								"-enable-early-data",
+								"-expect-ticket-supports-early-data",
+								"-reverify-on-resume",
+								"-on-resume-shim-writes-first",
+								// Session tickets are disabled, so the runner will not send a ticket.
+								"-on-retry-expect-no-session",
+								"-expect-reject-early-data",
+							}, flags...),
+						})
+						tests = append(tests, testCase{
+							testType: testType,
+							name:     "EarlyData-Reject0RTT-Client-Reverify" + suffix,
+							config: Config{
+								MaxVersion:       vers.version,
+								MaxEarlyDataSize: 16384,
+							},
+							resumeConfig: &Config{
+								MaxVersion:       vers.version,
+								MaxEarlyDataSize: 16384,
+								Bugs: ProtocolBugs{
+									AlwaysRejectEarlyData: true,
+								},
+							},
+							tls13Variant:         vers.tls13Variant,
+							resumeSession:        true,
+							expectResumeRejected: false,
+							flags: append([]string{
+								"-enable-early-data",
+								"-expect-reject-early-data",
+								"-expect-ticket-supports-early-data",
+								"-reverify-on-resume",
+								"-on-resume-shim-writes-first",
+							}, flags...),
+						})
+						tests = append(tests, testCase{
+							testType: testType,
+							name:     "EarlyData-RejectTicket-Client-ReverifyFails" + suffix,
+							config: Config{
+								MaxVersion:       vers.version,
+								MaxEarlyDataSize: 16384,
+							},
+							resumeConfig: &Config{
+								MaxVersion:             vers.version,
+								MaxEarlyDataSize:       16384,
+								SessionTicketsDisabled: true,
+							},
+							tls13Variant:         vers.tls13Variant,
+							resumeSession:        true,
+							expectResumeRejected: true,
+							shouldFail:           true,
+							expectedError:        ":CERTIFICATE_VERIFY_FAILED:",
+							flags: append([]string{
+								"-enable-early-data",
+								"-expect-ticket-supports-early-data",
+								"-reverify-on-resume",
+								"-on-resume-shim-writes-first",
+								// Session tickets are disabled, so the runner will not send a ticket.
+								"-on-retry-expect-no-session",
+								"-on-retry-verify-fail",
+								"-expect-reject-early-data",
+							}, flags...),
+						})
+						tests = append(tests, testCase{
+							testType: testType,
+							name:     "EarlyData-Reject0RTT-Client-ReverifyFails" + suffix,
+							config: Config{
+								MaxVersion:       vers.version,
+								MaxEarlyDataSize: 16384,
+							},
+							resumeConfig: &Config{
+								MaxVersion:       vers.version,
+								MaxEarlyDataSize: 16384,
+								Bugs: ProtocolBugs{
+									AlwaysRejectEarlyData: true,
+								},
+							},
+							tls13Variant:         vers.tls13Variant,
+							resumeSession:        true,
+							expectResumeRejected: false,
+							shouldFail:           true,
+							expectedError:        ":CERTIFICATE_VERIFY_FAILED:",
+							flags: append([]string{
+								"-enable-early-data",
+								"-expect-reject-early-data",
+								"-expect-ticket-supports-early-data",
+								"-reverify-on-resume",
+								"-on-resume-shim-writes-first",
+								"-on-retry-verify-fail",
+							}, flags...),
+						})
+						// This tests that we only call the verify callback once.
+						tests = append(tests, testCase{
+							testType: testType,
+							name:     "EarlyData-Accept0RTT-Client-Reverify" + suffix,
+							config: Config{
+								MaxVersion:       vers.version,
+								MaxEarlyDataSize: 16384,
+							},
+							resumeConfig: &Config{
+								MaxVersion:       vers.version,
+								MaxEarlyDataSize: 16384,
+								Bugs: ProtocolBugs{
+									ExpectEarlyData: [][]byte{[]byte("hello")},
+								},
+							},
+							tls13Variant:         vers.tls13Variant,
+							resumeSession:        true,
+							expectResumeRejected: false,
+							flags: append([]string{
+								"-enable-early-data",
+								"-expect-ticket-supports-early-data",
+								"-reverify-on-resume",
+								"-on-resume-shim-writes-first",
+							}, flags...),
+						})
+						tests = append(tests, testCase{
+							testType: testType,
+							name:     "EarlyData-Accept0RTT-Client-ReverifyFails" + suffix,
+							config: Config{
+								MaxVersion:       vers.version,
+								MaxEarlyDataSize: 16384,
+							},
+							resumeConfig: &Config{
+								MaxVersion:       vers.version,
+								MaxEarlyDataSize: 16384,
+								Bugs: ProtocolBugs{
+									ExpectEarlyData: [][]byte{[]byte("hello")},
+								},
+							},
+							tls13Variant:  vers.tls13Variant,
+							resumeSession: true,
+							shouldFail:    true,
+							expectedError: ":CERTIFICATE_VERIFY_FAILED:",
+							flags: append([]string{
+								"-enable-early-data",
+								"-expect-ticket-supports-early-data",
+								"-reverify-on-resume",
+								"-on-resume-verify-fail",
+								"-on-resume-shim-writes-first",
+							}, flags...),
+						})
+					}
 				}
 			}
 		}
@@ -8693,7 +8922,7 @@ func addSignatureAlgorithmTests() {
 	// Not all ciphers involve a signature. Advertise a list which gives all
 	// versions a signing cipher.
 	signingCiphers := []uint16{
-		TLS_AES_128_GCM_SHA256,
+		TLS_AES_256_GCM_SHA384,
 		TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 		TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 		TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
@@ -9137,26 +9366,8 @@ func addSignatureAlgorithmTests() {
 		expectedError: ":WRONG_SIGNATURE_TYPE:",
 	})
 
-	// Test that, if the list is missing, the peer falls back to SHA-1 in
-	// TLS 1.2, but not TLS 1.3.
-	testCases = append(testCases, testCase{
-		name: "ClientAuth-SHA1-Fallback-RSA",
-		config: Config{
-			MaxVersion: VersionTLS12,
-			ClientAuth: RequireAnyClientCert,
-			VerifySignatureAlgorithms: []signatureAlgorithm{
-				signatureRSAPKCS1WithSHA1,
-			},
-			Bugs: ProtocolBugs{
-				NoSignatureAlgorithms: true,
-			},
-		},
-		flags: []string{
-			"-cert-file", path.Join(*resourceDir, rsaCertificateFile),
-			"-key-file", path.Join(*resourceDir, rsaKeyFile),
-		},
-	})
-
+	// Test that, if the ClientHello list is missing, the server falls back
+	// to SHA-1 in TLS 1.2, but not TLS 1.3.
 	testCases = append(testCases, testCase{
 		testType: serverTest,
 		name:     "ServerAuth-SHA1-Fallback-RSA",
@@ -9172,24 +9383,6 @@ func addSignatureAlgorithmTests() {
 		flags: []string{
 			"-cert-file", path.Join(*resourceDir, rsaCertificateFile),
 			"-key-file", path.Join(*resourceDir, rsaKeyFile),
-		},
-	})
-
-	testCases = append(testCases, testCase{
-		name: "ClientAuth-SHA1-Fallback-ECDSA",
-		config: Config{
-			MaxVersion: VersionTLS12,
-			ClientAuth: RequireAnyClientCert,
-			VerifySignatureAlgorithms: []signatureAlgorithm{
-				signatureECDSAWithSHA1,
-			},
-			Bugs: ProtocolBugs{
-				NoSignatureAlgorithms: true,
-			},
-		},
-		flags: []string{
-			"-cert-file", path.Join(*resourceDir, ecdsaP256CertificateFile),
-			"-key-file", path.Join(*resourceDir, ecdsaP256KeyFile),
 		},
 	})
 
@@ -9212,6 +9405,66 @@ func addSignatureAlgorithmTests() {
 	})
 
 	testCases = append(testCases, testCase{
+		testType: serverTest,
+		name:     "ServerAuth-NoFallback-TLS13",
+		config: Config{
+			MaxVersion: VersionTLS13,
+			VerifySignatureAlgorithms: []signatureAlgorithm{
+				signatureRSAPKCS1WithSHA1,
+			},
+			Bugs: ProtocolBugs{
+				NoSignatureAlgorithms: true,
+			},
+		},
+		shouldFail:    true,
+		expectedError: ":NO_COMMON_SIGNATURE_ALGORITHMS:",
+	})
+
+	// The CertificateRequest list, however, may never be omitted. It is a
+	// syntax error for it to be empty.
+	testCases = append(testCases, testCase{
+		name: "ClientAuth-NoFallback-RSA",
+		config: Config{
+			MaxVersion: VersionTLS12,
+			ClientAuth: RequireAnyClientCert,
+			VerifySignatureAlgorithms: []signatureAlgorithm{
+				signatureRSAPKCS1WithSHA1,
+			},
+			Bugs: ProtocolBugs{
+				NoSignatureAlgorithms: true,
+			},
+		},
+		flags: []string{
+			"-cert-file", path.Join(*resourceDir, rsaCertificateFile),
+			"-key-file", path.Join(*resourceDir, rsaKeyFile),
+		},
+		shouldFail:         true,
+		expectedError:      ":DECODE_ERROR:",
+		expectedLocalError: "remote error: error decoding message",
+	})
+
+	testCases = append(testCases, testCase{
+		name: "ClientAuth-NoFallback-ECDSA",
+		config: Config{
+			MaxVersion: VersionTLS12,
+			ClientAuth: RequireAnyClientCert,
+			VerifySignatureAlgorithms: []signatureAlgorithm{
+				signatureECDSAWithSHA1,
+			},
+			Bugs: ProtocolBugs{
+				NoSignatureAlgorithms: true,
+			},
+		},
+		flags: []string{
+			"-cert-file", path.Join(*resourceDir, ecdsaP256CertificateFile),
+			"-key-file", path.Join(*resourceDir, ecdsaP256KeyFile),
+		},
+		shouldFail:         true,
+		expectedError:      ":DECODE_ERROR:",
+		expectedLocalError: "remote error: error decoding message",
+	})
+
+	testCases = append(testCases, testCase{
 		name: "ClientAuth-NoFallback-TLS13",
 		config: Config{
 			MaxVersion: VersionTLS13,
@@ -9227,27 +9480,9 @@ func addSignatureAlgorithmTests() {
 			"-cert-file", path.Join(*resourceDir, rsaCertificateFile),
 			"-key-file", path.Join(*resourceDir, rsaKeyFile),
 		},
-		shouldFail: true,
-		// An empty CertificateRequest signature algorithm list is a
-		// syntax error in TLS 1.3.
+		shouldFail:         true,
 		expectedError:      ":DECODE_ERROR:",
 		expectedLocalError: "remote error: error decoding message",
-	})
-
-	testCases = append(testCases, testCase{
-		testType: serverTest,
-		name:     "ServerAuth-NoFallback-TLS13",
-		config: Config{
-			MaxVersion: VersionTLS13,
-			VerifySignatureAlgorithms: []signatureAlgorithm{
-				signatureRSAPKCS1WithSHA1,
-			},
-			Bugs: ProtocolBugs{
-				NoSignatureAlgorithms: true,
-			},
-		},
-		shouldFail:    true,
-		expectedError: ":NO_COMMON_SIGNATURE_ALGORITHMS:",
 	})
 
 	// Test that signature preferences are enforced. BoringSSL does not
@@ -9444,7 +9679,7 @@ func addSignatureAlgorithmTests() {
 			CipherSuites: []uint16{TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256},
 			Certificates: []Certificate{ecdsaP256Certificate},
 		},
-		flags:         []string{"-p384-only"},
+		flags:         []string{"-curves", strconv.Itoa(int(CurveP384))},
 		shouldFail:    true,
 		expectedError: ":BAD_ECC_CERT:",
 	})
@@ -9456,7 +9691,7 @@ func addSignatureAlgorithmTests() {
 			MaxVersion:   VersionTLS13,
 			Certificates: []Certificate{ecdsaP256Certificate},
 		},
-		flags: []string{"-p384-only"},
+		flags: []string{"-curves", strconv.Itoa(int(CurveP384))},
 	})
 
 	// In TLS 1.2, the ECDSA curve is not in the signature algorithm.
@@ -10346,6 +10581,24 @@ func addExportKeyingMaterialTests() {
 	})
 }
 
+func addExportTrafficSecretsTests() {
+	for _, cipherSuite := range []testCipherSuite{
+		// Test a SHA-256 and SHA-384 based cipher suite.
+		{"AEAD-AES128-GCM-SHA256", TLS_AES_128_GCM_SHA256},
+		{"AEAD-AES256-GCM-SHA384", TLS_AES_256_GCM_SHA384},
+	} {
+
+		testCases = append(testCases, testCase{
+			name: "ExportTrafficSecrets-" + cipherSuite.name,
+			config: Config{
+				MinVersion:   VersionTLS13,
+				CipherSuites: []uint16{cipherSuite.id},
+			},
+			exportTrafficSecrets: true,
+		})
+	}
+}
+
 func addTLSUniqueTests() {
 	for _, isClient := range []bool{false, true} {
 		for _, isResumption := range []bool{false, true} {
@@ -10536,6 +10789,7 @@ var testCurves = []struct {
 	{"P-384", CurveP384},
 	{"P-521", CurveP521},
 	{"X25519", CurveX25519},
+	{"CECPQ2", CurveCECPQ2},
 }
 
 const bogusCurve = 0x1234
@@ -10543,6 +10797,10 @@ const bogusCurve = 0x1234
 func addCurveTests() {
 	for _, curve := range testCurves {
 		for _, ver := range tlsVersions {
+			if curve.id == CurveCECPQ2 && ver.version < VersionTLS13 {
+				continue
+			}
+
 			suffix := curve.name + "-" + ver.name
 
 			testCases = append(testCases, testCase{
@@ -10552,7 +10810,7 @@ func addCurveTests() {
 					CipherSuites: []uint16{
 						TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 						TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-						TLS_AES_128_GCM_SHA256,
+						TLS_AES_256_GCM_SHA384,
 					},
 					CurvePreferences: []CurveID{curve.id},
 				},
@@ -10571,7 +10829,7 @@ func addCurveTests() {
 					CipherSuites: []uint16{
 						TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 						TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-						TLS_AES_128_GCM_SHA256,
+						TLS_AES_256_GCM_SHA384,
 					},
 					CurvePreferences: []CurveID{curve.id},
 				},
@@ -10583,7 +10841,7 @@ func addCurveTests() {
 				expectedCurveID: curve.id,
 			})
 
-			if curve.id != CurveX25519 {
+			if curve.id != CurveX25519 && curve.id != CurveCECPQ2 {
 				testCases = append(testCases, testCase{
 					name: "CurveTest-Client-Compressed-" + suffix,
 					config: Config{
@@ -10591,7 +10849,7 @@ func addCurveTests() {
 						CipherSuites: []uint16{
 							TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 							TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-							TLS_AES_128_GCM_SHA256,
+							TLS_AES_256_GCM_SHA384,
 						},
 						CurvePreferences: []CurveID{curve.id},
 						Bugs: ProtocolBugs{
@@ -10611,7 +10869,7 @@ func addCurveTests() {
 						CipherSuites: []uint16{
 							TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 							TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-							TLS_AES_128_GCM_SHA256,
+							TLS_AES_256_GCM_SHA384,
 						},
 						CurvePreferences: []CurveID{curve.id},
 						Bugs: ProtocolBugs{
@@ -10727,7 +10985,7 @@ func addCurveTests() {
 				IgnorePeerCurvePreferences: true,
 			},
 		},
-		flags:         []string{"-p384-only"},
+		flags:         []string{"-curves", strconv.Itoa(int(CurveP384))},
 		shouldFail:    true,
 		expectedError: ":WRONG_CURVE:",
 	})
@@ -10743,7 +11001,7 @@ func addCurveTests() {
 				SendCurve: CurveP256,
 			},
 		},
-		flags:         []string{"-p384-only"},
+		flags:         []string{"-curves", strconv.Itoa(int(CurveP384))},
 		shouldFail:    true,
 		expectedError: ":WRONG_CURVE:",
 	})
@@ -10992,6 +11250,112 @@ func addCurveTests() {
 			Bugs: ProtocolBugs{
 				SetX25519HighBit: true,
 			},
+		},
+	})
+
+	// CECPQ2 should not be offered by a TLS < 1.3 client.
+	testCases = append(testCases, testCase{
+		name: "CECPQ2NotInTLS12",
+		config: Config{
+			Bugs: ProtocolBugs{
+				FailIfCECPQ2Offered: true,
+			},
+		},
+		flags: []string{
+			"-max-version", strconv.Itoa(VersionTLS12),
+			"-curves", strconv.Itoa(int(CurveCECPQ2)),
+			"-curves", strconv.Itoa(int(CurveX25519)),
+		},
+	})
+
+	// CECPQ2 should not crash a TLS < 1.3 client if the server mistakenly
+	// selects it.
+	testCases = append(testCases, testCase{
+		name: "CECPQ2NotAcceptedByTLS12Client",
+		config: Config{
+			Bugs: ProtocolBugs{
+				SendCurve: CurveCECPQ2,
+			},
+		},
+		flags: []string{
+			"-max-version", strconv.Itoa(VersionTLS12),
+			"-curves", strconv.Itoa(int(CurveCECPQ2)),
+			"-curves", strconv.Itoa(int(CurveX25519)),
+		},
+		shouldFail:    true,
+		expectedError: ":WRONG_CURVE:",
+	})
+
+	// CECPQ2 should not be offered by default as a client.
+	testCases = append(testCases, testCase{
+		name: "CECPQ2NotEnabledByDefaultInClients",
+		config: Config{
+			MinVersion: VersionTLS13,
+			Bugs: ProtocolBugs{
+				FailIfCECPQ2Offered: true,
+			},
+		},
+	})
+
+	// If CECPQ2 is offered, both X25519 and CECPQ2 should have a key-share.
+	testCases = append(testCases, testCase{
+		name: "NotJustCECPQ2KeyShare",
+		config: Config{
+			MinVersion: VersionTLS13,
+			Bugs: ProtocolBugs{
+				ExpectedKeyShares: []CurveID{CurveCECPQ2, CurveX25519},
+			},
+		},
+		flags: []string{
+			"-curves", strconv.Itoa(int(CurveCECPQ2)),
+			"-curves", strconv.Itoa(int(CurveX25519)),
+			"-expect-curve-id", strconv.Itoa(int(CurveCECPQ2)),
+		},
+	})
+
+	// ... but only if CECPQ2 is listed first.
+	testCases = append(testCases, testCase{
+		name: "CECPQ2KeyShareNotIncludedSecond",
+		config: Config{
+			MinVersion: VersionTLS13,
+			Bugs: ProtocolBugs{
+				ExpectedKeyShares: []CurveID{CurveX25519},
+			},
+		},
+		flags: []string{
+			"-curves", strconv.Itoa(int(CurveX25519)),
+			"-curves", strconv.Itoa(int(CurveCECPQ2)),
+			"-expect-curve-id", strconv.Itoa(int(CurveX25519)),
+		},
+	})
+
+	// If CECPQ2 is the only configured curve, the key share is sent.
+	testCases = append(testCases, testCase{
+		name: "JustConfiguringCECPQ2Works",
+		config: Config{
+			MinVersion: VersionTLS13,
+			Bugs: ProtocolBugs{
+				ExpectedKeyShares: []CurveID{CurveCECPQ2},
+			},
+		},
+		flags: []string{
+			"-curves", strconv.Itoa(int(CurveCECPQ2)),
+			"-expect-curve-id", strconv.Itoa(int(CurveCECPQ2)),
+		},
+	})
+
+	// As a server, CECPQ2 is not yet supported by default.
+	testCases = append(testCases, testCase{
+		testType: serverTest,
+		name:     "CECPQ2NotEnabledByDefaultForAServer",
+		config: Config{
+			MinVersion:       VersionTLS13,
+			CurvePreferences: []CurveID{CurveCECPQ2, CurveX25519},
+			DefaultCurves:    []CurveID{CurveCECPQ2},
+		},
+		flags: []string{
+			"-server-preference",
+			"-expect-curve-id", strconv.Itoa(int(CurveX25519)),
 		},
 	})
 }
@@ -12531,7 +12895,7 @@ func addTLS13HandshakeTests() {
 				},
 			},
 			tls13Variant:  variant,
-			flags:         []string{"-p384-only"},
+			flags:         []string{"-curves", strconv.Itoa(int(CurveP384))},
 			shouldFail:    true,
 			expectedError: ":WRONG_CURVE:",
 		})
@@ -13690,6 +14054,60 @@ func addTLS13CipherPreferenceTests() {
 			"-expect-cipher-no-aes", strconv.Itoa(int(TLS_CHACHA20_POLY1305_SHA256)),
 		},
 	})
+
+	// Test that CECPQ2 cannot be used with TLS_AES_128_GCM_SHA256.
+	testCases = append(testCases, testCase{
+		testType: serverTest,
+		name:     "TLS13-CipherPreference-CECPQ2-AES128Only",
+		config: Config{
+			MaxVersion: VersionTLS13,
+			CipherSuites: []uint16{
+				TLS_AES_128_GCM_SHA256,
+			},
+		},
+		flags: []string{
+			"-curves", strconv.Itoa(int(CurveCECPQ2)),
+		},
+		shouldFail:         true,
+		expectedError:      ":NO_SHARED_CIPHER:",
+		expectedLocalError: "remote error: handshake failure",
+	})
+
+	// Test that CECPQ2 continues to honor AES vs ChaCha20 logic.
+	testCases = append(testCases, testCase{
+		testType: serverTest,
+		name:     "TLS13-CipherPreference-CECPQ2-AES128-ChaCha20-AES256",
+		config: Config{
+			MaxVersion: VersionTLS13,
+			CipherSuites: []uint16{
+				TLS_AES_128_GCM_SHA256,
+				TLS_CHACHA20_POLY1305_SHA256,
+				TLS_AES_256_GCM_SHA384,
+			},
+		},
+		flags: []string{
+			"-curves", strconv.Itoa(int(CurveCECPQ2)),
+			"-expect-cipher-aes", strconv.Itoa(int(TLS_CHACHA20_POLY1305_SHA256)),
+			"-expect-cipher-no-aes", strconv.Itoa(int(TLS_CHACHA20_POLY1305_SHA256)),
+		},
+	})
+	testCases = append(testCases, testCase{
+		testType: serverTest,
+		name:     "TLS13-CipherPreference-CECPQ2-AES128-AES256-ChaCha20",
+		config: Config{
+			MaxVersion: VersionTLS13,
+			CipherSuites: []uint16{
+				TLS_AES_128_GCM_SHA256,
+				TLS_AES_256_GCM_SHA384,
+				TLS_CHACHA20_POLY1305_SHA256,
+			},
+		},
+		flags: []string{
+			"-curves", strconv.Itoa(int(CurveCECPQ2)),
+			"-expect-cipher-aes", strconv.Itoa(int(TLS_AES_256_GCM_SHA384)),
+			"-expect-cipher-no-aes", strconv.Itoa(int(TLS_CHACHA20_POLY1305_SHA256)),
+		},
+	})
 }
 
 func addPeekTests() {
@@ -14467,6 +14885,162 @@ func addCertCompressionTests() {
 	}
 }
 
+func addJDK11WorkaroundTests() {
+	// Test the client treats the JDK 11 downgrade random like the usual one.
+	testCases = append(testCases, testCase{
+		testType: clientTest,
+		name:     "Client-RejectJDK11DowngradeRandom",
+		config: Config{
+			MaxVersion: VersionTLS12,
+			Bugs: ProtocolBugs{
+				SendJDK11DowngradeRandom: true,
+			},
+		},
+		shouldFail:         true,
+		expectedError:      ":TLS13_DOWNGRADE:",
+		expectedLocalError: "remote error: illegal parameter",
+	})
+	testCases = append(testCases, testCase{
+		testType: clientTest,
+		name:     "Client-AcceptJDK11DowngradeRandom",
+		config: Config{
+			MaxVersion: VersionTLS12,
+			Bugs: ProtocolBugs{
+				SendJDK11DowngradeRandom: true,
+			},
+		},
+		flags: []string{"-max-version", strconv.Itoa(VersionTLS12)},
+	})
+
+	var clientHelloTests = []struct {
+		clientHello []byte
+		isJDK11     bool
+	}{
+		{
+			// A default JDK 11 ClientHello.
+			decodeHexOrPanic("010001a9030336a379aa355a22a064b4402760efae1c73977b0b4c975efc7654c35677723dde201fe3f8a2bca60418a68f72463ea19f3c241e7cbfceb347e451a62bd2417d8981005a13011302c02cc02bc030009dc02ec032009f00a3c02f009cc02dc031009e00a2c024c028003dc026c02a006b006ac00ac0140035c005c00f00390038c023c027003cc025c02900670040c009c013002fc004c00e0033003200ff01000106000000080006000003736e69000500050100000000000a0020001e0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020011000900070200040000000000170000002b0009080304030303020301002d000201010033004700450017004104721f007464cb08a0f36e093ad178eb78d6968df20077b2dd882694a85dc4c9884caf5092db41f16cc3f8d41f59426992fa5e32cfb9ad08deee752cdd95b1a6b5"),
+			true,
+		},
+		{
+			// The above with supported_versions and
+			// psk_key_exchange_modes in the wrong order.
+			decodeHexOrPanic("010001a9030336a379aa355a22a064b4402760efae1c73977b0b4c975efc7654c35677723dde201fe3f8a2bca60418a68f72463ea19f3c241e7cbfceb347e451a62bd2417d8981005a13011302c02cc02bc030009dc02ec032009f00a3c02f009cc02dc031009e00a2c024c028003dc026c02a006b006ac00ac0140035c005c00f00390038c023c027003cc025c02900670040c009c013002fc004c00e0033003200ff01000106000000080006000003736e69000500050100000000000a0020001e0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020011000900070200040000000000170000002d00020101002b00090803040303030203010033004700450017004104721f007464cb08a0f36e093ad178eb78d6968df20077b2dd882694a85dc4c9884caf5092db41f16cc3f8d41f59426992fa5e32cfb9ad08deee752cdd95b1a6b5"),
+			false,
+		},
+		{
+			// The above with a padding extension added at the end.
+			decodeHexOrPanic("010001b4030336a379aa355a22a064b4402760efae1c73977b0b4c975efc7654c35677723dde201fe3f8a2bca60418a68f72463ea19f3c241e7cbfceb347e451a62bd2417d8981005a13011302c02cc02bc030009dc02ec032009f00a3c02f009cc02dc031009e00a2c024c028003dc026c02a006b006ac00ac0140035c005c00f00390038c023c027003cc025c02900670040c009c013002fc004c00e0033003200ff01000111000000080006000003736e69000500050100000000000a0020001e0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020011000900070200040000000000170000002b0009080304030303020301002d000201010033004700450017004104721f007464cb08a0f36e093ad178eb78d6968df20077b2dd882694a85dc4c9884caf5092db41f16cc3f8d41f59426992fa5e32cfb9ad08deee752cdd95b1a6b50015000700000000000000"),
+			false,
+		},
+		{
+			// A JDK 11 ClientHello offering a TLS 1.3 PSK.
+			decodeHexOrPanic("0100024c0303a8d71b20f060545a398226e807d21371a7a02b7ca2f96f476c2dea7e5860c5a400005a13011302c02cc02bc030009dc02ec032009f00a3c02f009cc02dc031009e00a2c024c028003dc026c02a006b006ac00ac0140035c005c00f00390038c023c027003cc025c02900670040c009c013002fc004c00e0033003200ff010001c9000500050100000000000a0020001e0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020011000900070200040000000000170000002b0009080304030303020301002d000201010033004700450017004104aaec585ea9e121b24710a23560571322b2cf8ab8cd14e5762ef0486d8a6d0ecd721d8f2abda2eb8ed5ab7195505660450f49bba94bbf0c3f0070a531d9a1be4f002900cb00a600a0e6f7586d9a2bf64a54c1adf55a2f76657047e8e88e26629e2e7b9d630941e06fd87792770f6834e159a70b252157a9b4b082183f24629c8ff5049088b07ce37c49de8cf752a2ed7a545aff63bdc7a1b18e1bc201f23f159ee75d4987a04e00f840824f764691ab83a20e3032646e793065874cdb46138a52f50ed71406f399f96f9309eba4e5b1966148c22a63dc4aa1364269dd41dd5cc0e848d07af0095622c52cfcfc00212009cc315259e2328d65ad17a3de7c182c7874140a9356fecdd4614657806cd659"),
+			true,
+		},
+		{
+			// A JDK 11 ClientHello offering a TLS 1.2 session.
+			decodeHexOrPanic("010001a903038cdec49f4836d064a75046c93f22d0b9c2cf4900917332e6f0e1f41d692d3146201a3e99047492285ec65ab4e0eeee59f8f9d1eb7687398887bcd7b81353e93923005a13011302c02cc02bc030009dc02ec032009f00a3c02f009cc02dc031009e00a2c024c028003dc026c02a006b006ac00ac0140035c005c00f00390038c023c027003cc025c02900670040c009c013002fc004c00e0033003200ff01000106000000080006000003736e69000500050100000000000a0020001e0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020011000900070200040000000000170000002b0009080304030303020301002d0002010100330047004500170041041c83c42fcd8fc06265b9f6e4f076f7e7ee17ace915c587845c0e1bc8cd177f904befeb611b682cae4702509a5f5d0c7162a282b8152d843169b91136e7c6f3e7"),
+			true,
+		},
+		{
+			// A JDK 11 ClientHello with EMS disabled.
+			decodeHexOrPanic("010001a50303323a857c324a9ef57d6e2544d129073830385cb1dc75ea79f6a2ec8ae09d2e7320f85fdd081678874c67ebab235e6d6a81d947f690bc0af9be4d39854ed67d9ef9005a13011302c02cc02bc030009dc02ec032009f00a3c02f009cc02dc031009e00a2c024c028003dc026c02a006b006ac00ac0140035c005c00f00390038c023c027003cc025c02900670040c009c013002fc004c00e0033003200ff01000102000000080006000003736e69000500050100000000000a0020001e0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b040105010601040203030301030202030201020200110009000702000400000000002b0009080304030303020301002d0002010100330047004500170041049c904c4850b495d75522f955d79e9cabea065c90279d6037a101a4c4ee712afc93ad0df5d12d287d53e458c7075d9a3ce3969c939bb62222bda779cecf54a603"),
+			true,
+		},
+		{
+			// A JDK 11 ClientHello with OCSP stapling disabled.
+			decodeHexOrPanic("0100019303038a50481dc85ee4f6581670821c50f2b3d34ac3251dc6e9b751bfd2521ab47ab02069a963c5486034c37ae0577ddb4c2db28cab592380ef8e4599d1305148712112005a13011302c02cc02bc030009dc02ec032009f00a3c02f009cc02dc031009e00a2c024c028003dc026c02a006b006ac00ac0140035c005c00f00390038c023c027003cc025c02900670040c009c013002fc004c00e0033003200ff010000f0000000080006000003736e69000a0020001e0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b040105010601040203030301030202030201020200170000002b0009080304030303020301002d00020101003300470045001700410438a97824f842c549e3c339322d8b2dbaa85d10bd7bca9c969376cb0c60b1e929eb4d13db38dcb0082ad8c637b24f55466a9acbb0b63634c1f431ec8342cf720d"),
+			true,
+		},
+		{
+			// A JDK 11 ClientHello configured with a smaller set of
+			// ciphers.
+			decodeHexOrPanic("0100015603036f5706bbdf1dcae671cd9be043603f5ed20f8fc195b426504cafb4f353edb0012007aabd35e588bc2504a72eda42cbbf89d69cfc0a6a1d77db0d757606f1f4811800061301c02bc02f01000107000000080006000003736e69000500050100000000000a0020001e0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020011000900070200040000000000170000002b00050403040303002d000201010033004700450017004104d283f3d5a90259b61d43ea1511211f568ce5d18457326b717e1f9d6b7d1476f2b51cdc3c798d3bdfba5095edff0ffd0540f6bc0c324bd9744f3b3f24317496e3ff01000100"),
+			true,
+		},
+		{
+			// The above with TLS_CHACHA20_POLY1305_SHA256 added,
+			// which JDK 11 does not support.
+			decodeHexOrPanic("0100015803036f5706bbdf1dcae671cd9be043603f5ed20f8fc195b426504cafb4f353edb0012007aabd35e588bc2504a72eda42cbbf89d69cfc0a6a1d77db0d757606f1f48118000813011303c02bc02f01000107000000080006000003736e69000500050100000000000a0020001e0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020011000900070200040000000000170000002b00050403040303002d000201010033004700450017004104d283f3d5a90259b61d43ea1511211f568ce5d18457326b717e1f9d6b7d1476f2b51cdc3c798d3bdfba5095edff0ffd0540f6bc0c324bd9744f3b3f24317496e3ff01000100"),
+			false,
+		},
+		{
+			// The above with X25519 added, which JDK 11 does not
+			// support.
+			decodeHexOrPanic("0100015803036f5706bbdf1dcae671cd9be043603f5ed20f8fc195b426504cafb4f353edb0012007aabd35e588bc2504a72eda42cbbf89d69cfc0a6a1d77db0d757606f1f4811800061301c02bc02f01000109000000080006000003736e69000500050100000000000a00220020001d0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020011000900070200040000000000170000002b00050403040303002d000201010033004700450017004104d283f3d5a90259b61d43ea1511211f568ce5d18457326b717e1f9d6b7d1476f2b51cdc3c798d3bdfba5095edff0ffd0540f6bc0c324bd9744f3b3f24317496e3ff01000100"),
+			false,
+		},
+		{
+			// A JDK 11 ClientHello with ALPN protocols configured.
+			decodeHexOrPanic("010001bb0303c0e0ea707b00c5311eb09cabd58626692cebfaefaef7265637e4550811dae16220da86d6eea04e214e873675223f08a6926bcf79f16d866280bdbab85e9e09c3ff005a13011302c02cc02bc030009dc02ec032009f00a3c02f009cc02dc031009e00a2c024c028003dc026c02a006b006ac00ac0140035c005c00f00390038c023c027003cc025c02900670040c009c013002fc004c00e0033003200ff01000118000000080006000003736e69000500050100000000000a0020001e0017001800190009000a000b000c000d000e001601000101010201030104000b00020100000d002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020032002800260403050306030804080508060809080a080b04010501060104020303030103020203020102020010000e000c02683208687474702f312e310011000900070200040000000000170000002b0009080304030303020301002d00020101003300470045001700410416def07c1d66ddde5fc9dcc328c8e77022d321c590c0d30cb41d515b38dca34540819a216c6c053bd47b9068f4f6b960f03647de4e36e8b7ffeea78f7252e3d9"),
+			true,
+		},
+	}
+	for i, t := range clientHelloTests {
+		expectedVersion := uint16(VersionTLS13)
+		if t.isJDK11 {
+			expectedVersion = VersionTLS12
+		}
+
+		// In each of these tests, we set DefaultCurves to P-256 to
+		// match the test inputs. SendClientHelloWithFixes requires the
+		// key_shares extension to match in type.
+
+		// With the workaround enabled, we should negotiate TLS 1.2 on
+		// JDK 11 ClientHellos.
+		testCases = append(testCases, testCase{
+			testType: serverTest,
+			name:     fmt.Sprintf("Server-JDK11-%d", i),
+			config: Config{
+				MaxVersion:    VersionTLS13,
+				DefaultCurves: []CurveID{CurveP256},
+				Bugs: ProtocolBugs{
+					SendClientHelloWithFixes:   t.clientHello,
+					ExpectJDK11DowngradeRandom: t.isJDK11,
+				},
+			},
+			expectedVersion: expectedVersion,
+			flags:           []string{"-jdk11-workaround"},
+		})
+
+		// With the workaround disabled, we always negotiate TLS 1.3.
+		testCases = append(testCases, testCase{
+			testType: serverTest,
+			name:     fmt.Sprintf("Server-JDK11-NoWorkaround-%d", i),
+			config: Config{
+				MaxVersion:    VersionTLS13,
+				DefaultCurves: []CurveID{CurveP256},
+				Bugs: ProtocolBugs{
+					SendClientHelloWithFixes:   t.clientHello,
+					ExpectJDK11DowngradeRandom: false,
+				},
+			},
+			expectedVersion: VersionTLS13,
+		})
+
+		// If the server does not support TLS 1.3, the workaround should
+		// be a no-op. In particular, it should not send the downgrade
+		// signal.
+		testCases = append(testCases, testCase{
+			testType: serverTest,
+			name:     fmt.Sprintf("Server-JDK11-TLS12-%d", i),
+			config: Config{
+				MaxVersion:    VersionTLS13,
+				DefaultCurves: []CurveID{CurveP256},
+				Bugs: ProtocolBugs{
+					SendClientHelloWithFixes:   t.clientHello,
+					ExpectJDK11DowngradeRandom: false,
+				},
+			},
+			expectedVersion: VersionTLS12,
+			flags: []string{
+				"-jdk11-workaround",
+				"-max-version", strconv.Itoa(VersionTLS12),
+			},
+		})
+	}
+}
+
 func worker(statusChan chan statusMsg, c chan *testCase, shimPath string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -14502,10 +15076,10 @@ type statusMsg struct {
 	err     error
 }
 
-func statusPrinter(doneChan chan *testOutput, statusChan chan statusMsg, total int) {
+func statusPrinter(doneChan chan *testresult.Results, statusChan chan statusMsg, total int) {
 	var started, done, failed, unimplemented, lineLen int
 
-	testOutput := newTestOutput()
+	testOutput := testresult.NewResults()
 	for msg := range statusChan {
 		if !*pipe {
 			// Erase the previous status line.
@@ -14528,18 +15102,22 @@ func statusPrinter(doneChan chan *testOutput, statusChan chan statusMsg, total i
 						fmt.Printf("UNIMPLEMENTED (%s)\n", msg.test.name)
 					}
 					unimplemented++
-					testOutput.addResult(msg.test.name, "UNIMPLEMENTED")
+					if *allowUnimplemented {
+						testOutput.AddSkip(msg.test.name)
+					} else {
+						testOutput.AddResult(msg.test.name, "SKIP")
+					}
 				} else {
 					fmt.Printf("FAILED (%s)\n%s\n", msg.test.name, msg.err)
 					failed++
-					testOutput.addResult(msg.test.name, "FAIL")
+					testOutput.AddResult(msg.test.name, "FAIL")
 				}
 			} else {
 				if *pipe {
 					// Print each test instead of a status line.
 					fmt.Printf("PASSED (%s)\n", msg.test.name)
 				}
-				testOutput.addResult(msg.test.name, "PASS")
+				testOutput.AddResult(msg.test.name, "PASS")
 			}
 		}
 
@@ -14576,6 +15154,7 @@ func main() {
 	addSignatureAlgorithmTests()
 	addDTLSRetransmitTests()
 	addExportKeyingMaterialTests()
+	addExportTrafficSecretsTests()
 	addTLSUniqueTests()
 	addCustomExtensionTests()
 	addRSAClientKeyExchangeTests()
@@ -14596,6 +15175,7 @@ func main() {
 	addExtraHandshakeTests()
 	addOmitExtensionsTests()
 	addCertCompressionTests()
+	addJDK11WorkaroundTests()
 
 	testCases = append(testCases, convertToSplitHandshakeTests(testCases)...)
 
@@ -14603,7 +15183,7 @@ func main() {
 
 	statusChan := make(chan statusMsg, *numWorkers)
 	testChan := make(chan *testCase, *numWorkers)
-	doneChan := make(chan *testOutput)
+	doneChan := make(chan *testresult.Results)
 
 	if len(*shimConfigFile) != 0 {
 		encoded, err := ioutil.ReadFile(*shimConfigFile)
@@ -14676,16 +15256,12 @@ func main() {
 	fmt.Printf("\n")
 
 	if *jsonOutput != "" {
-		if err := testOutput.writeTo(*jsonOutput); err != nil {
+		if err := testOutput.WriteToFile(*jsonOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		}
 	}
 
-	if !*allowUnimplemented && testOutput.NumFailuresByType["UNIMPLEMENTED"] > 0 {
-		os.Exit(1)
-	}
-
-	if !testOutput.noneFailed {
+	if !testOutput.HasUnexpectedResults() {
 		os.Exit(1)
 	}
 }

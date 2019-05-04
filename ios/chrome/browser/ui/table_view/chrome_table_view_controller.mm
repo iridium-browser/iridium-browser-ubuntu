@@ -13,11 +13,14 @@
 #import "ios/chrome/browser/ui/table_view/table_view_empty_view.h"
 #import "ios/chrome/browser/ui/table_view/table_view_loading_view.h"
 #import "ios/chrome/browser/ui/table_view/table_view_model.h"
-#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+const CGFloat kTableViewSeparatorInset = 16;
+const CGFloat kTableViewSeparatorInsetWithIcon = 56;
 
 @interface ChromeTableViewController ()
 // The loading displayed by [self startLoadingIndicatorWithLoadingMessage:].
@@ -62,6 +65,7 @@
   if (_emptyView == emptyView)
     return;
   _emptyView = emptyView;
+  _emptyView.scrollViewContentInsets = self.view.safeAreaInsets;
   self.tableView.backgroundView = _emptyView;
   // Since this would replace any loadingView, set it to nil.
   self.loadingView = nil;
@@ -73,12 +77,21 @@
   _tableViewModel = [[TableViewModel alloc] init];
 }
 
+- (void)viewSafeAreaInsetsDidChange {
+  [super viewSafeAreaInsetsDidChange];
+  // The safe area insets aren't propagated to the inner scroll view. Manually
+  // set the content insets.
+  self.emptyView.scrollViewContentInsets = self.view.safeAreaInsets;
+}
+
 - (void)viewDidLoad {
   [super viewDidLoad];
 
   [self.tableView setBackgroundColor:self.styler.tableViewBackgroundColor];
   [self.tableView setSeparatorColor:self.styler.cellSeparatorColor];
-  [self.tableView setSeparatorInset:UIEdgeInsetsMake(0, 56, 0, 0)];
+  [self.tableView
+      setSeparatorInset:UIEdgeInsetsMake(0, kTableViewSeparatorInsetWithIcon, 0,
+                                         0)];
 
   // Configure the app bar if needed.
   if (_appBarViewController) {
@@ -153,15 +166,23 @@
 
 - (void)performBatchTableViewUpdates:(void (^)(void))updates
                           completion:(void (^)(BOOL finished))completion {
-  if (@available(iOS 11, *)) {
-    [self.tableView performBatchUpdates:updates completion:completion];
-  } else {
-    [self.tableView beginUpdates];
-    if (updates)
-      updates();
-    [self.tableView endUpdates];
-    if (completion)
-      completion(YES);
+  [self.tableView performBatchUpdates:updates completion:completion];
+}
+
+- (void)removeFromModelItemAtIndexPaths:(NSArray<NSIndexPath*>*)indexPaths {
+  // Sort and enumerate in reverse order to delete the items from the collection
+  // view model.
+  NSArray* sortedIndexPaths =
+      [indexPaths sortedArrayUsingSelector:@selector(compare:)];
+  for (NSIndexPath* indexPath in [sortedIndexPaths reverseObjectEnumerator]) {
+    NSInteger sectionIdentifier =
+        [self.tableViewModel sectionIdentifierForSection:indexPath.section];
+    NSInteger itemType = [self.tableViewModel itemTypeForIndexPath:indexPath];
+    NSUInteger index =
+        [self.tableViewModel indexInItemTypeForIndexPath:indexPath];
+    [self.tableViewModel removeItemWithType:itemType
+                  fromSectionWithIdentifier:sectionIdentifier
+                                    atIndex:index];
   }
 }
 
@@ -260,14 +281,6 @@
 }
 
 #pragma mark - MDCAppBarViewController support
-
-- (UIViewController*)childViewControllerForStatusBarHidden {
-  return self.appBarViewController;
-}
-
-- (UIViewController*)childViewControllerForStatusBarStyle {
-  return self.appBarViewController;
-}
 
 - (void)scrollViewDidScroll:(UIScrollView*)scrollView {
   MDCFlexibleHeaderView* headerView = self.appBarViewController.headerView;

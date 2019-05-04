@@ -51,6 +51,10 @@ namespace base {
 class ListValue;
 }
 
+namespace content {
+class RenderThread;
+}  // namespace content
+
 namespace extensions {
 class ContentWatcher;
 class DispatcherDelegate;
@@ -79,6 +83,8 @@ class Dispatcher : public content::RenderThreadObserver,
   const std::string& webview_partition_id() { return webview_partition_id_; }
 
   bool activity_logging_enabled() const { return activity_logging_enabled_; }
+
+  void OnRenderThreadStarted(content::RenderThread* render_thread);
 
   void OnRenderFrameCreated(content::RenderFrame* render_frame);
 
@@ -171,8 +177,7 @@ class Dispatcher : public content::RenderThreadObserver,
   void OnDispatchOnConnect(const PortId& target_port_id,
                            const std::string& channel_name,
                            const ExtensionMsg_TabConnectionInfo& source,
-                           const ExtensionMsg_ExternalConnectionInfo& info,
-                           const std::string& tls_channel_id);
+                           const ExtensionMsg_ExternalConnectionInfo& info);
   void OnDispatchOnDisconnect(const PortId& port_id,
                               const std::string& error_message);
   void OnLoaded(

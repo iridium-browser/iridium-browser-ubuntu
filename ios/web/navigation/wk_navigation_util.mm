@@ -76,6 +76,12 @@ bool IsWKInternalUrl(const GURL& url) {
   return IsPlaceholderUrl(url) || IsRestoreSessionUrl(url);
 }
 
+bool URLNeedsUserAgentType(const GURL& url) {
+  return !web::GetWebClient()->IsAppSpecificURL(url) &&
+         !(url.SchemeIs(url::kFileScheme) && !IsRestoreSessionUrl(url)) &&
+         !(url.SchemeIs(url::kAboutScheme) && !IsPlaceholderUrl(url));
+}
+
 GURL GetRestoreSessionBaseUrl() {
   std::string restore_session_resource_path = base::SysNSStringToUTF8(
       [base::mac::FrameworkBundle() pathForResource:@"restore_session"

@@ -32,6 +32,7 @@
 
 #include <stdint.h>
 
+#include "base/stl_util.h"
 #include "services/network/public/mojom/cors.mojom-shared.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/blob/blob_url.h"
@@ -48,12 +49,15 @@ namespace blink {
 
 const uint16_t kMaxAllowedPort = UINT16_MAX;
 
-class SecurityOriginTest : public testing::Test {};
+class SecurityOriginTest : public testing::Test {
+ private:
+  void TearDown() override { SecurityPolicy::ClearOriginAccessList(); }
+};
 
 TEST_F(SecurityOriginTest, ValidPortsCreateTupleOrigins) {
   uint16_t ports[] = {0, 80, 443, 5000, kMaxAllowedPort};
 
-  for (size_t i = 0; i < arraysize(ports); ++i) {
+  for (size_t i = 0; i < base::size(ports); ++i) {
     scoped_refptr<const SecurityOrigin> origin =
         SecurityOrigin::Create("http", "example.com", ports[i]);
     EXPECT_FALSE(origin->IsOpaque())
@@ -150,7 +154,7 @@ TEST_F(SecurityOriginTest, IsPotentiallyTrustworthy) {
       {false, "filesystem:ftp://evil:99/foo"},
   };
 
-  for (size_t i = 0; i < arraysize(inputs); ++i) {
+  for (size_t i = 0; i < base::size(inputs); ++i) {
     SCOPED_TRACE(inputs[i].url);
     scoped_refptr<const SecurityOrigin> origin =
         SecurityOrigin::CreateFromString(inputs[i].url);
@@ -234,7 +238,7 @@ TEST_F(SecurityOriginTest, CanAccess) {
       {false, "file:///", "file://localhost/"},
   };
 
-  for (size_t i = 0; i < arraysize(tests); ++i) {
+  for (size_t i = 0; i < base::size(tests); ++i) {
     scoped_refptr<const SecurityOrigin> origin1 =
         SecurityOrigin::CreateFromString(tests[i].origin1);
     scoped_refptr<const SecurityOrigin> origin2 =
@@ -341,7 +345,7 @@ TEST_F(SecurityOriginTest, CanRequest) {
       {false, "https://foobar.com", "https://bazbar.com"},
   };
 
-  for (size_t i = 0; i < arraysize(tests); ++i) {
+  for (size_t i = 0; i < base::size(tests); ++i) {
     scoped_refptr<const SecurityOrigin> origin =
         SecurityOrigin::CreateFromString(tests[i].origin);
     blink::KURL url(tests[i].url);
@@ -358,7 +362,7 @@ TEST_F(SecurityOriginTest, CanRequestWithAllowListedAccess) {
   // Adding the url to the access allowlist should allow the request.
   SecurityPolicy::AddOriginAccessAllowListEntry(
       *origin, "https", "example.com", false,
-      network::mojom::CORSOriginAccessMatchPriority::kMediumPriority);
+      network::mojom::CorsOriginAccessMatchPriority::kMediumPriority);
   EXPECT_TRUE(origin->CanRequest(url));
 }
 
@@ -371,10 +375,10 @@ TEST_F(SecurityOriginTest, CannotRequestWithBlockListedAccess) {
   // BlockList that is more or same specificity wins.
   SecurityPolicy::AddOriginAccessAllowListEntry(
       *origin, "https", "example.com", true,
-      network::mojom::CORSOriginAccessMatchPriority::kDefaultPriority);
+      network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority);
   SecurityPolicy::AddOriginAccessBlockListEntry(
       *origin, "https", "example.com", false,
-      network::mojom::CORSOriginAccessMatchPriority::kLowPriority);
+      network::mojom::CorsOriginAccessMatchPriority::kLowPriority);
   // Block since example.com is on the allowlist & blocklist.
   EXPECT_FALSE(origin->CanRequest(blocked_url));
   // Allow since *.example.com is on the allowlist but not the blocklist.
@@ -389,10 +393,10 @@ TEST_F(SecurityOriginTest, CanRequestWithMoreSpecificAllowList) {
 
   SecurityPolicy::AddOriginAccessAllowListEntry(
       *origin, "https", "test.example.com", true,
-      network::mojom::CORSOriginAccessMatchPriority::kMediumPriority);
+      network::mojom::CorsOriginAccessMatchPriority::kMediumPriority);
   SecurityPolicy::AddOriginAccessBlockListEntry(
       *origin, "https", "example.com", true,
-      network::mojom::CORSOriginAccessMatchPriority::kLowPriority);
+      network::mojom::CorsOriginAccessMatchPriority::kLowPriority);
   // Allow since test.example.com (allowlist) has a higher priority than
   // *.example.com (blocklist).
   EXPECT_TRUE(origin->CanRequest(allowed_url));
@@ -413,19 +417,19 @@ TEST_F(SecurityOriginTest, PunycodeNotUnicode) {
   // Verify unicode origin can not be allowlisted.
   SecurityPolicy::AddOriginAccessAllowListEntry(
       *origin, "https", "☃.net", true,
-      network::mojom::CORSOriginAccessMatchPriority::kMediumPriority);
+      network::mojom::CorsOriginAccessMatchPriority::kMediumPriority);
   EXPECT_FALSE(origin->CanRequest(punycode_url));
   EXPECT_FALSE(origin->CanRequest(unicode_url));
 
   // Verify punycode allowlist only affects punycode URLs.
   SecurityPolicy::AddOriginAccessAllowListEntry(
       *origin, "https", "xn--n3h.net", true,
-      network::mojom::CORSOriginAccessMatchPriority::kMediumPriority);
+      network::mojom::CorsOriginAccessMatchPriority::kMediumPriority);
   EXPECT_TRUE(origin->CanRequest(punycode_url));
   EXPECT_FALSE(origin->CanRequest(unicode_url));
 
-  // Clear enterprise policy allowlist.
-  SecurityPolicy::ClearOriginAccessAllowListForOrigin(*origin);
+  // Clear enterprise policy allow/block lists.
+  SecurityPolicy::ClearOriginAccessListForOrigin(*origin);
 
   EXPECT_FALSE(origin->CanRequest(punycode_url));
   EXPECT_FALSE(origin->CanRequest(unicode_url));
@@ -433,7 +437,7 @@ TEST_F(SecurityOriginTest, PunycodeNotUnicode) {
   // Simulate <all_urls> being in the extension permissions.
   SecurityPolicy::AddOriginAccessAllowListEntry(
       *origin, "https", "", true,
-      network::mojom::CORSOriginAccessMatchPriority::kDefaultPriority);
+      network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority);
 
   EXPECT_TRUE(origin->CanRequest(punycode_url));
   EXPECT_FALSE(origin->CanRequest(unicode_url));
@@ -441,14 +445,14 @@ TEST_F(SecurityOriginTest, PunycodeNotUnicode) {
   // Verify unicode origin can not be blocklisted.
   SecurityPolicy::AddOriginAccessBlockListEntry(
       *origin, "https", "☃.net", true,
-      network::mojom::CORSOriginAccessMatchPriority::kLowPriority);
+      network::mojom::CorsOriginAccessMatchPriority::kLowPriority);
   EXPECT_TRUE(origin->CanRequest(punycode_url));
   EXPECT_FALSE(origin->CanRequest(unicode_url));
 
   // Verify punycode blocklist only affects punycode URLs.
   SecurityPolicy::AddOriginAccessBlockListEntry(
       *origin, "https", "xn--n3h.net", true,
-      network::mojom::CORSOriginAccessMatchPriority::kLowPriority);
+      network::mojom::CorsOriginAccessMatchPriority::kLowPriority);
   EXPECT_FALSE(origin->CanRequest(punycode_url));
   EXPECT_FALSE(origin->CanRequest(unicode_url));
 }
@@ -694,6 +698,25 @@ TEST_F(SecurityOriginTest, UrlOriginConversions) {
   }
 }
 
+TEST_F(SecurityOriginTest, InvalidWrappedUrls) {
+  const char* kTestCases[] = {
+      "blob:filesystem:ws:b/.",
+      "blob:filesystem:ftp://a/b",
+      "filesystem:filesystem:http://example.org:88/foo/bar",
+      "blob:blob:file://localhost/foo/bar",
+  };
+
+  for (const char* test_url : kTestCases) {
+    scoped_refptr<SecurityOrigin> target_origin =
+        SecurityOrigin::CreateFromString(test_url);
+    EXPECT_TRUE(target_origin->IsOpaque())
+        << test_url << " is not opaque as a blink::SecurityOrigin";
+    url::Origin origin = target_origin->ToUrlOrigin();
+    EXPECT_TRUE(origin.opaque())
+        << test_url << " is not opaque as a url::Origin";
+  }
+}
+
 TEST_F(SecurityOriginTest, EffectiveDomain) {
   constexpr struct {
     const char* expected_effective_domain;
@@ -766,6 +789,23 @@ TEST_F(SecurityOriginTest, ToTokenForFastCheck) {
         SecurityOrigin::CreateFromString(test.url);
     EXPECT_EQ(test.token, origin->ToTokenForFastCheck()) << test.token;
   }
+}
+
+TEST_F(SecurityOriginTest, NonStandardScheme) {
+  scoped_refptr<const SecurityOrigin> origin =
+      SecurityOrigin::CreateFromString("cow://");
+  EXPECT_TRUE(origin->IsOpaque());
+}
+
+TEST_F(SecurityOriginTest, NonStandardSchemeWithAndroidWebViewHack) {
+  url::EnableNonStandardSchemesForAndroidWebView();
+  scoped_refptr<const SecurityOrigin> origin =
+      SecurityOrigin::CreateFromString("cow://");
+  EXPECT_FALSE(origin->IsOpaque());
+  EXPECT_EQ("cow", origin->Protocol());
+  EXPECT_EQ("", origin->Host());
+  EXPECT_EQ(0, origin->Port());
+  url::Shutdown();
 }
 
 }  // namespace blink

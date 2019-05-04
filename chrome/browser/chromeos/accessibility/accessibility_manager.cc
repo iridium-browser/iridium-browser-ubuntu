@@ -28,6 +28,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
 #include "base/values.h"
 #include "chrome/browser/accessibility/accessibility_extension_api.h"
@@ -37,7 +38,7 @@
 #include "chrome/browser/chromeos/accessibility/dictation_chromeos.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/accessibility/select_to_speak_event_handler_delegate.h"
-#include "chrome/browser/chromeos/accessibility/switch_access_event_handler.h"
+#include "chrome/browser/chromeos/accessibility/switch_access_event_handler_delegate.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -45,7 +46,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/speech/tts_controller.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/chrome_paths.h"
@@ -55,9 +55,10 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chromeos/audio/chromeos_sounds.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/upstart_client.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
@@ -69,6 +70,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/tts_controller.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/service_manager_connection.h"
@@ -81,8 +83,9 @@
 #include "mash/public/mojom/launchable.mojom.h"
 #include "media/audio/sounds/sounds_manager.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/media_session/public/cpp/switches.h"
+#include "services/media_session/public/mojom/constants.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
+#include "ui/accessibility/accessibility_switches.h"
 #include "ui/accessibility/ax_enum_util.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -110,6 +113,13 @@ const char kUserSpokenFeedbackEnabled[] = "UserSpokenFeedbackEnabled";
 // A key for the startup sound enabled boolean state for a known user.
 const char kUserStartupSoundEnabled[] = "UserStartupSoundEnabled";
 
+// A key for the bluetooth braille display for a user.
+const char kUserBluetoothBrailleDisplayAddress[] =
+    "UserBluetoothBrailleDisplayAddress";
+
+// The name of the Brltty upstart job.
+constexpr char kBrlttyUpstartJobName[] = "brltty";
+
 static chromeos::AccessibilityManager* g_accessibility_manager = nullptr;
 
 static BrailleController* g_braille_controller_for_test = nullptr;
@@ -131,6 +141,24 @@ void EnableChromeVoxAfterSwitchAccessMetric(bool val) {
 
 void EnableSwitchAccessAfterChromeVoxMetric(bool val) {
   UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosSwitchAccessAfterChromeVox", val);
+}
+
+// Restarts (stops, then starts brltty). If |address| is empty, only stops.
+// In Upstart, sending an explicit restart command is a no-op if the job isn't
+// already started. Without knowledge regarding brltty's current job status,
+// stop followed by start ensures we both stop a started job, and also start
+// brltty.
+void RestartBrltty(const std::string& address) {
+  chromeos::UpstartClient* client =
+      chromeos::DBusThreadManager::Get()->GetUpstartClient();
+  client->StopJob(kBrlttyUpstartJobName, EmptyVoidDBusMethodCallback());
+
+  std::vector<std::string> args;
+  if (address.empty())
+    return;
+
+  args.push_back(base::StringPrintf("ADDRESS=%s", address.c_str()));
+  client->StartJob(kBrlttyUpstartJobName, args, EmptyVoidDBusMethodCallback());
 }
 
 }  // namespace
@@ -211,6 +239,7 @@ AccessibilityManager::AccessibilityManager()
       scoped_braille_observer_(this),
       braille_ime_current_(false),
       chromevox_panel_(nullptr),
+      switch_access_panel_(nullptr),
       extension_registry_observer_(this),
       weak_ptr_factory_(this) {
   notification_registrar_.Add(this,
@@ -293,6 +322,12 @@ AccessibilityManager::AccessibilityManager()
       ->BindInterface(ash::mojom::kServiceName,
                       &accessibility_focus_ring_controller_);
 
+  // Connect to the media session service.
+  content::ServiceManagerConnection::GetForProcess()
+      ->GetConnector()
+      ->BindInterface(media_session::mojom::kServiceName,
+                      &audio_focus_manager_ptr_);
+
   CrasAudioHandler::Get()->AddAudioObserver(this);
 }
 
@@ -325,6 +360,7 @@ bool AccessibilityManager::ShouldShowAccessibilityMenu() {
         prefs->GetBoolean(ash::prefs::kAccessibilityLargeCursorEnabled) ||
         prefs->GetBoolean(ash::prefs::kAccessibilitySpokenFeedbackEnabled) ||
         prefs->GetBoolean(ash::prefs::kAccessibilitySelectToSpeakEnabled) ||
+        prefs->GetBoolean(ash::prefs::kAccessibilitySwitchAccessEnabled) ||
         prefs->GetBoolean(ash::prefs::kAccessibilityHighContrastEnabled) ||
         prefs->GetBoolean(ash::prefs::kAccessibilityAutoclickEnabled) ||
         prefs->GetBoolean(ash::prefs::kShouldAlwaysShowAccessibilityMenu) ||
@@ -844,10 +880,10 @@ void AccessibilityManager::UpdateSwitchAccessFromPref() {
   // even if the preference is enabled, if the flag isn't also set.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (!command_line->HasSwitch(
-          chromeos::switches::kEnableExperimentalAccessibilityFeatures)) {
+          ::switches::kEnableExperimentalAccessibilitySwitchAccess)) {
     if (enabled) {
       LOG(WARNING) << "Switch access enabled but experimental accessibility "
-                   << "features flag is not set.";
+                   << "switch access flag is not set.";
     }
     return;
   }
@@ -860,22 +896,30 @@ void AccessibilityManager::UpdateSwitchAccessFromPref() {
       return;
     }
     EnableSwitchAccessAfterChromeVoxMetric(false);
+    switch_access_loader_->SetProfile(profile_, base::RepeatingClosure());
   }
 
   if (switch_access_enabled_ == enabled)
     return;
   switch_access_enabled_ = enabled;
 
+  AccessibilityStatusEventDetails details(ACCESSIBILITY_TOGGLE_SWITCH_ACCESS,
+                                          enabled);
+  NotifyAccessibilityStatusChanged(details);
+
   if (enabled) {
+    // Construct a delegate to connect Switch Access and its EventHandler in
+    // ash. Do this before loading Switch Access so the keys_to_capture will
+    // be properly set.
+    switch_access_event_handler_delegate_ =
+        std::make_unique<SwitchAccessEventHandlerDelegate>();
     switch_access_loader_->Load(
         profile_,
         base::BindRepeating(&AccessibilityManager::PostLoadSwitchAccess,
                             weak_ptr_factory_.GetWeakPtr()));
-    switch_access_event_handler_.reset(
-        new chromeos::SwitchAccessEventHandler());
   } else {
     switch_access_loader_->Unload();
-    switch_access_event_handler_.reset(nullptr);
+    switch_access_event_handler_delegate_.reset(nullptr);
   }
 }
 
@@ -1155,16 +1199,6 @@ void AccessibilityManager::UpdateChromeOSAccessibilityHistograms() {
     bool autoclick_enabled =
         prefs->GetBoolean(ash::prefs::kAccessibilityAutoclickEnabled);
     UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosAutoclick", autoclick_enabled);
-    if (autoclick_enabled) {
-      // We only want to log the autoclick delay if the user has actually
-      // enabled autoclick.
-      UMA_HISTOGRAM_CUSTOM_TIMES(
-          "Accessibility.CrosAutoclickDelay",
-          base::TimeDelta::FromMilliseconds(
-              prefs->GetInteger(ash::prefs::kAccessibilityAutoclickDelayMs)),
-          base::TimeDelta::FromMilliseconds(1),
-          base::TimeDelta::FromMilliseconds(3000), 50);
-    }
   }
   UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosCaretHighlight",
                         IsCaretHighlightEnabled());
@@ -1270,6 +1304,11 @@ void AccessibilityManager::PostLoadChromeVox() {
     return;
 
   // Do any setup work needed immediately after ChromeVox actually loads.
+  // Maybe start brltty, if we have a bluetooth device stored for connection.
+  const std::string& address = GetBluetoothBrailleDisplayAddress();
+  if (!address.empty())
+    RestartBrltty(address);
+
   PlayEarcon(SOUND_SPOKEN_FEEDBACK_ENABLED, PlaySoundOption::ALWAYS);
 
   extensions::EventRouter* event_router =
@@ -1292,15 +1331,16 @@ void AccessibilityManager::PostLoadChromeVox() {
                        base::Unretained(this))));
   }
 
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          media_session::switches::kEnableAudioFocus)) {
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        media_session::switches::kEnableAudioFocus);
-  }
+  audio_focus_manager_ptr_->SetEnforcementMode(
+      media_session::mojom::EnforcementMode::kSingleSession);
 }
 
 void AccessibilityManager::PostUnloadChromeVox() {
   // Do any teardown work needed immediately after ChromeVox actually unloads.
+  // Stop brltty.
+  chromeos::DBusThreadManager::Get()->GetUpstartClient()->StopJob(
+      kBrlttyUpstartJobName, EmptyVoidDBusMethodCallback());
+
   PlayEarcon(SOUND_SPOKEN_FEEDBACK_DISABLED, PlaySoundOption::ALWAYS);
 
   // Clear the accessibility focus ring.
@@ -1317,7 +1357,10 @@ void AccessibilityManager::PostUnloadChromeVox() {
   SetDarkenScreen(false);
 
   // Stop speech.
-  TtsController::GetInstance()->Stop();
+  content::TtsController::GetInstance()->Stop();
+
+  audio_focus_manager_ptr_->SetEnforcementMode(
+      media_session::mojom::EnforcementMode::kDefault);
 }
 
 void AccessibilityManager::PostSwitchChromeVoxProfile() {
@@ -1346,7 +1389,7 @@ void AccessibilityManager::PostUnloadSelectToSpeak() {
   HideHighlights();
 
   // Stop speech.
-  TtsController::GetInstance()->Stop();
+  content::TtsController::GetInstance()->Stop();
 }
 
 void AccessibilityManager::PostLoadSwitchAccess() {
@@ -1390,9 +1433,13 @@ void AccessibilityManager::SetKeyboardListenerExtensionId(
     extension_registry_observer_.Add(registry);
 }
 
-void AccessibilityManager::SetSwitchAccessKeys(const std::set<int>& key_codes) {
-  if (switch_access_enabled_)
-    switch_access_event_handler_->SetKeysToCapture(key_codes);
+void AccessibilityManager::HideSwitchAccessMenu() {
+  switch_access_panel_->Hide();
+}
+
+void AccessibilityManager::ShowSwitchAccessMenu(
+    const gfx::Rect& element_bounds) {
+  switch_access_panel_->Show(element_bounds);
 }
 
 bool AccessibilityManager::ToggleDictation() {
@@ -1472,6 +1519,35 @@ void AccessibilityManager::SetStartupSoundEnabled(bool value) const {
   user_manager::known_user::SetBooleanPref(
       multi_user_util::GetAccountIdFromProfile(profile_),
       kUserStartupSoundEnabled, value);
+}
+
+const std::string AccessibilityManager::GetBluetoothBrailleDisplayAddress()
+    const {
+  user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+  const user_manager::UserList& user_list = user_manager->GetUsers();
+  if (user_list.empty())
+    return std::string();
+
+  // |user_list| is sorted by last log in date. Take the most recent user to log
+  // in.
+  std::string val;
+  return user_manager::known_user::GetStringPref(
+             user_list[0]->GetAccountId(), kUserBluetoothBrailleDisplayAddress,
+             &val)
+             ? val
+             : std::string();
+}
+
+void AccessibilityManager::UpdateBluetoothBrailleDisplayAddress(
+    const std::string& address) {
+  CHECK(spoken_feedback_enabled_);
+  if (!profile_)
+    return;
+
+  user_manager::known_user::SetStringPref(
+      multi_user_util::GetAccountIdFromProfile(profile_),
+      kUserBluetoothBrailleDisplayAddress, address);
+  RestartBrltty(address);
 }
 
 void AccessibilityManager::SetProfileForTest(Profile* profile) {

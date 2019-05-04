@@ -29,19 +29,16 @@ import org.chromium.base.SysUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.TabLoadStatus;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager.FullscreenListener;
 import org.chromium.chrome.browser.native_page.NativePageHost;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabModel;
+import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.toolbar.ActionModeController.ActionBarDelegate;
-import org.chromium.chrome.browser.toolbar.ViewShiftingActionBarDelegate;
+import org.chromium.chrome.browser.toolbar.top.ActionModeController.ActionBarDelegate;
+import org.chromium.chrome.browser.toolbar.top.ViewShiftingActionBarDelegate;
 import org.chromium.chrome.browser.util.AccessibilityUtil;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.SelectionPopupController;
@@ -129,7 +126,7 @@ public class BottomSheet extends FrameLayout
     private static final float THRESHOLD_TO_NEXT_STATE_2 = 0.3f;
 
     /** The height ratio for the sheet in the SheetState.HALF state. */
-    private static final float HALF_HEIGHT_RATIO = 0.65f;
+    private static final float HALF_HEIGHT_RATIO = 0.75f;
 
     /** The fraction of the width of the screen that, when swiped, will cause the sheet to move. */
     private static final float SWIPE_ALLOWED_FRACTION = 0.2f;
@@ -261,9 +258,6 @@ public class BottomSheet extends FrameLayout
     /** Conversion ratio of dp to px. */
     private float mDpToPx;
 
-    /** Whether or not scroll events are currently being blocked for the 'velocity' swipe logic. */
-    private boolean mVelocityLogicBlockSwipe;
-
     /**
      * An interface defining content that can be displayed inside of the bottom sheet for Chrome
      * Home.
@@ -373,43 +367,8 @@ public class BottomSheet extends FrameLayout
             return true;
         }
 
-        if (currentEvent.getActionMasked() == MotionEvent.ACTION_DOWN) {
-            mVelocityLogicBlockSwipe = false;
-        }
-
-        float scrollDistanceDp = MathUtils.distance(initialEvent.getX(), initialEvent.getY(),
-                                         currentEvent.getX(), currentEvent.getY())
-                / mDpToPx;
-        long timeDeltaMs = currentEvent.getEventTime() - initialEvent.getDownTime();
-
-        String logicType = FeatureUtilities.getChromeHomeSwipeLogicType();
-
-        // By default, the entire toolbar is swipable.
         float startX = mVisibleViewportRect.left;
         float endX = mDefaultToolbarView.getWidth() + mVisibleViewportRect.left;
-
-        if (ChromeSwitches.CHROME_HOME_SWIPE_LOGIC_RESTRICT_AREA.equals(logicType)) {
-            // Determine an area in the middle of the toolbar that is swipable. This will only
-            // trigger if the expand button is disabled.
-            float allowedSwipeWidth = mContainerWidth * SWIPE_ALLOWED_FRACTION;
-            startX = mVisibleViewportRect.left + (mContainerWidth - allowedSwipeWidth) / 2;
-            endX = startX + allowedSwipeWidth;
-        } else if (ChromeSwitches.CHROME_HOME_SWIPE_LOGIC_VELOCITY.equals(logicType)
-                || (ChromeFeatureList.isInitialized()
-                           && ChromeFeatureList.isEnabled(
-                                      ChromeFeatureList.CHROME_HOME_SWIPE_VELOCITY_FEATURE))) {
-            if (mVelocityLogicBlockSwipe) return false;
-
-            double dpPerMs = scrollDistanceDp / (double) timeDeltaMs;
-
-            if (dpPerMs < SHEET_SWIPE_MIN_DP_PER_MS) {
-                mVelocityLogicBlockSwipe = true;
-                return false;
-            }
-
-            return true;
-        }
-
         return currentEvent.getRawX() > startX && currentEvent.getRawX() < endX;
     }
 
@@ -422,7 +381,7 @@ public class BottomSheet extends FrameLayout
         super(context, atts);
 
         mMinHalfFullDistance =
-                getResources().getDimensionPixelSize(R.dimen.chrome_home_min_full_half_distance);
+                getResources().getDimensionPixelSize(R.dimen.bottom_sheet_min_full_half_distance);
         mToolbarShadowHeight =
                 getResources().getDimensionPixelOffset(R.dimen.toolbar_shadow_height);
 
@@ -667,7 +626,7 @@ public class BottomSheet extends FrameLayout
 
             @Override
             public void onControlsOffsetChanged(
-                    float topOffset, float bottomOffset, boolean needsAnimate) {
+                    int topOffset, int bottomOffset, boolean needsAnimate) {
                 if (getSheetState() == SheetState.HIDDEN) return;
                 if (getCurrentOffsetPx() > getSheetHeightForState(SheetState.PEEK)) return;
 
@@ -676,7 +635,7 @@ public class BottomSheet extends FrameLayout
             }
 
             @Override
-            public void onContentOffsetChanged(float offset) {}
+            public void onContentOffsetChanged(int offset) {}
 
             @Override
             public void onBottomControlsHeightChanged(int bottomControlsHeight) {}
@@ -709,7 +668,7 @@ public class BottomSheet extends FrameLayout
         } else {
             // If no compatible tab is active behind the sheet, open a new one.
             mTabModelSelector.openNewTab(
-                    params, TabModel.TabLaunchType.FROM_CHROME_UI, getActiveTab(), incognito);
+                    params, TabLaunchType.FROM_CHROME_UI, getActiveTab(), incognito);
         }
 
         return tabLoadStatus;
@@ -987,7 +946,7 @@ public class BottomSheet extends FrameLayout
         mIsSheetOpen = false;
 
         // Update the browser controls since they are permanently shown while the sheet is open.
-        mFullscreenManager.getBrowserVisibilityDelegate().hideControlsPersistent(
+        mFullscreenManager.getBrowserVisibilityDelegate().releasePersistentShowingToken(
                 mPersistentControlsToken);
 
         for (BottomSheetObserver o : mObservers) o.onSheetClosed(reason);

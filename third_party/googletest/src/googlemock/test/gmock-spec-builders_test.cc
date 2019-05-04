@@ -34,6 +34,7 @@
 
 #include "gmock/gmock-spec-builders.h"
 
+#include <memory>
 #include <ostream>  // NOLINT
 #include <sstream>
 #include <string>
@@ -77,6 +78,7 @@ using testing::Expectation;
 using testing::ExpectationSet;
 using testing::GMOCK_FLAG(verbose);
 using testing::Gt;
+using testing::IgnoreResult;
 using testing::InSequence;
 using testing::Invoke;
 using testing::InvokeWithoutArgs;
@@ -99,7 +101,6 @@ using testing::internal::kFail;
 using testing::internal::kInfoVerbosity;
 using testing::internal::kWarn;
 using testing::internal::kWarningVerbosity;
-using testing::internal::linked_ptr;
 
 #if GTEST_HAS_STREAM_REDIRECTION
 using testing::HasSubstr;
@@ -172,7 +173,7 @@ class ReferenceHoldingMock {
  public:
   ReferenceHoldingMock() {}
 
-  MOCK_METHOD1(AcceptReference, void(linked_ptr<MockA>*));
+  MOCK_METHOD1(AcceptReference, void(std::shared_ptr<MockA>*));
 
  private:
   GTEST_DISALLOW_COPY_AND_ASSIGN_(ReferenceHoldingMock);
@@ -1952,17 +1953,17 @@ TEST(DeletingMockEarlyTest, Failure2) {
 class EvenNumberCardinality : public CardinalityInterface {
  public:
   // Returns true iff call_count calls will satisfy this cardinality.
-  virtual bool IsSatisfiedByCallCount(int call_count) const {
+  bool IsSatisfiedByCallCount(int call_count) const override {
     return call_count % 2 == 0;
   }
 
   // Returns true iff call_count calls will saturate this cardinality.
-  virtual bool IsSaturatedByCallCount(int /* call_count */) const {
+  bool IsSaturatedByCallCount(int /* call_count */) const override {
     return false;
   }
 
   // Describes self to an ostream.
-  virtual void DescribeTo(::std::ostream* os) const {
+  void DescribeTo(::std::ostream* os) const override {
     *os << "called even number of times";
   }
 };
@@ -2023,7 +2024,9 @@ class VerboseFlagPreservingFixture : public testing::Test {
   VerboseFlagPreservingFixture()
       : saved_verbose_flag_(GMOCK_FLAG(verbose)) {}
 
-  ~VerboseFlagPreservingFixture() { GMOCK_FLAG(verbose) = saved_verbose_flag_; }
+  ~VerboseFlagPreservingFixture() override {
+    GMOCK_FLAG(verbose) = saved_verbose_flag_;
+  }
 
  private:
   const std::string saved_verbose_flag_;
@@ -2041,7 +2044,7 @@ TEST(FunctionCallMessageTest,
   GMOCK_FLAG(verbose) = kWarningVerbosity;
   NaggyMock<MockC> c;
   CaptureStdout();
-  c.VoidMethod(false, 5, "Hi", NULL, Printable(), Unprintable());
+  c.VoidMethod(false, 5, "Hi", nullptr, Printable(), Unprintable());
   const std::string output = GetCapturedStdout();
   EXPECT_PRED_FORMAT2(IsSubstring, "GMOCK WARNING", output);
   EXPECT_PRED_FORMAT2(IsNotSubstring, "Stack trace:", output);
@@ -2055,7 +2058,7 @@ TEST(FunctionCallMessageTest,
   GMOCK_FLAG(verbose) = kInfoVerbosity;
   NaggyMock<MockC> c;
   CaptureStdout();
-  c.VoidMethod(false, 5, "Hi", NULL, Printable(), Unprintable());
+  c.VoidMethod(false, 5, "Hi", nullptr, Printable(), Unprintable());
   const std::string output = GetCapturedStdout();
   EXPECT_PRED_FORMAT2(IsSubstring, "GMOCK WARNING", output);
   EXPECT_PRED_FORMAT2(IsSubstring, "Stack trace:", output);
@@ -2098,7 +2101,7 @@ TEST(FunctionCallMessageTest,
   // A void mock function.
   NaggyMock<MockC> c;
   CaptureStdout();
-  c.VoidMethod(false, 5, "Hi", NULL, Printable(), Unprintable());
+  c.VoidMethod(false, 5, "Hi", nullptr, Printable(), Unprintable());
   const std::string output2 = GetCapturedStdout();
   EXPECT_THAT(output2.c_str(),
               ContainsRegex(
@@ -2619,7 +2622,7 @@ TEST(VerifyAndClearTest, DoesNotAffectOtherMockObjects) {
 
 TEST(VerifyAndClearTest,
      DestroyingChainedMocksDoesNotDeadlockThroughExpectations) {
-  linked_ptr<MockA> a(new MockA);
+  std::shared_ptr<MockA> a(new MockA);
   ReferenceHoldingMock test_mock;
 
   // EXPECT_CALL stores a reference to a inside test_mock.
@@ -2639,7 +2642,7 @@ TEST(VerifyAndClearTest,
 
 TEST(VerifyAndClearTest,
      DestroyingChainedMocksDoesNotDeadlockThroughDefaultAction) {
-  linked_ptr<MockA> a(new MockA);
+  std::shared_ptr<MockA> a(new MockA);
   ReferenceHoldingMock test_mock;
 
   // ON_CALL stores a reference to a inside test_mock.

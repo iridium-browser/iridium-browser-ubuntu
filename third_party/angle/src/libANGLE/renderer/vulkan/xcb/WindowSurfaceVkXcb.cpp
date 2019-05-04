@@ -20,8 +20,7 @@ WindowSurfaceVkXcb::WindowSurfaceVkXcb(const egl::SurfaceState &surfaceState,
                                        EGLint height,
                                        xcb_connection_t *conn)
     : WindowSurfaceVk(surfaceState, window, width, height), mXcbConnection(conn)
-{
-}
+{}
 
 angle::Result WindowSurfaceVkXcb::createSurfaceVk(vk::Context *context, gl::Extents *extentsOut)
 {
@@ -39,7 +38,7 @@ angle::Result WindowSurfaceVkXcb::createSurfaceVk(vk::Context *context, gl::Exte
     ASSERT(reply);
     *extentsOut = gl::Extents(reply->width, reply->height, 0);
     free(reply);
-    return angle::Result::Continue();
+    return angle::Result::Continue;
 }
 
 }  // namespace rx

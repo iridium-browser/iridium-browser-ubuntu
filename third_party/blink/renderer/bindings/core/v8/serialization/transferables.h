@@ -7,6 +7,7 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 
 namespace blink {
@@ -16,12 +17,18 @@ class ImageBitmap;
 class OffscreenCanvas;
 class MessagePort;
 class MojoHandle;
+class ReadableStream;
+class WritableStream;
+class TransformStream;
 
 using ArrayBufferArray = HeapVector<Member<DOMArrayBufferBase>>;
 using ImageBitmapArray = HeapVector<Member<ImageBitmap>>;
 using OffscreenCanvasArray = HeapVector<Member<OffscreenCanvas>>;
 using MessagePortArray = HeapVector<Member<MessagePort>>;
 using MojoHandleArray = HeapVector<Member<blink::MojoHandle>>;
+using ReadableStreamArray = HeapVector<Member<ReadableStream>>;
+using WritableStreamArray = HeapVector<Member<WritableStream>>;
+using TransformStreamArray = HeapVector<Member<TransformStream>>;
 
 class CORE_EXPORT Transferables final {
   STACK_ALLOCATED();
@@ -35,6 +42,9 @@ class CORE_EXPORT Transferables final {
   OffscreenCanvasArray offscreen_canvases;
   MessagePortArray message_ports;
   MojoHandleArray mojo_handles;
+  ReadableStreamArray readable_streams;
+  WritableStreamArray writable_streams;
+  TransformStreamArray transform_streams;
 };
 
 // Along with extending |Transferables| to hold a new kind of transferable

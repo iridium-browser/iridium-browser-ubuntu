@@ -12,7 +12,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 #if DCHECK_IS_ON()
-#include "third_party/blink/renderer/platform/wtf/list_hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/linked_hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #endif
 
@@ -74,8 +74,9 @@ class PaintPropertyNode : public RefCounted<NodeType> {
     return true;
   }
 
-  void ClearChangedToRoot() const {
-    for (auto* n = this; n; n = n->Parent())
+  void ClearChangedToRoot() const { ClearChangedTo(nullptr); }
+  void ClearChangedTo(const NodeType* node) const {
+    for (auto* n = this; n && n != node; n = n->Parent())
       n->changed_ = false;
   }
 
@@ -143,6 +144,13 @@ class PaintPropertyNode : public RefCounted<NodeType> {
   // nodes that do not affect rendering and are ignored for the purposes of
   // display item list generation.
   bool is_parent_alias_ = false;
+
+  // Indicates that the paint property value changed in the last update in the
+  // prepaint lifecycle step. This is used for raster invalidation and damage
+  // in the compositor. This value is cleared through |ClearChangedTo*|. With
+  // BlinkGenPropertyTrees, this is cleared explicitly at the end of paint (see:
+  // LocalFrameView::RunPaintLifecyclePhase), otherwise this is cleared through
+  // PaintController::FinishCycle.
   mutable bool changed_ = true;
 
 #if DCHECK_IS_ON()
@@ -200,7 +208,7 @@ class PropertyTreePrinter {
     return node;
   }
 
-  ListHashSet<const NodeType*> nodes_;
+  LinkedHashSet<const NodeType*> nodes_;
 };
 
 template <typename NodeType>

@@ -11,7 +11,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/page/page_visibility_state.h"
+#include "third_party/blink/renderer/core/page/page_hidden_state.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_location.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_error.h"
@@ -43,31 +43,31 @@ void DidFocus(ScriptPromiseResolver* resolver,
 ServiceWorkerWindowClient* ServiceWorkerWindowClient::Create(
     const WebServiceWorkerClientInfo& info) {
   DCHECK_EQ(mojom::blink::ServiceWorkerClientType::kWindow, info.client_type);
-  return new ServiceWorkerWindowClient(info);
+  return MakeGarbageCollected<ServiceWorkerWindowClient>(info);
 }
 
 ServiceWorkerWindowClient* ServiceWorkerWindowClient::Create(
     const mojom::blink::ServiceWorkerClientInfo& info) {
   DCHECK_EQ(mojom::blink::ServiceWorkerClientType::kWindow, info.client_type);
-  return new ServiceWorkerWindowClient(info);
+  return MakeGarbageCollected<ServiceWorkerWindowClient>(info);
 }
 
 ServiceWorkerWindowClient::ServiceWorkerWindowClient(
     const WebServiceWorkerClientInfo& info)
     : ServiceWorkerClient(info),
-      page_visibility_state_(info.page_visibility_state),
+      page_hidden_(info.page_hidden),
       is_focused_(info.is_focused) {}
 
 ServiceWorkerWindowClient::ServiceWorkerWindowClient(
     const mojom::blink::ServiceWorkerClientInfo& info)
     : ServiceWorkerClient(info),
-      page_visibility_state_(info.page_visibility_state),
+      page_hidden_(info.page_hidden),
       is_focused_(info.is_focused) {}
 
 ServiceWorkerWindowClient::~ServiceWorkerWindowClient() = default;
 
 String ServiceWorkerWindowClient::visibilityState() const {
-  return PageVisibilityStateString(page_visibility_state_);
+  return PageHiddenStateString(page_hidden_);
 }
 
 ScriptPromise ServiceWorkerWindowClient::focus(ScriptState* script_state) {
@@ -92,7 +92,8 @@ ScriptPromise ServiceWorkerWindowClient::navigate(ScriptState* script_state,
   ScriptPromise promise = resolver->Promise();
   ExecutionContext* context = ExecutionContext::From(script_state);
 
-  KURL parsed_url = KURL(ToWorkerGlobalScope(context)->location()->Url(), url);
+  KURL parsed_url =
+      KURL(To<WorkerGlobalScope>(context)->location()->Url(), url);
   if (!parsed_url.IsValid() || parsed_url.ProtocolIsAbout()) {
     resolver->Reject(V8ThrowException::CreateTypeError(
         script_state->GetIsolate(), "'" + url + "' is not a valid URL."));

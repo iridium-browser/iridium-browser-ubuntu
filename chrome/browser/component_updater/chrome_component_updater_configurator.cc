@@ -10,11 +10,13 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/version.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/component_updater/component_updater_utils.h"
+#include "chrome/browser/component_updater/recovery_improved_component_installer.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
@@ -25,13 +27,14 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/update_client/activity_data_service.h"
+#include "components/update_client/protocol_handler.h"
 #include "components/update_client/update_query_params.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/service_manager_connection.h"
 #include "services/service_manager/public/cpp/connector.h"
 
 #if defined(OS_WIN)
-#include "base/win/win_util.h"
+#include "base/enterprise_util.h"
 #include "chrome/install_static/install_util.h"
 #include "chrome/installer/util/google_update_settings.h"
 #endif
@@ -73,6 +76,9 @@ class ChromeConfigurator : public update_client::Configurator {
   bool IsPerUserInstall() const override;
   std::vector<uint8_t> GetRunActionKeyHash() const override;
   std::string GetAppGuid() const override;
+  std::unique_ptr<update_client::ProtocolHandlerFactory>
+  GetProtocolHandlerFactory() const override;
+  update_client::RecoveryCRXElevator GetRecoveryCRXElevator() const override;
 
  private:
   friend class base::RefCountedThreadSafe<ChromeConfigurator>;
@@ -153,7 +159,7 @@ ChromeConfigurator::ExtraRequestParams() const {
 std::string ChromeConfigurator::GetDownloadPreference() const {
 #if defined(OS_WIN)
   // This group policy is supported only on Windows and only for enterprises.
-  return base::win::IsEnterpriseManaged()
+  return base::IsMachineExternallyManaged()
              ? base::SysWideToUTF8(
                    GoogleUpdateSettings::GetDownloadPreference())
              : std::string();
@@ -218,6 +224,20 @@ std::string ChromeConfigurator::GetAppGuid() const {
   return install_static::UTF16ToUTF8(install_static::GetAppGuid());
 #else
   return configurator_impl_.GetAppGuid();
+#endif
+}
+
+std::unique_ptr<update_client::ProtocolHandlerFactory>
+ChromeConfigurator::GetProtocolHandlerFactory() const {
+  return configurator_impl_.GetProtocolHandlerFactory();
+}
+
+update_client::RecoveryCRXElevator ChromeConfigurator::GetRecoveryCRXElevator()
+    const {
+#if defined(GOOGLE_CHROME_BUILD) && defined(OS_WIN)
+  return base::BindOnce(&RunRecoveryCRXElevated);
+#else
+  return {};
 #endif
 }
 

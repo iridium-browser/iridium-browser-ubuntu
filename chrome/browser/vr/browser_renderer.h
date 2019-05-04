@@ -74,9 +74,11 @@ class VR_EXPORT BrowserRenderer : public SchedulerBrowserRendererInterface {
   void SetUiExpectingActivityForTesting(
       UiTestActivityExpectation ui_expectation);
   void SaveNextFrameBufferToDiskForTesting(std::string filepath_base);
-  void WatchElementForVisibilityChangeForTesting(
+  void WatchElementForVisibilityStatusForTesting(
       VisibilityChangeExpectation visibility_expectation);
   void AcceptDoffPromptForTesting();
+  void SetBrowserRendererBrowserInterfaceForTesting(
+      BrowserRendererBrowserInterface* interface_ptr);
   void ConnectPresentingService(
       device::mojom::VRDisplayInfoPtr display_info,
       device::mojom::XRRuntimeSessionOptionsPtr options);
@@ -112,7 +114,6 @@ class VR_EXPORT BrowserRenderer : public SchedulerBrowserRendererInterface {
       const base::TimeTicks& current_time);
   void ReportElementVisibilityResultForTesting(UiTestOperationResult result);
 
-  std::unique_ptr<UiInterface> ui_;
   std::unique_ptr<SchedulerDelegate> scheduler_delegate_;
   std::unique_ptr<GraphicsDelegate> graphics_delegate_;
   std::unique_ptr<InputDelegate> input_delegate_;
@@ -128,6 +129,10 @@ class VR_EXPORT BrowserRenderer : public SchedulerBrowserRendererInterface {
   std::unique_ptr<UiVisibilityState> ui_visibility_state_;
   SlidingTimeDeltaAverage ui_processing_time_;
   SlidingTimeDeltaAverage ui_controller_update_time_;
+
+  // ui_ is using gl contexts during destruction (skia context specifically), so
+  // it must be destroyed before graphics_delegate_.
+  std::unique_ptr<UiInterface> ui_;
 
   base::WeakPtrFactory<BrowserRenderer> weak_ptr_factory_;
 

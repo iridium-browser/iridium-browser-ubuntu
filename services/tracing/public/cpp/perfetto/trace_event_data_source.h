@@ -46,6 +46,8 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventMetadataSource
   std::vector<MetadataGeneratorFunction> generator_functions_;
   scoped_refptr<base::SequencedTaskRunner> origin_task_runner_;
   base::Lock lock_;
+  ProducerClient* producer_client_ = nullptr;
+  uint32_t target_buffer_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(TraceEventMetadataSource);
 };
@@ -81,10 +83,15 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventDataSource
   TraceEventDataSource();
   ~TraceEventDataSource() override;
 
-  ThreadLocalEventSink* CreateThreadLocalEventSink();
+  ThreadLocalEventSink* CreateThreadLocalEventSink(bool thread_will_flush);
 
   // Callback from TraceLog, can be called from any thread.
-  static void OnAddTraceEvent(const base::trace_event::TraceEvent& trace_event);
+  static void OnAddTraceEvent(base::trace_event::TraceEvent* trace_event,
+                              bool thread_will_flush,
+                              base::trace_event::TraceEventHandle* handle);
+  static void OnUpdateDuration(base::trace_event::TraceEventHandle handle,
+                               const base::TimeTicks& now,
+                               const base::ThreadTicks& thread_now);
 
   base::Lock lock_;
   uint32_t target_buffer_ = 0;

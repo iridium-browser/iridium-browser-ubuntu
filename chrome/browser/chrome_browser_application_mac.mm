@@ -4,7 +4,6 @@
 
 #import "chrome/browser/chrome_browser_application_mac.h"
 
-#include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/mac/call_with_eh_frame.h"
@@ -22,7 +21,6 @@
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/native_event_processor_mac.h"
 #include "content/public/browser/native_event_processor_observer_mac.h"
-#include "ui/base/ui_base_switches.h"
 
 namespace chrome_browser_application_mac {
 
@@ -101,12 +99,6 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 
 }  // namespace
 
-// Method exposed for the purposes of overriding.
-// Used to determine when a Panel window can become the key window.
-@interface NSApplication (PanelsCanBecomeKey)
-- (void)_cycleWindowsReversed:(BOOL)arg1;
-@end
-
 @interface BrowserCrApplication ()<NativeEventProcessor> {
   base::ObserverList<content::NativeEventProcessorObserver>::Unchecked
       observers_;
@@ -123,26 +115,6 @@ std::string DescriptionForNSEvent(NSEvent* event) {
   chrome::InstallObjcExceptionPreprocessor();
 
   cocoa_l10n_util::ApplyForcedRTL();
-}
-
-- (id)init {
-  self = [super init];
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kForceDarkMode)) {
-    if (@available(macOS 10.14, *)) {
-      self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
-    }
-  }
-
-  // Sanity check to alert if overridden methods are not supported.
-  DCHECK([NSApplication
-      instancesRespondToSelector:@selector(_cycleWindowsReversed:)]);
-  DCHECK([NSApplication
-      instancesRespondToSelector:@selector(_removeWindow:)]);
-  DCHECK([NSApplication
-      instancesRespondToSelector:@selector(_setKeyWindow:)]);
-
-  return self;
 }
 
 // Initialize NSApplication using the custom subclass.  Check whether NSApp
@@ -366,15 +338,6 @@ std::string DescriptionForNSEvent(NSEvent* event) {
       accessibility_state->DisableAccessibility();
   }
   return [super accessibilitySetValue:value forAttribute:attribute];
-}
-
-- (void)_cycleWindowsReversed:(BOOL)arg1 {
-  base::AutoReset<BOOL> pin(&cyclingWindows_, YES);
-  [super _cycleWindowsReversed:arg1];
-}
-
-- (BOOL)isCyclingWindows {
-  return cyclingWindows_;
 }
 
 - (void)addNativeEventProcessorObserver:

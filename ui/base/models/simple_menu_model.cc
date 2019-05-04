@@ -50,9 +50,6 @@ bool SimpleMenuModel::Delegate::GetIconForCommandId(
   return false;
 }
 
-void SimpleMenuModel::Delegate::CommandIdHighlighted(int command_id) {
-}
-
 void SimpleMenuModel::Delegate::OnMenuWillShow(SimpleMenuModel* /*source*/) {}
 
 void SimpleMenuModel::Delegate::MenuClosed(SimpleMenuModel* /*source*/) {
@@ -117,6 +114,15 @@ void SimpleMenuModel::AddRadioItem(int command_id,
 void SimpleMenuModel::AddRadioItemWithStringId(int command_id, int string_id,
                                                int group_id) {
   AddRadioItem(command_id, l10n_util::GetStringUTF16(string_id), group_id);
+}
+
+void SimpleMenuModel::AddHighlightedItemWithStringIdAndIcon(
+    int command_id,
+    int string_id,
+    const gfx::ImageSkia& icon) {
+  Item item(command_id, TYPE_HIGHLIGHTED, l10n_util::GetStringUTF16(string_id));
+  item.icon = gfx::Image(icon);
+  AppendItem(std::move(item));
 }
 
 void SimpleMenuModel::AddSeparator(MenuSeparatorType separator_type) {
@@ -411,11 +417,6 @@ bool SimpleMenuModel::IsVisibleAt(int index) const {
 
   return delegate_->IsCommandIdVisible(command_id) &&
          items_[ValidateItemIndex(index)].visible;
-}
-
-void SimpleMenuModel::HighlightChangedTo(int index) {
-  if (delegate_)
-    delegate_->CommandIdHighlighted(GetCommandIdAt(index));
 }
 
 void SimpleMenuModel::ActivatedAt(int index) {

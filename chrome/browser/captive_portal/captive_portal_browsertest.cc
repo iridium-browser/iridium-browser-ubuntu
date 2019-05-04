@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <algorithm>
+#include <atomic>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -521,10 +522,13 @@ class TabActivationWaiter : public TabStripModelObserver {
   }
 
   // TabStripModelObserver overrides.
-  void ActiveTabChanged(content::WebContents* old_contents,
-                        content::WebContents* new_contents,
-                        int index,
-                        int reason) override {
+  void OnTabStripModelChanged(
+      TabStripModel* tab_strip_model,
+      const TabStripModelChange& change,
+      const TabStripSelectionChange& selection) override {
+    if (tab_strip_model->empty() || !selection.active_tab_changed())
+      return;
+
     number_of_unconsumed_active_tab_changes_++;
     DCHECK_EQ(1, number_of_unconsumed_active_tab_changes_);
     if (message_loop_runner_)
@@ -728,14 +732,6 @@ class CaptivePortalBrowserTest : public InProcessBrowserTest {
   // Sets whether or not there is a captive portal. Outstanding requests are
   // not affected.
   void SetBehindCaptivePortal(bool behind_captive_portal) {
-    if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-      base::PostTaskWithTraits(
-          FROM_HERE, {content::BrowserThread::IO},
-          base::BindOnce(&CaptivePortalBrowserTest::SetBehindCaptivePortal,
-                         base::Unretained(this), behind_captive_portal));
-      return;
-    }
-
     behind_captive_portal_ = behind_captive_portal;
   }
 
@@ -861,15 +857,15 @@ class CaptivePortalBrowserTest : public InProcessBrowserTest {
   int num_jobs_to_wait_for_ = 0;
   std::vector<content::URLLoaderInterceptor::RequestParams>
       ongoing_mock_requests_;
-  bool behind_captive_portal_ = true;
+  std::atomic<bool> behind_captive_portal_;
   bool intercept_bad_cert_ = true;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CaptivePortalBrowserTest);
 };
 
-CaptivePortalBrowserTest::CaptivePortalBrowserTest() {
-}
+CaptivePortalBrowserTest::CaptivePortalBrowserTest()
+    : behind_captive_portal_(true) {}
 
 void CaptivePortalBrowserTest::SetUpOnMainThread() {
   url_loader_interceptor_ =

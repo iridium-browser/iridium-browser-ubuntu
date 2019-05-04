@@ -24,10 +24,6 @@ class Identity;
 class ZygoteForkDelegate;
 }  // namespace service_manager
 
-namespace ui {
-class DataPack;
-}
-
 namespace content {
 
 class ContentBrowserClient;
@@ -63,10 +59,6 @@ class CONTENT_EXPORT ContentMainDelegate {
   // Called right before the process exits.
   virtual void ProcessExiting(const std::string& process_type) {}
 
-  // This loads the service manifest datapack, takes its ownership and returns
-  // the pointer to it.
-  virtual ui::DataPack* LoadServiceManifestDataPack();
-
 #if defined(OS_MACOSX)
   // Returns true if the process registers with the system monitor, so that we
   // can allocate an IO port for it before the sandbox is initialized. Embedders
@@ -95,11 +87,6 @@ class CONTENT_EXPORT ContentMainDelegate {
   // Called every time the zygote process forks.
   virtual void ZygoteForked() {}
 #endif  // defined(OS_LINUX)
-
-  // TODO(vadimt, yiyaoliu): Remove this function once crbug.com/453640 is
-  // fixed.
-  // Returns whether or not profiler recording should be enabled.
-  virtual bool ShouldEnableProfilerRecording();
 
   // Fatal errors during initialization are reported by this function, so that
   // the embedder can implement graceful exit by displaying some message and
@@ -137,8 +124,15 @@ class CONTENT_EXPORT ContentMainDelegate {
 
   // Allows the embedder to perform its own initialization after content
   // performed its own and already brought up MessageLoop, TaskScheduler, field
-  // tials and FeatureList (by default).
-  virtual void PostEarlyInitialization() {}
+  // trials and FeatureList (by default).
+  // |is_running_tests| indicates whether it is running in tests.
+  virtual void PostEarlyInitialization(bool is_running_tests) {}
+
+  // Allows the embedder to perform initialization once field trials/FeatureList
+  // initialization has completed if ShouldCreateFeatureList() returns true.
+  // Otherwise, the embedder is responsible for calling this method once feature
+  // list initialization is complete.
+  virtual void PostFieldTrialInitialization() {}
 
  protected:
   friend class ContentClientInitializer;

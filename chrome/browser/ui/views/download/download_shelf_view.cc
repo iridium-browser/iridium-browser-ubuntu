@@ -155,8 +155,9 @@ void DownloadShelfView::ConfigureButtonForTheme(views::MdTextButton* button) {
           ->UsingDefaultTheme()) {
     // For custom themes, we have to make up a background color for the
     // button. Use a slight tint of the shelf background.
-    bg_color = color_utils::BlendTowardOppositeLuma(
-        GetThemeProvider()->GetColor(ThemeProperties::COLOR_TOOLBAR), 0x10);
+    bg_color = color_utils::BlendTowardMaxContrast(
+        GetThemeProvider()->GetColor(ThemeProperties::COLOR_DOWNLOAD_SHELF),
+        0x10);
   }
   button->SetBgColorOverride(bg_color);
 }
@@ -305,7 +306,7 @@ void DownloadShelfView::UpdateColorsFromTheme() {
   ConfigureButtonForTheme(show_all_view_);
 
   SetBackground(views::CreateSolidBackground(
-      GetThemeProvider()->GetColor(ThemeProperties::COLOR_TOOLBAR)));
+      GetThemeProvider()->GetColor(ThemeProperties::COLOR_DOWNLOAD_SHELF)));
 
   views::SetImageFromVectorIcon(
       close_button_, vector_icons::kCloseRoundedIcon,
@@ -390,6 +391,16 @@ void DownloadShelfView::Closed() {
       ++i;
     }
   }
+
+  // If we had keyboard focus, calling SetVisible(false) causes keyboard focus
+  // to be completely lost. To prevent this, we focus another view: the web
+  // contents. TODO(collinbaker): https://crbug.com/846466 Fix
+  // AccessiblePaneView::SetVisible or FocusManager to make this unnecessary.
+  auto* focus_manager = GetFocusManager();
+  if (focus_manager && Contains(focus_manager->GetFocusedView())) {
+    get_parent()->contents_web_view()->RequestFocus();
+  }
+
   SetVisible(false);
 }
 

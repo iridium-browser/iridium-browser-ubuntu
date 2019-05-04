@@ -1,6 +1,6 @@
 AC_PREREQ([2.64])
 AC_INIT([HarfBuzz],
-        [1.9.0],
+        [2.3.0],
         [https://github.com/harfbuzz/harfbuzz/issues/new],
         [harfbuzz],
         [http://harfbuzz.org/])
@@ -12,7 +12,6 @@ AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([1.13.0 gnits tar-ustar dist-bzip2 no-dist-gzip -Wall no-define color-tests -Wno-portability])
 AM_SILENT_RULES([yes])
 AX_CODE_COVERAGE
-AC_USE_SYSTEM_EXTENSIONS
 
 # Initialize libtool
 m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
@@ -103,9 +102,6 @@ if test "x$GCC" = "xyes"; then
 	# by overriding CXXFLAGS.
 	CXXFLAGS="-fno-rtti $CXXFLAGS -fno-exceptions -fno-threadsafe-statics"
 
-	# Assorted warnings
-	CXXFLAGS="$CXXFLAGS -Wcast-align"
-
 	case "$host" in
 		*-*-mingw*)
 		;;
@@ -147,12 +143,6 @@ fi
 AM_CONDITIONAL(HAVE_PTHREAD, $have_pthread)
 
 dnl ==========================================================================
-
-have_ot=true
-if $have_ot; then
-	AC_DEFINE(HAVE_OT, 1, [Have native OpenType Layout backend])
-fi
-AM_CONDITIONAL(HAVE_OT, $have_ot)
 
 have_fallback=true
 if $have_fallback; then
@@ -514,6 +504,7 @@ test/api/Makefile
 test/fuzzing/Makefile
 test/shaping/Makefile
 test/shaping/data/Makefile
+test/shaping/data/aots/Makefile
 test/shaping/data/in-house/Makefile
 test/shaping/data/text-rendering-tests/Makefile
 test/subset/Makefile

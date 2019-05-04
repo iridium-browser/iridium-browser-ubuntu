@@ -14,6 +14,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/gcm_driver/gcm_channel_status_syncer.h"
+#include "components/history/core/common/pref_names.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -29,7 +30,7 @@
 #include "components/translate/core/browser/translate_prefs.h"
 #include "ios/web/public/web_task_traits.h"
 #include "ios/web/public/web_thread.h"
-#include "ios/web_view/cwv_web_view_features.h"
+#include "ios/web_view/cwv_web_view_buildflags.h"
 #include "ios/web_view/internal/autofill/web_view_personal_data_manager_factory.h"
 #include "ios/web_view/internal/content_settings/web_view_cookie_settings_factory.h"
 #include "ios/web_view/internal/content_settings/web_view_host_content_settings_map_factory.h"
@@ -52,6 +53,7 @@
 #import "ios/web_view/internal/sync/web_view_profile_sync_service_factory.h"
 #include "ios/web_view/internal/translate/web_view_translate_accept_languages_factory.h"
 #include "ios/web_view/internal/translate/web_view_translate_ranker_factory.h"
+#include "ios/web_view/internal/web_view_download_manager.h"
 #include "ios/web_view/internal/web_view_url_request_context_getter.h"
 #include "ios/web_view/internal/webdata_services/web_view_web_data_service_wrapper_factory.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -69,7 +71,9 @@ namespace ios_web_view {
 WebViewBrowserState::WebViewBrowserState(
     bool off_the_record,
     WebViewBrowserState* recording_browser_state /* = nullptr */)
-    : web::BrowserState(), off_the_record_(off_the_record) {
+    : web::BrowserState(),
+      off_the_record_(off_the_record),
+      download_manager_(std::make_unique<WebViewDownloadManager>(this)) {
   // A recording browser state must not be associated with another recording
   // browser state. An off the record browser state must be associated with
   // a recording browser state.

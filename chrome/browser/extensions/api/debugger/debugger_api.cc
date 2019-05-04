@@ -148,7 +148,6 @@ class ExtensionDevToolsClientHost : public content::DevToolsAgentHostClient,
   bool MayAttachToRenderer(content::RenderFrameHost* render_frame_host,
                            bool is_webui) override;
   bool MayAttachToBrowser() override;
-  bool MayDiscoverTargets() override;
   bool MayAffectLocalFiles() override;
 
  private:
@@ -320,9 +319,12 @@ void ExtensionDevToolsClientHost::DispatchProtocolMessage(
   if (!EventRouter::Get(profile_))
     return;
 
-  std::unique_ptr<base::Value> result = base::JSONReader::Read(message);
-  if (!result || !result->is_dict())
+  std::unique_ptr<base::Value> result =
+      base::JSONReader::Read(message, base::JSON_REPLACE_INVALID_CHARACTERS);
+  if (!result || !result->is_dict()) {
+    LOG(ERROR) << "Tried to send invalid message to extension: " << message;
     return;
+  }
   base::DictionaryValue* dictionary =
       static_cast<base::DictionaryValue*>(result.get());
 
@@ -380,10 +382,6 @@ bool ExtensionDevToolsClientHost::MayAttachToRenderer(
 }
 
 bool ExtensionDevToolsClientHost::MayAttachToBrowser() {
-  return false;
-}
-
-bool ExtensionDevToolsClientHost::MayDiscoverTargets() {
   return false;
 }
 

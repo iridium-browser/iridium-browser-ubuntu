@@ -27,6 +27,7 @@ rtc_source_set("enums") {
 }
 
 rtc_static_library("network_control") {
+  visibility = [ "*" ]
   sources = [
     "network_control.h",
     "network_types.cc",
@@ -34,6 +35,7 @@ rtc_static_library("network_control") {
   ]
 
   deps = [
+    ":webrtc_key_value_config",
     "../units:data_rate",
     "../units:data_size",
     "../units:time_delta",
@@ -42,13 +44,38 @@ rtc_static_library("network_control") {
   ]
 }
 
+rtc_source_set("webrtc_key_value_config") {
+  visibility = [ "*" ]
+  sources = [
+    "webrtc_key_value_config.h",
+  ]
+  deps = [
+    "//third_party/abseil-cpp/absl/strings",
+  ]
+}
+
+rtc_source_set("field_trial_based_config") {
+  visibility = [ "*" ]
+  sources = [
+    "field_trial_based_config.cc",
+    "field_trial_based_config.h",
+  ]
+  deps = [
+    ":webrtc_key_value_config",
+    "../../system_wrappers:field_trial",
+    "//third_party/abseil-cpp/absl/strings",
+  ]
+}
+
 rtc_static_library("goog_cc") {
+  visibility = [ "*" ]
   sources = [
     "goog_cc_factory.cc",
     "goog_cc_factory.h",
   ]
   deps = [
     ":network_control",
+    ":webrtc_key_value_config",
     "../../modules/congestion_controller/goog_cc",
     "//third_party/abseil-cpp/absl/memory",
   ]
@@ -59,8 +86,6 @@ if (rtc_include_tests) {
     testonly = true
     sources = [
       "test/mock_network_control.h",
-      "test/network_control_tester.cc",
-      "test/network_control_tester.h",
     ]
     deps = [
       ":network_control",

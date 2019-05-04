@@ -1,10 +1,11 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="no">
-<translation id="111910763555783249">Innstillinger for varsler</translation>
+<translation id="111910763555783249">Varslingsinnstillinger</translation>
 <translation id="1127811143501539442">{DAYS,plural, =1{For 1 dag siden}other{For # dager siden}}</translation>
 <translation id="1156623771253174079">{SECONDS,plural, =1{for 1 minutt siden}other{for # minutter siden}}</translation>
 <translation id="1169783199079129864">{MINUTES,plural, =1{1 m}other{# m}}</translation>
+<translation id="1181037720776840403">Fjern</translation>
 <translation id="1243314992276662751">Last opp</translation>
 <translation id="1269641567813814718">Win</translation>
 <translation id="1293699935367580298">Esc</translation>
@@ -30,16 +31,19 @@
 <translation id="1871244248791675517">Ins</translation>
 <translation id="1884435127456172652"><ph name="NUMBER" /> %</translation>
 <translation id="1901303067676059328">Marker &amp;alt</translation>
+<translation id="1938451708255335766">For å justere visningstettheten for vinduer, start appen på nytt.</translation>
 <translation id="2141853158323869627">{DAYS,plural, =1{1 d}other{# d}}</translation>
 <translation id="2148716181193084225">I dag</translation>
 <translation id="2168039046890040389">Opp 1 s.</translation>
 <translation id="2190355936436201913">(tom)</translation>
+<translation id="2192232475740621500">Bruk lav tetthet</translation>
 <translation id="219905428774326614">Appoversikt, alle apper</translation>
 <translation id="2267918077332197517">Blokkér alle varsler fra dette nettstedet</translation>
 <translation id="2289052229480071835">Trykk på berøringsmålene på skjermen.</translation>
 <translation id="2295140143284145483">Undersøkelse</translation>
 <translation id="2297836609126180313"><ph name="QUANTITY" /> TB per sek</translation>
 <translation id="24452542372838207">Vis varselet</translation>
+<translation id="2445449901874883781">Bruk høy tetthet</translation>
 <translation id="2482878487686419369">Varsler</translation>
 <translation id="2497284189126895209">Alle filer</translation>
 <translation id="2515586267016047495">Alt</translation>
@@ -60,7 +64,10 @@
 <translation id="3234408098842461169">Pil ned</translation>
 <translation id="3291688615589870984">{DAYS,plural, =1{1 dag}other{# dager}}</translation>
 <translation id="335581015389089642">Tale</translation>
+<translation id="3462241349431650993">Hvis du skjuler dette forslaget, vises det ikke for kontoen din igjen på noen av enhetene dine.</translation>
+<translation id="3479552764303398839">Ikke nå</translation>
 <translation id="3600566671520689681">{DAYS,plural, =1{1 dag igjen}other{# dager igjen}}</translation>
+<translation id="3608915363409716668"><ph name="MAXIMUM_VALUE" />+</translation>
 <translation id="3618849550573277856">Slå opp «<ph name="LOOKUP_STRING" />»</translation>
 <translation id="364720409959344976">Velg mappen du vil laste opp</translation>
 <translation id="3660179305079774227">Pil opp</translation>
@@ -99,6 +106,7 @@
 <translation id="5613020302032141669">Pil venstre</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{1 min}other{# min}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{1 dag og }other{# dager og }}</translation>
+<translation id="5895138241574237353">Start på nytt</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{1 sekund igjen}other{# sekunder igjen}}</translation>
 <translation id="5941711191222866238">Minimer</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 time}other{# timer}}</translation>
@@ -120,6 +128,7 @@
 <translation id="6483402905448010557">{SECONDS,plural, =1{for 1 sekund siden}other{for # sekunder siden}}</translation>
 <translation id="654149438358937226">Blokkér alle varsler</translation>
 <translation id="6567071839949112727">klikk på et overordnet element</translation>
+<translation id="6578407462441924264">Uten navn</translation>
 <translation id="6612467943526193239">For å lukke kalibreringen, trykk på Esc.</translation>
 <translation id="6620110761915583480">Lagre fil</translation>
 <translation id="6699343763173986273">Media – neste spor</translation>
@@ -134,7 +143,7 @@
 <translation id="6917971086528278418">{YEARS,plural, =1{1 år igjen}other{# år igjen}}</translation>
 <translation id="6945221475159498467">Velg</translation>
 <translation id="6965382102122355670">OK</translation>
-<translation id="6974053822202609517">Høyre til venstre</translation>
+<translation id="6974053822202609517">Høyre mot venstre</translation>
 <translation id="7052633198403197513">F1</translation>
 <translation id="7130207228079676353">MEST SANNSYNLIG</translation>
 <translation id="7222373446505536781">F11</translation>
@@ -154,6 +163,7 @@
 <translation id="8087772101393322318"><ph name="KEY_MODIFIER_NAME" /> + <ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{For 1 time siden}other{For # timer siden}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{1 sek igjen}other{# sek igjen}}</translation>
+<translation id="8152264887680882389"><ph name="TEXT" />, autofullføring</translation>
 <translation id="815598010540052116">Rull ned</translation>
 <translation id="8179976553408161302">Enter</translation>
 <translation id="8210608804940886430">Ned 1 s.</translation>
@@ -165,6 +175,7 @@
 <translation id="838869780401515933">merk av</translation>
 <translation id="8393700583063109961">Send melding</translation>
 <translation id="8394908167088220973">Media – spill av / pause</translation>
+<translation id="8420205633584771378">Vil du fjerne dette forslaget?</translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1 år}other{# år}}</translation>
 <translation id="8602707065186045623"><ph name="SAVEAS_EXTENSION_TYPE" /> Fil (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> kB per sek</translation>
@@ -177,7 +188,6 @@
 <translation id="8841375032071747811">Tilbakeknapp</translation>
 <translation id="8901569739625249689"><ph name="QUANTITY" /> kB</translation>
 <translation id="9002566407876343676">åpne</translation>
-<translation id="9038489124413477075">Mappe uten navn</translation>
 <translation id="9044832324875206639">{SECONDS,plural, =1{1 sek}other{# sek}}</translation>
 <translation id="9059834730836941392">Skjul varselet</translation>
 <translation id="9150735707954472829">Fane</translation>

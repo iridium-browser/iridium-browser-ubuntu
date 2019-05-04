@@ -169,7 +169,8 @@ SDK.HARLog.Entry = class {
       // IPv6 address should not have square brackets per (https://tools.ietf.org/html/rfc2373#section-2.2).
       serverIPAddress: ipAddress.replace(/\[\]/g, ''),
       _initiator: exportedInitiator,
-      _priority: harEntry._request.priority()
+      _priority: harEntry._request.priority(),
+      _resourceType: harEntry._request.resourceType().name()
     };
 
     // Chrome specific.
@@ -197,7 +198,7 @@ SDK.HARLog.Entry = class {
       queryString: this._buildParameters(this._request.queryParameters || []),
       cookies: this._buildCookies(this._request.requestCookies || []),
       headersSize: headersText ? headersText.length : -1,
-      bodySize: this.requestBodySize
+      bodySize: await this._requestBodySize()
     };
     const postData = await this._buildPostData();
     if (postData)
@@ -375,10 +376,18 @@ SDK.HARLog.Entry = class {
   }
 
   /**
-   * @return {number}
+   * @return {!Promise<number>}
    */
-  get requestBodySize() {
-    return !this._request.requestFormData ? 0 : this._request.requestFormData.length;
+  async _requestBodySize() {
+    const postData = await this._request.requestFormData();
+    if (!postData)
+      return 0;
+
+    // As per the har spec, returns the length in bytes of the posted data.
+    // TODO(jarhar): This will be wrong if the underlying encoding is not UTF-8. NetworkRequest.requestFormData is
+    //   assumed to be UTF-8 because the backend decodes post data to a UTF-8 string regardless of the provided
+    //   content-type/charset in InspectorNetworkAgent::FormDataToString
+    return new TextEncoder('utf-8').encode(postData).length;
   }
 
   /**

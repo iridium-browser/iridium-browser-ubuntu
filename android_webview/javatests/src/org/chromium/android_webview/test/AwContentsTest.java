@@ -33,6 +33,7 @@ import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.renderer_priority.RendererPriority;
 import org.chromium.android_webview.test.TestAwContentsClient.OnDownloadStartHelper;
 import org.chromium.android_webview.test.util.CommonResources;
+import org.chromium.base.BuildInfo;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CallbackHelper;
@@ -510,63 +511,6 @@ public class AwContentsTest {
         Assert.assertTrue(testContainer.isBackedByHardwareView());
     }
 
-    // TODO(hush): more ssl tests. And put the ssl tests into a separate test
-    // class.
-    @Test
-    @Feature({"AndroidWebView"})
-    @SmallTest
-    // If the user allows the ssl error, the same ssl error will not trigger
-    // the onReceivedSslError callback; If the user denies it, the same ssl
-    // error will still trigger the onReceivedSslError callback.
-    public void testSslPreferences() throws Throwable {
-        final AwTestContainerView testContainer =
-                mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
-        final AwContents awContents = testContainer.getAwContents();
-        TestWebServer webServer = TestWebServer.startSsl();
-        final String pagePath = "/hello.html";
-        final String pageUrl =
-                webServer.setResponse(pagePath, "<html><body>hello world</body></html>", null);
-        final CallbackHelper onReceivedSslErrorHelper =
-                mContentsClient.getOnReceivedSslErrorHelper();
-        int onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
-
-        mActivityTestRule.loadUrlSync(
-                awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
-
-        Assert.assertEquals(onSslErrorCallCount + 1, onReceivedSslErrorHelper.getCallCount());
-        Assert.assertEquals(1, webServer.getRequestCount(pagePath));
-
-        // Now load the page again. This time, we expect no ssl error, because
-        // user's decision should be remembered.
-        onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
-        mActivityTestRule.loadUrlSync(
-                awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
-        Assert.assertEquals(onSslErrorCallCount, onReceivedSslErrorHelper.getCallCount());
-
-        // Now clear the ssl preferences then load the same url again. Expect to see
-        // onReceivedSslError getting called again.
-        awContents.clearSslPreferences();
-        onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
-        mActivityTestRule.loadUrlSync(
-                awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
-        Assert.assertEquals(onSslErrorCallCount + 1, onReceivedSslErrorHelper.getCallCount());
-
-        // Now clear the stored decisions and tell the client to deny ssl errors.
-        awContents.clearSslPreferences();
-        mContentsClient.setAllowSslError(false);
-        onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
-        mActivityTestRule.loadUrlSync(
-                awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
-        Assert.assertEquals(onSslErrorCallCount + 1, onReceivedSslErrorHelper.getCallCount());
-
-        // Now load the same page again. This time, we still expect onReceivedSslError,
-        // because we only remember user's decision if it is "allow".
-        onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
-        mActivityTestRule.loadUrlSync(
-                awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
-        Assert.assertEquals(onSslErrorCallCount + 1, onReceivedSslErrorHelper.getCallCount());
-    }
-
     /**
      * Verifies that Web Notifications and the Push API are not exposed in WebView.
      */
@@ -783,6 +727,88 @@ public class AwContentsTest {
         Assert.assertEquals(0, consoleHelper.getMessages().size());
     }
 
+    @Test
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testFixupOctothorpesInLoadDataContent() {
+        // If there are no octothorpes the function should have no effect.
+        final String noOctothorpeString = "<div id='foo1'>This content has no octothorpe</div>";
+        Assert.assertEquals(noOctothorpeString,
+                AwContents.fixupOctothorpesInLoadDataContent(noOctothorpeString));
+
+        // One '#' followed by a valid DOM id requires us to duplicate it into a real fragment.
+        Assert.assertEquals("abc%23A#A", AwContents.fixupOctothorpesInLoadDataContent("abc#A"));
+        Assert.assertEquals("abc%23a#a", AwContents.fixupOctothorpesInLoadDataContent("abc#a"));
+        Assert.assertEquals("abc%23Aa#Aa", AwContents.fixupOctothorpesInLoadDataContent("abc#Aa"));
+        Assert.assertEquals("abc%23aA#aA", AwContents.fixupOctothorpesInLoadDataContent("abc#aA"));
+        Assert.assertEquals(
+                "abc%23a1-_:.#a1-_:.", AwContents.fixupOctothorpesInLoadDataContent("abc#a1-_:."));
+
+        // One '#' followed by an invalid DOM id just means we encode the '#'.
+        Assert.assertEquals("abc%231", AwContents.fixupOctothorpesInLoadDataContent("abc#1"));
+        Assert.assertEquals("abc%231a", AwContents.fixupOctothorpesInLoadDataContent("abc#1a"));
+        Assert.assertEquals(
+                "abc%23not valid", AwContents.fixupOctothorpesInLoadDataContent("abc#not valid"));
+        Assert.assertEquals("abc%23a@", AwContents.fixupOctothorpesInLoadDataContent("abc#a@"));
+
+        // Multiple '#', whether or not they have a valid DOM id afterwards, just means we encode
+        // the '#'.
+        Assert.assertEquals("abc%23%23a", AwContents.fixupOctothorpesInLoadDataContent("abc##a"));
+        Assert.assertEquals("abc%23a%23b", AwContents.fixupOctothorpesInLoadDataContent("abc#a#b"));
+    }
+
+    @Test
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testLoadDataOctothorpeHandling() throws Throwable {
+        AwTestContainerView testView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
+        final AwContents awContents = testView.getAwContents();
+
+        // Before Android Q, the loadData API is expected to handle the encoding for users.
+        boolean encodeOctothorpes = !BuildInfo.targetsAtLeastQ();
+
+        // A URL with no '#' character.
+        mActivityTestRule.loadDataSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                "<html>test</html>", "text/html", false);
+        Assert.assertEquals("data:text/html,<html>test</html>", awContents.getLastCommittedUrl());
+
+        // A URL with one '#' character.
+        mActivityTestRule.loadDataSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                "<html>test#foo</html>", "text/html", false);
+        String expectedUrl = encodeOctothorpes ? "data:text/html,<html>test%23foo</html>"
+                                               : "data:text/html,<html>test#foo</html>";
+        Assert.assertEquals(expectedUrl, awContents.getLastCommittedUrl());
+
+        // A URL with many '#' characters.
+        mActivityTestRule.loadDataSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                "<html>test#foo#bar#</html>", "text/html", false);
+        expectedUrl = encodeOctothorpes ? "data:text/html,<html>test%23foo%23bar%23</html>"
+                                        : "data:text/html,<html>test#foo#bar#</html>";
+        Assert.assertEquals(expectedUrl, awContents.getLastCommittedUrl());
+
+        // An already encoded '#' character.
+        mActivityTestRule.loadDataSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                "<html>test%23foo</html>", "text/html", false);
+        Assert.assertEquals(
+                "data:text/html,<html>test%23foo</html>", awContents.getLastCommittedUrl());
+
+        // A URL with a valid fragment. Before Q, this must be manipulated so that it renders the
+        // same and still scrolls to the fragment location.
+        if (encodeOctothorpes) {
+            String contents = "<div style='height: 5000px'></div><a id='target'>Target</a>#target";
+            mActivityTestRule.loadDataSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                    contents, "text/html", false);
+            Assert.assertEquals(
+                    "data:text/html,<div style='height: 5000px'></div><a id='target'>Target</a>"
+                            + "%23target#target",
+                    awContents.getLastCommittedUrl());
+            // TODO(smcgruer): I can physically see that this has scrolled on the test page, and
+            // have traced scrolling through PaintLayerScrollableArea, but I don't know how to check
+            // it.
+        }
+    }
+
     private int getHistogramSampleCount(String name) throws Throwable {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -844,10 +870,18 @@ public class AwContentsTest {
         });
         Assert.assertEquals(0, getHistogramSampleCount(AwContents.DATA_URI_HISTOGRAM_NAME));
 
-        // Check a URL with a '#' character.
+        // '#' is legal if the baseUrl is not data scheme, because loadDataWithBaseURL accepts
+        // unencoded content.
         mActivityTestRule.runOnUiThread(() -> {
             awContents.loadDataWithBaseURL(
                     "http://www.example.com", "<html>test#foo</html>", "text/html", null, null);
+        });
+        Assert.assertEquals(0, getHistogramSampleCount(AwContents.DATA_URI_HISTOGRAM_NAME));
+
+        // Check a URL with a '#' character, with data-scheme baseUrl.
+        mActivityTestRule.runOnUiThread(() -> {
+            awContents.loadDataWithBaseURL(
+                    "data:text/html", "<html>test#foo</html>", "text/html", null, null);
         });
         Assert.assertEquals(1, getHistogramSampleCount(AwContents.DATA_URI_HISTOGRAM_NAME));
 
@@ -894,5 +928,72 @@ public class AwContentsTest {
 
         // |loadUrl| doesn't allow a null url, so it is not necessary to check that for this API.
         // See http://crbug.com/864708.
+    }
+
+    @Test
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testLoadUrlRecordsScheme_http() throws Throwable {
+        // No need to spin up a web server, since we don't care if the load ever succeeds.
+        final String httpUrlWithNoRealPage = "http://some.origin/some/path.html";
+        loadUrlAndCheckScheme(httpUrlWithNoRealPage, AwContents.UrlScheme.HTTP_SCHEME);
+    }
+
+    @Test
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testLoadUrlRecordsScheme_javascript() throws Throwable {
+        loadUrlAndCheckScheme(
+                "javascript:console.log('message')", AwContents.UrlScheme.JAVASCRIPT_SCHEME);
+    }
+
+    @Test
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testLoadUrlRecordsScheme_fileAndroidAsset() throws Throwable {
+        loadUrlAndCheckScheme("file:///android_asset/some/asset/page.html",
+                AwContents.UrlScheme.FILE_ANDROID_ASSET_SCHEME);
+    }
+
+    @Test
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testLoadUrlRecordsScheme_fileRegular() throws Throwable {
+        loadUrlAndCheckScheme("file:///some/path/on/disk.html", AwContents.UrlScheme.FILE_SCHEME);
+    }
+
+    @Test
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testLoadUrlRecordsScheme_data() throws Throwable {
+        loadUrlAndCheckScheme(
+                "data:text/html,<html><body>foo</body></html>", AwContents.UrlScheme.DATA_SCHEME);
+    }
+
+    @Test
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testLoadUrlRecordsScheme_blank() throws Throwable {
+        loadUrlAndCheckScheme("about:blank", AwContents.UrlScheme.EMPTY);
+    }
+
+    private void loadUrlAndCheckScheme(String url, @AwContents.UrlScheme int expectedSchemeEnum)
+            throws Throwable {
+        AwTestContainerView testView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
+        final AwContents awContents = testView.getAwContents();
+
+        Assert.assertEquals(0,
+                RecordHistogram.getHistogramTotalCountForTesting(
+                        AwContents.LOAD_URL_SCHEME_HISTOGRAM_NAME));
+        // Note: we use async because not all loads emit onPageFinished. This relies on the UMA
+        // metric being logged in the synchronous part of loadUrl().
+        mActivityTestRule.loadUrlAsync(awContents, url);
+        Assert.assertEquals(1,
+                RecordHistogram.getHistogramTotalCountForTesting(
+                        AwContents.LOAD_URL_SCHEME_HISTOGRAM_NAME));
+        Assert.assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        AwContents.LOAD_URL_SCHEME_HISTOGRAM_NAME, expectedSchemeEnum));
     }
 }

@@ -4,13 +4,13 @@
 
 #include "ash/public/cpp/accelerators.h"
 
-#include "base/macros.h"
+#include "base/stl_util.h"
 
 namespace ash {
 
 const AcceleratorData kAcceleratorData[] = {
-    {true, ui::VKEY_SPACE, ui::EF_CONTROL_DOWN, PREVIOUS_IME},
-    {false, ui::VKEY_SPACE, ui::EF_CONTROL_DOWN, PREVIOUS_IME},
+    {true, ui::VKEY_SPACE, ui::EF_CONTROL_DOWN, SWITCH_TO_LAST_USED_IME},
+    {false, ui::VKEY_SPACE, ui::EF_CONTROL_DOWN, SWITCH_TO_LAST_USED_IME},
     {true, ui::VKEY_TAB, ui::EF_ALT_DOWN, CYCLE_FORWARD_MRU},
     {true, ui::VKEY_TAB, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
      CYCLE_BACKWARD_MRU},
@@ -82,7 +82,8 @@ const AcceleratorData kAcceleratorData[] = {
     {true, ui::VKEY_VOLUME_DOWN, ui::EF_NONE, VOLUME_DOWN},
     {true, ui::VKEY_VOLUME_UP, ui::EF_NONE, VOLUME_UP},
     {true, ui::VKEY_ESCAPE, ui::EF_COMMAND_DOWN, SHOW_TASK_MANAGER},
-    {true, ui::VKEY_SPACE, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN, NEXT_IME},
+    {true, ui::VKEY_SPACE, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN,
+     SWITCH_TO_NEXT_IME},
     {true, ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, OPEN_FEEDBACK_PAGE},
     {true, ui::VKEY_Q, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, EXIT},
     {true, ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
@@ -109,13 +110,14 @@ const AcceleratorData kAcceleratorData[] = {
     {true, ui::VKEY_MEDIA_LAUNCH_APP2, ui::EF_SHIFT_DOWN, TOGGLE_FULLSCREEN},
     {true, ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN | ui::EF_COMMAND_DOWN, UNPIN},
     {true, ui::VKEY_L, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, FOCUS_SHELF},
-    {true, ui::VKEY_HELP, ui::EF_NONE, SHOW_KEYBOARD_OVERLAY},
+    {true, ui::VKEY_V, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, FOCUS_PIP},
+    {true, ui::VKEY_HELP, ui::EF_NONE, SHOW_SHORTCUT_VIEWER},
     {true, ui::VKEY_OEM_2, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
-     SHOW_KEYBOARD_OVERLAY},
+     SHOW_SHORTCUT_VIEWER},
     {true, ui::VKEY_OEM_2,
      ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
-     SHOW_KEYBOARD_OVERLAY},
-    {true, ui::VKEY_F14, ui::EF_NONE, SHOW_KEYBOARD_OVERLAY},
+     SHOW_SHORTCUT_VIEWER},
+    {true, ui::VKEY_F14, ui::EF_NONE, SHOW_SHORTCUT_VIEWER},
     {true, ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
      TOGGLE_MESSAGE_CENTER_BUBBLE},
     {true, ui::VKEY_P, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, SHOW_STYLUS_TOOLS},
@@ -173,6 +175,6 @@ const AcceleratorData kAcceleratorData[] = {
     // VKEY_MEDIA_LAUNCH_MAIL.
 };
 
-const size_t kAcceleratorDataLength = arraysize(kAcceleratorData);
+const size_t kAcceleratorDataLength = base::size(kAcceleratorData);
 
 }  // namespace ash

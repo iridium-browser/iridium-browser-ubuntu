@@ -12,16 +12,15 @@
 #include "third_party/blink/renderer/modules/peerconnection/adapters/quic_transport_host.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/web_rtc_cross_thread_copier.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 
 namespace blink {
 
 QuicTransportProxy::QuicTransportProxy(
     Delegate* delegate,
     IceTransportProxy* ice_transport_proxy,
-    quic::Perspective perspective,
-    const std::vector<rtc::scoped_refptr<rtc::RTCCertificate>>& certificates,
-    std::unique_ptr<P2PQuicTransportFactory> quic_transport_factory)
+    std::unique_ptr<P2PQuicTransportFactory> quic_transport_factory,
+    const P2PQuicTransportConfig& config)
     : host_(nullptr,
             base::OnTaskRunnerDeleter(ice_transport_proxy->host_thread())),
       delegate_(delegate),
@@ -46,11 +45,11 @@ QuicTransportProxy::QuicTransportProxy(
   // object.
   IceTransportHost* ice_transport_host =
       ice_transport_proxy->ConnectConsumer(this);
-  PostCrossThreadTask(*host_thread(), FROM_HERE,
-                      CrossThreadBind(&QuicTransportHost::Initialize,
-                                      CrossThreadUnretained(host_.get()),
-                                      CrossThreadUnretained(ice_transport_host),
-                                      perspective, certificates));
+  PostCrossThreadTask(
+      *host_thread(), FROM_HERE,
+      CrossThreadBind(&QuicTransportHost::Initialize,
+                      CrossThreadUnretained(host_.get()),
+                      CrossThreadUnretained(ice_transport_host), config));
 }
 
 QuicTransportProxy::~QuicTransportProxy() {
@@ -71,14 +70,12 @@ scoped_refptr<base::SingleThreadTaskRunner> QuicTransportProxy::host_thread()
   return ice_transport_proxy_->host_thread();
 }
 
-void QuicTransportProxy::Start(
-    std::vector<std::unique_ptr<rtc::SSLFingerprint>> remote_fingerprints) {
+void QuicTransportProxy::Start(P2PQuicTransport::StartConfig config) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  PostCrossThreadTask(
-      *host_thread(), FROM_HERE,
-      CrossThreadBind(&QuicTransportHost::Start,
-                      CrossThreadUnretained(host_.get()),
-                      WTF::Passed(std::move(remote_fingerprints))));
+  PostCrossThreadTask(*host_thread(), FROM_HERE,
+                      CrossThreadBind(&QuicTransportHost::Start,
+                                      CrossThreadUnretained(host_.get()),
+                                      WTF::Passed(std::move(config))));
 }
 
 void QuicTransportProxy::Stop() {
@@ -109,6 +106,15 @@ QuicStreamProxy* QuicTransportProxy::CreateStream() {
   return stream_proxy_ptr;
 }
 
+void QuicTransportProxy::GetStats(uint32_t request_id) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  PostCrossThreadTask(
+      *host_thread(), FROM_HERE,
+      CrossThreadBind(&QuicTransportHost::GetStats,
+                      CrossThreadUnretained(host_.get()), request_id));
+}
+
 void QuicTransportProxy::OnRemoveStream(
     QuicStreamProxy* stream_proxy_to_remove) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -132,8 +138,8 @@ void QuicTransportProxy::OnRemoteStopped() {
 void QuicTransportProxy::OnConnectionFailed(const std::string& error_details,
                                             bool from_remote) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  delegate_->OnConnectionFailed(error_details, from_remote);
   stream_proxies_.clear();
+  delegate_->OnConnectionFailed(error_details, from_remote);
 }
 
 void QuicTransportProxy::OnStream(
@@ -146,6 +152,13 @@ void QuicTransportProxy::OnStream(
   stream_proxies_.insert(
       std::make_pair(stream_proxy_ptr, std::move(stream_proxy)));
   delegate_->OnStream(stream_proxy_ptr);
+}
+
+void QuicTransportProxy::OnStats(uint32_t request_id,
+                                 const P2PQuicTransportStats& stats) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  delegate_->OnStats(request_id, stats);
 }
 
 }  // namespace blink

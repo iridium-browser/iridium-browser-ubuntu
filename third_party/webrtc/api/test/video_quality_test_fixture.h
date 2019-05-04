@@ -18,7 +18,7 @@
 
 #include "api/bitrate_constraints.h"
 #include "api/fec_controller.h"
-#include "api/mediatypes.h"
+#include "api/media_types.h"
 #include "api/test/simulated_network.h"
 #include "api/video_codecs/video_encoder_config.h"
 
@@ -66,6 +66,7 @@ class VideoQualityTestFixtureInterface {
       bool sync_video;
       bool dtx;
       bool use_real_adm;
+      absl::optional<std::string> ana_config;
     } audio;
     struct Screenshare {
       bool enabled;
@@ -82,10 +83,6 @@ class VideoQualityTestFixtureInterface {
       std::string graph_data_output_filename;
       std::string graph_title;
     } analyzer;
-    // Deprecated. DO NOT USE. Use config instead. This is not pipe actually,
-    // it is just configuration, that will be passed to default implementation
-    // of simulation layer.
-    BuiltInNetworkBehaviorConfig pipe;
     // Config for default simulation implementation. Must be nullopt if
     // `sender_network` and `receiver_network` in InjectionComponents are
     // non-null. May be nullopt even if `sender_network` and `receiver_network`

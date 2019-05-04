@@ -5,23 +5,12 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_WELCOME_NUX_GOOGLE_APPS_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_WELCOME_NUX_GOOGLE_APPS_HANDLER_H_
 
+#include <array>
+
 #include "base/macros.h"
 #include "base/values.h"
+#include "chrome/browser/ui/webui/welcome/nux/bookmark_item.h"
 #include "content/public/browser/web_ui_message_handler.h"
-
-class PrefService;
-
-namespace bookmarks {
-class BookmarkModel;
-}  // namespace bookmarks
-
-namespace content {
-class WebUIDataSource;
-}  // namespace content
-
-namespace favicon {
-class FaviconService;
-}  // namespace favicon
 
 namespace nux {
 
@@ -36,32 +25,22 @@ enum class GoogleAppsInteraction {
   kCount,
 };
 
+const size_t kGoogleAppCount = 5;
+
 class GoogleAppsHandler : public content::WebUIMessageHandler {
  public:
-  GoogleAppsHandler(PrefService* prefs,
-                    favicon::FaviconService* favicon_service,
-                    bookmarks::BookmarkModel* bookmark_model);
+  GoogleAppsHandler();
   ~GoogleAppsHandler() override;
 
   // WebUIMessageHandler:
   void RegisterMessages() override;
 
   // Callbacks for JS APIs.
-  void HandleRejectGoogleApps(const base::ListValue* args);
-  void HandleAddGoogleApps(const base::ListValue* args);
-
-  // Adds webui sources.
-  static void AddSources(content::WebUIDataSource* html_source);
+  void HandleCacheGoogleAppIcon(const base::ListValue* args);
+  void HandleGetGoogleAppsList(const base::ListValue* args);
 
  private:
-  // Weak reference.
-  PrefService* prefs_;
-
-  // Weak reference.
-  favicon::FaviconService* favicon_service_;
-
-  // Weak reference.
-  bookmarks::BookmarkModel* bookmark_model_;
+  std::array<BookmarkItem, kGoogleAppCount> google_apps_;
 
   DISALLOW_COPY_AND_ASSIGN(GoogleAppsHandler);
 };

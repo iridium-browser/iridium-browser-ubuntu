@@ -89,6 +89,10 @@ void UpdateProvisioningResultUMA(ProvisioningResult result,
       GetHistogramName("Arc.Provisioning.Result.", profile), result);
 }
 
+void UpdateSecondarySigninResultUMA(ProvisioningResult result) {
+  UMA_HISTOGRAM_ENUMERATION("Arc.Secondary.Signin.Result", result);
+}
+
 void UpdateProvisioningTiming(const base::TimeDelta& elapsed_time,
                               bool success,
                               const Profile* profile) {
@@ -106,6 +110,20 @@ void UpdateReauthorizationResultUMA(ProvisioningResult result,
                                     const Profile* profile) {
   base::UmaHistogramEnumeration(
       GetHistogramName("Arc.Reauthorization.Result.", profile), result);
+}
+
+void UpdatePlayAutoInstallRequestState(mojom::PaiFlowState state,
+                                       const Profile* profile) {
+  base::UmaHistogramEnumeration(
+      GetHistogramName("Arc.PlayAutoInstallRequest.State.", profile), state);
+}
+
+void UpdatePlayAutoInstallRequestTime(const base::TimeDelta& elapsed_time,
+                                      const Profile* profile) {
+  base::UmaHistogramCustomTimes(
+      GetHistogramName("Arc.PlayAutoInstallRequest.TimeDelta.", profile),
+      elapsed_time, base::TimeDelta::FromSeconds(1),
+      base::TimeDelta::FromMinutes(10), 50);
 }
 
 void UpdatePlayStoreShowTime(const base::TimeDelta& elapsed_time,
@@ -145,6 +163,11 @@ void UpdateSupervisionTransitionResultUMA(
 
 void UpdateReauthorizationSilentAuthCodeUMA(OptInSilentAuthCode state) {
   base::UmaHistogramSparse("Arc.OptInSilentAuthCode.Reauthorization",
+                           static_cast<int>(state));
+}
+
+void UpdateSecondaryAccountSilentAuthCodeUMA(OptInSilentAuthCode state) {
+  base::UmaHistogramSparse("Arc.OptInSilentAuthCode.SecondaryAccount",
                            static_cast<int>(state));
 }
 

@@ -17,10 +17,9 @@
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "base/strings/string16.h"
-#include "content/shell/test_runner/layout_test_runtime_flags.h"
 #include "content/shell/test_runner/test_runner_export.h"
 #include "content/shell/test_runner/web_test_runner.h"
-#include "media/midi/midi_service.mojom.h"
+#include "content/shell/test_runner/web_test_runtime_flags.h"
 #include "third_party/blink/public/platform/web_effective_connection_type.h"
 #include "third_party/blink/public/platform/web_image.h"
 #include "v8/include/v8.h"
@@ -62,7 +61,7 @@ class WebTestDelegate;
 // 2. It manages global test state.  Example:
 //    - Tracking topLoadingFrame that can finish the test when it loads.
 //    - WorkQueue holding load requests from the TestInterfaces
-//    - LayoutTestRuntimeFlags
+//    - WebTestRuntimeFlags
 class TestRunner : public WebTestRunner {
  public:
   explicit TestRunner(TestInterfaces*);
@@ -92,7 +91,7 @@ class TestRunner : public WebTestRunner {
   bool DumpPixelsAsync(
       blink::WebLocalFrame* frame,
       base::OnceCallback<void(const SkBitmap&)> callback) override;
-  void ReplicateLayoutTestRuntimeFlagsChanges(
+  void ReplicateWebTestRuntimeFlagsChanges(
       const base::DictionaryValue& changed_values) override;
   bool HasCustomTextDump(std::string* custom_text_dump) const override;
   bool ShouldDumpBackForwardList() const override;
@@ -112,6 +111,7 @@ class TestRunner : public WebTestRunner {
   void SetV8CacheDisabled(bool);
   void setShouldDumpAsText(bool);
   void setShouldDumpAsMarkup(bool);
+  void setShouldDumpAsLayout(bool);
   void setCustomTextOutput(const std::string& text);
   void setShouldGeneratePixelResults(bool);
   void setShouldDumpFrameLoadCallbacks(bool);
@@ -133,9 +133,6 @@ class TestRunner : public WebTestRunner {
     return is_web_platform_tests_mode_;
   }
   void set_is_web_platform_tests_mode() { is_web_platform_tests_mode_ = true; }
-  const base::Optional<std::vector<std::string>>& file_chooser_paths() const {
-    return file_chooser_paths_;
-  }
   bool animation_requires_raster() const { return animation_requires_raster_; }
   void SetAnimationRequiresRaster(bool do_raster);
 
@@ -161,16 +158,12 @@ class TestRunner : public WebTestRunner {
   void setDragImage(const SkBitmap& drag_image);
   bool shouldDumpNavigationPolicy() const;
 
-  midi::mojom::Result midiAccessorResult();
-
   bool ShouldDumpConsoleMessages() const;
   // Controls whether console messages produced by the page are dumped
   // to test output.
   void SetDumpConsoleMessages(bool value);
 
   bool ShouldDumpJavaScriptDialogs() const;
-
-  void SetShouldUseInnerTextDump(bool value);
 
   blink::WebEffectiveConnectionType effective_connection_type() const {
     return effective_connection_type_;
@@ -245,7 +238,7 @@ class TestRunner : public WebTestRunner {
   void SetCloseRemainingWindowsWhenComplete(bool close_remaining_windows);
   void ResetTestHelperControllers();
 
-  // Allows layout tests to manage origins' allow list.
+  // Allows web tests to manage origins' allow list.
   void AddOriginAccessAllowListEntry(const std::string& source_origin,
                                      const std::string& destination_protocol,
                                      const std::string& destination_host,
@@ -301,77 +294,78 @@ class TestRunner : public WebTestRunner {
   ///////////////////////////////////////////////////////////////////////////
   // Methods that modify the state of TestRunner
 
-  // This function sets a flag that tells the test_shell to print a line of
+  // This function sets a flag that tells the test runner to print a line of
   // descriptive text for each editing command. It takes no arguments, and
   // ignores any that may be present.
   void DumpEditingCallbacks();
 
-  // This function sets a flag that tells the test_shell to dump pages as
-  // plain text, rather than as a text representation of the renderer's state.
-  // The pixel results will not be generated for this test.
+  // This function sets a flag that tells the test runner to dump pages as
+  // plain text. The pixel results will not be generated for this test.
+  // It has higher priority than DumpAsMarkup() and DumpAsLayout().
   void DumpAsText();
 
-  // This function sets a flag that tells the test_shell to dump pages as
+  // This function sets a flag that tells the test runner to dump pages as
   // the DOM contents, rather than as a text representation of the renderer's
-  // state. The pixel results will not be generated for this test.
+  // state. The pixel results will not be generated for this test. It has
+  // higher priority than DumpAsLayout(), but lower than DumpAsText().
   void DumpAsMarkup();
 
-  // This function sets a flag that tells the test_shell to dump pages as
-  // plain text, rather than as a text representation of the renderer's state.
-  // It will also generate a pixel dump for the test.
+  // This function sets a flag that tells the test runner to dump pages as
+  // plain text. It will also generate a pixel dump for the test.
   void DumpAsTextWithPixelResults();
 
-  // This function sets a flag that tells the test_shell to print out the
-  // scroll offsets of the child frames. It ignores all.
-  void DumpChildFrameScrollPositions();
+  // This function sets a flag that tells the test runner to dump pages as
+  // text representation of the layout. The pixel results will not be generated
+  // for this test. It has lower priority than DumpAsText() and DumpAsMarkup().
+  void DumpAsLayout();
 
-  // This function sets a flag that tells the test_shell to recursively
-  // dump all frames as plain text if the DumpAsText flag is set.
-  // It takes no arguments, and ignores any that may be present.
-  void DumpChildFramesAsText();
+  // This function sets a flag that tells the test runner to dump pages as
+  // text representation of the layout. It will also generate a pixel dump for
+  // the test.
+  void DumpAsLayoutWithPixelResults();
 
-  // This function sets a flag that tells the test_shell to recursively
-  // dump all frames as the DOM contents if the DumpAsMarkup flag is set.
-  // It takes no arguments, and ignores any that may be present.
-  void DumpChildFramesAsMarkup();
+  // This function sets a flag that tells the test runner to recursively dump
+  // all frames as text, markup or layout depending on which of DumpAsText,
+  // DumpAsMarkup and DumpAsLayout is effective.
+  void DumpChildFrames();
 
-  // This function sets a flag that tells the test_shell to print out the
+  // This function sets a flag that tells the test runner to print out the
   // information about icon changes notifications from WebKit.
   void DumpIconChanges();
 
   // Deals with Web Audio WAV file data.
   void SetAudioData(const gin::ArrayBufferView& view);
 
-  // This function sets a flag that tells the test_shell to print a line of
+  // This function sets a flag that tells the test runner to print a line of
   // descriptive text for each frame load callback. It takes no arguments, and
   // ignores any that may be present.
   void DumpFrameLoadCallbacks();
 
-  // This function sets a flag that tells the test_shell to print a line of
+  // This function sets a flag that tells the test runner to print a line of
   // descriptive text for each PingLoader dispatch. It takes no arguments, and
   // ignores any that may be present.
   void DumpPingLoaderCallbacks();
 
-  // This function sets a flag that tells the test_shell to print a line of
+  // This function sets a flag that tells the test runner to print a line of
   // user gesture status text for some frame load callbacks. It takes no
   // arguments, and ignores any that may be present.
   void DumpUserGestureInFrameLoadCallbacks();
 
   void DumpTitleChanges();
 
-  // This function sets a flag that tells the test_shell to dump all calls to
+  // This function sets a flag that tells the test runner to dump all calls to
   // WebViewClient::createView().
   // It takes no arguments, and ignores any that may be present.
   void DumpCreateView();
 
   void SetCanOpenWindows();
 
-  // This function sets a flag that tells the test_shell to dump a descriptive
+  // This function sets a flag that tells the test runner to dump a descriptive
   // line for each resource load callback. It takes no arguments, and ignores
   // any that may be present.
   void DumpResourceLoadCallbacks();
 
-  // This function sets a flag that tells the test_shell to dump the MIME type
+  // This function sets a flag that tells the test runner to dump the MIME type
   // for each resource that was loaded. It takes no arguments, and ignores any
   // that may be present.
   void DumpResourceResponseMIMETypes();
@@ -388,15 +382,18 @@ class TestRunner : public WebTestRunner {
   // Sets up a mock DocumentSubresourceFilter to disallow subsequent subresource
   // loads within the current document with the given path |suffixes|. The
   // filter is created and injected even if |suffixes| is empty. If |suffixes|
-  // contains the empty string, all subresource loads will be disallowed.
+  // contains the empty string, all subresource loads will be disallowed. If
+  // |block_subresources| is false, matching resources will not be blocked but
+  // instead marked as matching a disallowed resource.
   void SetDisallowedSubresourcePathSuffixes(
-      const std::vector<std::string>& suffixes);
+      const std::vector<std::string>& suffixes,
+      bool block_subresources);
 
-  // This function sets a flag that tells the test_shell to dump all
+  // This function sets a flag that tells the test runner to dump all
   // the lines of descriptive text about spellcheck execution.
   void DumpSpellCheckCallbacks();
 
-  // This function sets a flag that tells the test_shell to print out a text
+  // This function sets a flag that tells the test runner to print out a text
   // representation of the back/forward list. It ignores all arguments.
   void DumpBackForwardList();
 
@@ -460,7 +457,7 @@ class TestRunner : public WebTestRunner {
   // Inspect chooser state
   bool IsChooserShown();
 
-  // Allows layout tests to exec scripts at WebInspector side.
+  // Allows web tests to exec scripts at WebInspector side.
   void EvaluateInWebInspector(int call_id, const std::string& script);
 
   // Clears all databases.
@@ -490,9 +487,6 @@ class TestRunner : public WebTestRunner {
   // Resets between tests.
   void SetPOSIXLocale(const std::string& locale);
 
-  // MIDI function to control permission handling.
-  void SetMIDIAccessorResult(midi::mojom::Result result);
-
   // Simulates a click on a Web Notification.
   void SimulateWebNotificationClick(
       const std::string& title,
@@ -502,13 +496,9 @@ class TestRunner : public WebTestRunner {
   // Simulates closing a Web Notification.
   void SimulateWebNotificationClose(const std::string& title, bool by_user);
 
-  // Takes care of notifying the delegate after a change to layout test runtime
+  // Takes care of notifying the delegate after a change to web test runtime
   // flags.
-  void OnLayoutTestRuntimeFlagsChanged();
-
-  // Sets a list of file paths to be selected in the next file chooser session.
-  // If an empty list is specified, the next file chooser will be canceled.
-  void SetFileChooserPaths(const std::vector<std::string>& paths);
+  void OnWebTestRuntimeFlagsChanged();
 
   ///////////////////////////////////////////////////////////////////////////
   // Internal helpers
@@ -541,12 +531,12 @@ class TestRunner : public WebTestRunner {
   int web_history_item_count_;
 
   // Flags controlling what content gets dumped as a layout text result.
-  LayoutTestRuntimeFlags layout_test_runtime_flags_;
+  WebTestRuntimeFlags web_test_runtime_flags_;
 
-  // If true, the test_shell will output a base64 encoded WAVE file.
+  // If true, the test runner will output a base64 encoded WAVE file.
   bool dump_as_audio_;
 
-  // If true, the test_shell will produce a dump of the back forward list as
+  // If true, the test runner will produce a dump of the back forward list as
   // well.
   bool dump_back_forward_list_;
 
@@ -557,9 +547,6 @@ class TestRunner : public WebTestRunner {
   // If true and test_repaint_ is true as well, pixel dump will be produced as
   // a series of 1px-wide, view-tall paints across the width of the view.
   bool sweep_horizontally_;
-
-  // startSession() result of MockWebMIDIAccessor for testing.
-  midi::mojom::Result midi_accessor_result_;
 
   std::set<std::string> http_headers_to_clear_;
 
@@ -592,7 +579,7 @@ class TestRunner : public WebTestRunner {
   // is ok, because this is taken care of in WebTestDelegate::SetFocus).
   blink::WebView* previously_focused_view_;
 
-  // True when running a test in LayoutTests/external/wpt/.
+  // True when running a test in web_tests/external/wpt/.
   bool is_web_platform_tests_mode_;
 
   // True if rasterization should be performed during tests that examine
@@ -600,13 +587,11 @@ class TestRunner : public WebTestRunner {
   // This does not include most "ordinary" animations, such as CSS animations.
   bool animation_requires_raster_;
 
-  // An effective connection type settable by layout tests.
+  // An effective connection type settable by web tests.
   blink::WebEffectiveConnectionType effective_connection_type_;
 
   // Forces v8 compilation cache to be disabled (used for inspector tests).
   bool disable_v8_cache_ = false;
-
-  base::Optional<std::vector<std::string>> file_chooser_paths_;
 
   base::WeakPtrFactory<TestRunner> weak_factory_;
 

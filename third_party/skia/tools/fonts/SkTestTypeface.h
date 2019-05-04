@@ -10,6 +10,7 @@
 
 #include "SkFixed.h"
 #include "SkFontArguments.h"
+#include "SkFontMetrics.h"
 #include "SkFontStyle.h"
 #include "SkPaint.h"
 #include "SkRefCnt.h"
@@ -37,7 +38,7 @@ struct SkTestFontData {
     const SkUnichar* fCharCodes;
     const size_t fCharCodesCount;
     const SkFixed* fWidths;
-    const SkPaint::FontMetrics& fMetrics;
+    const SkFontMetrics& fMetrics;
     const char* fName;
     SkFontStyle fStyle;
 };
@@ -52,7 +53,7 @@ private:
     const SkUnichar* fCharCodes;
     const size_t fCharCodesCount;
     const SkFixed* fWidths;
-    const SkPaint::FontMetrics& fMetrics;
+    const SkFontMetrics& fMetrics;
     const char* fName;
     SkPath** fPaths;
     friend class SkTestTypeface;
@@ -64,7 +65,7 @@ class SkTestTypeface : public SkTypeface {
 public:
     SkTestTypeface(sk_sp<SkTestFont>, const SkFontStyle& style);
     void getAdvance(SkGlyph* glyph);
-    void getFontMetrics(SkPaint::FontMetrics* metrics);
+    void getFontMetrics(SkFontMetrics* metrics);
     void getPath(SkGlyphID glyph, SkPath* path);
 protected:
     SkScalerContext* onCreateScalerContext(const SkScalerContextEffects&,

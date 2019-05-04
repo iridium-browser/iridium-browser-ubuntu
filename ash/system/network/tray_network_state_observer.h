@@ -37,7 +37,6 @@ class TrayNetworkStateObserver
   void NetworkConnectionStateChanged(
       const chromeos::NetworkState* network) override;
   void NetworkPropertiesUpdated(const chromeos::NetworkState* network) override;
-  void DevicePropertiesUpdated(const chromeos::DeviceState* device) override;
 
   // NetworkPortalDetector::Observer
   void OnPortalDetectionCompleted(
@@ -51,9 +50,6 @@ class TrayNetworkStateObserver
 
   // Unowned Delegate pointer (must outlive this instance).
   Delegate* delegate_;
-
-  // Set to true when we should purge stale icons in the cache.
-  bool purge_icons_;
 
   // Frequency at which to push NetworkStateChanged updates. This avoids
   // unnecessarily frequent UI updates (which can be expensive). We set this

@@ -33,7 +33,7 @@ rtc_static_library("system_wrappers") {
   libs = []
   deps = [
     ":cpu_features_api",
-    "..:webrtc_common",
+    "../api:array_view",
     "../modules:module_api_public",
     "../rtc_base:checks",
     "../rtc_base/synchronization:rw_lock_wrapper",
@@ -42,8 +42,6 @@ rtc_static_library("system_wrappers") {
   ]
 
   if (is_android) {
-    defines += [ "WEBRTC_THREAD_RR" ]
-
     if (build_with_mozilla) {
       include_dirs = [
         "/config/external/nspr",
@@ -58,17 +56,11 @@ rtc_static_library("system_wrappers") {
   }
 
   if (is_linux) {
-    defines += [ "WEBRTC_THREAD_RR" ]
-
     if (!build_with_chromium) {
       deps += [ ":cpu_features_linux" ]
     }
 
     libs += [ "rt" ]
-  }
-
-  if (is_ios || is_mac) {
-    defines += [ "WEBRTC_THREAD_RR" ]
   }
 
   if (is_win) {
@@ -89,9 +81,6 @@ rtc_source_set("cpu_features_api") {
   sources = [
     "include/cpu_features_wrapper.h",
   ]
-  deps = [
-    "..:webrtc_common",
-  ]
 }
 
 rtc_source_set("field_trial") {
@@ -104,6 +93,16 @@ rtc_source_set("field_trial") {
   ]
   if (rtc_exclude_field_trial_default) {
     defines = [ "WEBRTC_EXCLUDE_FIELD_TRIAL_DEFAULT" ]
+  }
+  if (build_with_chromium) {
+    # When WebRTC is built as part of Chromium it should exclude the default
+    # implementation of field_trial unless it is building for NACL or
+    # Chromecast.
+    if (!is_nacl && !is_chromecast) {
+      deps = [
+        "../../webrtc_overrides:field_trial",
+      ]
+    }
   }
 }
 
@@ -123,6 +122,9 @@ rtc_source_set("metrics") {
     "../rtc_base:checks",
     "../rtc_base:rtc_base_approved",
   ]
+  if (build_with_chromium) {
+    deps += [ "../../webrtc_overrides:metrics" ]
+  }
 }
 
 if (is_android && !build_with_mozilla) {
@@ -164,8 +166,10 @@ if (rtc_include_tests) {
       ":metrics",
       ":system_wrappers",
       "..:webrtc_common",
+      "../rtc_base:checks",
       "../rtc_base:rtc_base_approved",
       "../test:test_main",
+      "../test:test_support",
       "//testing/gtest",
     ]
 

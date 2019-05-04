@@ -6,9 +6,11 @@
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
 #include "chrome/browser/sync/test/integration/feature_toggler.h"
+#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/updated_progress_marker_checker.h"
@@ -492,6 +494,83 @@ IN_PROC_BROWSER_TEST_P(SingleClientBookmarksSyncTest, DownloadBookmarkFolder) {
   ASSERT_EQ(1, CountFoldersWithTitlesMatching(kSingleProfileIndex, title));
 }
 
+// Legacy bookmark clients append a blank space to empty titles. This tests that
+// this is respected when merging local and remote hierarchies.
+IN_PROC_BROWSER_TEST_P(SingleClientBookmarksSyncTest,
+                       ShouldTruncateBlanksWhenMatchingTitles) {
+  const std::string remote_blank_title = " ";
+  const std::string local_empty_title = "";
+
+  // Create a folder on the server under BookmarkBar with a title with a blank
+  // space.
+  fake_server::EntityBuilderFactory entity_builder_factory;
+  fake_server::BookmarkEntityBuilder bookmark_builder =
+      entity_builder_factory.NewBookmarkEntityBuilder(remote_blank_title);
+  fake_server_->InjectEntity(bookmark_builder.BuildFolder());
+
+  DisableVerifier();
+  ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
+
+  // Create a folder on the client under BookmarkBar with an empty title.
+  const BookmarkNode* node =
+      AddFolder(kSingleProfileIndex, GetBookmarkBarNode(kSingleProfileIndex), 0,
+                local_empty_title);
+  ASSERT_TRUE(node);
+  ASSERT_EQ(1, CountFoldersWithTitlesMatching(kSingleProfileIndex,
+                                              local_empty_title));
+
+  ASSERT_TRUE(SetupSync());
+  // There should be only one bookmark on the client. The remote node should
+  // have been merged with the local node and either the local or remote titles
+  // is picked.
+  EXPECT_EQ(1, CountFoldersWithTitlesMatching(kSingleProfileIndex,
+                                              local_empty_title) +
+                   CountFoldersWithTitlesMatching(kSingleProfileIndex,
+                                                  remote_blank_title));
+}
+
+// Legacy bookmark clients truncate long titles up to 255 bytes. This tests that
+// this is respected when merging local and remote hierarchies.
+IN_PROC_BROWSER_TEST_P(SingleClientBookmarksSyncTest,
+                       ShouldTruncateLongTitles) {
+  const std::string remote_truncated_title =
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst"
+      "uvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN"
+      "OPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh"
+      "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTU";
+  const std::string local_full_title =
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst"
+      "uvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN"
+      "OPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh"
+      "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzAB"
+      "CDEFGHIJKLMNOPQRSTUVWXYZ";
+
+  // Create a folder on the server under BookmarkBar with a truncated title.
+  fake_server::EntityBuilderFactory entity_builder_factory;
+  fake_server::BookmarkEntityBuilder bookmark_builder =
+      entity_builder_factory.NewBookmarkEntityBuilder(remote_truncated_title);
+  fake_server_->InjectEntity(bookmark_builder.BuildFolder());
+
+  DisableVerifier();
+  ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
+  // Create a folder on the client under BookmarkBar with a long title.
+  const BookmarkNode* node =
+      AddFolder(kSingleProfileIndex, GetBookmarkBarNode(kSingleProfileIndex), 0,
+                local_full_title);
+  ASSERT_TRUE(node);
+  ASSERT_EQ(
+      1, CountFoldersWithTitlesMatching(kSingleProfileIndex, local_full_title));
+
+  ASSERT_TRUE(SetupSync());
+  // There should be only one bookmark on the client. The remote node should
+  // have been merged with the local node and either the local or remote title
+  // is picked.
+  EXPECT_EQ(
+      1, CountFoldersWithTitlesMatching(kSingleProfileIndex, local_full_title) +
+             CountFoldersWithTitlesMatching(kSingleProfileIndex,
+                                            remote_truncated_title));
+}
+
 IN_PROC_BROWSER_TEST_P(SingleClientBookmarksSyncTest,
                        DownloadBookmarkFoldersWithPositions) {
   const std::string title0 = "Folder left";
@@ -534,6 +613,52 @@ IN_PROC_BROWSER_TEST_P(SingleClientBookmarksSyncTest,
 
 IN_PROC_BROWSER_TEST_P(SingleClientBookmarksSyncTest, E2E_ONLY(SanitySetup)) {
   ASSERT_TRUE(SetupSync()) <<  "SetupSync() failed.";
+}
+
+IN_PROC_BROWSER_TEST_P(SingleClientBookmarksSyncTest,
+                       PRE_PersistProgressMarkerOnRestart) {
+  const std::string title = "Seattle Sounders FC";
+  fake_server::EntityBuilderFactory entity_builder_factory;
+  fake_server::BookmarkEntityBuilder bookmark_builder =
+      entity_builder_factory.NewBookmarkEntityBuilder(title);
+  fake_server_->InjectEntity(bookmark_builder.BuildFolder());
+
+  base::HistogramTester histogram_tester;
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_EQ(1, GetBookmarkBarNode(kSingleProfileIndex)->child_count());
+
+  EXPECT_NE(
+      0, histogram_tester.GetBucketCount("Sync.ModelTypeEntityChange3.BOOKMARK",
+                                         /*REMOTE_INITIAL_UPDATE=*/5));
+}
+
+IN_PROC_BROWSER_TEST_P(SingleClientBookmarksSyncTest,
+                       PersistProgressMarkerOnRestart) {
+  const std::string title = "Seattle Sounders FC";
+  fake_server::EntityBuilderFactory entity_builder_factory;
+  fake_server::BookmarkEntityBuilder bookmark_builder =
+      entity_builder_factory.NewBookmarkEntityBuilder(title);
+  fake_server_->InjectEntity(bookmark_builder.BuildFolder());
+
+  base::HistogramTester histogram_tester;
+  ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
+  ASSERT_EQ(1, GetBookmarkBarNode(kSingleProfileIndex)->child_count());
+
+#if defined(CHROMEOS)
+  // identity::SetRefreshTokenForPrimaryAccount() is needed on ChromeOS in order
+  // to get a non-empty refresh token on startup.
+  GetClient(0)->SignInPrimaryAccount();
+#endif  // defined(CHROMEOS)
+  ASSERT_TRUE(GetClient(kSingleProfileIndex)->AwaitEngineInitialization());
+
+  // After restart, the last sync cycle snapshot should be empty.
+  // Once a sync request happened (e.g. by a poll), that snapshot is populated.
+  // We use the following checker to simply wait for an non-empty snapshot.
+  EXPECT_TRUE(UpdatedProgressMarkerChecker(GetSyncService(0)).Wait());
+
+  EXPECT_EQ(
+      0, histogram_tester.GetBucketCount("Sync.ModelTypeEntityChange3.BOOKMARK",
+                                         /*REMOTE_INITIAL_UPDATE=*/5));
 }
 
 INSTANTIATE_TEST_CASE_P(USS,

@@ -13,12 +13,13 @@ import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
+import org.chromium.chrome.browser.tab.TabThemeColorHelper;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabModelObserver;
+import org.chromium.chrome.browser.tabmodel.TabSelectionType;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
 
@@ -224,8 +225,9 @@ public class ActivityTabTaskDescriptionHelper {
      */
     public void updateTaskDescription(String label, Bitmap icon) {
         int color = mDefaultThemeColor;
-        if (mCurrentTab != null && !mCurrentTab.isDefaultThemeColor()) {
-            color = mCurrentTab.getThemeColor();
+        if (mCurrentTab != null) {
+            TabThemeColorHelper tabTheme = TabThemeColorHelper.get(mCurrentTab);
+            if (!tabTheme.isDefaultColor()) color = tabTheme.getColor();
         }
         ApiCompatibilityUtils.setTaskDescription(mActivity, label, icon, color);
     }

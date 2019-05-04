@@ -9,8 +9,10 @@
 #include <vector>
 
 #include "ash/public/interfaces/assistant_volume_control.mojom.h"
+#include "base/component_export.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
+#include "chromeos/services/assistant/public/mojom/assistant_audio_decoder.mojom.h"
 #include "libassistant/shared/public/platform_audio_output.h"
 #include "media/base/audio_block_fifo.h"
 #include "media/base/audio_parameters.h"
@@ -25,10 +27,13 @@ class Connector;
 namespace chromeos {
 namespace assistant {
 
+class AssistantMediaSession;
+
 class VolumeControlImpl : public assistant_client::VolumeControl,
                           public ash::mojom::VolumeObserver {
  public:
-  explicit VolumeControlImpl(service_manager::Connector* connector);
+  explicit VolumeControlImpl(service_manager::Connector* connector,
+                             AssistantMediaSession* media_session);
   ~VolumeControlImpl() override;
 
   // assistant_client::VolumeControl overrides:
@@ -46,12 +51,15 @@ class VolumeControlImpl : public assistant_client::VolumeControl,
   void OnMuteStateChanged(bool mute) override;
 
  private:
+  void SetAudioFocusOnMainThread(
+      assistant_client::OutputStreamType focused_stream);
   void SetSystemVolumeOnMainThread(float new_volume, bool user_initiated);
   void SetSystemMutedOnMainThread(bool muted);
 
+  AssistantMediaSession* media_session_;
   ash::mojom::AssistantVolumeControlPtr volume_control_ptr_;
   mojo::Binding<ash::mojom::VolumeObserver> binding_;
-  scoped_refptr<base::SequencedTaskRunner> main_thread_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> main_task_runner_;
 
   int volume_ = 100;
   bool mute_ = false;
@@ -65,6 +73,7 @@ class AudioOutputProviderImpl : public assistant_client::AudioOutputProvider {
  public:
   explicit AudioOutputProviderImpl(
       service_manager::Connector* connector,
+      AssistantMediaSession* media_session,
       scoped_refptr<base::SequencedTaskRunner> background_task_runner);
   ~AudioOutputProviderImpl() override;
 
@@ -88,13 +97,16 @@ class AudioOutputProviderImpl : public assistant_client::AudioOutputProvider {
  private:
   VolumeControlImpl volume_control_impl_;
   service_manager::Connector* connector_;
-  scoped_refptr<base::SequencedTaskRunner> main_thread_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> main_task_runner_;
   scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
+  mojom::AssistantAudioDecoderFactoryPtr audio_decoder_factory_ptr_;
+  mojom::AssistantAudioDecoderFactory* audio_decoder_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioOutputProviderImpl);
 };
 
-class AudioDeviceOwner : public media::AudioRendererSink::RenderCallback {
+class COMPONENT_EXPORT(ASSISTANT_SERVICE) AudioDeviceOwner
+    : public media::AudioRendererSink::RenderCallback {
  public:
   AudioDeviceOwner(
       scoped_refptr<base::SequencedTaskRunner> task_runner,
@@ -127,7 +139,7 @@ class AudioDeviceOwner : public media::AudioRendererSink::RenderCallback {
   // Callback for assistant to notify that it completes the filling.
   void BufferFillDone(int num_bytes);
 
-  scoped_refptr<base::SequencedTaskRunner> main_thread_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> main_task_runner_;
   scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
 
   base::Lock lock_;

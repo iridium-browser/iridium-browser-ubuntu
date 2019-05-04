@@ -17,7 +17,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -28,9 +27,9 @@
 #include "build/build_config.h"
 #include "content/browser/devtools/devtools_http_handler.h"
 #include "content/browser/devtools/devtools_manager.h"
-#include "content/browser/devtools/grit/devtools_resources.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_external_agent_proxy_delegate.h"
 #include "content/public/browser/devtools_frontend_host.h"
 #include "content/public/browser/devtools_manager_delegate.h"
@@ -53,6 +52,10 @@
 
 #if defined(OS_ANDROID)
 #include "base/android/build_info.h"
+#endif
+
+#if !defined(OS_FUCHSIA)
+#include "content/browser/devtools/grit/devtools_resources.h"  // nogncheck
 #endif
 
 namespace content {
@@ -223,7 +226,8 @@ void TerminateOnUI(std::unique_ptr<base::Thread> thread,
     thread->task_runner()->DeleteSoon(FROM_HERE, std::move(socket_factory));
   if (thread) {
     base::PostTaskWithTraits(
-        FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+        FROM_HERE,
+        {base::WithBaseSyncPrimitives(), base::TaskPriority::BEST_EFFORT},
         BindOnce([](std::unique_ptr<base::Thread>) {}, std::move(thread)));
   }
 }
@@ -308,11 +312,12 @@ void StartServerOnHandlerThread(
 // messages sent to a DebuggerShell instance.
 class DevToolsAgentHostClientImpl : public DevToolsAgentHostClient {
  public:
-  DevToolsAgentHostClientImpl(base::MessageLoop* message_loop,
-                              ServerWrapper* server_wrapper,
-                              int connection_id,
-                              scoped_refptr<DevToolsAgentHost> agent_host)
-      : message_loop_(message_loop),
+  DevToolsAgentHostClientImpl(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      ServerWrapper* server_wrapper,
+      int connection_id,
+      scoped_refptr<DevToolsAgentHost> agent_host)
+      : task_runner_(std::move(task_runner)),
         server_wrapper_(server_wrapper),
         connection_id_(connection_id),
         agent_host_(agent_host) {
@@ -323,7 +328,7 @@ class DevToolsAgentHostClientImpl : public DevToolsAgentHostClient {
 
   ~DevToolsAgentHostClientImpl() override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    if (agent_host_.get())
+    if (agent_host_)
       agent_host_->DetachClient(this);
   }
 
@@ -337,7 +342,7 @@ class DevToolsAgentHostClientImpl : public DevToolsAgentHostClient {
     DispatchProtocolMessage(agent_host, message);
 
     agent_host_ = nullptr;
-    message_loop_->task_runner()->PostTask(
+    task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(&ServerWrapper::Close, base::Unretained(server_wrapper_),
                        connection_id_));
@@ -347,20 +352,20 @@ class DevToolsAgentHostClientImpl : public DevToolsAgentHostClient {
                                const std::string& message) override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     DCHECK(agent_host == agent_host_.get());
-    message_loop_->task_runner()->PostTask(
-        FROM_HERE, base::BindOnce(&ServerWrapper::SendOverWebSocket,
-                                  base::Unretained(server_wrapper_),
-                                  connection_id_, message));
+    task_runner_->PostTask(FROM_HERE,
+                           base::BindOnce(&ServerWrapper::SendOverWebSocket,
+                                          base::Unretained(server_wrapper_),
+                                          connection_id_, message));
   }
 
   void OnMessage(const std::string& message) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    if (agent_host_.get())
+    if (agent_host_)
       agent_host_->DispatchProtocolMessage(this, message);
   }
 
  private:
-  base::MessageLoop* const message_loop_;
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   ServerWrapper* const server_wrapper_;
   const int connection_id_;
   scoped_refptr<DevToolsAgentHost> agent_host_;
@@ -383,7 +388,7 @@ DevToolsHttpHandler::~DevToolsHttpHandler() {
 }
 
 static std::string PathWithoutParams(const std::string& path) {
-  size_t query_position = path.find("?");
+  size_t query_position = path.find('?');
   if (query_position != std::string::npos)
     return path.substr(0, query_position);
   return path;
@@ -546,13 +551,13 @@ void DevToolsHttpHandler::OnJsonRequest(
 
   // Trim fragment and query
   std::string query;
-  size_t query_pos = path.find("?");
+  size_t query_pos = path.find('?');
   if (query_pos != std::string::npos) {
     query = path.substr(query_pos + 1);
     path = path.substr(0, query_pos);
   }
 
-  size_t fragment_pos = path.find("#");
+  size_t fragment_pos = path.find('#');
   if (fragment_pos != std::string::npos)
     path = path.substr(0, fragment_pos);
 
@@ -569,8 +574,9 @@ void DevToolsHttpHandler::OnJsonRequest(
     version.SetString("Protocol-Version",
                       DevToolsAgentHost::GetProtocolVersion());
     version.SetString("WebKit-Version", GetWebKitVersion());
-    version.SetString("Browser", GetContentClient()->GetProduct());
-    version.SetString("User-Agent", GetContentClient()->GetUserAgent());
+    version.SetString("Browser", GetContentClient()->browser()->GetProduct());
+    version.SetString("User-Agent",
+                      GetContentClient()->browser()->GetUserAgent());
     version.SetString("V8-Version", V8_VERSION_STRING);
     std::string host = info.headers["host"];
     version.SetString(
@@ -650,10 +656,12 @@ void DevToolsHttpHandler::OnJsonRequest(
   }
   SendJson(connection_id, net::HTTP_NOT_FOUND, nullptr,
            "Unknown command: " + command);
-  return;
 }
 
 void DevToolsHttpHandler::DecompressAndSendJsonProtocol(int connection_id) {
+#if defined(OS_FUCHSIA)
+  NOTREACHED();
+#else
   scoped_refptr<base::RefCountedMemory> raw_bytes =
       GetContentClient()->GetDataResourceBytes(COMPRESSED_PROTOCOL_JSON);
   const uint8_t* next_encoded_byte = raw_bytes->front();
@@ -692,6 +700,7 @@ void DevToolsHttpHandler::DecompressAndSendJsonProtocol(int connection_id) {
       FROM_HERE, base::BindOnce(&ServerWrapper::SendResponse,
                                 base::Unretained(server_wrapper_.get()),
                                 connection_id, response));
+#endif  // defined(OS_FUCHSIA)
 }
 
 void DevToolsHttpHandler::RespondToJsonList(
@@ -736,7 +745,7 @@ void DevToolsHttpHandler::OnWebSocketRequest(
             base::Bind(&DevToolsSocketFactory::CreateForTethering,
                        base::Unretained(socket_factory_.get())));
     connection_to_client_[connection_id].reset(new DevToolsAgentHostClientImpl(
-        thread_->message_loop(), server_wrapper_.get(), connection_id,
+        thread_->task_runner(), server_wrapper_.get(), connection_id,
         browser_agent));
     AcceptWebSocket(connection_id, request);
     return;
@@ -757,7 +766,7 @@ void DevToolsHttpHandler::OnWebSocketRequest(
   }
 
   connection_to_client_[connection_id].reset(new DevToolsAgentHostClientImpl(
-      thread_->message_loop(), server_wrapper_.get(), connection_id, agent));
+      thread_->task_runner(), server_wrapper_.get(), connection_id, agent));
 
   AcceptWebSocket(connection_id, request);
 }
@@ -789,7 +798,7 @@ DevToolsHttpHandler::DevToolsHttpHandler(
   base::Thread::Options options;
   options.message_loop_type = base::MessageLoop::TYPE_IO;
   if (thread->StartWithOptions(options)) {
-    base::TaskRunner* task_runner = thread->task_runner().get();
+    auto task_runner = thread->task_runner();
     task_runner->PostTask(
         FROM_HERE,
         base::BindOnce(&StartServerOnHandlerThread, weak_factory_.GetWeakPtr(),

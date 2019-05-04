@@ -15,10 +15,10 @@
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/char_iterator.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversion_utils.h"
 #include "base/strings/utf_string_conversions.h"
@@ -151,9 +151,9 @@ void GetFieldsForDistinguishingProfiles(
 
   std::vector<ServerFieldType> default_fields;
   if (!suggested_fields) {
-    default_fields.assign(
-        kDefaultDistinguishingFields,
-        kDefaultDistinguishingFields + arraysize(kDefaultDistinguishingFields));
+    default_fields.assign(kDefaultDistinguishingFields,
+                          kDefaultDistinguishingFields +
+                              base::size(kDefaultDistinguishingFields));
     if (excluded_field == UNKNOWN_TYPE) {
       distinguishing_fields->swap(default_fields);
       return;
@@ -230,14 +230,16 @@ AutofillProfile::AutofillProfile(const std::string& guid,
     : AutofillDataModel(guid, origin),
       phone_number_(this),
       record_type_(LOCAL_PROFILE),
-      has_converted_(false) {}
+      has_converted_(false),
+      weak_ptr_factory_(this) {}
 
 AutofillProfile::AutofillProfile(RecordType type, const std::string& server_id)
     : AutofillDataModel(base::GenerateGUID(), std::string()),
       phone_number_(this),
       server_id_(server_id),
       record_type_(type),
-      has_converted_(false) {
+      has_converted_(false),
+      weak_ptr_factory_(this) {
   DCHECK(type == SERVER_PROFILE);
 }
 
@@ -245,10 +247,13 @@ AutofillProfile::AutofillProfile()
     : AutofillDataModel(base::GenerateGUID(), std::string()),
       phone_number_(this),
       record_type_(LOCAL_PROFILE),
-      has_converted_(false) {}
+      has_converted_(false),
+      weak_ptr_factory_(this) {}
 
 AutofillProfile::AutofillProfile(const AutofillProfile& profile)
-    : AutofillDataModel(std::string(), std::string()), phone_number_(this) {
+    : AutofillDataModel(std::string(), std::string()),
+      phone_number_(this),
+      weak_ptr_factory_(this) {
   operator=(profile);
 }
 
@@ -305,6 +310,10 @@ bool AutofillProfile::SetMetadata(const AutofillMetadata metadata) {
 
   has_converted_ = metadata.has_converted;
   return true;
+}
+
+bool AutofillProfile::IsDeletable() const {
+  return AutofillDataModel::IsDeletable() && !IsVerified();
 }
 
 // TODO(crbug.com/589535): Disambiguate similar field types before uploading.
@@ -439,22 +448,36 @@ int AutofillProfile::Compare(const AutofillProfile& profile) const {
 bool AutofillProfile::EqualsSansOrigin(const AutofillProfile& profile) const {
   return guid() == profile.guid() &&
          language_code() == profile.language_code() &&
-         is_client_validity_states_updated() ==
-             profile.is_client_validity_states_updated() &&
          Compare(profile) == 0;
 }
 
 bool AutofillProfile::EqualsForSyncPurposes(const AutofillProfile& profile)
     const {
   return use_count() == profile.use_count() &&
-         use_date() == profile.use_date() &&
-         EqualsSansGuid(profile);
+         UseDateEqualsInSeconds(&profile) && EqualsSansGuid(profile);
+}
+
+bool AutofillProfile::EqualsForUpdatePurposes(
+    const AutofillProfile& profile) const {
+  return use_count() == profile.use_count() &&
+         UseDateEqualsInSeconds(&profile) &&
+         language_code() == profile.language_code() && Compare(profile) == 0;
+}
+
+bool AutofillProfile::EqualsForClientValidationPurpose(
+    const AutofillProfile& profile) const {
+  for (ServerFieldType type : kSupportedTypesByClientForValidation) {
+    if (GetRawInfo(type).compare(profile.GetRawInfo(type))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool AutofillProfile::EqualsIncludingUsageStatsForTesting(
     const AutofillProfile& profile) const {
   return use_count() == profile.use_count() &&
-         use_date() == profile.use_date() && *this == profile;
+         UseDateEqualsInSeconds(&profile) && *this == profile;
 }
 
 bool AutofillProfile::operator==(const AutofillProfile& profile) const {
@@ -799,7 +822,7 @@ void AutofillProfile::GenerateServerProfileIdentifier() {
 }
 
 void AutofillProfile::RecordAndLogUse() {
-  previous_use_date_ = use_date();
+  set_previous_use_date(use_date());
   UMA_HISTOGRAM_COUNTS_1000("Autofill.DaysSinceLastUse.Profile",
                             (AutofillClock::Now() - use_date()).InDays());
   RecordUse();
@@ -855,9 +878,10 @@ AutofillProfile::ValidityState AutofillProfile::GetValidityState(
   return (it == server_validity_states_.end()) ? UNVALIDATED : it->second;
 }
 
-void AutofillProfile::SetValidityState(ServerFieldType type,
-                                       ValidityState validity,
-                                       ValidationSource validation_source) {
+void AutofillProfile::SetValidityState(
+    ServerFieldType type,
+    ValidityState validity,
+    ValidationSource validation_source) const {
   if (validation_source == CLIENT) {
     // Do not save validity of unsupported types.
     if (!IsClientValidationSupportedForType(type))
@@ -870,15 +894,12 @@ void AutofillProfile::SetValidityState(ServerFieldType type,
 }
 
 void AutofillProfile::UpdateServerValidityMap(
-    const ProfileValidityMap& validity_map) {
+    const ProfileValidityMap& validity_map) const {
   server_validity_states_.clear();
-
   const auto& field_validity_states = validity_map.field_validity_states();
-  for (auto current_pair = field_validity_states.begin();
-       current_pair != field_validity_states.end(); ++current_pair) {
-    const auto& field_type = static_cast<ServerFieldType>(current_pair->first);
-    const auto& field_validity =
-        static_cast<ValidityState>(current_pair->second);
+  for (const auto& current_pair : field_validity_states) {
+    const auto field_type = static_cast<ServerFieldType>(current_pair.first);
+    const auto field_validity = static_cast<ValidityState>(current_pair.second);
     server_validity_states_[field_type] = field_validity;
   }
 }
@@ -908,7 +929,8 @@ int AutofillProfile::GetClientValidityBitfieldValue() const {
   return validity_value;
 }
 
-void AutofillProfile::SetClientValidityFromBitfieldValue(int bitfield_value) {
+void AutofillProfile::SetClientValidityFromBitfieldValue(
+    int bitfield_value) const {
   // Compute the bitmask based on the number a bits per type. For example, this
   // could be the two least significant bits (0b11).
   const int kBitmask = (1 << kValidityBitsPerType) - 1;
@@ -1093,13 +1115,15 @@ FormGroup* AutofillProfile::MutableFormGroupForType(const AutofillType& type) {
 bool AutofillProfile::EqualsSansGuid(const AutofillProfile& profile) const {
   return origin() == profile.origin() &&
          language_code() == profile.language_code() &&
-         is_client_validity_states_updated() ==
-             profile.is_client_validity_states_updated() &&
          Compare(profile) == 0;
 }
 
 std::ostream& operator<<(std::ostream& os, const AutofillProfile& profile) {
-  return os << profile.guid() << " " << profile.origin() << " "
+  return os << (profile.record_type() == AutofillProfile::LOCAL_PROFILE
+                    ? profile.guid()
+                    : base::HexEncode(profile.server_id().data(),
+                                      profile.server_id().size()))
+            << " " << profile.origin() << " "
             << UTF16ToUTF8(profile.GetRawInfo(NAME_FULL)) << " "
             << UTF16ToUTF8(profile.GetRawInfo(NAME_FIRST)) << " "
             << UTF16ToUTF8(profile.GetRawInfo(NAME_MIDDLE)) << " "
@@ -1118,7 +1142,8 @@ std::ostream& operator<<(std::ostream& os, const AutofillProfile& profile) {
             << profile.language_code() << " "
             << UTF16ToUTF8(profile.GetRawInfo(PHONE_HOME_WHOLE_NUMBER)) << " "
             << profile.GetClientValidityBitfieldValue() << " "
-            << profile.use_count() << " " << profile.use_date();
+            << profile.has_converted() << " " << profile.use_count() << " "
+            << profile.use_date();
 }
 
 }  // namespace autofill

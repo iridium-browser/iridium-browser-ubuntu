@@ -13,7 +13,6 @@
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/views/chrome_views_test_base.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_web_contents_factory.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/events/test/event_generator.h"
@@ -120,9 +119,6 @@ class ToolbarActionViewUnitTest : public ChromeViewsTestBase {
   views::Widget* widget() { return widget_; }
 
  private:
-  // Web contents need a UI thread and a TaskScheduler.
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
-
   // The widget managed by this test.
   views::Widget* widget_;
 
@@ -272,7 +268,7 @@ TEST_F(ToolbarActionViewUnitTest, BasicToolbarActionViewTest) {
   EXPECT_FALSE(view.wants_to_run_for_testing());
 
   // Create an overflow button.
-  views::MenuButton overflow_button(base::string16(), nullptr, false);
+  views::MenuButton overflow_button(base::string16(), nullptr);
   overflow_button.set_owned_by_client();
   action_view_delegate.set_overflow_reference_view(&overflow_button);
 

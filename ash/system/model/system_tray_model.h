@@ -15,6 +15,7 @@ namespace ash {
 
 class ClockModel;
 class EnterpriseDomainModel;
+class LocaleModel;
 class SessionLengthLimitModel;
 class TracingModel;
 class UpdateModel;
@@ -37,6 +38,8 @@ class SystemTrayModel : public mojom::SystemTray {
   void SetEnterpriseDisplayDomain(const std::string& enterprise_display_domain,
                                   bool active_directory_managed) override;
   void SetPerformanceTracingIconVisible(bool visible) override;
+  void SetLocaleList(std::vector<mojom::LocaleInfoPtr> locale_list,
+                     const std::string& current_locale_iso_code) override;
   void ShowUpdateIcon(mojom::UpdateSeverity severity,
                       bool factory_reset_required,
                       bool rollback,
@@ -52,6 +55,7 @@ class SystemTrayModel : public mojom::SystemTray {
   EnterpriseDomainModel* enterprise_domain() {
     return enterprise_domain_.get();
   }
+  LocaleModel* locale() { return locale_.get(); }
   SessionLengthLimitModel* session_length_limit() {
     return session_length_limit_.get();
   }
@@ -64,6 +68,7 @@ class SystemTrayModel : public mojom::SystemTray {
  private:
   std::unique_ptr<ClockModel> clock_;
   std::unique_ptr<EnterpriseDomainModel> enterprise_domain_;
+  std::unique_ptr<LocaleModel> locale_;
   std::unique_ptr<SessionLengthLimitModel> session_length_limit_;
   std::unique_ptr<TracingModel> tracing_;
   std::unique_ptr<UpdateModel> update_model_;

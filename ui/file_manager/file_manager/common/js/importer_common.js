@@ -186,11 +186,13 @@ importer.isEligibleEntry = function(volumeManager, entry) {
  * @return {boolean}
  */
 importer.isMediaDirectory = function(entry, volumeManager) {
-  if (!entry || !entry.isDirectory || !entry.fullPath)
+  if (!entry || !entry.isDirectory || !entry.fullPath) {
     return false;
+  }
   var splitPath = importer.splitPath_(/** @type {Entry} */(entry));
-  if (importer.isEligiblePath_(splitPath))
+  if (importer.isEligiblePath_(splitPath)) {
     return true;
+  }
 
   // This is a media root if there is only one element in the path, and it is a
   // valid import root.
@@ -215,8 +217,9 @@ importer.getMediaDirectory = function(directory) {
            */
           function(results) {
             for (var i = 0; i < results.length; i++) {
-              if (!!results[i] && results[i].isDirectory)
+              if (!!results[i] && results[i].isDirectory) {
                 return Promise.resolve(results[i]);
+              }
             }
             // If standard (upper case) forms are not present,
             // check for a lower-case "DCIM".
@@ -253,17 +256,12 @@ importer.hasMediaDirectory = function(directory) {
  * @private
  */
 importer.getDirectory_ = function(parent, name) {
-  return new Promise(
-    function(resolve, reject) {
-      parent.getDirectory(
-          name,
-          {
-            create: false,
-            exclusive: false
-          },
-          resolve,
-          function() { resolve(null); });
-    });
+  return new Promise(function(resolve, reject) {
+    parent.getDirectory(
+        name, {create: false, exclusive: false}, resolve, function() {
+          resolve(null);
+        });
+  });
 };
 
 /**
@@ -772,34 +770,13 @@ importer.Logger.prototype.catcher;
  * @final
  *
  * @param {!Promise<!FileEntry>} fileEntryPromise
- * @param {!Promise<!analytics.Tracker>} trackerPromise
  */
-importer.RuntimeLogger = function(fileEntryPromise, trackerPromise) {
-
+importer.RuntimeLogger = function(fileEntryPromise) {
   /** @private {!Promise<!importer.PromisingFileEntry>} */
   this.fileEntryPromise_ = fileEntryPromise.then(
       /** @param {!FileEntry} fileEntry */
       function(fileEntry) {
         return new importer.PromisingFileEntry(fileEntry);
-      });
-
-  /** @private {!Promise<!analytics.Tracker>} */
-  this.trackerPromise_ = trackerPromise;
-};
-
-/**
- * Reports an error to analytics.
- *
- * @param {string} context MUST NOT contain any dynamic error content,
- *    only statically defined string will dooooo.
- */
-importer.RuntimeLogger.prototype.reportErrorContext_ = function(context) {
-  this.trackerPromise_.then(
-      /** @param {!analytics.Tracker} tracker */
-      function(tracker) {
-        tracker.sendException(
-            context,
-            false  /* fatal */ );
       });
 };
 
@@ -820,7 +797,6 @@ importer.RuntimeLogger.prototype.catcher = function(context) {
   var prefix = '(' + context + ') ';
 
   return function(error) {
-    this.reportErrorContext_(context);
 
     var message = prefix + 'Caught error in promise chain.';
     // Append error info, if provided, then output the error.
@@ -912,32 +888,10 @@ importer.getLogger = function() {
     importer.logger_ = new importer.RuntimeLogger(
         importer.ChromeSyncFilesystem.getOrCreateFileEntry(
             /** @type {!Promise<string>} */ (rotator().then(
-                importer.getDebugLogFilename.bind(null, nextLogId)))),
-        importer.getTracker_());
+                importer.getDebugLogFilename.bind(null, nextLogId)))));
   }
 
   return importer.logger_;
-};
-
-/**
- * Fetch analytics.Tracker from background page.
- * @return {!Promise<!analytics.Tracker>}
- * @private
- */
-importer.getTracker_ = function() {
-  return new Promise(
-      function(resolve, reject) {
-        chrome.runtime.getBackgroundPage(
-          function(/** BackgroundWindow */ opt_background) {
-            if (chrome.runtime.lastError) {
-              reject(chrome.runtime.lastError);
-            }
-            opt_background.background.ready(
-                function() {
-                  resolve(opt_background.background.tracker);
-                });
-          });
-      });
 };
 
 /**

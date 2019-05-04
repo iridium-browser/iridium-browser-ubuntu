@@ -68,7 +68,7 @@ using blink::WebLocalizedString;
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 namespace {
 
@@ -340,8 +340,9 @@ const InternalRoleEntry kInternalRoles[] = {
     {ax::mojom::Role::kLegend, "Legend"},
     {ax::mojom::Role::kLink, "Link"},
     {ax::mojom::Role::kLineBreak, "LineBreak"},
-    {ax::mojom::Role::kListBoxOption, "ListBoxOption"},
     {ax::mojom::Role::kListBox, "ListBox"},
+    {ax::mojom::Role::kListBoxOption, "ListBoxOption"},
+    {ax::mojom::Role::kListGrid, "ListGrid"},
     {ax::mojom::Role::kListItem, "ListItem"},
     {ax::mojom::Role::kListMarker, "ListMarker"},
     {ax::mojom::Role::kList, "List"},
@@ -386,11 +387,11 @@ const InternalRoleEntry kInternalRoles[] = {
     {ax::mojom::Role::kStaticText, "StaticText"},
     {ax::mojom::Role::kStatus, "Status"},
     {ax::mojom::Role::kSwitch, "Switch"},
+    {ax::mojom::Role::kTab, "Tab"},
     {ax::mojom::Role::kTabList, "TabList"},
     {ax::mojom::Role::kTabPanel, "TabPanel"},
-    {ax::mojom::Role::kTab, "Tab"},
-    {ax::mojom::Role::kTableHeaderContainer, "TableHeaderContainer"},
     {ax::mojom::Role::kTable, "Table"},
+    {ax::mojom::Role::kTableHeaderContainer, "TableHeaderContainer"},
     {ax::mojom::Role::kTerm, "Term"},
     {ax::mojom::Role::kTextField, "TextField"},
     {ax::mojom::Role::kTextFieldWithComboBox, "ComboBox"},
@@ -440,16 +441,17 @@ static ARIARoleMap* CreateARIARoleMap() {
 static Vector<AtomicString>* CreateRoleNameVector() {
   Vector<AtomicString>* role_name_vector =
       new Vector<AtomicString>(base::size(kInternalRoles));
-  for (size_t i = 0; i < base::size(kInternalRoles); i++)
+  for (wtf_size_t i = 0; i < base::size(kInternalRoles); i++)
     (*role_name_vector)[i] = g_null_atom;
 
-  for (size_t i = 0; i < base::size(kRoles); ++i) {
-    (*role_name_vector)[static_cast<size_t>(kRoles[i].webcore_role)] =
+  for (wtf_size_t i = 0; i < base::size(kRoles); ++i) {
+    (*role_name_vector)[static_cast<wtf_size_t>(kRoles[i].webcore_role)] =
         AtomicString(kRoles[i].aria_role);
   }
 
-  for (size_t i = 0; i < base::size(kReverseRoles); ++i) {
-    (*role_name_vector)[static_cast<size_t>(kReverseRoles[i].webcore_role)] =
+  for (wtf_size_t i = 0; i < base::size(kReverseRoles); ++i) {
+    (*role_name_vector)[static_cast<wtf_size_t>(
+        kReverseRoles[i].webcore_role)] =
         AtomicString(kReverseRoles[i].aria_role);
   }
 
@@ -459,8 +461,8 @@ static Vector<AtomicString>* CreateRoleNameVector() {
 static Vector<AtomicString>* CreateInternalRoleNameVector() {
   Vector<AtomicString>* internal_role_name_vector =
       new Vector<AtomicString>(base::size(kInternalRoles));
-  for (size_t i = 0; i < base::size(kInternalRoles); i++) {
-    (*internal_role_name_vector)[static_cast<size_t>(
+  for (wtf_size_t i = 0; i < base::size(kInternalRoles); i++) {
+    (*internal_role_name_vector)[static_cast<wtf_size_t>(
         kInternalRoles[i].webcore_role)] =
         AtomicString(kInternalRoles[i].internal_role_name);
   }
@@ -756,7 +758,7 @@ bool AXObject::IsNativeCheckboxInMixedState(const Node* node) {
 
   const HTMLInputElement* input = ToHTMLInputElement(node);
   const auto inputType = input->type();
-  if (inputType != InputTypeNames::checkbox)
+  if (inputType != input_type_names::kCheckbox)
     return false;
   return input->ShouldAppearIndeterminate();
 }
@@ -900,9 +902,12 @@ void AXObject::UpdateCachedAttributeValuesIfNeeded() const {
       !!InheritsPresentationalRoleFrom();
   cached_is_ignored_ = ComputeAccessibilityIsIgnored();
   cached_is_editable_root_ = ComputeIsEditableRoot();
+  // Compute live region root, which can be from any ARIA live value, including
+  // "off", or from an automatic ARIA live value, e.g. from role="status".
   // TODO(dmazzoni): remove this const_cast.
+  AtomicString aria_live;
   cached_live_region_root_ =
-      IsLiveRegion()
+      IsLiveRegionRoot()
           ? const_cast<AXObject*>(this)
           : (ParentObjectIfExists() ? ParentObjectIfExists()->LiveRegionRoot()
                                     : nullptr);
@@ -938,9 +943,14 @@ AXObjectInclusion AXObject::AccessibilityPlatformIncludesObject() const {
 AXObjectInclusion AXObject::DefaultObjectInclusion(
     IgnoredReasons* ignored_reasons) const {
   if (IsInertOrAriaHidden()) {
-    if (ignored_reasons)
-      ComputeIsInertOrAriaHidden(ignored_reasons);
-    return kIgnoreObject;
+    // Keep focusable elements that are aria-hidden in tree, so that they can
+    // still fire events such as focus and value changes.
+    const Element* elem = GetElement();
+    if (!elem || !elem->SupportsFocus() || elem->IsInert()) {
+      if (ignored_reasons)
+        ComputeIsInertOrAriaHidden(ignored_reasons);
+      return kIgnoreObject;
+    }
   }
 
   return AccessibilityPlatformIncludesObject();
@@ -1002,6 +1012,10 @@ bool AXObject::ComputeIsInertOrAriaHidden(
   return false;
 }
 
+bool AXObject::IsVisible() const {
+  return !IsInertOrAriaHidden();
+}
+
 bool AXObject::IsDescendantOfLeafNode() const {
   UpdateCachedAttributeValuesIfNeeded();
   return cached_is_descendant_of_leaf_node_;
@@ -1039,7 +1053,7 @@ const AXObject* AXObject::InertRoot() const {
                          ? ToElement(node)
                          : FlatTreeTraversal::ParentElement(*node);
   while (element) {
-    if (element->hasAttribute(inertAttr))
+    if (element->hasAttribute(kInertAttr))
       return AXObjectCache().GetOrCreate(element);
     element = FlatTreeTraversal::ParentElement(*element);
   }
@@ -1086,10 +1100,11 @@ bool AXObject::DispatchEventToAOMEventListeners(Event& event) {
   // that if it didn't previously exist it won't be part of the event path.
   AccessibleNode* target = GetAccessibleNode();
   if (!target) {
-    Element* element = GetElement();
-    if (element)
+    if (Element* element = GetElement())
       target = element->accessibleNode();
   }
+  if (!target)
+    return false;
   event.SetTarget(target);
 
   // Capturing phase.
@@ -1197,7 +1212,7 @@ bool AXObject::CanReceiveAccessibilityFocus() const {
     return true;
 
   // aria-activedescendant focus
-  return elem->FastHasAttribute(idAttr) && CanBeActiveDescendant();
+  return elem->FastHasAttribute(kIdAttr) && CanBeActiveDescendant();
 }
 
 bool AXObject::CanSetValueAttribute() const {
@@ -1516,7 +1531,7 @@ String AXObject::AriaTextAlternative(bool recursive,
     if (HasAOMProperty(AOMRelationListProperty::kLabeledBy, elements)) {
       if (name_sources) {
         name_sources->push_back(
-            NameSource(*found_text_alternative, aria_labelledbyAttr));
+            NameSource(*found_text_alternative, kAriaLabelledbyAttr));
         name_sources->back().type = name_from;
       }
 
@@ -1543,9 +1558,9 @@ String AXObject::AriaTextAlternative(bool recursive,
     } else {
       // Now check ARIA attribute
       const QualifiedName& attr =
-          HasAttribute(aria_labeledbyAttr) && !HasAttribute(aria_labelledbyAttr)
-              ? aria_labeledbyAttr
-              : aria_labelledbyAttr;
+          HasAttribute(kAriaLabeledbyAttr) && !HasAttribute(kAriaLabelledbyAttr)
+              ? kAriaLabeledbyAttr
+              : kAriaLabelledbyAttr;
 
       if (name_sources) {
         name_sources->push_back(NameSource(*found_text_alternative, attr));
@@ -1589,7 +1604,7 @@ String AXObject::AriaTextAlternative(bool recursive,
   name_from = ax::mojom::NameFrom::kAttribute;
   if (name_sources) {
     name_sources->push_back(
-        NameSource(*found_text_alternative, aria_labelAttr));
+        NameSource(*found_text_alternative, kAriaLabelAttr));
     name_sources->back().type = name_from;
   }
   const AtomicString& aria_label =
@@ -1628,7 +1643,7 @@ String AXObject::TextFromElements(
       String result = RecursiveTextAlternative(
           *ax_element, in_aria_labelledby_traversal, visited);
       local_related_objects.push_back(
-          new NameSourceRelatedObject(ax_element, result));
+          MakeGarbageCollected<NameSourceRelatedObject>(ax_element, result));
       if (!result.IsEmpty()) {
         if (!accumulated_text.IsEmpty())
           accumulated_text.Append(' ');
@@ -1675,9 +1690,9 @@ void AXObject::AriaLabelledbyElementVector(
     HeapVector<Member<Element>>& elements,
     Vector<String>& ids) const {
   // Try both spellings, but prefer aria-labelledby, which is the official spec.
-  ElementsFromAttribute(elements, aria_labelledbyAttr, ids);
+  ElementsFromAttribute(elements, kAriaLabelledbyAttr, ids);
   if (!ids.size())
-    ElementsFromAttribute(elements, aria_labeledbyAttr, ids);
+    ElementsFromAttribute(elements, kAriaLabeledbyAttr, ids);
 }
 
 String AXObject::TextFromAriaLabelledby(AXObjectSet& visited,
@@ -1692,7 +1707,7 @@ String AXObject::TextFromAriaDescribedby(AXRelatedObjectVector* related_objects,
                                          Vector<String>& ids) const {
   AXObjectSet visited;
   HeapVector<Member<Element>> elements;
-  ElementsFromAttribute(elements, aria_describedbyAttr, ids);
+  ElementsFromAttribute(elements, kAriaDescribedbyAttr, ids);
   return TextFromElements(true, visited, elements, related_objects);
 }
 
@@ -1712,7 +1727,8 @@ void AXObject::Markers(Vector<DocumentMarker::MarkerType>&,
 
 void AXObject::TextCharacterOffsets(Vector<int>&) const {}
 
-void AXObject::GetWordBoundaries(Vector<AXRange>&) const {}
+void AXObject::GetWordBoundaries(Vector<int>& word_starts,
+                                 Vector<int>& word_ends) const {}
 
 ax::mojom::DefaultActionVerb AXObject::Action() const {
   Element* action_element = ActionElement();
@@ -1896,11 +1912,16 @@ int AXObject::IndexInParent() const {
     return 0;
 
   const AXObjectVector& siblings = ParentObjectUnignored()->Children();
-  size_t index = siblings.Find(this);
+  wtf_size_t index = siblings.Find(this);
   return (index == kNotFound) ? 0 : static_cast<int>(index);
 }
 
-bool AXObject::IsLiveRegion() const {
+bool AXObject::IsLiveRegionRoot() const {
+  const AtomicString& live_region = LiveRegionStatus();
+  return !live_region.IsEmpty();
+}
+
+bool AXObject::IsActiveLiveRegionRoot() const {
   const AtomicString& live_region = LiveRegionStatus();
   return !live_region.IsEmpty() && !EqualIgnoringASCIICase(live_region, "off");
 }
@@ -2338,7 +2359,7 @@ AtomicString AXObject::Language() const {
   // 2. The list of languages the browser sends in the [Accept-Language] header.
   // 3. The browser's default language.
 
-  const AtomicString& lang = GetAttribute(langAttr);
+  const AtomicString& lang = GetAttribute(kLangAttr);
   if (!lang.IsEmpty())
     return lang;
 
@@ -2515,7 +2536,7 @@ AXObject* AXObject::CellForColumnAndRow(unsigned target_column_index,
   // i.e. it's an ARIA grid/table.
   //
   // TODO(dmazzoni): delete this code or rename it "for testing only"
-  // since it's only needed for Blink layout tests and not for production.
+  // since it's only needed for Blink web tests and not for production.
   unsigned row_index = 0;
   for (const auto& row : TableRowChildren()) {
     unsigned column_index = 0;
@@ -2574,45 +2595,11 @@ int AXObject::AriaRowCount() const {
 }
 
 unsigned AXObject::ColumnIndex() const {
-  if (!IsTableCellLikeRole())
-    return 0;
-
-  const AXObject* row = TableRowParent();
-  if (!row)
-    return 0;
-
-  unsigned column_index = 0;
-  for (const auto& child : row->TableCellChildren()) {
-    if (child == this)
-      break;
-    column_index++;
-  }
-  return column_index;
+  return 0;
 }
 
 unsigned AXObject::RowIndex() const {
-  const AXObject* row = nullptr;
-  if (IsTableRowLikeRole())
-    row = this;
-  else if (IsTableCellLikeRole())
-    row = TableRowParent();
-
-  if (!row)
-    return 0;
-
-  const AXObject* table = row->TableParent();
-  if (!table)
-    return 0;
-
-  unsigned row_index = 0;
-  for (const auto& child : table->TableRowChildren()) {
-    if (child == row)
-      break;
-    if (!child->IsTableRowLikeRole())
-      continue;
-    row_index++;
-  }
-  return row_index;
+  return 0;
 }
 
 unsigned AXObject::ColumnSpan() const {
@@ -2634,84 +2621,19 @@ unsigned AXObject::AriaRowIndex() const {
 }
 
 unsigned AXObject::ComputeAriaColumnIndex() const {
-  if (!IsTableCellLikeRole())
-    return 0;
-
-  // First see if it has an ARIA column index explicitly set.
-  uint32_t col_index;
-  if (HasAOMPropertyOrARIAAttribute(AOMUIntProperty::kColIndex, col_index) &&
-      col_index >= 1) {
-    return col_index;
-  }
-
-  // Get the previous sibling.
-  // TODO(dmazzoni): this code depends on the DOM; move this code out of Blink
-  // and make it more general.
-  AXObject* previous = nullptr;
-  if (GetNode()) {
-    Node* previousNode = ElementTraversal::PreviousSibling(*GetNode());
-    previous = AXObjectCache().GetOrCreate(previousNode);
-  }
-
-  // It has a previous sibling, so if that cell has a column index, this one's
-  // index is one greater.
-  if (previous) {
-    col_index = previous->AriaColumnIndex();
-    if (col_index)
-      return col_index + 1;
-    return 0;
-  }
-
-  // No previous cell, so check the row to see if it sets a column index.
-  const AXObject* row = TableRowParent();
-  if (!row)
-    return 0;
-  if (row->HasAOMPropertyOrARIAAttribute(AOMUIntProperty::kColIndex,
-                                         col_index)) {
-    return col_index;
-  }
-
-  // Otherwise there's no ARIA column index.
-  return 0;
+  // Return the ARIA column index if it has been set. Otherwise return a default
+  // value of 0.
+  uint32_t col_index = 0;
+  HasAOMPropertyOrARIAAttribute(AOMUIntProperty::kColIndex, col_index);
+  return col_index;
 }
 
 unsigned AXObject::ComputeAriaRowIndex() const {
-  if (!IsTableCellLikeRole() && !IsTableRowLikeRole())
-    return 0;
-
-  // First check if there's an ARIA row index explicitly set.
-  uint32_t row_index;
-  if (HasAOMPropertyOrARIAAttribute(AOMUIntProperty::kRowIndex, row_index) &&
-      row_index >= 1) {
-    return row_index;
-  }
-
-  // If this is a cell, return the ARIA row index of the containing row.
-  if (IsTableCellLikeRole()) {
-    const AXObject* row = TableRowParent();
-    if (row)
-      return row->AriaRowIndex();
-    return 0;
-  }
-
-  // Otherwise, this is a row. Find the previous sibling row.
-  // TODO(dmazzoni): this code depends on the DOM; move this code out of Blink
-  // and make it more general.
-  if (!GetNode())
-    return 0;
-  Node* previousNode = ElementTraversal::PreviousSibling(*GetNode());
-  AXObject* previous = AXObjectCache().GetOrCreate(previousNode);
-  if (!previous || !previous->IsTableRowLikeRole())
-    return 0;
-
-  // If the previous row has an ARIA row index, this one is the same index
-  // plus one.
-  row_index = previous->AriaRowIndex();
-  if (row_index)
-    return row_index + 1;
-
-  // Otherwise there's no ARIA row index.
-  return 0;
+  // Return the ARIA row index if it has been set. Otherwise return a default
+  // value of 0.
+  uint32_t row_index = 0;
+  HasAOMPropertyOrARIAAttribute(AOMUIntProperty::kRowIndex, row_index);
+  return row_index;
 }
 
 AXObject::AXObjectVector AXObject::TableRowChildren() const {
@@ -2893,7 +2815,8 @@ LayoutRect AXObject::GetBoundsInFrameCoordinates() const {
 //
 
 bool AXObject::RequestDecrementAction() {
-  Event* event = Event::CreateCancelable(EventTypeNames::accessibledecrement);
+  Event* event =
+      Event::CreateCancelable(event_type_names::kAccessibledecrement);
   if (DispatchEventToAOMEventListeners(*event))
     return true;
 
@@ -2901,7 +2824,7 @@ bool AXObject::RequestDecrementAction() {
 }
 
 bool AXObject::RequestClickAction() {
-  Event* event = Event::CreateCancelable(EventTypeNames::accessibleclick);
+  Event* event = Event::CreateCancelable(event_type_names::kAccessibleclick);
   if (DispatchEventToAOMEventListeners(*event))
     return true;
 
@@ -2921,6 +2844,9 @@ bool AXObject::OnNativeClickAction() {
   if (!element && GetNode())
     element = GetNode()->parentElement();
 
+  if (IsTextControl())
+    return OnNativeFocusAction();
+
   if (element) {
     element->AccessKeyAction(true);
     return true;
@@ -2933,7 +2859,7 @@ bool AXObject::OnNativeClickAction() {
 }
 
 bool AXObject::RequestFocusAction() {
-  Event* event = Event::CreateCancelable(EventTypeNames::accessiblefocus);
+  Event* event = Event::CreateCancelable(event_type_names::kAccessiblefocus);
   if (DispatchEventToAOMEventListeners(*event))
     return true;
 
@@ -2941,7 +2867,8 @@ bool AXObject::RequestFocusAction() {
 }
 
 bool AXObject::RequestIncrementAction() {
-  Event* event = Event::CreateCancelable(EventTypeNames::accessibleincrement);
+  Event* event =
+      Event::CreateCancelable(event_type_names::kAccessibleincrement);
   if (DispatchEventToAOMEventListeners(*event))
     return true;
 
@@ -2954,7 +2881,7 @@ bool AXObject::RequestScrollToGlobalPointAction(const IntPoint& point) {
 
 bool AXObject::RequestScrollToMakeVisibleAction() {
   Event* event =
-      Event::CreateCancelable(EventTypeNames::accessiblescrollintoview);
+      Event::CreateCancelable(event_type_names::kAccessiblescrollintoview);
   if (DispatchEventToAOMEventListeners(*event))
     return true;
 
@@ -2983,7 +2910,8 @@ bool AXObject::RequestSetValueAction(const String& value) {
 }
 
 bool AXObject::RequestShowContextMenuAction() {
-  Event* event = Event::CreateCancelable(EventTypeNames::accessiblecontextmenu);
+  Event* event =
+      Event::CreateCancelable(event_type_names::kAccessiblecontextmenu);
   if (DispatchEventToAOMEventListeners(*event))
     return true;
 
@@ -3305,6 +3233,7 @@ bool AXObject::NameFromContents(bool recursive) const {
     case ax::mojom::Role::kInputTime:
     case ax::mojom::Role::kKeyboard:
     case ax::mojom::Role::kListBox:
+    case ax::mojom::Role::kListGrid:
     case ax::mojom::Role::kLog:
     case ax::mojom::Role::kMain:
     case ax::mojom::Role::kMarquee:
@@ -3450,7 +3379,7 @@ ax::mojom::Role AXObject::ButtonRoleType() const {
 const AtomicString& AXObject::RoleName(ax::mojom::Role role) {
   static const Vector<AtomicString>* role_name_vector = CreateRoleNameVector();
 
-  return role_name_vector->at(static_cast<size_t>(role));
+  return role_name_vector->at(static_cast<wtf_size_t>(role));
 }
 
 // static
@@ -3458,7 +3387,7 @@ const AtomicString& AXObject::InternalRoleName(ax::mojom::Role role) {
   static const Vector<AtomicString>* internal_role_name_vector =
       CreateInternalRoleNameVector();
 
-  return internal_role_name_vector->at(static_cast<size_t>(role));
+  return internal_role_name_vector->at(static_cast<wtf_size_t>(role));
 }
 
 // static
@@ -3501,6 +3430,13 @@ const AXObject* AXObject::LowestCommonAncestor(const AXObject& first,
   }
 
   return common_ancestor;
+}
+
+String AXObject::ToString() const {
+  return AXObject::InternalRoleName(RoleValue())
+             .GetString()
+             .EncodeForDebugging() +
+         ": " + ComputedName().EncodeForDebugging();
 }
 
 VisiblePosition AXObject::VisiblePositionForIndex(int) const {
@@ -3558,8 +3494,7 @@ bool operator>=(const AXObject& first, const AXObject& second) {
 }
 
 std::ostream& operator<<(std::ostream& stream, const AXObject& obj) {
-  return stream << AXObject::InternalRoleName(obj.RoleValue()) << ": "
-                << obj.ComputedName();
+  return stream << obj.ToString().Utf8().data();
 }
 
 void AXObject::Trace(blink::Visitor* visitor) {

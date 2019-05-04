@@ -49,6 +49,13 @@
 
 namespace blink {
 
+namespace {
+
+constexpr char kInterfaceMapLabel[] =
+    "V8PerIsolateData::interface_template_map_for_v8_context_snapshot_";
+
+}  // namespace
+
 // Wrapper function defined in WebKit.h
 v8::Isolate* MainThreadIsolate() {
   return V8PerIsolateData::MainThreadIsolate();
@@ -75,7 +82,8 @@ V8PerIsolateData::V8PerIsolateData(
                          : gin::IsolateHolder::kAllowAtomicsWait,
           IsMainThread() ? gin::IsolateHolder::IsolateType::kBlinkMainThread
                          : gin::IsolateHolder::IsolateType::kBlinkWorkerThread),
-      interface_template_map_for_v8_context_snapshot_(GetIsolate()),
+      interface_template_map_for_v8_context_snapshot_(GetIsolate(),
+                                                      kInterfaceMapLabel),
       string_cache_(std::make_unique<StringCache>(GetIsolate())),
       private_property_(V8PrivateProperty::Create()),
       constructor_mode_(ConstructorMode::kCreateNewObject),
@@ -86,8 +94,7 @@ V8PerIsolateData::V8PerIsolateData(
           new ScriptWrappableMarkingVisitor(ThreadState::Current())),
       unified_heap_controller_(
           new UnifiedHeapController(ThreadState::Current())),
-      runtime_call_stats_(base::DefaultTickClock::GetInstance()),
-      handled_near_v8_heap_limit_(false) {
+      runtime_call_stats_(base::DefaultTickClock::GetInstance()) {
   // FIXME: Remove once all v8::Isolate::GetCurrent() calls are gone.
   GetIsolate()->Enter();
   GetIsolate()->AddBeforeCallEnteredCallback(&BeforeCallEnteredCallback);
@@ -100,7 +107,7 @@ V8PerIsolateData::V8PerIsolateData(
 // the main thread.
 V8PerIsolateData::V8PerIsolateData()
     : v8_context_snapshot_mode_(V8ContextSnapshotMode::kTakeSnapshot),
-      isolate_holder_(Platform::Current()->MainThread()->GetTaskRunner(),
+      isolate_holder_(Thread::Current()->GetTaskRunner(),
                       gin::IsolateHolder::kSingleThread,
                       gin::IsolateHolder::kAllowAtomicsWait,
                       gin::IsolateHolder::IsolateType::kBlinkMainThread,
@@ -112,8 +119,7 @@ V8PerIsolateData::V8PerIsolateData()
       use_counter_disabled_(false),
       is_handling_recursion_level_error_(false),
       is_reporting_exception_(false),
-      runtime_call_stats_(base::DefaultTickClock::GetInstance()),
-      handled_near_v8_heap_limit_(false) {
+      runtime_call_stats_(base::DefaultTickClock::GetInstance()) {
   CHECK(IsMainThread());
 
   // SnapshotCreator enters the isolate, so we don't call Isolate::Enter() here.
@@ -171,7 +177,7 @@ void V8PerIsolateData::WillBeDestroyed(v8::Isolate* isolate) {
   }
   isolate->SetEmbedderHeapTracer(nullptr);
   if (data->script_wrappable_visitor_->WrapperTracingInProgress())
-    data->script_wrappable_visitor_->AbortTracing();
+    data->script_wrappable_visitor_->AbortTracingForTermination();
   data->script_wrappable_visitor_.reset();
 }
 
@@ -379,8 +385,10 @@ V8PerIsolateData::Data* V8PerIsolateData::ThreadDebugger() {
 
 void V8PerIsolateData::AddActiveScriptWrappable(
     ActiveScriptWrappableBase* wrappable) {
-  if (!active_script_wrappables_)
-    active_script_wrappables_ = new ActiveScriptWrappableSet();
+  if (!active_script_wrappables_) {
+    active_script_wrappables_ =
+        MakeGarbageCollected<ActiveScriptWrappableSet>();
+  }
 
   active_script_wrappables_->insert(wrappable);
 }

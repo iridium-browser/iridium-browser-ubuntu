@@ -4,7 +4,6 @@
 
 #include "ash/system/tray/tray_constants.h"
 
-#include "ash/public/cpp/ash_features.h"
 #include "base/logging.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/color_palette.h"
@@ -54,7 +53,11 @@ const SkColor kHeaderTextColorNormal = SkColorSetARGB(0x7f, 0, 0, 0);
 
 const SkColor kMobileNotConnectedXIconColor = SkColorSetRGB(0xb2, 0xb2, 0xb2);
 
-const SkColor kTrayIconColor = SK_ColorWHITE;
+const SkColor kTrayIconColor = gfx::kGoogleGrey200;
+// Note that the alpha value should match kSignalStrengthImageBgAlpha in
+// ash/public/cpp/network_icon_image_source.cc
+const SkColor kTrayIconBackgroundColor =
+    SkColorSetA(gfx::kGoogleGrey200, 0x4D /* 30% */);
 const SkColor kOobeTrayIconColor = gfx::kGoogleGrey600;
 
 const int kMenuIconSize = 20;
@@ -87,8 +90,7 @@ static_assert(kTrayMenuWidth == kUnifiedFeaturePodHorizontalSidePadding * 2 +
 
 // static
 int TrayConstants::GetTrayIconSize() {
-  return features::IsSystemTrayUnifiedEnabled() ? kUnifiedTrayIconSize
-                                                : kTrayIconSize;
+  return kUnifiedTrayIconSize;
 }
 
 }  // namespace ash

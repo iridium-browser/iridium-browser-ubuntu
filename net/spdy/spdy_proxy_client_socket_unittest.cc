@@ -35,7 +35,7 @@
 #include "net/test/gtest_util.h"
 #include "net/test/test_data_directory.h"
 #include "net/test/test_with_scoped_task_environment.h"
-#include "net/third_party/spdy/core/spdy_protocol.h"
+#include "net/third_party/quiche/src/spdy/core/spdy_protocol.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -90,7 +90,8 @@ class SpdyProxyClientSocketTest : public PlatformTest,
                   base::span<const MockWrite> writes);
   void PopulateConnectRequestIR(spdy::SpdyHeaderBlock* syn_ir);
   void PopulateConnectReplyIR(spdy::SpdyHeaderBlock* block, const char* status);
-  spdy::SpdySerializedFrame ConstructConnectRequestFrame();
+  spdy::SpdySerializedFrame ConstructConnectRequestFrame(
+      RequestPriority priority);
   spdy::SpdySerializedFrame ConstructConnectAuthRequestFrame();
   spdy::SpdySerializedFrame ConstructConnectReplyFrame();
   spdy::SpdySerializedFrame ConstructConnectAuthReplyFrame();
@@ -169,6 +170,7 @@ SpdyProxyClientSocketTest::SpdyProxyClientSocketTest()
       endpoint_spdy_session_key_(endpoint_host_port_pair_,
                                  proxy_,
                                  PRIVACY_MODE_DISABLED,
+                                 SpdySessionKey::IsProxySession::kFalse,
                                  SocketTag()) {
   session_deps_.net_log = net_log_.bound().net_log();
 }
@@ -353,10 +355,11 @@ void SpdyProxyClientSocketTest::PopulateConnectReplyIR(
 
 // Constructs a standard SPDY HEADERS frame for a CONNECT request.
 spdy::SpdySerializedFrame
-SpdyProxyClientSocketTest::ConstructConnectRequestFrame() {
+SpdyProxyClientSocketTest::ConstructConnectRequestFrame(
+    RequestPriority priority = LOWEST) {
   spdy::SpdyHeaderBlock block;
   PopulateConnectRequestIR(&block);
-  return spdy_util_.ConstructSpdyHeaders(kStreamId, std::move(block), LOWEST,
+  return spdy_util_.ConstructSpdyHeaders(kStreamId, std::move(block), priority,
                                          false);
 }
 
@@ -495,7 +498,7 @@ TEST_P(SpdyProxyClientSocketTest, ConnectRedirects) {
 
   Initialize(reads, writes);
 
-  AssertConnectFails(ERR_HTTPS_PROXY_TUNNEL_RESPONSE);
+  AssertConnectFails(ERR_HTTPS_PROXY_TUNNEL_RESPONSE_REDIRECT);
 
   const HttpResponseInfo* response = sock_->GetConnectResponseInfo();
   ASSERT_TRUE(response != NULL);
@@ -531,6 +534,25 @@ TEST_P(SpdyProxyClientSocketTest, ConnectFails) {
   AssertConnectFails(ERR_CONNECTION_CLOSED);
 
   ASSERT_FALSE(sock_->IsConnected());
+}
+
+TEST_P(SpdyProxyClientSocketTest, SetStreamPriority) {
+  spdy::SpdySerializedFrame conn(ConstructConnectRequestFrame(HIGHEST));
+  MockWrite writes[] = {
+      CreateMockWrite(conn, 0, SYNCHRONOUS),
+  };
+
+  spdy::SpdySerializedFrame resp(ConstructConnectReplyFrame());
+  MockRead reads[] = {
+      CreateMockRead(resp, 1, ASYNC),
+      MockRead(SYNCHRONOUS, ERR_IO_PENDING, 2),
+  };
+
+  Initialize(reads, writes);
+
+  sock_->SetStreamPriority(HIGHEST);
+
+  AssertConnectSucceeds();
 }
 
 // ----------- WasEverUsed

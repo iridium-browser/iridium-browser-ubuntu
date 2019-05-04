@@ -43,6 +43,13 @@ class Value;
 /// Delete the specified block, which must have no predecessors.
 void DeleteDeadBlock(BasicBlock *BB, DomTreeUpdater *DTU = nullptr);
 
+/// Delete the specified blocks from \p BB. The set of deleted blocks must have
+/// no predecessors that are not being deleted themselves. \p BBs must have no
+/// duplicating blocks. If there are loops among this set of blocks, all
+/// relevant loop info updates should be done before this function is called.
+void DeleteDeadBlocks(SmallVectorImpl <BasicBlock *> &BBs,
+                      DomTreeUpdater *DTU = nullptr);
+
 /// We know that BB has one predecessor. If there are any single-entry PHI nodes
 /// in it, fold them away. This handles the case when all entries to the PHI
 /// nodes in a block are guaranteed equal, such as when the block has exactly
@@ -128,7 +135,7 @@ struct CriticalEdgeSplittingOptions {
 /// IndirectBrInst.  Splitting these edges will almost always create an invalid
 /// program because the address of the new block won't be the one that is jumped
 /// to.
-BasicBlock *SplitCriticalEdge(TerminatorInst *TI, unsigned SuccNum,
+BasicBlock *SplitCriticalEdge(Instruction *TI, unsigned SuccNum,
                               const CriticalEdgeSplittingOptions &Options =
                                   CriticalEdgeSplittingOptions());
 
@@ -148,7 +155,7 @@ inline bool SplitCriticalEdge(BasicBlock *Succ, pred_iterator PI,
                               const CriticalEdgeSplittingOptions &Options =
                                   CriticalEdgeSplittingOptions()) {
   bool MadeChange = false;
-  TerminatorInst *TI = (*PI)->getTerminator();
+  Instruction *TI = (*PI)->getTerminator();
   for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
     if (TI->getSuccessor(i) == Succ)
       MadeChange |= !!SplitCriticalEdge(TI, i, Options);
@@ -162,7 +169,7 @@ inline BasicBlock *
 SplitCriticalEdge(BasicBlock *Src, BasicBlock *Dst,
                   const CriticalEdgeSplittingOptions &Options =
                       CriticalEdgeSplittingOptions()) {
-  TerminatorInst *TI = Src->getTerminator();
+  Instruction *TI = Src->getTerminator();
   unsigned i = 0;
   while (true) {
     assert(i != TI->getNumSuccessors() && "Edge doesn't exist!");
@@ -257,11 +264,11 @@ ReturnInst *FoldReturnIntoUncondBranch(ReturnInst *RI, BasicBlock *BB,
 /// Returns the NewBasicBlock's terminator.
 ///
 /// Updates DT and LI if given.
-TerminatorInst *SplitBlockAndInsertIfThen(Value *Cond, Instruction *SplitBefore,
-                                          bool Unreachable,
-                                          MDNode *BranchWeights = nullptr,
-                                          DominatorTree *DT = nullptr,
-                                          LoopInfo *LI = nullptr);
+Instruction *SplitBlockAndInsertIfThen(Value *Cond, Instruction *SplitBefore,
+                                       bool Unreachable,
+                                       MDNode *BranchWeights = nullptr,
+                                       DominatorTree *DT = nullptr,
+                                       LoopInfo *LI = nullptr);
 
 /// SplitBlockAndInsertIfThenElse is similar to SplitBlockAndInsertIfThen,
 /// but also creates the ElseBlock.
@@ -278,8 +285,8 @@ TerminatorInst *SplitBlockAndInsertIfThen(Value *Cond, Instruction *SplitBefore,
 ///   SplitBefore
 ///   Tail
 void SplitBlockAndInsertIfThenElse(Value *Cond, Instruction *SplitBefore,
-                                   TerminatorInst **ThenTerm,
-                                   TerminatorInst **ElseTerm,
+                                   Instruction **ThenTerm,
+                                   Instruction **ElseTerm,
                                    MDNode *BranchWeights = nullptr);
 
 /// Check whether BB is the merge point of a if-region.

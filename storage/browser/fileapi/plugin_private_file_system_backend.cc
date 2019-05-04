@@ -102,11 +102,11 @@ PluginPrivateFileSystemBackend::PluginPrivateFileSystemBackend(
                      .Append(kPluginPrivateDirectory)),
       plugin_map_(new FileSystemIDToPluginMap(file_task_runner)),
       weak_factory_(this) {
-  file_util_.reset(new AsyncFileUtilAdapter(new ObfuscatedFileUtil(
+  file_util_ = std::make_unique<AsyncFileUtilAdapter>(new ObfuscatedFileUtil(
       special_storage_policy, base_path_, env_override,
-      base::Bind(&FileSystemIDToPluginMap::GetPluginIDForURL,
-                 base::Owned(plugin_map_)),
-      std::set<std::string>(), nullptr)));
+      base::BindRepeating(&FileSystemIDToPluginMap::GetPluginIDForURL,
+                          base::Owned(plugin_map_)),
+      std::set<std::string>(), nullptr));
 }
 
 PluginPrivateFileSystemBackend::~PluginPrivateFileSystemBackend() {
@@ -230,6 +230,15 @@ PluginPrivateFileSystemBackend::DeleteOriginDataOnFileTaskRunner(
   if (result)
     return base::File::FILE_OK;
   return base::File::FILE_ERROR_FAILED;
+}
+
+void PluginPrivateFileSystemBackend::PerformStorageCleanupOnFileTaskRunner(
+    FileSystemContext* context,
+    storage::QuotaManagerProxy* proxy,
+    FileSystemType type) {
+  if (!CanHandleType(type))
+    return;
+  obfuscated_file_util()->RewriteDatabases();
 }
 
 void PluginPrivateFileSystemBackend::GetOriginsForTypeOnFileTaskRunner(

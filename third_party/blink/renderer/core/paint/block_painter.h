@@ -5,7 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_BLOCK_PAINTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_BLOCK_PAINTER_H_
 
+#include "base/gtest_prod_util.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/order_iterator.h"
+#include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 
 namespace blink {
@@ -40,15 +43,16 @@ class BlockPainter {
   // Paint scroll hit test placeholders in the correct paint order (see:
   // ScrollHitTestDisplayItem.h).
   void PaintScrollHitTestDisplayItem(const PaintInfo&);
-  // Paint a hit test display item and record hit test data. This should be
-  // called in the background paint phase even if there is no other painted
-  // content.
-  void RecordHitTestData(const PaintInfo&, const LayoutPoint& paint_offset);
   void PaintBlockFlowContents(const PaintInfo&, const LayoutPoint&);
   void PaintCarets(const PaintInfo&, const LayoutPoint& paint_offset);
 
   bool ShouldPaint(const ScopedPaintState&) const;
 
+  CORE_EXPORT LayoutRect OverflowRectForCullRectTesting(bool is_printing) const;
+
+  FRIEND_TEST_ALL_PREFIXES(BlockPainterTest, OverflowRectForCullRectTesting);
+  FRIEND_TEST_ALL_PREFIXES(BlockPainterTest,
+                           OverflowRectCompositedScrollingForCullRectTesting);
   const LayoutBlock& layout_block_;
 };
 

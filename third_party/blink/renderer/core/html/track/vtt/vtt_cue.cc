@@ -29,8 +29,9 @@
 
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_cue.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/bindings/core/v8/double_or_auto_keyword.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -57,14 +58,14 @@ namespace blink {
 
 static const CSSValueID kDisplayWritingModeMap[] = {
     CSSValueHorizontalTb, CSSValueVerticalRl, CSSValueVerticalLr};
-static_assert(arraysize(kDisplayWritingModeMap) ==
+static_assert(base::size(kDisplayWritingModeMap) ==
                   VTTCue::kNumberOfWritingDirections,
               "displayWritingModeMap should have the same number of elements "
               "as VTTCue::NumberOfWritingDirections");
 
 static const CSSValueID kDisplayAlignmentMap[] = {
     CSSValueStart, CSSValueCenter, CSSValueEnd, CSSValueLeft, CSSValueRight};
-static_assert(arraysize(kDisplayAlignmentMap) == VTTCue::kNumberOfAlignments,
+static_assert(base::size(kDisplayAlignmentMap) == VTTCue::kNumberOfAlignments,
               "displayAlignmentMap should have the same number of elements as "
               "VTTCue::NumberOfAlignments");
 
@@ -530,8 +531,8 @@ class VTTTextRunIterator : public TextRunIterator {
     // Within a cue, paragraph boundaries are only denoted by Type B characters,
     // such as U+000A LINE FEED (LF), U+0085 NEXT LINE (NEL),
     // and U+2029 PARAGRAPH SEPARATOR.
-    return WTF::Unicode::Category(Current()) &
-           WTF::Unicode::kSeparator_Paragraph;
+    return WTF::unicode::Category(Current()) &
+           WTF::unicode::kSeparator_Paragraph;
   }
 };
 
@@ -1129,7 +1130,7 @@ Document& VTTCue::GetDocument() const {
   return cue_background_box_->GetDocument();
 }
 
-void VTTCue::Trace(blink::Visitor* visitor) {
+void VTTCue::Trace(Visitor* visitor) {
   visitor->Trace(region_);
   visitor->Trace(vtt_node_tree_);
   visitor->Trace(cue_background_box_);

@@ -96,6 +96,11 @@ const char kDisableBackgroundTimerThrottling[] =
 // features.
 const char kDisableBlinkFeatures[]          = "disable-blink-features";
 
+// Enable Web Bluetooth Scanning
+// This switch enables Web Bluetooth Scanning without any
+// permission prompt for testing.
+const char kEnableWebBluetoothScanning[] = "enable-web-bluetooth-scanning";
+
 // Disables compositor Ukm recording in browser tests.
 // TODO(khushalsagar): Remove once crbug.com/761524 is resolved.
 const char kDisableCompositorUkmForTests[] = "disable-compositor-ukm-for-tests";
@@ -161,6 +166,12 @@ const char kDisableGpuWatchdog[] = "disable-gpu-watchdog";
 // Disallow image animations to be reset to the beginning to avoid skipping
 // many frames. Only effective if compositor image animations are enabled.
 const char kDisableImageAnimationResync[] = "disable-image-animation-resync";
+
+// Disables the IPC flooding protection.
+// It is activated by default. Some javascript functions can be used to flood
+// the browser process with IPC. This protection limits the rate at which they
+// can be used.
+const char kDisableIpcFloodingProtection[] = "disable-ipc-flooding-protection";
 
 // Suppresses hang monitor dialogs in renderer processes.  This may allow slow
 // unload handlers on a page to prevent the tab from closing, but the Task
@@ -244,10 +255,6 @@ const char kDisableRendererAccessibility[]  = "disable-renderer-accessibility";
 // Prevent renderer process backgrounding when set.
 const char kDisableRendererBackgrounding[]  = "disable-renderer-backgrounding";
 
-// Whether the resize lock is disabled. Default is false. This is generally only
-// useful for tests that want to force disabling.
-const char kDisableResizeLock[] = "disable-resize-lock";
-
 // Whether the ResourceScheduler is disabled.  Note this is only useful for C++
 // Headless embedders who need to implement their own resource scheduling.
 const char kDisableResourceScheduler[] = "disable-resource-scheduler";
@@ -256,7 +263,7 @@ const char kDisableResourceScheduler[] = "disable-resource-scheduler";
 const char kDisableSharedWorkers[]          = "disable-shared-workers";
 
 // Do not use runtime-detected high-end CPU optimizations in Skia.  This is
-// useful for forcing a baseline code path for e.g. layout tests.
+// useful for forcing a baseline code path for e.g. web tests.
 const char kDisableSkiaRuntimeOpts[]        = "disable-skia-runtime-opts";
 
 // Disable smooth scrolling for testing.
@@ -265,11 +272,17 @@ const char kDisableSmoothScrolling[]        = "disable-smooth-scrolling";
 // Disables the use of a 3D software rasterizer.
 const char kDisableSoftwareRasterizer[]     = "disable-software-rasterizer";
 
-// Disables the Web Speech API.
+// Disables the Web Speech API (both speech recognition and synthesis).
 const char kDisableSpeechAPI[]              = "disable-speech-api";
 
+// Disables the speech synthesis part of Web Speech API.
+const char kDisableSpeechSynthesisAPI[]     = "disable-speech-synthesis-api";
+
+// Disables adding the test certs in the network process.
+const char kDisableTestCerts[]              = "disable-test-root-certs";
+
 // Disable multithreaded GPU compositing of web content.
-const char kDisableThreadedCompositing[]     = "disable-threaded-compositing";
+const char kDisableThreadedCompositing[]    = "disable-threaded-compositing";
 
 // Disable multithreaded, compositor scrolling of web content.
 const char kDisableThreadedScrolling[]      = "disable-threaded-scrolling";
@@ -323,10 +336,6 @@ const char kEnablePreferCompositingToLCDText[] =
 // Applied before kDisableBlinkFeatures, and after other flags that change these
 // features.
 const char kEnableBlinkFeatures[]           = "enable-blink-features";
-
-// A shorthand for adding both "--enable-blink-features=BlinkGenPropertyTrees"
-// and "--enable-layer-lists".
-const char kEnableBlinkGenPropertyTrees[] = "enable-blink-gen-property-trees";
 
 // Enables Web Platform features that are in development.
 const char kEnableExperimentalWebPlatformFeatures[] =
@@ -391,9 +400,6 @@ const char kEnableServiceBinaryLauncher[] = "enable-service-binary-launcher";
 // Enables the Skia benchmarking extension
 const char kEnableSkiaBenchmarking[]        = "enable-skia-benchmarking";
 
-// Enables slimming paint phase 2: https://www.chromium.org/blink/slimming-paint
-const char kEnableSlimmingPaintV2[]         = "enable-slimming-paint-v2";
-
 // On platforms that support it, enables smooth scroll animation.
 const char kEnableSmoothScrolling[]         = "enable-smooth-scrolling";
 
@@ -410,7 +416,7 @@ const char kEnableStrictMixedContentChecking[] =
 const char kEnableStrictPowerfulFeatureRestrictions[] =
     "enable-strict-powerful-feature-restrictions";
 
-// Enabled threaded compositing for layout tests.
+// Enabled threaded compositing for web tests.
 const char kEnableThreadedCompositing[]     = "enable-threaded-compositing";
 
 // Enable tracing during the execution of browser tests.
@@ -455,10 +461,6 @@ const char kEnableWebVR[] = "enable-webvr";
 
 // Enable rasterizer that writes directly to GPU memory associated with tiles.
 const char kEnableZeroCopy[]                = "enable-zero-copy";
-
-// Explicitly allows additional ports using a comma-separated list of port
-// numbers.
-const char kExplicitlyAllowedPorts[]        = "explicitly-allowed-ports";
 
 // Handle to the shared memory segment containing field trial state that is to
 // be shared between processes. The argument to this switch is the handle id
@@ -572,6 +574,17 @@ const char kLogFile[] = "log-file";
 const char kMainFrameResizesAreOrientationChanges[] =
     "main-frame-resizes-are-orientation-changes";
 
+// Specifies the maximum disk cache size for the ApplicationCache. The default
+// value is 250MB.
+// TODO(crbug.com/895825): Remove this flag in Feb 2019.
+const char kMaxAppCacheDiskCacheSizeMb[] = "max-appcache-disk-cache-size-mb";
+
+// Specifies the maximum cache size per an origin for the ApplicationCache.
+// The default value is 5MB.
+// TODO(crbug.com/895825): Remove this flag in Feb 2019.
+const char kMaxAppCacheOriginCacheSizeMb[] =
+    "max-appcache-origin-cache-size-mb";
+
 // Sets the maximium decoded image size limitation.
 const char kMaxDecodedImageSizeMb[] = "max-decoded-image-size-mb";
 
@@ -617,19 +630,6 @@ const char kNumRasterThreads[]              = "num-raster-threads";
 // value to 'never' to disable throttling.
 const char kOverridePluginPowerSaverForTesting[] =
     "override-plugin-power-saver-for-testing";
-
-// Controls the behavior of history navigation in response to horizontal
-// overscroll.
-// Set the value to '0' to disable.
-// Set the value to '1' to enable the behavior where pages slide in and out in
-// response to the horizontal overscroll gesture and a screenshot of the target
-// page is shown.
-// Set the value to '2' to enable the simplified overscroll UI where a
-// navigation arrow slides in from the side of the screen in response to the
-// horizontal overscroll gesture.
-// Defaults to '2'.
-const char kOverscrollHistoryNavigation[] =
-    "overscroll-history-navigation";
 
 // Controls the value of the threshold to start horizontal overscroll relative
 // to the default value.
@@ -742,13 +742,6 @@ const char kSamplingHeapProfiler[]          = "sampling-heap-profiler";
 // Causes the process to run as a sandbox IPC subprocess.
 const char kSandboxIPCProcess[]             = "sandbox-ipc";
 
-// Causes the renderer to keep an old document's cached resources alive until
-// the specified point in the next document's lifecycle.
-// By default, no explicit attempt to keep the resources alive is made, though
-// that doesn't necessarily mean they will be GCed promptly.
-const char kSavePreviousDocumentResources[] =
-    "save-previous-document-resources";
-
 // Visibly render a border around paint rects in the web page to help debug
 // and study painting behavior.
 const char kShowPaintRects[]                = "show-paint-rects";
@@ -773,8 +766,23 @@ const char kSingleProcess[]                 = "single-process";
 // process consolidation, not isolation). You probably want this one.
 const char kSitePerProcess[]                = "site-per-process";
 
-// Disables enabling site isolation (i.e., --site-per-process) via field trial.
-const char kDisableSiteIsolationTrials[] = "disable-site-isolation-trials";
+// Disables site isolation.
+//
+// Note that the opt-in (to site-per-process, isolate-origins, etc.) via
+// enterprise policy and/or cmdline takes precedence over the
+// kDisableSiteIsolation switch (i.e. the opt-in takes effect despite potential
+// presence of kDisableSiteIsolation switch).
+//
+// Note that for historic reasons the name of the switch misleadingly mentions
+// "trials", but the switch also disables the default site isolation that ships
+// on desktop since M67.  The name of the switch is preserved for
+// backcompatibility of chrome://flags.
+const char kDisableSiteIsolation[] = "disable-site-isolation-trials";
+
+// Just like kDisableSiteIsolation, but doesn't show the "stability and security
+// will suffer" butter bar warning.
+const char kDisableSiteIsolationForPolicy[] =
+    "disable-site-isolation-for-policy";
 
 // Specifies if the browser should start in fullscreen mode, like if the user
 // had pressed F11 right after startup.

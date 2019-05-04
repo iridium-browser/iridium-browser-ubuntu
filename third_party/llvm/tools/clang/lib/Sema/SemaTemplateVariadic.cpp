@@ -164,7 +164,7 @@ namespace {
       // A function parameter pack is a pack expansion, so cannot contain
       // an unexpanded parameter pack. Likewise for a template parameter
       // pack that contains any references to other packs.
-      if (D->isParameterPack())
+      if (D && D->isParameterPack())
         return true;
 
       return inherited::TraverseDecl(D);
@@ -976,6 +976,7 @@ ExprResult Sema::ActOnSizeofParameterPackExpr(Scope *S,
                    PDiag(diag::note_parameter_pack_here));
       ParameterPack = Corrected.getCorrectionDecl();
     }
+    break;
 
   case LookupResult::FoundOverloaded:
   case LookupResult::FoundUnresolvedValue:

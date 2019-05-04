@@ -8,9 +8,9 @@
 #include <utility>
 
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/sync_file_system/drive_backend/callback_helper.h"
@@ -54,8 +54,7 @@ class SyncEngineTest : public testing::Test,
         nullptr,    // task_logger
         nullptr,    // notification_manager
         nullptr,    // extension_service
-        nullptr,    // signin_manager
-        nullptr,    // token_service
+        nullptr,    // identity_manager
         nullptr,    // url_loader_factory
         nullptr,    // drive_service_factory
         nullptr));  // in_memory_env
@@ -213,7 +212,7 @@ TEST_F(SyncEngineTest, UpdateServiceState) {
     {REMOTE_SERVICE_DISABLED, "DISABLED"},
   };
 
-  for (size_t i = 0; i < arraysize(test_data); ++i) {
+  for (size_t i = 0; i < base::size(test_data); ++i) {
     PostUpdateServiceState(test_data[i].state, test_data[i].description);
     EXPECT_EQ(test_data[i].state, sync_engine()->GetCurrentState())
         << "Expected state: REMOTE_SERVICE_" << test_data[i].description;

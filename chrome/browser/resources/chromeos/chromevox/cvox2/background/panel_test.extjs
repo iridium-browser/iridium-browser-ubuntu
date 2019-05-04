@@ -12,32 +12,16 @@ GEN_INCLUDE(['../../testing/mock_feedback.js']);
  * @constructor
  * @extends {ChromeVoxNextE2ETest}
  */
-function PanelTest() {
+function ChromeVoxPanelTest() {
   ChromeVoxNextE2ETest.call(this);
 }
 
-PanelTest.prototype = {
+ChromeVoxPanelTest.prototype = {
   __proto__: ChromeVoxNextE2ETest.prototype,
 
   /** @override */
   testGenCppIncludes: function() {
     ChromeVoxE2ETest.prototype.  testGenCppIncludes.call(this);
-
-    // Flaky on dbg, see https://crbug.com/795840
-    GEN_BLOCK(function() { /*!
-
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
-#define MAYBE_ActivateMenu DISABLED_ActivateMenu
-#else
-#define MAYBE_ActivateMenu ActivateMenu
-#endif
-
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER)
-#define MAYBE_LinkMenu DISABLED_LinkMenu
-#else
-#define MAYBE_LinkMenu LinkMenu
-#endif
-    */});
   },
 
   /**
@@ -87,7 +71,8 @@ PanelTest.prototype = {
   */}
 };
 
-TEST_F('PanelTest', 'MAYBE_ActivateMenu', function() {
+// TODO: Flaky timeouts. https://crbug.com/795840 and https://crbug.com/751046
+TEST_F('ChromeVoxPanelTest', 'DISABLED_ActivateMenu', function() {
   var mockFeedback = this.createMockFeedback();
   this.runWithLoadedTree(this.linksDoc, function(root) {
     var openMenus = new PanelCommand(PanelCommandType.OPEN_MENUS);
@@ -105,7 +90,8 @@ TEST_F('PanelTest', 'MAYBE_ActivateMenu', function() {
   });
 });
 
-TEST_F('PanelTest', 'MAYBE_LinkMenu', function() {
+// TODO: Flaky timeouts. https://crbug.com/795840 and https://crbug.com/751046
+TEST_F('ChromeVoxPanelTest', 'DISABLED_LinkMenu', function() {
   var mockFeedback = this.createMockFeedback();
   this.runWithLoadedTree(this.linksDoc, function(root) {
     var openMenus = new PanelCommand(PanelCommandType.OPEN_MENUS, 'role_link');

@@ -25,7 +25,6 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
-#include "ui/gfx/range/range.h"
 
 namespace blink {
 namespace mojom {
@@ -354,6 +353,13 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
   virtual void FrameNameChanged(RenderFrameHost* render_frame_host,
                                 const std::string& name) {}
 
+  // Called when the sticky user activation bit has been set on the frame.
+  // This will not be called for new RenderFrameHosts whose underlying
+  // FrameTreeNode was already activated. This should not be used to determine a
+  // RenderFrameHost's user activation state.
+  virtual void FrameReceivedFirstUserActivation(
+      RenderFrameHost* render_frame_host) {}
+
   // This method is invoked when the title of the WebContents is set. Note that
   // |entry| may be null if the web page whose title changed has not yet had a
   // NavigationEntry assigned to it.
@@ -454,11 +460,6 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
 
   // Invoked when theme color is changed to |theme_color|.
   virtual void DidChangeThemeColor(SkColor theme_color) {}
-
-  // Invoked when text selection is changed.
-  virtual void DidChangeTextSelection(const base::string16& text,
-                                      const gfx::Range& range,
-                                      size_t offset) {}
 
   // Invoked when media is playing or paused.  |id| is unique per player and per
   // RenderFrameHost.  There may be multiple players within a RenderFrameHost

@@ -36,17 +36,24 @@ class TestGpuChannelManagerDelegate : public GpuChannelManagerDelegate {
   void StoreShaderToDisk(int32_t client_id,
                          const std::string& key,
                          const std::string& shader) override {}
-  void ExitProcess() override {}
+  void MaybeExitOnContextLost() override { is_exiting_ = true; }
+  bool IsExiting() const override { return is_exiting_; }
 #if defined(OS_WIN)
   void SendCreatedChildWindow(SurfaceHandle parent_window,
                               SurfaceHandle child_window) override {}
 #endif
 
  private:
+  bool is_exiting_ = false;
+
   DISALLOW_COPY_AND_ASSIGN(TestGpuChannelManagerDelegate);
 };
 
 GpuChannelTestCommon::GpuChannelTestCommon()
+    : GpuChannelTestCommon(std::vector<int32_t>()) {}
+
+GpuChannelTestCommon::GpuChannelTestCommon(
+    std::vector<int32_t> enabled_workarounds)
     : task_runner_(new base::TestSimpleTaskRunner),
       io_task_runner_(new base::TestSimpleTaskRunner),
       sync_point_manager_(new SyncPointManager()),
@@ -55,12 +62,17 @@ GpuChannelTestCommon::GpuChannelTestCommon()
   // We need GL bindings to actually initialize command buffers.
   gl::GLSurfaceTestSupport::InitializeOneOffWithStubBindings();
 
+  GpuFeatureInfo feature_info;
+  feature_info.enabled_gpu_driver_bug_workarounds =
+      std::move(enabled_workarounds);
+
   channel_manager_.reset(new GpuChannelManager(
       GpuPreferences(), channel_manager_delegate_.get(), nullptr, /* watchdog */
       task_runner_.get(), io_task_runner_.get(), scheduler_.get(),
       sync_point_manager_.get(), nullptr, /* gpu_memory_buffer_factory */
-      GpuFeatureInfo(), GpuProcessActivityFlags(),
-      gl::init::CreateOffscreenGLSurface(gfx::Size())));
+      std::move(feature_info), GpuProcessActivityFlags(),
+      gl::init::CreateOffscreenGLSurface(gfx::Size()),
+      nullptr /* image_decode_accelerator_worker */));
 }
 
 GpuChannelTestCommon::~GpuChannelTestCommon() {

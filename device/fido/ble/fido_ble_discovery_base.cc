@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/no_destructor.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -83,23 +82,8 @@ void FidoBleDiscoveryBase::OnGetAdapter(
 }
 
 void FidoBleDiscoveryBase::StartInternal() {
-  auto& factory = BluetoothAdapterFactory::Get();
-  auto callback = base::BindOnce(&FidoBleDiscoveryBase::OnGetAdapter,
-                                 weak_factory_.GetWeakPtr());
-#if defined(OS_MACOSX)
-  // BluetoothAdapter may invoke the callback synchronously on Mac, but
-  // StartInternal() never wants to invoke to NotifyDiscoveryStarted()
-  // immediately, so ensure there is at least post-task at this bottleneck.
-  // See: https://crbug.com/823686.
-  callback = base::BindOnce(
-      [](BluetoothAdapterFactory::AdapterCallback callback,
-         scoped_refptr<BluetoothAdapter> adapter) {
-        base::ThreadTaskRunnerHandle::Get()->PostTask(
-            FROM_HERE, base::BindOnce(std::move(callback), adapter));
-      },
-      base::AdaptCallbackForRepeating(std::move(callback)));
-#endif  // defined(OS_MACOSX)
-  factory.GetAdapter(base::AdaptCallbackForRepeating(std::move(callback)));
+  BluetoothAdapterFactory::Get().GetAdapter(base::BindOnce(
+      &FidoBleDiscoveryBase::OnGetAdapter, weak_factory_.GetWeakPtr()));
 }
 
 }  // namespace device

@@ -83,7 +83,7 @@ RemoteFontFaceSource::RemoteFontFaceSource(CSSFontFace* css_font_face,
                                            FontDisplay display)
     : face_(css_font_face),
       font_selector_(font_selector),
-      display_(display),
+      display_(GetFontDisplayWithFeaturePolicyCheck(display, font_selector)),
       phase_(kNoLimitExceeded),
       is_intervention_triggered_(ShouldTriggerWebFontsIntervention()) {
   DCHECK(face_);
@@ -168,7 +168,7 @@ void RemoteFontFaceSource::SetDisplay(FontDisplay display) {
   // using the loaded font.
   if (IsLoaded())
     return;
-  display_ = display;
+  display_ = GetFontDisplayWithFeaturePolicyCheck(display, font_selector_);
   UpdatePeriod();
 }
 
@@ -186,6 +186,18 @@ void RemoteFontFaceSource::UpdatePeriod() {
     histograms_.RecordFallbackTime();
   }
   period_ = new_period;
+}
+
+FontDisplay RemoteFontFaceSource::GetFontDisplayWithFeaturePolicyCheck(
+    FontDisplay display,
+    const FontSelector* font_selector) const {
+  ExecutionContext* context = font_selector->GetExecutionContext();
+  if (display != kFontDisplayFallback && context && context->IsDocument() &&
+      !To<Document>(context)->IsFeatureEnabled(
+          mojom::FeaturePolicyFeature::kFontDisplay)) {
+    return kFontDisplayOptional;
+  }
+  return display;
 }
 
 bool RemoteFontFaceSource::ShouldTriggerWebFontsIntervention() {
@@ -235,9 +247,9 @@ RemoteFontFaceSource::CreateLoadingFallbackFontData(
     const FontDescription& font_description) {
   // This temporary font is not retained and should not be returned.
   FontCachePurgePreventer font_cache_purge_preventer;
-  SimpleFontData* temporary_font =
-      FontCache::GetFontCache()->GetNonRetainedLastResortFallbackFont(
-          font_description);
+  scoped_refptr<SimpleFontData> temporary_font =
+      FontCache::GetFontCache()->GetLastResortFallbackFont(font_description,
+                                                           kDoNotRetain);
   if (!temporary_font) {
     NOTREACHED();
     return nullptr;
@@ -252,6 +264,8 @@ void RemoteFontFaceSource::BeginLoadIfNeeded() {
   if (IsLoaded())
     return;
   DCHECK(GetResource());
+
+  SetDisplay(face_->GetFontFace()->GetFontDisplayWithFallback());
 
   FontResource* font = ToFontResource(GetResource());
   if (font->StillNeedsLoad()) {
@@ -330,11 +344,11 @@ void RemoteFontFaceSource::FontLoadHistograms::RecordRemoteFont(
     int duration = static_cast<int>(CurrentTimeMS() - load_start_time_);
     RecordLoadTimeHistogram(font, duration);
 
-    enum { kCORSFail, kCORSSuccess, kCORSEnumMax };
+    enum { kCorsFail, kCorsSuccess, kCorsEnumMax };
     int cors_value =
-        font->GetResponse().IsCORSSameOrigin() ? kCORSSuccess : kCORSFail;
+        font->GetResponse().IsCorsSameOrigin() ? kCorsSuccess : kCorsFail;
     DEFINE_THREAD_SAFE_STATIC_LOCAL(EnumerationHistogram, cors_histogram,
-                                    ("WebFont.CORSSuccess", kCORSEnumMax));
+                                    ("WebFont.CORSSuccess", kCorsEnumMax));
     cors_histogram.Count(cors_value);
   }
 }

@@ -35,21 +35,28 @@ const int kMaxMockCacheEntrySize = 100 * 1000 * 1000;
 int g_test_mode = 0;
 
 int GetTestModeForEntry(const std::string& key) {
+  std::string url = key;
+
   // 'key' is prefixed with an identifier if it corresponds to a cached POST.
   // Skip past that to locate the actual URL.
   //
   // TODO(darin): It breaks the abstraction a bit that we assume 'key' is an
   // URL corresponding to a registered MockTransaction.  It would be good to
   // have another way to access the test_mode.
-  GURL url;
   if (isdigit(key[0])) {
     size_t slash = key.find('/');
     DCHECK(slash != std::string::npos);
-    url = GURL(key.substr(slash + 1));
-  } else {
-    url = GURL(key);
+    url = url.substr(slash + 1);
   }
-  const MockTransaction* t = FindMockTransaction(url);
+
+  // If we split the cache by top frame origin, then the origin is prepended to
+  // the key. Skip to the second url in the key.
+  if (base::StartsWith(url, "_dk_", base::CompareCase::SENSITIVE)) {
+    auto const pos = url.find("\nhttp");
+    url = url.substr(pos + 1);
+  }
+
+  const MockTransaction* t = FindMockTransaction(GURL(url));
   DCHECK(t);
   return t->test_mode;
 }
@@ -67,6 +74,7 @@ struct MockDiskEntry::CallbackInfo {
 MockDiskEntry::MockDiskEntry(const std::string& key)
     : key_(key),
       in_memory_data_(0),
+      max_file_size_(std::numeric_limits<int>::max()),
       doomed_(false),
       sparse_(false),
       fail_requests_(false),
@@ -163,6 +171,9 @@ int MockDiskEntry::WriteData(int index,
     return ERR_FAILED;
 
   DCHECK_LT(offset + buf_len, kMaxMockCacheEntrySize);
+  if (offset + buf_len > max_file_size_ && index == 1)
+    return net::ERR_FAILED;
+
   data_[index].resize(offset + buf_len);
   if (buf_len)
     memcpy(&data_[index][offset], buf->data(), buf_len);
@@ -396,8 +407,10 @@ MockDiskCache::MockDiskCache()
     : open_count_(0),
       create_count_(0),
       doomed_count_(0),
+      max_file_size_(std::numeric_limits<int>::max()),
       fail_requests_(false),
       soft_failures_(false),
+      soft_failures_one_instance_(false),
       double_create_check_(true),
       fail_sparse_requests_(false),
       support_in_memory_entry_data_(true),
@@ -439,8 +452,12 @@ net::Error MockDiskCache::OpenEntry(const std::string& key,
   it->second->AddRef();
   *entry = it->second;
 
-  if (soft_failures_)
+  if (soft_failures_ || soft_failures_one_instance_) {
     it->second->set_fail_requests();
+    soft_failures_one_instance_ = false;
+  }
+
+  it->second->set_max_file_size(max_file_size_);
 
   if (GetTestModeForEntry(key) & TEST_MODE_SYNC_CACHE_START)
     return OK;
@@ -479,11 +496,15 @@ net::Error MockDiskCache::CreateEntry(const std::string& key,
   new_entry->AddRef();
   *entry = new_entry;
 
-  if (soft_failures_)
+  if (soft_failures_ || soft_failures_one_instance_) {
     new_entry->set_fail_requests();
+    soft_failures_one_instance_ = false;
+  }
 
   if (fail_sparse_requests_)
     new_entry->set_fail_sparse_requests();
+
+  new_entry->set_max_file_size(max_file_size_);
 
   if (GetTestModeForEntry(key) & TEST_MODE_SYNC_CACHE_START)
     return OK;
@@ -554,6 +575,7 @@ void MockDiskCache::GetStats(base::StringPairs* stats) {
 }
 
 void MockDiskCache::OnExternalCacheHit(const std::string& key) {
+  external_cache_hits_.push_back(key);
 }
 
 size_t MockDiskCache::DumpMemoryStats(
@@ -576,6 +598,10 @@ void MockDiskCache::SetEntryInMemoryData(const std::string& key, uint8_t data) {
   auto it = entries_.find(key);
   if (it != entries_.end())
     it->second->set_in_memory_data(data);
+}
+
+int64_t MockDiskCache::MaxFileSize() const {
+  return max_file_size_;
 }
 
 void MockDiskCache::ReleaseAll() {
@@ -609,6 +635,10 @@ scoped_refptr<MockDiskEntry> MockDiskCache::GetDiskEntryRef(
   if (it == entries_.end())
     return nullptr;
   return it->second;
+}
+
+const std::vector<std::string>& MockDiskCache::GetExternalCacheHits() const {
+  return external_cache_hits_;
 }
 
 //-----------------------------------------------------------------------------

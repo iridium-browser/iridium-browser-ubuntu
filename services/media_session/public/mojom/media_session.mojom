@@ -4,7 +4,52 @@
 
 module media_session.mojom;
 
-// Next MinVersion: 1
+import "mojo/public/mojom/base/string16.mojom";
+import "mojo/public/mojom/base/time.mojom";
+import "ui/gfx/geometry/mojo/geometry.mojom";
+import "url/mojom/url.mojom";
+
+// Next MinVersion: 4
+
+[Extensible]
+enum MediaPlaybackState {
+  kPaused,
+  kPlaying,
+};
+
+[Extensible]
+enum MediaSessionAction {
+  kPlay,
+  kPause,
+  kPreviousTrack,
+  kNextTrack,
+  kSeekBackward,
+  kSeekForward,
+  kSkipAd,
+  kStop,
+};
+
+// Album art in MediaMetadata
+// Spec: https://wicg.github.io/mediasession/
+struct MediaImage {
+  url.mojom.Url src;
+  mojo_base.mojom.String16 type;
+  array<gfx.mojom.Size> sizes;
+};
+
+// MediaMetadata
+struct MediaMetadata {
+  // These are defined in the spec: https://wicg.github.io/mediasession/
+  mojo_base.mojom.String16 title;
+  mojo_base.mojom.String16 artist;
+  mojo_base.mojom.String16 album;
+  array<MediaImage> artwork;
+
+  // The |source_title| is a human readable title for the source of the media
+  // session. This could be the name of the app or the name of the site playing
+  // media.
+  mojo_base.mojom.String16 source_title;
+};
 
 // Contains state information about a MediaSession.
 struct MediaSessionInfo {
@@ -23,11 +68,23 @@ struct MediaSessionInfo {
     kInactive,
   };
 
-  // The current state of the MediaSession.
+  // The current audio focus state of the MediaSession.
   SessionState state;
 
   // If true then we will always duck this MediaSession instead of suspending.
   bool force_duck;
+
+  // The playback state tells the client whether the audio is playing. This is
+  // different from the audio focus state as it is common for a media session
+  // to hold audio focus sometimes even though it is not actually playing.
+  [MinVersion=1] MediaPlaybackState playback_state;
+
+  // If true then the session should be controllable by the user.
+  [MinVersion=2] bool is_controllable;
+
+  // If true then we will stop this MediaSession instead of suspending when the
+  // session loses focus to a kGain focus type.
+  [MinVersion=4] bool prefer_stop_for_gain_focus_loss;
 };
 
 // Contains debugging information about a MediaSession. This will be displayed
@@ -46,15 +103,24 @@ struct MediaSessionDebugInfo {
 // The observer for observing media session events.
 // Next Method ID: 1
 interface MediaSessionObserver {
-  // The info associated with the session changed.
+  // Call when the info associated with the session changed.
   MediaSessionInfoChanged@0(MediaSessionInfo info);
+
+  // Called when the observed MediaSession has changed metadata. The metadata
+  // can be null to be reset, e.g. the media that was being played has been
+  // stopped.
+  MediaSessionMetadataChanged@1(MediaMetadata? metadata);
+
+  // Called when the media session action list has changed. This tells the
+  // observer which actions can be used to control the session.
+  MediaSessionActionsChanged@2(array<MediaSessionAction> action);
 };
 
 // A MediaSession manages the media session and audio focus for a given
 // WebContents or ARC app.
 // TODO(https://crbug.com/875004): migrate media session from content/public
 // to mojo.
-// Next Method ID: 6
+// Next Method ID: 12
 interface MediaSession {
   [Extensible]
   enum SuspendType {
@@ -89,4 +155,26 @@ interface MediaSession {
   Resume@5(SuspendType suspend_type);
 
   AddObserver@6(MediaSessionObserver observer);
+
+  // Skip to the previous track. If there is no previous track then this will
+  // be a no-op.
+  PreviousTrack@7();
+
+  // Skip to the next track. If there is no next track then this will be a
+  // no-op.
+  NextTrack@8();
+
+  // Seek the media session. If the media cannot seek then this will be a
+  // no-op. The |seek_time| is the time delta that the media will seek by and
+  // supports both positive and negative values. This value cannot be zero.
+  // The |kDefaultSeekTimeSeconds| provides a default value for seeking by a
+  // few seconds.
+  Seek@9(mojo_base.mojom.TimeDelta seek_time);
+
+  // Stop the media session.
+  // |type| represents the origin of the request.
+  Stop@10(SuspendType suspend_type);
+
+  // Skip ad.
+  SkipAd@11();
 };

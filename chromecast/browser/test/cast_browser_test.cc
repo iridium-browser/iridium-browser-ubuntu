@@ -83,9 +83,10 @@ content::WebContents* CastBrowserTest::NavigateToURL(const GURL& url) {
   return web_contents;
 }
 
-void CastBrowserTest::OnPageStopped(int reason) {}
+void CastBrowserTest::OnPageStateChanged(CastWebContents* cast_web_contents) {}
 
-void CastBrowserTest::OnLoadingStateChanged(bool loading) {}
+void CastBrowserTest::OnPageStopped(CastWebContents* cast_web_contents,
+                                    int error_code) {}
 
 void CastBrowserTest::OnWindowDestroyed() {}
 
@@ -106,7 +107,6 @@ std::string CastBrowserTest::GetId() {
 }
 
 bool CastBrowserTest::OnAddMessageToConsoleReceived(
-    content::WebContents* source,
     int32_t level,
     const base::string16& message,
     int32_t line_no,

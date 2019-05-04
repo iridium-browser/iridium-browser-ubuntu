@@ -8,17 +8,15 @@
 #include "ash/frame/header_view.h"
 #include "ash/frame/non_client_frame_view_ash.h"
 #include "ash/frame/wide_frame_view.h"
-#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/caption_buttons/caption_button_model.h"
 #include "ash/public/cpp/caption_buttons/frame_caption_button_container_view.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/public/interfaces/window_pin_type.mojom.h"
 #include "ash/shell.h"
 #include "ash/shell_test_api.h"
-#include "ash/system/tray/system_tray.h"
 #include "ash/system/unified/unified_system_tray.h"
 #include "ash/wm/drag_window_resizer.h"
-#include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_window_drag_delegate.h"
@@ -30,7 +28,6 @@
 #include "ash/wm/workspace_controller_test_api.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "cc/paint/display_item_list.h"
 #include "components/exo/buffer.h"
 #include "components/exo/display.h"
@@ -47,6 +44,8 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_targeter.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/compositor_extra/shadow.h"
 #include "ui/display/display.h"
 #include "ui/display/test/display_manager_test_api.h"
@@ -660,54 +659,8 @@ TEST_F(ClientControlledShellSurfaceTest, CompositorLockInRotation) {
 
 // If system tray is shown by click. It should be activated if user presses tab
 // key while shell surface is active.
-TEST_F(ClientControlledShellSurfaceTest, KeyboardNavigationWithSystemTray) {
-  // This is old SystemTray version.
-  if (ash::features::IsSystemTrayUnifiedEnabled())
-    return;
-
-  const gfx::Size buffer_size(800, 600);
-  std::unique_ptr<Buffer> buffer(
-      new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
-  std::unique_ptr<Surface> surface(new Surface());
-  auto shell_surface =
-      exo_test_helper()->CreateClientControlledShellSurface(surface.get());
-
-  surface->Attach(buffer.get());
-  surface->Commit();
-
-  EXPECT_TRUE(shell_surface->GetWidget()->IsActive());
-
-  // Show system tray by perfoming a gesture tap at tray.
-  ash::SystemTray* system_tray = GetPrimarySystemTray();
-  ui::GestureEvent tap(0, 0, 0, base::TimeTicks(),
-                       ui::GestureEventDetails(ui::ET_GESTURE_TAP));
-  system_tray->PerformAction(tap);
-  ASSERT_TRUE(system_tray->GetWidget());
-
-  // Confirm that system tray is not active at this time.
-  EXPECT_TRUE(shell_surface->GetWidget()->IsActive());
-  EXPECT_FALSE(
-      system_tray->GetSystemBubble()->bubble_view()->GetWidget()->IsActive());
-
-  // Send tab key event.
-  ui::test::EventGenerator* event_generator = GetEventGenerator();
-  event_generator->PressKey(ui::VKEY_TAB, ui::EF_NONE);
-  event_generator->ReleaseKey(ui::VKEY_TAB, ui::EF_NONE);
-
-  // Confirm that system tray is activated.
-  EXPECT_FALSE(shell_surface->GetWidget()->IsActive());
-  EXPECT_TRUE(
-      system_tray->GetSystemBubble()->bubble_view()->GetWidget()->IsActive());
-}
-
-// If system tray is shown by click. It should be activated if user presses tab
-// key while shell surface is active.
 TEST_F(ClientControlledShellSurfaceTest,
        KeyboardNavigationWithUnifiedSystemTray) {
-  // This is UnifiedSystemTray version.
-  if (!ash::features::IsSystemTrayUnifiedEnabled())
-    return;
-
   const gfx::Size buffer_size(800, 600);
   std::unique_ptr<Buffer> buffer(
       new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
@@ -720,7 +673,7 @@ TEST_F(ClientControlledShellSurfaceTest,
 
   EXPECT_TRUE(shell_surface->GetWidget()->IsActive());
 
-  // Show system tray by perfoming a gesture tap at tray.
+  // Show system tray by performing a gesture tap at tray.
   ash::UnifiedSystemTray* system_tray = GetPrimaryUnifiedSystemTray();
   ui::GestureEvent tap(0, 0, 0, base::TimeTicks(),
                        ui::GestureEventDetails(ui::ET_GESTURE_TAP));
@@ -1135,8 +1088,6 @@ TEST_F(ClientControlledShellSurfaceTest, ClientIniatedResize) {
 // Test the functionalities of dragging a window from top in tablet mode.
 TEST_F(ClientControlledShellSurfaceTest, DragWindowFromTopInTabletMode) {
   UpdateDisplay("800x600");
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(ash::features::kDragAppsInTabletMode);
   ash::Shell* shell = ash::Shell::Get();
   shell->tablet_mode_controller()->EnableTabletModeWindowManager(true);
   std::unique_ptr<Surface> surface(new Surface());
@@ -1166,7 +1117,7 @@ TEST_F(ClientControlledShellSurfaceTest, DragWindowFromTopInTabletMode) {
 
   // FLING the window not inisde preview area with large enough y veloicty
   // (larger than kFlingToOverviewThreshold) will drop the window into overview.
-  EXPECT_FALSE(shell->window_selector_controller()->IsSelecting());
+  EXPECT_FALSE(shell->overview_controller()->IsSelecting());
   end = gfx::Point(400, 210);
   const base::TimeDelta duration =
       event_generator->CalculateScrollDurationForFlingVelocity(
@@ -1174,16 +1125,16 @@ TEST_F(ClientControlledShellSurfaceTest, DragWindowFromTopInTabletMode) {
           ash::TabletModeWindowDragDelegate::kFlingToOverviewThreshold + 10.f,
           200);
   event_generator->GestureScrollSequence(start, end, duration, 200);
-  EXPECT_TRUE(shell->window_selector_controller()->IsSelecting());
-  EXPECT_TRUE(shell->window_selector_controller()
-                  ->window_selector()
-                  ->IsWindowInOverview(window));
+  EXPECT_TRUE(shell->overview_controller()->IsSelecting());
+  EXPECT_TRUE(
+      shell->overview_controller()->overview_session()->IsWindowInOverview(
+          window));
 
   // Drag the window long enough (pass one fourth of the screen vertical
   // height) to snap the window to splitscreen.
   end = gfx::Point(0, 210);
-  shell->window_selector_controller()->ToggleOverview();
-  EXPECT_FALSE(shell->window_selector_controller()->IsSelecting());
+  shell->overview_controller()->ToggleOverview();
+  EXPECT_FALSE(shell->overview_controller()->IsSelecting());
   EXPECT_TRUE(ash::wm::GetWindowState(window)->IsMaximized());
   event_generator->GestureScrollSequence(
       start, end, base::TimeDelta::FromMilliseconds(100), 20);
@@ -1374,18 +1325,19 @@ TEST_F(ClientControlledShellSurfaceTest, CaptionButtonModel) {
   shell_surface->SetGeometry(gfx::Rect(0, 0, 64, 64));
   surface->Commit();
 
-  constexpr ash::CaptionButtonIcon kAllButtons[] = {
-      ash::CAPTION_BUTTON_ICON_MINIMIZE,
-      ash::CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE,
-      ash::CAPTION_BUTTON_ICON_CLOSE,
-      ash::CAPTION_BUTTON_ICON_BACK,
-      ash::CAPTION_BUTTON_ICON_MENU,
+  constexpr views::CaptionButtonIcon kAllButtons[] = {
+      views::CAPTION_BUTTON_ICON_MINIMIZE,
+      views::CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE,
+      views::CAPTION_BUTTON_ICON_CLOSE,
+      views::CAPTION_BUTTON_ICON_BACK,
+      views::CAPTION_BUTTON_ICON_MENU,
   };
   constexpr uint32_t kAllButtonMask =
-      1 << ash::CAPTION_BUTTON_ICON_MINIMIZE |
-      1 << ash::CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE |
-      1 << ash::CAPTION_BUTTON_ICON_CLOSE | 1 << ash::CAPTION_BUTTON_ICON_BACK |
-      1 << ash::CAPTION_BUTTON_ICON_MENU;
+      1 << views::CAPTION_BUTTON_ICON_MINIMIZE |
+      1 << views::CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE |
+      1 << views::CAPTION_BUTTON_ICON_CLOSE |
+      1 << views::CAPTION_BUTTON_ICON_BACK |
+      1 << views::CAPTION_BUTTON_ICON_MENU;
 
   ash::NonClientFrameViewAsh* frame_view =
       static_cast<ash::NonClientFrameViewAsh*>(
@@ -1423,7 +1375,7 @@ TEST_F(ClientControlledShellSurfaceTest, CaptionButtonModel) {
   // Zoom mode
   EXPECT_FALSE(container->model()->InZoomMode());
   shell_surface->SetFrameButtons(
-      kAllButtonMask | 1 << ash::CAPTION_BUTTON_ICON_ZOOM, kAllButtonMask);
+      kAllButtonMask | 1 << views::CAPTION_BUTTON_ICON_ZOOM, kAllButtonMask);
   EXPECT_TRUE(container->model()->InZoomMode());
 }
 
@@ -1766,6 +1718,13 @@ TEST_F(ClientControlledShellSurfaceTest, AdjustBoundsLocally) {
   views::Widget* widget = shell_surface->GetWidget();
   EXPECT_EQ(gfx::Rect(774, 0, 200, 300), widget->GetWindowBoundsInScreen());
   EXPECT_EQ(gfx::Rect(774, 0, 200, 300), requested_bounds);
+
+  // Receiving the same bounds shouldn't try to update the bounds again.
+  requested_bounds.SetRect(0, 0, 0, 0);
+  shell_surface->SetGeometry(client_bounds);
+  surface->Commit();
+
+  EXPECT_TRUE(requested_bounds.IsEmpty());
 }
 
 TEST_F(ClientControlledShellSurfaceTest, SnappedInTabletMode) {
@@ -1826,31 +1785,6 @@ TEST_F(ClientControlledShellSurfaceTest, PipWindowCannotBeActivated) {
   EXPECT_TRUE(shell_surface->GetWidget()->CanActivate());
 }
 
-TEST_F(ClientControlledShellSurfaceTest, MovingPipWindowOffDisplayIsAllowed) {
-  UpdateDisplay("500x500");
-
-  gfx::Size buffer_size(256, 256);
-  std::unique_ptr<Buffer> buffer(
-      new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
-  std::unique_ptr<Surface> surface(new Surface);
-  auto shell_surface(
-      exo_test_helper()->CreateClientControlledShellSurface(surface.get()));
-  surface->Attach(buffer.get());
-  surface->Commit();
-
-  // Use the PIP window state type.
-  shell_surface->SetPip();
-  shell_surface->GetWidget()->Show();
-
-  // Set an off-screen geometry.
-  gfx::Rect bounds(-200, 0, 100, 100);
-  shell_surface->SetGeometry(bounds);
-  surface->Commit();
-
-  EXPECT_EQ(gfx::Rect(-200, 0, 100, 100),
-            shell_surface->GetWidget()->GetWindowBoundsInScreen());
-}
-
 TEST_F(ClientControlledShellSurfaceDisplayTest,
        NoBoundsChangeEventInMinimized) {
   gfx::Size buffer_size(100, 100);
@@ -1883,6 +1817,53 @@ TEST_F(ClientControlledShellSurfaceDisplayTest,
                                      ash::mojom::WindowStateType::MINIMIZED, 0,
                                      gfx::Rect(0, 0, 100, 100), 0);
   ASSERT_EQ(1, bounds_change_count());
+}
+
+TEST_F(ClientControlledShellSurfaceTest, SetPipWindowBoundsAnimates) {
+  const gfx::Size buffer_size(256, 256);
+  std::unique_ptr<Buffer> buffer(
+      new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
+  std::unique_ptr<Surface> surface(new Surface());
+  auto shell_surface =
+      exo_test_helper()->CreateClientControlledShellSurface(surface.get());
+
+  surface->Attach(buffer.get());
+  surface->Commit();
+  shell_surface->SetPip();
+  surface->Commit();
+  shell_surface->GetWidget()->Show();
+
+  ui::ScopedAnimationDurationScaleMode animation_scale_mode(
+      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  aura::Window* window = shell_surface->GetWidget()->GetNativeWindow();
+  window->SetBounds(gfx::Rect(10, 10, 256, 256));
+  EXPECT_EQ(gfx::Rect(10, 10, 256, 256), window->layer()->GetTargetBounds());
+  EXPECT_EQ(gfx::Rect(0, 0, 256, 256), window->layer()->bounds());
+}
+
+TEST_F(ClientControlledShellSurfaceTest, PipWindowDragDoesNotAnimate) {
+  const gfx::Size buffer_size(256, 256);
+  std::unique_ptr<Buffer> buffer(
+      new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
+  std::unique_ptr<Surface> surface(new Surface());
+  auto shell_surface =
+      exo_test_helper()->CreateClientControlledShellSurface(surface.get());
+
+  surface->Attach(buffer.get());
+  surface->Commit();
+  shell_surface->SetPip();
+  surface->Commit();
+  shell_surface->GetWidget()->Show();
+
+  aura::Window* window = shell_surface->GetWidget()->GetNativeWindow();
+  ui::ScopedAnimationDurationScaleMode animation_scale_mode(
+      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  std::unique_ptr<ash::WindowResizer> resizer(ash::CreateWindowResizer(
+      window, gfx::Point(), HTCAPTION, ::wm::WINDOW_MOVE_SOURCE_MOUSE));
+  resizer->Drag(gfx::Point(10, 10), 0);
+  EXPECT_EQ(gfx::Rect(10, 10, 256, 256), window->layer()->GetTargetBounds());
+  EXPECT_EQ(gfx::Rect(10, 10, 256, 256), window->layer()->bounds());
+  resizer->CompleteDrag();
 }
 
 }  // namespace exo

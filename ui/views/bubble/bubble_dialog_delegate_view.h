@@ -56,6 +56,7 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public DialogDelegateView,
   const char* GetClassName() const override;
 
   // WidgetObserver:
+  void OnWidgetClosing(Widget* widget) override;
   void OnWidgetDestroying(Widget* widget) override;
   void OnWidgetVisibilityChanging(Widget* widget, bool visible) override;
   void OnWidgetVisibilityChanged(Widget* widget, bool visible) override;
@@ -76,8 +77,6 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public DialogDelegateView,
 
   BubbleBorder::Arrow arrow() const { return arrow_; }
   void SetArrow(BubbleBorder::Arrow arrow);
-
-  void set_mirror_arrow_in_rtl(bool mirror) { mirror_arrow_in_rtl_ = mirror; }
 
   BubbleBorder::Shadow GetShadow() const;
   void set_shadow(BubbleBorder::Shadow shadow) { shadow_ = shadow; }
@@ -106,6 +105,10 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public DialogDelegateView,
   bool adjust_if_offscreen() const { return adjust_if_offscreen_; }
   void set_adjust_if_offscreen(bool adjust) { adjust_if_offscreen_ = adjust; }
 
+  void set_highlight_button_when_shown(bool highlight) {
+    highlight_button_when_shown_ = highlight;
+  }
+
   // Get the arrow's anchor rect in screen space.
   virtual gfx::Rect GetAnchorRect() const;
 
@@ -120,11 +123,6 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public DialogDelegateView,
   // bubble. The bubble is automatically repositioned when the anchor view
   // bounds change as a result of the widget's bounds changing.
   void OnAnchorBoundsChanged();
-
-  // If this is called, enables focus to traverse from the anchor view
-  // to inside this dialog and back out. This may become the default in
-  // the future.
-  void EnableFocusTraversalFromAnchorView();
 
  protected:
   BubbleDialogDelegateView();
@@ -199,6 +197,10 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public DialogDelegateView,
   std::unique_ptr<ViewTracker> anchor_view_tracker_;
   Widget* anchor_widget_;
 
+  // Whether the |anchor_widget_| (or the |highlighted_button_tracker_|, when
+  // provided) should be highlighted when this bubble is shown.
+  bool highlight_button_when_shown_ = true;
+
   // If provided, this button should be highlighted while the bubble is visible.
   // If not provided, the anchor_view will attempt to be highlighted. A
   // ViewTracker is used because the view can be deleted.
@@ -209,9 +211,6 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public DialogDelegateView,
 
   // The arrow's location on the bubble.
   BubbleBorder::Arrow arrow_;
-
-  // Automatically mirror the arrow in RTL layout.
-  bool mirror_arrow_in_rtl_;
 
   // Bubble border shadow to use.
   BubbleBorder::Shadow shadow_;

@@ -14,6 +14,7 @@
 #include <memory>
 #include <vector>
 
+#include "api/media_transport_interface.h"
 #include "call/rtp_packet_sink_interface.h"
 #include "call/syncable.h"
 #include "call/video_receive_stream.h"
@@ -47,7 +48,9 @@ class VideoReceiveStream : public webrtc::VideoReceiveStream,
                            public KeyFrameRequestSender,
                            public video_coding::OnCompleteFrameCallback,
                            public Syncable,
-                           public CallStatsObserver {
+                           public CallStatsObserver,
+                           public MediaTransportVideoSinkInterface,
+                           public MediaTransportRttObserver {
  public:
   VideoReceiveStream(RtpStreamReceiverControllerInterface* receiver_controller,
                      int num_cpu_cores,
@@ -86,8 +89,16 @@ class VideoReceiveStream : public webrtc::VideoReceiveStream,
   void OnCompleteFrame(
       std::unique_ptr<video_coding::EncodedFrame> frame) override;
 
+  // Implements MediaTransportVideoSinkInterface, converts the received frame to
+  // OnCompleteFrameCallback
+  void OnData(uint64_t channel_id,
+              MediaTransportEncodedVideoFrame frame) override;
+
   // Implements CallStatsObserver::OnRttUpdate
   void OnRttUpdate(int64_t avg_rtt_ms, int64_t max_rtt_ms) override;
+
+  // Implements MediaTransportRttObserver::OnRttUpdated
+  void OnRttUpdated(int64_t rtt_ms) override;
 
   // Implements Syncable.
   int id() const override;
@@ -114,6 +125,7 @@ class VideoReceiveStream : public webrtc::VideoReceiveStream,
 
   CallStats* const call_stats_;
 
+  ReceiveStatisticsProxy stats_proxy_;
   // Shared by media and rtx stream receivers, since the latter has no RtpRtcp
   // module of its own.
   const std::unique_ptr<ReceiveStatistics> rtp_receive_statistics_;
@@ -121,7 +133,6 @@ class VideoReceiveStream : public webrtc::VideoReceiveStream,
   std::unique_ptr<VCMTiming> timing_;  // Jitter buffer experiment.
   vcm::VideoReceiver video_receiver_;
   std::unique_ptr<rtc::VideoSinkInterface<VideoFrame>> incoming_video_stream_;
-  ReceiveStatisticsProxy stats_proxy_;
   RtpVideoStreamReceiver rtp_video_stream_receiver_;
   std::unique_ptr<VideoStreamDecoder> video_stream_decoder_;
   RtpStreamsSynchronizer rtp_stream_sync_;
@@ -146,6 +157,7 @@ class VideoReceiveStream : public webrtc::VideoReceiveStream,
   bool frame_decoded_ = false;
 
   int64_t last_keyframe_request_ms_ = 0;
+  int64_t last_complete_frame_time_ms_ = 0;
 };
 }  // namespace internal
 }  // namespace webrtc

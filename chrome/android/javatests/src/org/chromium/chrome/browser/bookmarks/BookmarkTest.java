@@ -187,7 +187,7 @@ public class BookmarkTest {
                 isItemPresentInBookmarkList(TEST_PAGE_TITLE_GOOGLE));
         final View tile = getViewWithText(mItemsContainer, TEST_PAGE_TITLE_GOOGLE);
         ChromeTabUtils.waitForTabPageLoaded(mActivityTestRule.getActivity().getActivityTab(),
-                () -> TouchCommon.singleClickView(tile));
+                mTestPage, () -> TouchCommon.singleClickView(tile));
         Assert.assertEquals(TEST_PAGE_TITLE_GOOGLE,
                 mActivityTestRule.getActivity().getActivityTab().getTitle());
     }
@@ -281,6 +281,10 @@ public class BookmarkTest {
 
         BookmarkItemsAdapter adapter = ((BookmarkItemsAdapter) mItemsContainer.getAdapter());
         final BookmarkDelegate delegate = adapter.getDelegateForTesting();
+
+        // Open the default folder where these bookmarks were created.
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> delegate.openFolder(mBookmarkModel.getDefaultFolder()));
 
         Assert.assertEquals(BookmarkUIState.STATE_FOLDER, delegate.getCurrentState());
         Assert.assertEquals(

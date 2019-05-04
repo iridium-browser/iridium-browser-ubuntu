@@ -31,14 +31,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_PLATFORM_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_PLATFORM_DATA_H_
 
-#include "SkPaint.h"
-#include "SkTypeface.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/platform/web_font_render_style.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/fonts/font_orientation.h"
-#include "third_party/blink/renderer/platform/fonts/paint_font.h"
 #include "third_party/blink/renderer/platform/fonts/small_caps_iterator.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
@@ -47,6 +44,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_impl.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/skia/include/core/SkFont.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 
@@ -66,6 +64,7 @@ inline NSFont* toNSFont(CTFontRef ctFontRef) {
 }
 #endif  // defined(OS_MACOSX)
 
+class SkFont;
 class SkTypeface;
 typedef uint32_t SkFontID;
 
@@ -154,12 +153,17 @@ class PLATFORM_EXPORT FontPlatformData {
   const WebFontRenderStyle& GetFontRenderStyle() const { return style_; }
 #endif
 
-  void SetupPaintFont(PaintFont*,
-                      float device_scale_factor = 1,
-                      const Font* = nullptr) const;
+  void SetupSkFont(SkFont*,
+                   float device_scale_factor = 1,
+                   const Font* = nullptr) const;
 
 #if defined(OS_WIN)
-  int PaintTextFlags() const { return paint_text_flags_; }
+  enum Flags {
+    kAntiAlias = 1 << 0,
+    kSubpixelsAntiAlias = 1 << 1,
+    kSubpixelMetrics = 1 << 2,
+  };
+  int FontFlags() const { return font_flags_; }
 #endif
 
  private:
@@ -194,8 +198,8 @@ class PLATFORM_EXPORT FontPlatformData {
   mutable scoped_refptr<HarfBuzzFace> harfbuzz_face_;
   bool is_hash_table_deleted_value_;
 #if defined(OS_WIN)
-  // TODO(https://crbug.com/808221): Replace |paint_text_flags_| with |style_|.
-  int paint_text_flags_;
+  // TODO(https://crbug.com/808221): Replace |font_flags_| with |style_|.
+  int font_flags_;
 #endif
 };
 

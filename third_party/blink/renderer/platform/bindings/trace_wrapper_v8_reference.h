@@ -11,8 +11,9 @@
 namespace blink {
 
 /**
- * TraceWrapperV8Reference is used to trace from Blink to V8. The reference is
- * (strongly) traced by wrapper tracing.
+ * TraceWrapperV8Reference is used to hold references from Blink to V8 that are
+ * known to both garbage collectors. The reference is a regular traced reference
+ * for wrapper tracing as well as unified heap garbage collections.
  *
  * TODO(mlippautz): Use a better handle type than v8::Persistent.
  */
@@ -37,24 +38,14 @@ class TraceWrapperV8Reference {
     handle_.SetWeak();
   }
 
-  template <typename P>
-  void Set(v8::Isolate* isolate,
-           v8::Local<T> handle,
-           P* parameters,
-           void (*callback)(const v8::WeakCallbackInfo<P>&),
-           v8::WeakCallbackType type = v8::WeakCallbackType::kParameter) {
-    InternalSet(isolate, handle);
-    handle_.SetWeak(parameters, callback, type);
-  }
-
   ALWAYS_INLINE v8::Local<T> NewLocal(v8::Isolate* isolate) const {
     return v8::Local<T>::New(isolate, handle_);
   }
 
   bool IsEmpty() const { return handle_.IsEmpty(); }
   void Clear() { handle_.Reset(); }
-  ALWAYS_INLINE const v8::Persistent<T>& Get() const { return handle_; }
-  ALWAYS_INLINE v8::Persistent<T>& Get() { return handle_; }
+  ALWAYS_INLINE const v8::Global<T>& Get() const { return handle_; }
+  ALWAYS_INLINE v8::Global<T>& Get() { return handle_; }
 
   template <typename S>
   const TraceWrapperV8Reference<S>& Cast() const {
@@ -77,7 +68,7 @@ class TraceWrapperV8Reference {
     UnifiedHeapMarkingVisitor::WriteBarrier(isolate, UnsafeCast<v8::Value>());
   }
 
-  v8::Persistent<T> handle_;
+  v8::Global<T> handle_;
 };
 
 }  // namespace blink

@@ -23,10 +23,13 @@ public:
     }
 
     enum Wrapped { kWrapped };
-    GrMockTexture(GrMockGpu* gpu, Wrapped, const GrSurfaceDesc& desc,
-                  GrMipMapsStatus mipMapsStatus, const GrMockTextureInfo& info)
+    GrMockTexture(GrMockGpu* gpu, Wrapped, const GrSurfaceDesc& desc, GrMipMapsStatus mipMapsStatus,
+                  const GrMockTextureInfo& info, GrIOType ioType, bool purgeImmediately)
             : GrMockTexture(gpu, desc, mipMapsStatus, info) {
-        this->registerWithCacheWrapped();
+        if (ioType == kRead_GrIOType) {
+            this->setReadOnly();
+        }
+        this->registerWithCacheWrapped(purgeImmediately);
     }
 
     ~GrMockTexture() override {}
@@ -36,10 +39,20 @@ public:
                                 fInfo);
     }
 
+    GrBackendFormat backendFormat() const override {
+        return GrBackendFormat::MakeMock(fInfo.fConfig);
+    }
+
     void textureParamsModified() override {}
     void setRelease(sk_sp<GrReleaseProcHelper> releaseHelper) override {
         fReleaseHelper = std::move(releaseHelper);
     }
+
+    void setIdleProc(IdleProc proc, void* context) override {
+        fIdleProc = proc;
+        fIdleProcContext = context;
+    }
+    void* idleContext() const override { return fIdleProcContext; }
 
 protected:
     // constructor for subclasses
@@ -63,16 +76,27 @@ protected:
         return false;
     }
 
-private:
-    void invokeReleaseProc() {
-        if (fReleaseHelper) {
-            // Depending on the ref count of fReleaseHelper this may or may not actually trigger the
-            // ReleaseProc to be called.
-            fReleaseHelper.reset();
+    // protected so that GrMockTextureRenderTarget can call this to avoid "inheritance via
+    // dominance" warning.
+    void becamePurgeable() override {
+        if (fIdleProc) {
+            fIdleProc(fIdleProcContext);
+            fIdleProc = nullptr;
+            fIdleProcContext = nullptr;
         }
     }
-    GrMockTextureInfo          fInfo;
+
+private:
+    void invokeReleaseProc() {
+        // Depending on the ref count of fReleaseHelper this may or may not actually trigger the
+        // ReleaseProc to be called.
+        fReleaseHelper.reset();
+    }
+
+    GrMockTextureInfo fInfo;
     sk_sp<GrReleaseProcHelper> fReleaseHelper;
+    IdleProc* fIdleProc = nullptr;
+    void* fIdleProcContext = nullptr;
 
     typedef GrTexture INHERITED;
 };
@@ -114,6 +138,10 @@ public:
         return {this->width(), this->height(), this->numColorSamples(), numStencilBits, fInfo};
     }
 
+    GrBackendFormat backendFormat() const override {
+        return GrBackendFormat::MakeMock(fInfo.fConfig);
+    }
+
 protected:
     // constructor for subclasses
     GrMockRenderTarget(GrMockGpu* gpu, const GrSurfaceDesc& desc,
@@ -153,6 +181,10 @@ public:
     const GrTexture* asTexture() const override { return this; }
     const GrRenderTarget* asRenderTarget() const override { return this; }
 
+    GrBackendFormat backendFormat() const override {
+        return GrMockTexture::backendFormat();
+    }
+
 private:
     void onAbandon() override {
         GrRenderTarget::onAbandon();
@@ -163,6 +195,9 @@ private:
         GrRenderTarget::onRelease();
         GrMockTexture::onRelease();
     }
+
+    // We implement this to avoid the inheritance via dominance warning.
+    void becamePurgeable() override { GrMockTexture::becamePurgeable(); }
 
     size_t onGpuMemorySize() const override {
         int numColorSamples = this->numColorSamples();

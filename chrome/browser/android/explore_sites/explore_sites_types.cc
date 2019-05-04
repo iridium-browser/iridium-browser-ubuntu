@@ -9,8 +9,13 @@ namespace explore_sites {
 ExploreSitesSite::ExploreSitesSite(int site_id,
                                    int category_id,
                                    GURL url,
-                                   std::string title)
-    : site_id(site_id), category_id(category_id), url(url), title(title) {}
+                                   std::string title,
+                                   bool is_blacklisted)
+    : site_id(site_id),
+      category_id(category_id),
+      url(url),
+      title(title),
+      is_blacklisted(is_blacklisted) {}
 
 ExploreSitesSite::ExploreSitesSite(ExploreSitesSite&& other) = default;
 
@@ -19,11 +24,15 @@ ExploreSitesSite::~ExploreSitesSite() = default;
 ExploreSitesCategory::ExploreSitesCategory(int category_id,
                                            std::string version_token,
                                            int category_type,
-                                           std::string label)
+                                           std::string label,
+                                           int ntp_shown_count,
+                                           int interaction_count)
     : category_id(category_id),
       version_token(version_token),
       category_type(category_type),
-      label(label) {}
+      label(label),
+      ntp_shown_count(ntp_shown_count),
+      interaction_count(interaction_count) {}
 
 ExploreSitesCategory::ExploreSitesCategory(ExploreSitesCategory&& other) =
     default;

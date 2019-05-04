@@ -493,7 +493,9 @@ void Sema::finishLambdaExplicitCaptures(LambdaScopeInfo *LSI) {
   LSI->finishedExplicitCaptures();
 }
 
-void Sema::addLambdaParameters(CXXMethodDecl *CallOperator, Scope *CurScope) {
+void Sema::addLambdaParameters(
+    ArrayRef<LambdaIntroducer::LambdaCapture> Captures,
+    CXXMethodDecl *CallOperator, Scope *CurScope) {
   // Introduce our parameters into the function scope
   for (unsigned p = 0, NumParams = CallOperator->getNumParams();
        p < NumParams; ++p) {
@@ -501,7 +503,19 @@ void Sema::addLambdaParameters(CXXMethodDecl *CallOperator, Scope *CurScope) {
 
     // If this has an identifier, add it to the scope stack.
     if (CurScope && Param->getIdentifier()) {
-      CheckShadow(CurScope, Param);
+      bool Error = false;
+      // Resolution of CWG 2211 in C++17 renders shadowing ill-formed, but we
+      // retroactively apply it.
+      for (const auto &Capture : Captures) {
+        if (Capture.Id == Param->getIdentifier()) {
+          Error = true;
+          Diag(Param->getLocation(), diag::err_parameter_shadow_capture);
+          Diag(Capture.Loc, diag::note_var_explicitly_captured_here)
+              << Capture.Id << true;
+        }
+      }
+      if (!Error)
+        CheckShadow(CurScope, Param);
 
       PushOnScopeChains(Param, CurScope);
     }
@@ -745,14 +759,15 @@ QualType Sema::buildLambdaInitCaptureInitialization(SourceLocation Loc,
   TypeSourceInfo *TSI = TLB.getTypeSourceInfo(Context, DeductType);
 
   // Deduce the type of the init capture.
+  Expr *DeduceInit = Init;
   QualType DeducedType = deduceVarTypeFromInitializer(
       /*VarDecl*/nullptr, DeclarationName(Id), DeductType, TSI,
-      SourceRange(Loc, Loc), IsDirectInit, Init);
+      SourceRange(Loc, Loc), IsDirectInit, DeduceInit);
   if (DeducedType.isNull())
     return QualType();
 
   // Are we a non-list direct initialization?
-  ParenListExpr *CXXDirectInit = dyn_cast<ParenListExpr>(Init);
+  bool CXXDirectInit = isa<ParenListExpr>(Init);
 
   // Perform initialization analysis and ensure any implicit conversions
   // (such as lvalue-to-rvalue) are enforced.
@@ -765,24 +780,11 @@ QualType Sema::buildLambdaInitCaptureInitialization(SourceLocation Loc,
                            : InitializationKind::CreateDirectList(Loc))
           : InitializationKind::CreateCopy(Loc, Init->getBeginLoc());
 
-  MultiExprArg Args = Init;
-  if (CXXDirectInit)
-    Args =
-        MultiExprArg(CXXDirectInit->getExprs(), CXXDirectInit->getNumExprs());
+  MultiExprArg Args = DeduceInit;
   QualType DclT;
   InitializationSequence InitSeq(*this, Entity, Kind, Args);
   ExprResult Result = InitSeq.Perform(*this, Entity, Kind, Args, &DclT);
 
-  if (Result.isInvalid())
-    return QualType();
-  Init = Result.getAs<Expr>();
-
-  // The init-capture initialization is a full-expression that must be
-  // processed as one before we enter the declcontext of the lambda's
-  // call-operator.
-  Result = ActOnFinishFullExpr(Init, Loc, /*DiscardedValue*/ false,
-                               /*IsConstexpr*/ false,
-                               /*IsLambdaInitCaptureInitializer*/ true);
   if (Result.isInvalid())
     return QualType();
 
@@ -855,7 +857,7 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
     FunctionProtoType::ExtProtoInfo EPI(Context.getDefaultCallingConvention(
         /*IsVariadic=*/false, /*IsCXXMethod=*/true));
     EPI.HasTrailingReturn = true;
-    EPI.TypeQuals |= DeclSpec::TQ_const;
+    EPI.TypeQuals.addConst();
     // C++1y [expr.prim.lambda]:
     //   The lambda return type is 'auto', which is replaced by the
     //   trailing-return type if provided and/or deduced from 'return'
@@ -880,8 +882,10 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
     //   This function call operator is declared const (9.3.1) if and only if
     //   the lambda-expression's parameter-declaration-clause is not followed
     //   by mutable. It is neither virtual nor declared volatile. [...]
-    if (!FTI.hasMutableQualifier())
-      FTI.TypeQuals |= DeclSpec::TQ_const;
+    if (!FTI.hasMutableQualifier()) {
+      FTI.getOrCreateMethodQualifiers().SetTypeQual(DeclSpec::TQ_const,
+                                                    SourceLocation());
+    }
 
     MethodTyInfo = GetTypeForDeclarator(ParamInfo, CurScope);
     assert(MethodTyInfo && "no type from lambda-declarator");
@@ -1152,7 +1156,7 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
   LSI->ContainsUnexpandedParameterPack = ContainsUnexpandedParameterPack;
 
   // Add lambda parameters into scope.
-  addLambdaParameters(Method, CurScope);
+  addLambdaParameters(Intro.Captures, Method, CurScope);
 
   // Enter a new evaluation context to insulate the lambda from any
   // cleanups from the enclosing full-expression.
@@ -1194,7 +1198,7 @@ QualType Sema::getLambdaConversionFunctionResultType(
   CallingConv CC = Context.getDefaultCallingConvention(
       CallOpProto->isVariadic(), /*IsCXXMethod=*/false);
   InvokerExtInfo.ExtInfo = InvokerExtInfo.ExtInfo.withCallingConv(CC);
-  InvokerExtInfo.TypeQuals = 0;
+  InvokerExtInfo.TypeQuals = Qualifiers();
   assert(InvokerExtInfo.RefQualifier == RQ_None &&
       "Lambda's call operator should not have a reference qualifier");
   return Context.getFunctionType(CallOpProto->getReturnType(),
@@ -1225,7 +1229,8 @@ static void addFunctionPointerConversion(Sema &S,
       S.Context.getDefaultCallingConvention(
       /*IsVariadic=*/false, /*IsCXXMethod=*/true));
   // The conversion function is always const.
-  ConvExtInfo.TypeQuals = Qualifiers::Const;
+  ConvExtInfo.TypeQuals = Qualifiers();
+  ConvExtInfo.TypeQuals.addConst();
   QualType ConvTy =
       S.Context.getFunctionType(PtrToFunctionTy, None, ConvExtInfo);
 
@@ -1373,7 +1378,8 @@ static void addBlockPointerConversion(Sema &S,
   FunctionProtoType::ExtProtoInfo ConversionEPI(
       S.Context.getDefaultCallingConvention(
           /*IsVariadic=*/false, /*IsCXXMethod=*/true));
-  ConversionEPI.TypeQuals = Qualifiers::Const;
+  ConversionEPI.TypeQuals = Qualifiers();
+  ConversionEPI.TypeQuals.addConst();
   QualType ConvTy = S.Context.getFunctionType(BlockPtrTy, None, ConversionEPI);
 
   SourceLocation Loc = IntroducerRange.getBegin();
@@ -1632,7 +1638,7 @@ ExprResult Sema::BuildLambdaExpr(SourceLocation StartLoc, SourceLocation EndLoc,
     //   same parameter and return types as the closure type's function call
     //   operator.
     // FIXME: Fix generic lambda to block conversions.
-    if (getLangOpts().Blocks && getLangOpts().ObjC1 && !IsGenericLambda)
+    if (getLangOpts().Blocks && getLangOpts().ObjC && !IsGenericLambda)
       addBlockPointerConversion(*this, IntroducerRange, Class, CallOperator);
 
     // Finalize the lambda class.
@@ -1718,7 +1724,7 @@ ExprResult Sema::BuildBlockForLambdaConversion(SourceLocation CurrentLocation,
                                                  /*NRVO=*/false),
       CurrentLocation, Src);
   if (!Init.isInvalid())
-    Init = ActOnFinishFullExpr(Init.get());
+    Init = ActOnFinishFullExpr(Init.get(), /*DiscardedValue*/ false);
 
   if (Init.isInvalid())
     return ExprError();

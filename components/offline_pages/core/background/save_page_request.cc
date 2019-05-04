@@ -4,6 +4,8 @@
 
 #include "components/offline_pages/core/background/save_page_request.h"
 
+#include <string>
+
 namespace offline_pages {
 
 SavePageRequest::SavePageRequest(int64_t request_id,
@@ -34,7 +36,8 @@ bool SavePageRequest::operator==(const SavePageRequest& other) const {
          completed_attempt_count_ == other.completed_attempt_count_ &&
          last_attempt_time_ == other.last_attempt_time_ &&
          state_ == other.state_ && original_url_ == other.original_url_ &&
-         request_origin_ == other.request_origin_;
+         request_origin_ == other.request_origin_ &&
+         auto_fetch_notification_state_ == other.auto_fetch_notification_state_;
 }
 
 void SavePageRequest::MarkAttemptStarted(const base::Time& start_time) {
@@ -61,6 +64,13 @@ void SavePageRequest::MarkAttemptAborted() {
 
 void SavePageRequest::MarkAttemptPaused() {
   state_ = RequestState::PAUSED;
+}
+
+void SavePageRequest::MarkAttemptDeferred(const base::Time& attempt_time) {
+  ++started_attempt_count_;
+  ++completed_attempt_count_;
+  last_attempt_time_ = attempt_time;
+  state_ = RequestState::AVAILABLE;
 }
 
 void SavePageRequest::UpdateFailState(FailState fail_state) {

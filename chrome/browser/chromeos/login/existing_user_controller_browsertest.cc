@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/authpolicy/auth_policy_credentials_manager.h"
@@ -36,7 +37,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/fake_auth_policy_client.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
 #include "chromeos/dbus/util/tpm_util.h"
@@ -159,6 +160,7 @@ class KerberosFilesChangeWaiter {
 
   // Should be called once.
   void Wait() {
+    base::ScopedAllowBlockingForTesting allow_io;
     loop_.Run();
     config_watcher_.reset();
     creds_watcher_.reset();
@@ -168,6 +170,7 @@ class KerberosFilesChangeWaiter {
   void MaybeStartWatch(std::unique_ptr<base::FilePathWatcher>* watcher,
                        const base::FilePath& path,
                        bool files_must_exist) {
+    base::ScopedAllowBlockingForTesting allow_io;
     (*watcher)->Watch(path, false /* recursive */, watch_callback_);
     if (!files_must_exist && base::PathExists(path)) {
       watch_callback_.Run(path, false /* error */);
@@ -179,6 +182,7 @@ class KerberosFilesChangeWaiter {
 
   base::RepeatingCallback<void(const base::FilePath& path, bool error)>
       watch_callback_;
+
   std::unique_ptr<base::FilePathWatcher> config_watcher_;
   std::unique_ptr<base::FilePathWatcher> creds_watcher_;
 };
@@ -217,7 +221,7 @@ class ExistingUserControllerTest : public policy::DevicePolicyCrosBrowserTest {
         .Times(1)
         .WillOnce(ReturnNull());
     EXPECT_CALL(*mock_login_display_host_, OnPreferencesChanged()).Times(1);
-    EXPECT_CALL(*mock_login_display_, Init(_, false, true, true)).Times(1);
+    EXPECT_CALL(*mock_login_display_, Init(_, true, true, true)).Times(1);
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -899,6 +903,7 @@ class ExistingUserControllerActiveDirectoryTest
   }
 
   void CheckKerberosFiles(bool enable_dns_cname_lookup) {
+    base::ScopedAllowBlockingForTesting allow_io;
     std::string file_contents;
     EXPECT_TRUE(base::ReadFileToString(
         base::FilePath(GetKerberosConfigFileName()), &file_contents));
@@ -949,7 +954,7 @@ class ExistingUserControllerActiveDirectoryUserWhitelistTest
         .Times(1)
         .WillOnce(ReturnNull());
     EXPECT_CALL(*mock_login_display_host_, OnPreferencesChanged()).Times(1);
-    EXPECT_CALL(*mock_login_display_, Init(_, false, true, false)).Times(1);
+    EXPECT_CALL(*mock_login_display_, Init(_, true, true, false)).Times(1);
   }
 };
 

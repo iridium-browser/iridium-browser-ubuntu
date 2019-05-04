@@ -51,6 +51,7 @@ class Json3OutputFormatterTest(unittest.TestCase):
 
   def testOutputAndParse(self):
     results = page_test_results.PageTestResults()
+    results.telemetry_info.benchmark_name = 'benchmark_name'
     results.telemetry_info.benchmark_start_epoch = 1501773200
     self._output.truncate(0)
 
@@ -65,6 +66,7 @@ class Json3OutputFormatterTest(unittest.TestCase):
 
   def testAsDictBaseKeys(self):
     results = page_test_results.PageTestResults()
+    results.telemetry_info.benchmark_name = 'benchmark_name'
     results.telemetry_info.benchmark_start_epoch = 1501773200
     d = json_3_output_formatter.ResultsAsDict(results)
 
@@ -96,7 +98,7 @@ class Json3OutputFormatterTest(unittest.TestCase):
 
   def testAsDictWithTwoPages(self):
     results = page_test_results.PageTestResults()
-    results.telemetry_info.benchmark_start_epoc = 1501773200
+    results.telemetry_info.benchmark_start_epoch = 1501773200
     results.telemetry_info.benchmark_name = 'benchmark_name'
     results.WillRunPage(self._story_set[0])
     v0 = scalar.ScalarValue(results.current_page, 'foo', 'seconds', 3,
@@ -216,8 +218,7 @@ class Json3OutputFormatterTest(unittest.TestCase):
     options.output_dir = tempfile_dir
     options.suppress_gtest_report = False
     options.results_label = None
-    parser = options.CreateParser()
-    results_options.ProcessCommandLineArgs(parser, options)
+    results_options.ProcessCommandLineArgs(options)
     results = results_options.CreateResults(
         benchmark_metadata, options, benchmark_enabled=False)
     results.PrintSummary()
@@ -245,8 +246,7 @@ class Json3OutputFormatterTest(unittest.TestCase):
     options.output_dir = tempfile_dir
     options.suppress_gtest_report = False
     options.results_label = None
-    parser = options.CreateParser()
-    results_options.ProcessCommandLineArgs(parser, options)
+    results_options.ProcessCommandLineArgs(options)
     results = results_options.CreateResults(benchmark_metadata, options)
 
     story_set = story.StorySet(base_dir=os.path.dirname(__file__))

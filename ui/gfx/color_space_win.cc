@@ -44,6 +44,7 @@ DXVA2_ExtendedFormat ColorSpaceWin::GetExtendedFormat(
       break;
 
     case gfx::ColorSpace::MatrixID::RGB:
+    case gfx::ColorSpace::MatrixID::GBR:
     case gfx::ColorSpace::MatrixID::FCC:
     case gfx::ColorSpace::MatrixID::YCOCG:
     case gfx::ColorSpace::MatrixID::BT2020_NCL:
@@ -207,10 +208,11 @@ DXGI_COLOR_SPACE_TYPE ColorSpaceWin::GetDXGIColorSpace(
 D3D11_VIDEO_PROCESSOR_COLOR_SPACE ColorSpaceWin::GetD3D11ColorSpace(
     const ColorSpace& color_space) {
   D3D11_VIDEO_PROCESSOR_COLOR_SPACE ret = {0};
-  if (color_space.range_ != gfx::ColorSpace::RangeID::FULL) {
-    ret.RGB_Range = 1;
+  if (color_space.range_ == gfx::ColorSpace::RangeID::FULL) {
+    ret.RGB_Range = 0;  // FULL
     ret.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_0_255;
   } else {
+    ret.RGB_Range = 1;  // LIMITED
     ret.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
   }
 
@@ -226,6 +228,7 @@ D3D11_VIDEO_PROCESSOR_COLOR_SPACE ColorSpaceWin::GetD3D11ColorSpace(
 
     case gfx::ColorSpace::MatrixID::SMPTE240M:
     case gfx::ColorSpace::MatrixID::RGB:
+    case gfx::ColorSpace::MatrixID::GBR:
     case gfx::ColorSpace::MatrixID::FCC:
     case gfx::ColorSpace::MatrixID::YCOCG:
     case gfx::ColorSpace::MatrixID::BT2020_NCL:

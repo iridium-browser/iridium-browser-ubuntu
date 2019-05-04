@@ -31,7 +31,8 @@ class CONTROLLER_EXPORT OomInterventionImpl
   void StartDetection(mojom::blink::OomInterventionHostPtr,
                       mojom::blink::DetectionArgsPtr detection_args,
                       bool renderer_pause_enabled,
-                      bool navigate_ads_enabled) override;
+                      bool navigate_ads_enabled,
+                      bool purge_v8_memory_enabled) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(OomInterventionImplTest, DetectedAndDeclined);
@@ -47,13 +48,21 @@ class CONTROLLER_EXPORT OomInterventionImpl
 
   void ReportMemoryStats(OomInterventionMetrics& current_memory);
 
+  void TimerFiredUMAReport(TimerBase*);
+
+  static void TriggerGC();
+
   mojom::blink::DetectionArgsPtr detection_args_;
 
   mojom::blink::OomInterventionHostPtr host_;
   bool renderer_pause_enabled_ = false;
   bool navigate_ads_enabled_ = false;
+  bool purge_v8_memory_enabled_ = false;
   TaskRunnerTimer<OomInterventionImpl> timer_;
   std::unique_ptr<ScopedPagePauser> pauser_;
+  OomInterventionMetrics metrics_at_intervention_;
+  int number_of_report_needed_ = 0;
+  TaskRunnerTimer<OomInterventionImpl> delayed_report_timer_;
 };
 
 }  // namespace blink

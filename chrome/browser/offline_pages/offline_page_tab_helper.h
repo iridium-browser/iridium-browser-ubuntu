@@ -204,7 +204,7 @@ class OfflinePageTabHelper
 
   bool reloading_url_on_net_error_ = false;
 
-  // Service, overlives this object.
+  // Service, outlives this object.
   PrefetchService* prefetch_service_ = nullptr;
 
   // Table of OfflinePages policies.
@@ -218,6 +218,8 @@ class OfflinePageTabHelper
       mhtml_page_notifier_bindings_;
 
   base::WeakPtrFactory<OfflinePageTabHelper> weak_ptr_factory_;
+
+  WEB_CONTENTS_USER_DATA_KEY_DECL();
 
   DISALLOW_COPY_AND_ASSIGN(OfflinePageTabHelper);
 };

@@ -13,13 +13,12 @@
 
 #include "base/memory/ref_counted_delete_on_sequence.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "cc/layers/surface_layer.h"
 #include "cc/layers/video_frame_provider.h"
 #include "content/common/content_export.h"
-#include "media/base/media_log.h"
+#include "media/base/media_util.h"
 #include "media/blink/webmediaplayer_params.h"
 #include "third_party/blink/public/platform/web_video_frame_submitter.h"
 
@@ -88,19 +87,15 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
   // submit video frames given by WebMediaPlayerMSCompositor.
   virtual void EnableSubmission(
       const viz::SurfaceId& id,
+      base::TimeTicks local_surface_id_allocation_time,
       media::VideoRotation rotation,
-      bool force_submit,
-      bool is_opaque,
-      blink::WebFrameSinkDestroyedCallback frame_sink_destroyed_callback);
-
-  // Updates the rotation information for frames given to |submitter_|.
-  void UpdateRotation(media::VideoRotation rotation);
+      bool force_submit);
 
   // Notifies the |submitter_| that the frames must be submitted.
-  void SetForceSubmit(bool);
+  void SetForceSubmit(bool force_submit);
 
-  // Updates the opacity information for frames given to |submitter_|.
-  void UpdateIsOpaque(bool);
+  // Notifies the |submitter_| that the page is no longer visible.
+  void SetIsPageVisible(bool is_visible);
 
   // VideoFrameProvider implementation.
   void SetVideoFrameProviderClient(
@@ -138,7 +133,7 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
   void InitializeSubmitter();
 
   // Signals the VideoFrameSubmitter to stop submitting frames.
-  void UpdateSubmissionState(bool);
+  void SetIsSurfaceVisible(bool);
 
   bool MapTimestampsToRenderTimeTicks(
       const std::vector<base::TimeDelta>& timestamps,
@@ -160,6 +155,10 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
 
   // Update |current_frame_| and |dropped_frame_count_|
   void SetCurrentFrame(const scoped_refptr<media::VideoFrame>& frame);
+  // Following the update to |current_frame_|, this will check for changes that
+  // require updating video layer.
+  void CheckForFrameChanges(const scoped_refptr<media::VideoFrame>& old_frame,
+                            const scoped_refptr<media::VideoFrame>& new_frame);
 
   void StartRenderingInternal();
   void StopRenderingInternal();
@@ -170,19 +169,19 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
 
   // Used for DCHECKs to ensure method calls executed in the correct thread,
   // which is renderer main thread in this class.
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   const scoped_refptr<base::SingleThreadTaskRunner>
       video_frame_compositor_task_runner_;
   const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
-  base::MessageLoop* main_message_loop_;
+  const scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
 
   base::WeakPtr<WebMediaPlayerMS> player_;
 
   // TODO(qiangchen, emircan): It might be nice to use a real MediaLog here from
   // the WebMediaPlayerMS instance, but it owns the MediaLog and this class has
   // non-deterministic destruction paths (either compositor or IO).
-  media::MediaLog media_log_;
+  media::NullMediaLog media_log_;
 
   size_t serial_;
 

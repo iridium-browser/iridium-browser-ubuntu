@@ -155,7 +155,8 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // Returns whether this guest has an associated embedder.
   bool attached() const {
-    return (element_instance_id_ != kInstanceIDNone) && !attach_in_progress_;
+    return !(element_instance_id_ == kInstanceIDNone || attach_in_progress_ ||
+             is_being_destroyed_);
   }
 
   // Returns the instance ID of the <*view> element.
@@ -164,7 +165,10 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // Returns the instance ID of this GuestViewBase.
   int guest_instance_id() const { return guest_instance_id_; }
 
-  // Returns the instance ID of the GuestViewBase's element.
+  // Returns the instance ID of the GuestViewBase's element (unique within an
+  // embedder process). Note: this value is set once after attach is complete.
+  // It will maintain its value during the lifetime of GuestViewBase, even after
+  // |attach()| is false due to |is_being_destroyed_|.
   int element_instance_id() const { return element_instance_id_; }
 
   bool can_owner_receive_events() const { return !!view_instance_id_; }
@@ -208,6 +212,14 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   content::RenderWidgetHost* GetOwnerRenderWidgetHost() override;
   content::SiteInstance* GetOwnerSiteInstance() override;
 
+  // Starts the attaching process for a (frame-based) GuestView.
+  // |embedder_frame| is a frame in the embedder WebContents (owned by a
+  // HTMLFrameOwnerElement associated with the GuestView's element in the
+  // embedder process) which will be used for attaching.
+  void AttachToOuterWebContentsFrame(content::RenderFrameHost* embedder_frame,
+                                     int32_t element_instance_id,
+                                     bool is_full_page_plugin);
+
  protected:
   explicit GuestViewBase(content::WebContents* owner_web_contents);
 
@@ -220,7 +232,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   virtual void OnRenderFrameHostDeleted(int process_id, int routing_id);
 
   // WebContentsDelegate implementation.
-  void HandleKeyboardEvent(
+  bool HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) override;
   bool PreHandleGestureEvent(content::WebContents* source,
@@ -325,8 +337,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   void SetGuestZoomLevelToMatchEmbedder();
 
  private:
-  friend class GuestViewMessageFilter;
-
   class OwnerContentsObserver;
   class OpenerLifetimeObserver;
 
@@ -374,15 +384,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   void OnZoomChanged(
       const zoom::ZoomController::ZoomChangedEventData& data) final;
 
-  // See BrowserPluginGuestDelegate::WillAttach.
-  // This version also takes a |perform_attach| callback to specify
-  // attachment operations which must be done synchronously.
-  void WillAttach(content::WebContents* embedder_web_contents,
-                  int element_instance_id,
-                  bool is_full_page_plugin,
-                  base::OnceClosure perform_attach,
-                  base::OnceClosure completion_callback);
-
   void SendQueuedEvents();
 
   void CompleteInit(std::unique_ptr<base::DictionaryValue> create_params,
@@ -408,6 +409,15 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   GuestViewManager* GetGuestViewManager();
   void SetOwnerHost();
+
+  // TODO(ekaramad): Revisit this once MimeHandlerViewGuest is frame-based
+  // (https://crbug.com/659750); either remove or unify with
+  // BrowserPluginGuestDelegate::WillAttach.
+  void WillAttach(content::WebContents* embedder_web_contents,
+                  content::RenderFrameHost* outer_contents_frame,
+                  int browser_plugin_instance_id,
+                  bool is_full_page_plugin,
+                  base::OnceClosure completion_callback);
 
   // This guest tracks the lifetime of the WebContents specified by
   // |owner_web_contents_|. If |owner_web_contents_| is destroyed then this

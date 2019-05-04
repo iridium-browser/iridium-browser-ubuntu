@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include <list>
 #include <map>
 
 #include "base/macros.h"
@@ -135,7 +136,6 @@ class AutocompleteResult {
   size_t EstimateMemoryUsage() const;
 
  private:
-  friend class AutocompleteProviderTest;
   FRIEND_TEST_ALL_PREFIXES(AutocompleteResultTest, ConvertsOpenTabsCorrectly);
 
   typedef std::map<AutocompleteProvider*, ACMatches> ProviderToMatches;
@@ -147,6 +147,15 @@ class AutocompleteResult {
 #else
   typedef ACMatches::iterator::difference_type matches_difference_type;
 #endif
+
+  // Examines |first| and |second| and returns the one that is preferred based
+  // on the constraints we want to enforce when deduping. Note that this may
+  // modify the relevance, allowed_to_be_default_match, or inline_autocompletion
+  // values of the returned match.
+  static std::list<ACMatches::iterator>::iterator BetterMatch(
+      std::list<ACMatches::iterator>::iterator first,
+      std::list<ACMatches::iterator>::iterator second,
+      metrics::OmniboxEventProto::PageClassification page_classification);
 
   // Returns true if |matches| contains a match with the same destination as
   // |match|.

@@ -45,8 +45,8 @@ namespace {
 
 // Returns the tab model for non-incognito tabs.
 TabModel* GetNormalTabModel() {
-  return [[chrome_test_util::GetMainController() browserViewInformation]
-      mainTabModel];
+  return chrome_test_util::GetMainController()
+      .interfaceProvider.mainInterface.tabModel;
 }
 
 // Shows the tab switcher by tapping the switcher button.  Works on both phone
@@ -177,15 +177,14 @@ std::unique_ptr<net::test_server::HttpResponse> HandleQueryTitle(
 
 // Tests entering the tab switcher by closing the last normal tab.
 - (void)testEnterSwitcherByClosingLastNormalTab {
-  chrome_test_util::CloseAllTabsInCurrentMode();
+  [ChromeEarlGrey closeAllTabsInCurrentMode];
 }
 
 // Tests entering the tab switcher by closing the last incognito tab.
 - (void)testEnterSwitcherByClosingLastIncognitoTab {
   [ChromeEarlGreyUI openNewIncognitoTab];
   [GetNormalTabModel() closeAllTabs];
-
-  chrome_test_util::CloseAllTabsInCurrentMode();
+  [ChromeEarlGrey closeAllTabsInCurrentMode];
 }
 
 // Tests exiting the switcher by tapping the switcher button.

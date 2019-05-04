@@ -49,46 +49,57 @@
 using namespace llvm;
 
 void llvm::DeleteDeadBlock(BasicBlock *BB, DomTreeUpdater *DTU) {
-  assert((pred_begin(BB) == pred_end(BB) ||
-         // Can delete self loop.
-         BB->getSinglePredecessor() == BB) && "Block is not dead!");
-  TerminatorInst *BBTerm = BB->getTerminator();
-  std::vector<DominatorTree::UpdateType> Updates;
+  SmallVector<BasicBlock *, 1> BBs = {BB};
+  DeleteDeadBlocks(BBs, DTU);
+}
 
-  // Loop through all of our successors and make sure they know that one
-  // of their predecessors is going away.
+void llvm::DeleteDeadBlocks(SmallVectorImpl <BasicBlock *> &BBs,
+                            DomTreeUpdater *DTU) {
+#ifndef NDEBUG
+  // Make sure that all predecessors of each dead block is also dead.
+  SmallPtrSet<BasicBlock *, 4> Dead(BBs.begin(), BBs.end());
+  assert(Dead.size() == BBs.size() && "Duplicating blocks?");
+  for (auto *BB : Dead)
+    for (BasicBlock *Pred : predecessors(BB))
+      assert(Dead.count(Pred) && "All predecessors must be dead!");
+#endif
+
+  SmallVector<DominatorTree::UpdateType, 4> Updates;
+  for (auto *BB : BBs) {
+    // Loop through all of our successors and make sure they know that one
+    // of their predecessors is going away.
+    for (BasicBlock *Succ : successors(BB)) {
+      Succ->removePredecessor(BB);
+      if (DTU)
+        Updates.push_back({DominatorTree::Delete, BB, Succ});
+    }
+
+    // Zap all the instructions in the block.
+    while (!BB->empty()) {
+      Instruction &I = BB->back();
+      // If this instruction is used, replace uses with an arbitrary value.
+      // Because control flow can't get here, we don't care what we replace the
+      // value with.  Note that since this block is unreachable, and all values
+      // contained within it must dominate their uses, that all uses will
+      // eventually be removed (they are themselves dead).
+      if (!I.use_empty())
+        I.replaceAllUsesWith(UndefValue::get(I.getType()));
+      BB->getInstList().pop_back();
+    }
+    new UnreachableInst(BB->getContext(), BB);
+    assert(BB->getInstList().size() == 1 &&
+           isa<UnreachableInst>(BB->getTerminator()) &&
+           "The successor list of BB isn't empty before "
+           "applying corresponding DTU updates.");
+  }
   if (DTU)
-    Updates.reserve(BBTerm->getNumSuccessors());
-  for (BasicBlock *Succ : successors(BBTerm)) {
-    Succ->removePredecessor(BB);
-    if (DTU)
-      Updates.push_back({DominatorTree::Delete, BB, Succ});
-  }
-
-  // Zap all the instructions in the block.
-  while (!BB->empty()) {
-    Instruction &I = BB->back();
-    // If this instruction is used, replace uses with an arbitrary value.
-    // Because control flow can't get here, we don't care what we replace the
-    // value with.  Note that since this block is unreachable, and all values
-    // contained within it must dominate their uses, that all uses will
-    // eventually be removed (they are themselves dead).
-    if (!I.use_empty())
-      I.replaceAllUsesWith(UndefValue::get(I.getType()));
-    BB->getInstList().pop_back();
-  }
-  new UnreachableInst(BB->getContext(), BB);
-  assert(BB->getInstList().size() == 1 &&
-         isa<UnreachableInst>(BB->getTerminator()) &&
-         "The successor list of BB isn't empty before "
-         "applying corresponding DTU updates.");
-
-  if (DTU) {
     DTU->applyUpdates(Updates, /*ForceRemoveDuplicates*/ true);
-    DTU->deleteBB(BB);
-  } else {
-    BB->eraseFromParent(); // Zap the block!
-  }
+
+  for (BasicBlock *BB : BBs)
+    if (DTU)
+      DTU->deleteBB(BB);
+    else
+      BB->eraseFromParent();
 }
 
 void llvm::FoldSingleEntryPHINodes(BasicBlock *BB,
@@ -270,7 +281,7 @@ BasicBlock *llvm::SplitEdge(BasicBlock *BB, BasicBlock *Succ, DominatorTree *DT,
   unsigned SuccNum = GetSuccessorNumber(BB, Succ);
 
   // If this is a critical edge, let SplitCriticalEdge do it.
-  TerminatorInst *LatchTerm = BB->getTerminator();
+  Instruction *LatchTerm = BB->getTerminator();
   if (SplitCriticalEdge(
           LatchTerm, SuccNum,
           CriticalEdgeSplittingOptions(DT, LI, MSSAU).setPreserveLCSSA()))
@@ -298,7 +309,7 @@ llvm::SplitAllCriticalEdges(Function &F,
                             const CriticalEdgeSplittingOptions &Options) {
   unsigned NumBroken = 0;
   for (BasicBlock &BB : F) {
-    TerminatorInst *TI = BB.getTerminator();
+    Instruction *TI = BB.getTerminator();
     if (TI->getNumSuccessors() > 1 && !isa<IndirectBrInst>(TI))
       for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
         if (SplitCriticalEdge(TI, i, Options))
@@ -705,16 +716,17 @@ ReturnInst *llvm::FoldReturnIntoUncondBranch(ReturnInst *RI, BasicBlock *BB,
   return cast<ReturnInst>(NewRet);
 }
 
-TerminatorInst *
-llvm::SplitBlockAndInsertIfThen(Value *Cond, Instruction *SplitBefore,
-                                bool Unreachable, MDNode *BranchWeights,
-                                DominatorTree *DT, LoopInfo *LI) {
+Instruction *llvm::SplitBlockAndInsertIfThen(Value *Cond,
+                                             Instruction *SplitBefore,
+                                             bool Unreachable,
+                                             MDNode *BranchWeights,
+                                             DominatorTree *DT, LoopInfo *LI) {
   BasicBlock *Head = SplitBefore->getParent();
   BasicBlock *Tail = Head->splitBasicBlock(SplitBefore->getIterator());
-  TerminatorInst *HeadOldTerm = Head->getTerminator();
+  Instruction *HeadOldTerm = Head->getTerminator();
   LLVMContext &C = Head->getContext();
   BasicBlock *ThenBlock = BasicBlock::Create(C, "", Head->getParent(), Tail);
-  TerminatorInst *CheckTerm;
+  Instruction *CheckTerm;
   if (Unreachable)
     CheckTerm = new UnreachableInst(C, ThenBlock);
   else
@@ -749,12 +761,12 @@ llvm::SplitBlockAndInsertIfThen(Value *Cond, Instruction *SplitBefore,
 }
 
 void llvm::SplitBlockAndInsertIfThenElse(Value *Cond, Instruction *SplitBefore,
-                                         TerminatorInst **ThenTerm,
-                                         TerminatorInst **ElseTerm,
+                                         Instruction **ThenTerm,
+                                         Instruction **ElseTerm,
                                          MDNode *BranchWeights) {
   BasicBlock *Head = SplitBefore->getParent();
   BasicBlock *Tail = Head->splitBasicBlock(SplitBefore->getIterator());
-  TerminatorInst *HeadOldTerm = Head->getTerminator();
+  Instruction *HeadOldTerm = Head->getTerminator();
   LLVMContext &C = Head->getContext();
   BasicBlock *ThenBlock = BasicBlock::Create(C, "", Head->getParent(), Tail);
   BasicBlock *ElseBlock = BasicBlock::Create(C, "", Head->getParent(), Tail);

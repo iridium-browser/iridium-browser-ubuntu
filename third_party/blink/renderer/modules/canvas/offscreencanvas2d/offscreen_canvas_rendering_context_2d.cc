@@ -41,7 +41,7 @@ OffscreenCanvasRenderingContext2D::OffscreenCanvasRenderingContext2D(
   }
   dirty_rect_for_commit_.setEmpty();
   WorkerSettings* worker_settings =
-      ToWorkerGlobalScope(execution_context)->GetWorkerSettings();
+      To<WorkerGlobalScope>(execution_context)->GetWorkerSettings();
   if (worker_settings && worker_settings->DisableReadingFromCanvas())
     canvas->SetDisableReadingFromCanvasTrue();
 }
@@ -68,17 +68,8 @@ void OffscreenCanvasRenderingContext2D::SetOriginTainted() {
 }
 
 bool OffscreenCanvasRenderingContext2D::WouldTaintOrigin(
-    CanvasImageSource* source,
-    ExecutionContext* execution_context) {
-  if (execution_context->IsWorkerGlobalScope()) {
-    // We only support passing in ImageBitmap and OffscreenCanvases as
-    // source images in drawImage() or createPattern() in a
-    // OffscreenCanvas2d in worker.
-    DCHECK(source->IsImageBitmap() || source->IsOffscreenCanvas());
-  }
-
-  return CanvasRenderingContext::WouldTaintOrigin(
-      source, execution_context->GetSecurityOrigin());
+    CanvasImageSource* source) {
+  return CanvasRenderingContext::WouldTaintOrigin(source);
 }
 
 int OffscreenCanvasRenderingContext2D::Width() const {

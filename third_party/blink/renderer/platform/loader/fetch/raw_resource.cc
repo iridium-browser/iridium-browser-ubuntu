@@ -38,6 +38,7 @@
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
 
@@ -74,7 +75,8 @@ RawResource* RawResource::FetchMainResource(
     FetchParameters& params,
     ResourceFetcher* fetcher,
     RawResourceClient* client,
-    const SubstituteData& substitute_data) {
+    const SubstituteData& substitute_data,
+    unsigned long identifier) {
   DCHECK_NE(params.GetResourceRequest().GetFrameType(),
             network::mojom::RequestContextFrameType::kNone);
   DCHECK(params.GetResourceRequest().GetRequestContext() ==
@@ -92,7 +94,7 @@ RawResource* RawResource::FetchMainResource(
 
   return ToRawResource(fetcher->RequestResource(
       params, RawResourceFactory(ResourceType::kMainResource), client,
-      substitute_data));
+      substitute_data, identifier));
 }
 
 RawResource* RawResource::FetchMedia(FetchParameters& params,
@@ -139,7 +141,7 @@ RawResource::RawResource(const ResourceRequest& resource_request,
 void RawResource::AppendData(const char* data, size_t length) {
   if (data_pipe_writer_) {
     DCHECK_EQ(kDoNotBufferData, GetDataBufferingPolicy());
-    data_pipe_writer_->Write(data, length);
+    data_pipe_writer_->Write(data, SafeCast<uint32_t>(length));
   } else {
     Resource::AppendData(data, length);
   }
@@ -237,18 +239,19 @@ CachedMetadataHandler* RawResource::CreateCachedMetadataHandler(
   if (GetType() == ResourceType::kMainResource) {
     // This is a document resource; create a cache handler that can handle
     // multiple inline scripts.
-    return new SourceKeyedCachedMetadataHandler(Encoding(),
-                                                std::move(send_callback));
+    return MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
+        Encoding(), std::move(send_callback));
   } else if (GetType() == ResourceType::kRaw) {
     // This is a resource of indeterminate type, e.g. a fetched WebAssembly
     // module; create a cache handler that can store a single metadata entry.
-    return new ScriptCachedMetadataHandler(Encoding(),
-                                           std::move(send_callback));
+    return MakeGarbageCollected<ScriptCachedMetadataHandler>(
+        Encoding(), std::move(send_callback));
   }
   return Resource::CreateCachedMetadataHandler(std::move(send_callback));
 }
 
-void RawResource::SetSerializedCachedMetadata(const char* data, size_t size) {
+void RawResource::SetSerializedCachedMetadata(const uint8_t* data,
+                                              size_t size) {
   Resource::SetSerializedCachedMetadata(data, size);
 
   if (GetType() == ResourceType::kMainResource) {
@@ -277,7 +280,7 @@ void RawResource::DidSendData(unsigned long long bytes_sent,
     c->DataSent(this, bytes_sent, total_bytes_to_be_sent);
 }
 
-void RawResource::DidDownloadData(int data_length) {
+void RawResource::DidDownloadData(unsigned long long data_length) {
   ResourceClientWalker<RawResourceClient> w(Clients());
   while (RawResourceClient* c = w.Next())
     c->DataDownloaded(this, data_length);
@@ -340,7 +343,7 @@ bool RawResource::MatchPreload(const FetchParameters& params,
 
   if (Data()) {
     for (const auto& span : *Data())
-      data_pipe_writer_->Write(span.data(), span.size());
+      data_pipe_writer_->Write(span.data(), SafeCast<uint32_t>(span.size()));
   }
   SetDataBufferingPolicy(kDoNotBufferData);
 

@@ -5,7 +5,9 @@
 package org.chromium.chrome.browser.download.home.list;
 
 import android.content.Context;
+import android.content.res.Resources;
 import android.support.annotation.DrawableRes;
+import android.support.annotation.VisibleForTesting;
 import android.text.format.DateUtils;
 import android.text.format.Formatter;
 
@@ -29,7 +31,51 @@ import java.util.concurrent.TimeUnit;
 
 /** A set of helper utility methods for the UI. */
 public final class UiUtils {
+    private static boolean sDisableUrlFormatting;
+
+    /**
+     * Disable url formatting for tests since tests might not native initialized.
+     */
+    @VisibleForTesting
+    public static void setDisableUrlFormattingForTests(boolean disabled) {
+        sDisableUrlFormatting = disabled;
+    }
+
     private UiUtils() {}
+
+    /**
+     * Builds the accessibility text to be used for a given chip on the chips row.
+     * @param resources The resources to use for lookup.
+     * @param filter The filter type of the chip.
+     * @param itemCount The number of items being shown on the given chip.
+     * @return The content description to be used for the chip.
+     */
+    public static String getChipContentDescription(
+            Resources resources, @Filters.FilterType int filter, int itemCount) {
+        switch (filter) {
+            case Filters.FilterType.NONE:
+                return resources.getQuantityString(
+                        R.plurals.accessibility_download_manager_ui_generic, itemCount, itemCount);
+            case Filters.FilterType.VIDEOS:
+                return resources.getQuantityString(
+                        R.plurals.accessibility_download_manager_ui_video, itemCount, itemCount);
+            case Filters.FilterType.MUSIC:
+                return resources.getQuantityString(
+                        R.plurals.accessibility_download_manager_ui_audio, itemCount, itemCount);
+            case Filters.FilterType.IMAGES:
+                return resources.getQuantityString(
+                        R.plurals.accessibility_download_manager_ui_images, itemCount, itemCount);
+            case Filters.FilterType.SITES:
+                return resources.getQuantityString(
+                        R.plurals.accessibility_download_manager_ui_pages, itemCount, itemCount);
+            case Filters.FilterType.OTHER:
+                return resources.getQuantityString(
+                        R.plurals.accessibility_download_manager_ui_generic, itemCount, itemCount);
+            default:
+                assert false;
+                return null;
+        }
+    }
 
     /**
      * Converts {@code date} into a string meant to be used as a list header.
@@ -96,7 +142,10 @@ public final class UiUtils {
     public static CharSequence generatePrefetchCaption(OfflineItem item) {
         Context context = ContextUtils.getApplicationContext();
         String displaySize = Formatter.formatFileSize(context, item.totalSizeBytes);
-        String displayUrl = UrlFormatter.formatUrlForSecurityDisplayOmitScheme(item.pageUrl);
+        String displayUrl = item.pageUrl;
+        if (!sDisableUrlFormatting) {
+            displayUrl = UrlFormatter.formatUrlForSecurityDisplayOmitScheme(item.pageUrl);
+        }
         return context.getString(
                 R.string.download_manager_prefetch_caption, displayUrl, displaySize);
     }
@@ -109,7 +158,10 @@ public final class UiUtils {
     public static CharSequence generateGenericCaption(OfflineItem item) {
         Context context = ContextUtils.getApplicationContext();
         String displaySize = Formatter.formatFileSize(context, item.totalSizeBytes);
-        String displayUrl = UrlFormatter.formatUrlForSecurityDisplayOmitScheme(item.pageUrl);
+        String displayUrl = item.pageUrl;
+        if (!sDisableUrlFormatting) {
+            displayUrl = UrlFormatter.formatUrlForSecurityDisplayOmitScheme(item.pageUrl);
+        }
         return context.getString(
                 R.string.download_manager_list_item_description, displaySize, displayUrl);
     }
@@ -128,8 +180,23 @@ public final class UiUtils {
 
     /** @return A drawable resource id representing an icon for {@code item}. */
     public static @DrawableRes int getIconForItem(OfflineItem item) {
-        return DownloadUtils.getIconResId(Filters.offlineItemFilterToDownloadFilter(item.filter),
-                DownloadUtils.IconSize.DP_24);
+        switch (Filters.fromOfflineItem(item)) {
+            case Filters.FilterType.NONE:
+                return R.drawable.ic_file_download_24dp;
+            case Filters.FilterType.SITES:
+                return R.drawable.ic_globe_24dp;
+            case Filters.FilterType.VIDEOS:
+                return R.drawable.ic_videocam_24dp;
+            case Filters.FilterType.MUSIC:
+                return R.drawable.ic_music_note_24dp;
+            case Filters.FilterType.IMAGES:
+                return R.drawable.ic_drive_image_24dp;
+            case Filters.FilterType.DOCUMENT:
+                return R.drawable.ic_drive_document_24dp;
+            case Filters.FilterType.OTHER: // Intentional fallthrough.
+            default:
+                return R.drawable.ic_drive_file_24dp;
+        }
     }
 
     /**

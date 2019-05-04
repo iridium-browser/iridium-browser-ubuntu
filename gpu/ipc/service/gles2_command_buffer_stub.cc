@@ -22,6 +22,7 @@
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/gpu_memory_buffer_support.h"
 #include "gpu/command_buffer/common/mailbox.h"
+#include "gpu/command_buffer/common/presentation_feedback_utils.h"
 #include "gpu/command_buffer/common/swap_buffers_flags.h"
 #include "gpu/command_buffer/service/gl_context_virtual.h"
 #include "gpu/command_buffer/service/gl_state_restorer_impl.h"
@@ -104,6 +105,7 @@ gpu::ContextResult GLES2CommandBufferStub::Initialize(
         gmb_factory ? gmb_factory->AsImageFactory() : nullptr,
         manager->watchdog() /* progress_reporter */,
         manager->gpu_feature_info(), manager->discardable_manager(),
+        manager->passthrough_discardable_manager(),
         manager->shared_image_manager());
   }
 
@@ -228,6 +230,9 @@ gpu::ContextResult GLES2CommandBufferStub::Initialize(
   }
 
   if (context_group_->use_passthrough_cmd_decoder()) {
+    // Virtualized contexts don't work with passthrough command decoder.
+    // See https://crbug.com/914976
+    use_virtualized_gl_context_ = false;
     // When using the passthrough command decoder, only share with other
     // contexts in the explicitly requested share group
     if (share_command_buffer_stub) {
@@ -398,13 +403,8 @@ void GLES2CommandBufferStub::BufferPresented(
     const gfx::PresentationFeedback& feedback) {
   SwapBufferParams params = pending_presented_params_.front();
   pending_presented_params_.pop_front();
-
-  if (params.flags & gpu::SwapBuffersFlags::kPresentationFeedback ||
-      (params.flags & gpu::SwapBuffersFlags::kVSyncParams &&
-       feedback.flags & gfx::PresentationFeedback::kVSync)) {
-    Send(new GpuCommandBufferMsg_BufferPresented(route_id_, params.swap_id,
-                                                 feedback));
-  }
+  Send(new GpuCommandBufferMsg_BufferPresented(route_id_, params.swap_id,
+                                               feedback));
 }
 
 void GLES2CommandBufferStub::AddFilter(IPC::MessageFilter* message_filter) {
@@ -427,6 +427,8 @@ void GLES2CommandBufferStub::OnTakeFrontBuffer(const Mailbox& mailbox) {
 
 void GLES2CommandBufferStub::OnReturnFrontBuffer(const Mailbox& mailbox,
                                                  bool is_lost) {
+  // No need to pull texture updates.
+  DCHECK(!context_group_->mailbox_manager()->UsesSync());
   gles2_decoder_->ReturnFrontBuffer(mailbox, is_lost);
 }
 

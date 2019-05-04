@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/trace_event/memory_usage_estimator.h"
@@ -121,7 +121,7 @@ bool MemBackendImpl::SetMaxSize(int64_t max_bytes) {
   return true;
 }
 
-int MemBackendImpl::MaxFileSize() const {
+int64_t MemBackendImpl::MaxFileSize() const {
   return max_size_ / 8;
 }
 
@@ -165,6 +165,23 @@ net::CacheType MemBackendImpl::GetCacheType() const {
 
 int32_t MemBackendImpl::GetEntryCount() const {
   return static_cast<int32_t>(entries_.size());
+}
+
+net::Error MemBackendImpl::OpenOrCreateEntry(const std::string& key,
+                                             net::RequestPriority priority,
+                                             EntryWithOpened* entry_struct,
+                                             CompletionOnceCallback callback) {
+  net::Error rv = OpenEntry(key, priority, &(entry_struct->entry),
+                            CompletionOnceCallback());
+  if (rv == net::OK) {
+    entry_struct->opened = true;
+    return rv;
+  }
+  // Key was not opened, try creating it instead.
+  rv = CreateEntry(key, priority, &(entry_struct->entry),
+                   CompletionOnceCallback());
+  entry_struct->opened = false;
+  return rv;
 }
 
 net::Error MemBackendImpl::OpenEntry(const std::string& key,

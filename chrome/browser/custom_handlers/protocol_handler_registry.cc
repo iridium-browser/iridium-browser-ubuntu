@@ -21,7 +21,6 @@
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_prefs/user_prefs.h"
@@ -29,7 +28,6 @@
 #include "content/public/browser/child_process_security_policy.h"
 #include "net/base/network_delegate.h"
 #include "net/url_request/url_request_redirect_job.h"
-#include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
 using content::ChildProcessSecurityPolicy;
@@ -66,55 +64,6 @@ bool ShouldRemoveHandlersNotInOS() {
 
 // IOThreadDelegate ------------------------------------------------------------
 
-// IOThreadDelegate is an IO thread specific object. Access to the class should
-// all be done via the IO thread. The registry living on the UI thread makes
-// a best effort to update the IO object after local updates are completed.
-class ProtocolHandlerRegistry::IOThreadDelegate
-    : public base::RefCountedThreadSafe<
-          ProtocolHandlerRegistry::IOThreadDelegate> {
- public:
-  // Creates a new instance. If |enabled| is true the registry is considered
-  // enabled on the IO thread.
-  explicit IOThreadDelegate(bool enabled);
-
-  // Returns true if the protocol has a default protocol handler.
-  // Should be called only from the IO thread.
-  bool IsHandledProtocol(const std::string& scheme) const;
-
-  // Clears the default for the provided protocol.
-  // Should be called only from the IO thread.
-  void ClearDefault(const std::string& scheme);
-
-  // Makes this ProtocolHandler the default handler for its protocol.
-  // Should be called only from the IO thread.
-  void SetDefault(const ProtocolHandler& handler);
-
-  // Creates a URL request job for the given request if there is a matching
-  // protocol handler, returns NULL otherwise.
-  net::URLRequestJob* MaybeCreateJob(
-      net::URLRequest* request, net::NetworkDelegate* network_delegate) const;
-
-  // Indicate that the registry has been enabled in the IO thread's
-  // copy of the data.
-  void Enable() { enabled_ = true; }
-
-  // Indicate that the registry has been disabled in the IO thread's copy of
-  // the data.
-  void Disable() { enabled_ = false; }
-
- private:
-  friend class base::RefCountedThreadSafe<IOThreadDelegate>;
-  virtual ~IOThreadDelegate();
-
-  // Copy of protocol handlers use only on the IO thread.
-  ProtocolHandlerRegistry::ProtocolHandlerMap default_handlers_;
-
-  // Is the registry enabled on the IO thread.
-  bool enabled_;
-
-  DISALLOW_COPY_AND_ASSIGN(IOThreadDelegate);
-};
-
 ProtocolHandlerRegistry::IOThreadDelegate::IOThreadDelegate(bool)
     : enabled_(true) {}
 ProtocolHandlerRegistry::IOThreadDelegate::~IOThreadDelegate() {}
@@ -138,6 +87,21 @@ void ProtocolHandlerRegistry::IOThreadDelegate::SetDefault(
   default_handlers_.insert(std::make_pair(handler.protocol(), handler));
 }
 
+GURL ProtocolHandlerRegistry::IOThreadDelegate::Translate(
+    const GURL& url) const {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  ProtocolHandler handler = LookupHandler(default_handlers_, url.scheme());
+  if (handler.IsEmpty())
+    return GURL();
+
+  GURL translated_url(handler.TranslateUrl(url));
+  if (!translated_url.is_valid())
+    return GURL();
+
+  return translated_url;
+}
+
 // Create a new job for the supplied |URLRequest| if a default handler
 // is registered and the associated handler is able to interpret
 // the url from |request|.
@@ -145,19 +109,24 @@ net::URLRequestJob* ProtocolHandlerRegistry::IOThreadDelegate::MaybeCreateJob(
     net::URLRequest* request, net::NetworkDelegate* network_delegate) const {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  ProtocolHandler handler = LookupHandler(default_handlers_,
-                                          request->url().scheme());
-  if (handler.IsEmpty())
-    return NULL;
-
-  GURL translated_url(handler.TranslateUrl(request->url()));
-  if (!translated_url.is_valid())
-    return NULL;
+  GURL translated_url(Translate(request->url()));
+  if (translated_url.is_empty())
+    return nullptr;
 
   return new net::URLRequestRedirectJob(
       request, network_delegate, translated_url,
       net::URLRequestRedirectJob::REDIRECT_307_TEMPORARY_REDIRECT,
       "Protocol Handler Registry");
+}
+
+void ProtocolHandlerRegistry::IOThreadDelegate::Enable() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  enabled_ = true;
+}
+
+void ProtocolHandlerRegistry::IOThreadDelegate::Disable() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  enabled_ = false;
 }
 
 // JobInterceptorFactory -------------------------------------------------------
@@ -379,11 +348,11 @@ void ProtocolHandlerRegistry::InstallDefaultsForChromeOS() {
   AddPredefinedHandler(
       ProtocolHandler::CreateProtocolHandler(
           "mailto",
-          GURL(l10n_util::GetStringUTF8(IDS_GOOGLE_MAILTO_HANDLER_URL))));
+          GURL("https://mail.google.com/mail/?extsrc=mailto&amp;url=%s")));
   AddPredefinedHandler(
       ProtocolHandler::CreateProtocolHandler(
           "webcal",
-          GURL(l10n_util::GetStringUTF8(IDS_GOOGLE_WEBCAL_HANDLER_URL))));
+          GURL("https://www.google.com/calendar/render?cid=%s")));
 #else
   NOTREACHED();  // this method should only ever be called in chromeos.
 #endif

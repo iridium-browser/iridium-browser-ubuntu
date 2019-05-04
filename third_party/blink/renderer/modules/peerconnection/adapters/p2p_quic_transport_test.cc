@@ -6,145 +6,102 @@
 #include "net/quic/test_task_runner.h"
 #include "net/test/gtest_util.h"
 #include "net/third_party/quic/core/tls_client_handshaker.h"
+#include "net/third_party/quic/core/tls_server_handshaker.h"
 #include "net/third_party/quic/test_tools/mock_clock.h"
+#include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_crypto_config_factory_impl.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_packet_transport.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_transport_factory_impl.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_transport_impl.h"
-#include "third_party/webrtc/rtc_base/rtccertificate.h"
-#include "third_party/webrtc/rtc_base/sslfingerprint.h"
-#include "third_party/webrtc/rtc_base/sslidentity.h"
+#include "third_party/blink/renderer/modules/peerconnection/adapters/test/mock_p2p_quic_stream_delegate.h"
+#include "third_party/blink/renderer/modules/peerconnection/adapters/test/mock_p2p_quic_transport_delegate.h"
+#include "third_party/webrtc/rtc_base/rtc_certificate.h"
+#include "third_party/webrtc/rtc_base/ssl_fingerprint.h"
+#include "third_party/webrtc/rtc_base/ssl_identity.h"
 
 namespace blink {
 
 namespace {
 
-// The types of callbacks that can be fired on a P2PQuicTransport::Delegate.
-enum class TransportCallbackType {
-  kNone,
-  kOnRemoteStopped,
-  kOnConnectionFailed,
-  kOnConnected,
-  kOnStream
-};
+using testing::_;
+using testing::ElementsAreArray;
+using testing::Invoke;
+using testing::InvokeWithoutArgs;
+using ::testing::MakePolymorphicAction;
+using ::testing::PolymorphicAction;
 
-// The types of callbacks that can be fired on a P2PQuicStream::Delegate.
-enum class StreamCallbackType { kNone, kOnRemoteReset, kOnRemoteFinish };
+const uint8_t kTriggerRemoteStreamPhrase[] = {'o', 'p', 'e', 'n', ' ', 's',
+                                              'e', 's', 'a', 'm', 'e'};
+const uint32_t kTransportWriteBufferSize = 100 * 1024;
+const uint32_t kTransportDelegateReadBufferSize = 100 * 1024;
 
-// The QuicStreamDelegate implements counters for callbacks. It can also set
-// expectations for a specific callback. When an expectation is set the
-// quic::TestTaskRunner drives the test until the callbacks have been fired, and
-// we are no longer expecting the callback.
-class QuicStreamDelegateForTesting final : public P2PQuicStream::Delegate {
+// A custom gmock Action that fires the given callback. This is used in
+// conjuction with the CallbackRunLoop in order to drive the TestTaskRunner
+// until callbacks are fired. For example:
+//   CallbackRunLoop run_loop(runner());
+//   EXPECT_CALL(&object, foo())
+//       .WillOnce(FireCallback(run_loop.CreateCallback()));
+//   run_loop.RunUntilCallbacksFired(task_runner);
+class FireCallbackAction {
  public:
-  ~QuicStreamDelegateForTesting() override {}
+  FireCallbackAction(base::RepeatingCallback<void()> callback)
+      : callback_(callback) {}
 
-  void OnRemoteReset() override {
-    if (callback_type_expected_ == StreamCallbackType::kOnRemoteReset) {
-      callback_type_expected_ = StreamCallbackType::kNone;
-    }
-    remote_reset_count_++;
-  };
-
-  void OnRemoteFinish() override {
-    if (callback_type_expected_ == StreamCallbackType::kOnRemoteFinish) {
-      callback_type_expected_ = StreamCallbackType::kNone;
-    }
-    remote_finish_count_++;
-  };
-
-  int remote_reset_count() { return remote_reset_count_; }
-
-  int remote_finish_count() { return remote_finish_count_; }
-
-  // Sets the type of callback expected to be called.
-  void ExpectCallback(StreamCallbackType callback_type) {
-    callback_type_expected_ = callback_type;
-  }
-
-  // Returns if we are expecting a callback that hasn't been fired yet.
-  bool IsExpectingCallback() const {
-    return callback_type_expected_ != StreamCallbackType::kNone;
+  template <typename Result, typename ArgumentTuple>
+  Result Perform(const ArgumentTuple& args) const {
+    callback_.Run();
   }
 
  private:
-  int remote_reset_count_ = 0;
-  int remote_finish_count_ = 0;
-  StreamCallbackType callback_type_expected_ = StreamCallbackType::kNone;
+  base::RepeatingCallback<void()> callback_;
 };
 
-// Implements counters for callbacks. It can also set expectations for a
-// specific callback. When an expectation is set the quic::TestTaskRunner
-// drives the test until the callbacks have been fired, and we are no longer
-// expecting the callback.
+// Returns the custom gmock PolymorphicAction created from the
+// FireCallbackAction above.
+PolymorphicAction<FireCallbackAction> FireCallback(
+    base::RepeatingCallback<void()> callback) {
+  return MakePolymorphicAction(FireCallbackAction(callback));
+}
+
+// A helper object that can drive a TestTaskRunner's tasks, until
+// callbacks are fired.
 //
-// TODO(https://crbug.com/874296): If these files get moved to the platform
-// directory we will run the tests in a different test environment. In that case
-// it will make more sense to use the TestCompletionCallback and the RunLoop for
-// driving the test.
-class QuicTransportDelegateForTest final : public P2PQuicTransport::Delegate {
+// TODO(https://crbug.com/874296): If the test files get moved to the platform
+// directory we will run the tests in a different test environment. In that
+// case it will make more sense to use the TestCompletionCallback and the
+// RunLoop for driving the test.
+class CallbackRunLoop {
  public:
-  ~QuicTransportDelegateForTest() override {}
-  void OnRemoteStopped() override {
-    if (callback_type_expected_ == TransportCallbackType::kOnRemoteStopped) {
-      callback_type_expected_ = TransportCallbackType::kNone;
+  CallbackRunLoop(scoped_refptr<net::test::TestTaskRunner> task_runner)
+      : task_runner_(task_runner) {}
+
+  // Drives the run loop until all created callbacks have been fired.
+  // This is done using the |task_runner_|, which runs the tasks
+  // in the correct order and then advances the quic::MockClock to the time the
+  // task is run.
+  void RunUntilCallbacksFired() {
+    while (callback_counter_ != 0) {
+      ASSERT_GT(task_runner_->GetPostedTasks().size(), 0u);
+      task_runner_->RunNextTask();
     }
-    stopped_count_++;
   }
 
-  void OnConnectionFailed(const std::string& error_details,
-                          bool from_remote) override {
-    if (callback_type_expected_ == TransportCallbackType::kOnConnectionFailed) {
-      callback_type_expected_ = TransportCallbackType::kNone;
-    }
-    connection_failed_count_++;
+  // Creates a callback and increments the |callback_counter_|. The callback,
+  // when fired, will decrement the counter. This callback must only
+  // be Run() once (it is a RepeatingCallback because MakePolymorphicAction()
+  // requires that the action is COPYABLE).
+  base::RepeatingCallback<void()> CreateCallback() {
+    callback_counter_++;
+    return base::BindRepeating(&CallbackRunLoop::OnCallbackFired,
+                               base::Unretained(this));
   }
-
-  void OnConnected() override {
-    if (callback_type_expected_ == TransportCallbackType::kOnConnected) {
-      callback_type_expected_ = TransportCallbackType::kNone;
-    }
-    connected_count_++;
-  }
-
-  // We store the remotely created stream.
-  void OnStream(P2PQuicStream* stream) override {
-    if (callback_type_expected_ == TransportCallbackType::kOnStream) {
-      callback_type_expected_ = TransportCallbackType::kNone;
-    }
-    streams_.push_back(static_cast<P2PQuicStreamImpl*>(stream));
-    on_stream_count_++;
-  }
-
-  int stopped_count() const { return stopped_count_; }
-
-  int connection_failed_count() const { return connection_failed_count_; }
-
-  int connected_count() const { return connected_count_; }
-
-  int on_stream_count() const { return on_stream_count_; }
-
-  // Sets the type of callback expected to be called.
-  void ExpectCallback(TransportCallbackType callback_type) {
-    callback_type_expected_ = callback_type;
-  }
-
-  // Returns if we are expecting a callback that hasn't been fired yet.
-  bool IsExpectingCallback() const {
-    return callback_type_expected_ != TransportCallbackType::kNone;
-  }
-
-  std::vector<P2PQuicStreamImpl*> streams() const { return streams_; }
 
  private:
-  TransportCallbackType callback_type_expected_ = TransportCallbackType::kNone;
-  int stopped_count_ = 0;
-  int connection_failed_count_ = 0;
-  int connected_count_ = 0;
-  int on_stream_count_ = 0;
-  // The delegates created for each stream as a result of the remote side
-  // creating streams and sending data (triggering OnStream). P2PQuicStreamsImpl
-  // are owned by the P2PQuicTransport.
-  std::vector<P2PQuicStreamImpl*> streams_;
+  void OnCallbackFired() { callback_counter_--; }
+
+  scoped_refptr<net::test::TestTaskRunner> task_runner_;
+  // Incremented when a callback is created and decremented when the returned
+  // callback is later Run().
+  size_t callback_counter_ = 0;
 };
 
 // This is a fake packet transport to be used by the P2PQuicTransportImpl. It
@@ -220,7 +177,7 @@ class FakePacketTransport : public P2PQuicPacketTransport,
     delegate_->OnPacketDataReceived(data, data_len);
   }
 
-  int last_packet_num() { return last_packet_num_; }
+  uint64_t last_packet_num() { return last_packet_num_; }
 
  private:
   // Wraps the FakePacketTransport so that we can pass in a raw pointer that can
@@ -271,12 +228,15 @@ class FakePacketTransport : public P2PQuicPacketTransport,
   quic::MockClock* clock_;
 };
 
-// A helper class to bundle test objects together.
+// A helper class to bundle test objects together. It keeps track of the
+// P2PQuicTransport, P2PQuicStream and the associated delegate objects. This
+// also keeps track of when callbacks are expected on the delegate objects,
+// which allows running the TestTaskRunner tasks until they have been fired.
 class QuicPeerForTest {
  public:
   QuicPeerForTest(
       std::unique_ptr<FakePacketTransport> packet_transport,
-      std::unique_ptr<QuicTransportDelegateForTest> quic_transport_delegate,
+      std::unique_ptr<MockP2PQuicTransportDelegate> quic_transport_delegate,
       std::unique_ptr<P2PQuicTransportImpl> quic_transport,
       rtc::scoped_refptr<rtc::RTCCertificate> certificate)
       : packet_transport_(std::move(packet_transport)),
@@ -284,9 +244,28 @@ class QuicPeerForTest {
         quic_transport_(std::move(quic_transport)),
         certificate_(certificate) {}
 
+  // A helper that creates a stream and creates and attaches a delegate.
+  void CreateStreamWithDelegate() {
+    stream_ = quic_transport_->CreateStream();
+    stream_delegate_ = std::make_unique<MockP2PQuicStreamDelegate>();
+    stream_->SetDelegate(stream_delegate_.get());
+    stream_id_ = stream_->id();
+  }
+
+  // When a remote stream is created via P2PQuicTransport::Delegate::OnStream,
+  // this is called to set the stream.
+  void SetStreamAndDelegate(
+      P2PQuicStreamImpl* stream,
+      std::unique_ptr<MockP2PQuicStreamDelegate> stream_delegate) {
+    DCHECK(stream);
+    stream_ = stream;
+    stream_id_ = stream->id();
+    stream_delegate_ = std::move(stream_delegate);
+  }
+
   FakePacketTransport* packet_transport() { return packet_transport_.get(); }
 
-  QuicTransportDelegateForTest* quic_transport_delegate() {
+  MockP2PQuicTransportDelegate* quic_transport_delegate() {
     return quic_transport_delegate_.get();
   }
 
@@ -294,9 +273,26 @@ class QuicPeerForTest {
 
   rtc::scoped_refptr<rtc::RTCCertificate> certificate() { return certificate_; }
 
+  P2PQuicStreamImpl* stream() const { return stream_; }
+
+  MockP2PQuicStreamDelegate* stream_delegate() const {
+    return stream_delegate_.get();
+  }
+
+  quic::QuicStreamId stream_id() const { return stream_id_; }
+
  private:
   std::unique_ptr<FakePacketTransport> packet_transport_;
-  std::unique_ptr<QuicTransportDelegateForTest> quic_transport_delegate_;
+  std::unique_ptr<MockP2PQuicTransportDelegate> quic_transport_delegate_;
+  // The corresponding delegate to |stream_|.
+  std::unique_ptr<MockP2PQuicStreamDelegate> stream_delegate_ = nullptr;
+  // Created as a result of CreateStreamWithDelegate() or RemoteStreamCreated().
+  // Owned by the |quic_transport_|.
+  P2PQuicStreamImpl* stream_ = nullptr;
+  // The corresponding ID for |stream_|. This can be used to check if the stream
+  // is closed at the transport level (after the stream object could be
+  // deleted).
+  quic::QuicStreamId stream_id_;
   std::unique_ptr<P2PQuicTransportImpl> quic_transport_;
   rtc::scoped_refptr<rtc::RTCCertificate> certificate_;
 };
@@ -310,10 +306,10 @@ rtc::scoped_refptr<rtc::RTCCertificate> CreateTestCertificate() {
 }
 
 // Allows faking a failing handshake.
-class FailingProofVerifier : public quic::ProofVerifier {
+class FailingProofVerifierStub : public quic::ProofVerifier {
  public:
-  FailingProofVerifier() {}
-  ~FailingProofVerifier() override {}
+  FailingProofVerifierStub() {}
+  ~FailingProofVerifierStub() override {}
 
   // ProofVerifier override.
   quic::QuicAsyncStatus VerifyProof(
@@ -346,6 +342,70 @@ class FailingProofVerifier : public quic::ProofVerifier {
     return nullptr;
   }
 };
+
+// A dummy implementation of a quic::ProofSource.
+class ProofSourceStub : public quic::ProofSource {
+ public:
+  ProofSourceStub() {}
+  ~ProofSourceStub() override {}
+
+  // ProofSource override.
+  void GetProof(const quic::QuicSocketAddress& server_addr,
+                const quic::QuicString& hostname,
+                const quic::QuicString& server_config,
+                quic::QuicTransportVersion transport_version,
+                quic::QuicStringPiece chlo_hash,
+                std::unique_ptr<Callback> callback) override {
+    quic::QuicCryptoProof proof;
+    proof.signature = "Test signature";
+    proof.leaf_cert_scts = "Test timestamp";
+    callback->Run(true, GetCertChain(server_addr, hostname), proof,
+                  nullptr /* details */);
+  }
+
+  quic::QuicReferenceCountedPointer<Chain> GetCertChain(
+      const quic::QuicSocketAddress& server_address,
+      const quic::QuicString& hostname) override {
+    std::vector<quic::QuicString> certs;
+    certs.push_back("Test cert");
+    return quic::QuicReferenceCountedPointer<Chain>(
+        new ProofSource::Chain(certs));
+  }
+  void ComputeTlsSignature(
+      const quic::QuicSocketAddress& server_address,
+      const quic::QuicString& hostname,
+      uint16_t signature_algorithm,
+      quic::QuicStringPiece in,
+      std::unique_ptr<SignatureCallback> callback) override {
+    callback->Run(true, "Test signature");
+  }
+};
+
+// Creates crypto configs that will fail a QUIC handshake.
+class FailingQuicCryptoConfigFactory final : public P2PQuicCryptoConfigFactory {
+ public:
+  FailingQuicCryptoConfigFactory(quic::QuicRandom* quic_random)
+      : quic_random_(quic_random) {}
+
+  std::unique_ptr<quic::QuicCryptoClientConfig> CreateClientCryptoConfig()
+      override {
+    return std::make_unique<quic::QuicCryptoClientConfig>(
+        std::make_unique<FailingProofVerifierStub>(),
+        quic::TlsClientHandshaker::CreateSslCtx());
+  }
+
+  std::unique_ptr<quic::QuicCryptoServerConfig> CreateServerCryptoConfig()
+      override {
+    return std::make_unique<quic::QuicCryptoServerConfig>(
+        quic::QuicCryptoServerConfig::TESTING, quic_random_,
+        std::make_unique<ProofSourceStub>(), quic::KeyExchangeSource::Default(),
+        quic::TlsServerHandshaker::CreateSslCtx());
+  }
+
+ private:
+  quic::QuicRandom* quic_random_;
+};
+
 }  // namespace
 
 // Unit tests for the P2PQuicTransport, using an underlying fake packet
@@ -359,7 +419,14 @@ class FailingProofVerifier : public quic::ProofVerifier {
 // callbacks have been fired.
 class P2PQuicTransportTest : public testing::Test {
  public:
-  P2PQuicTransportTest() {}
+  P2PQuicTransportTest() {
+    // Quic crashes if packets are sent at time 0, and the clock defaults to 0.
+    clock_.AdvanceTime(quic::QuicTime::Delta::FromMilliseconds(1000));
+    quic_random_ = quic::QuicRandom::GetInstance();
+    runner_ = base::MakeRefCounted<net::test::TestTaskRunner>(&clock_);
+    alarm_factory_ =
+        std::make_unique<net::QuicChromiumAlarmFactory>(runner_.get(), &clock_);
+  }
 
   ~P2PQuicTransportTest() override {
     // This must be done before desctructing the transports so that we don't
@@ -370,120 +437,75 @@ class P2PQuicTransportTest : public testing::Test {
         client_peer_->packet_transport());
   }
 
-  // Connects both peer's underlying transports and creates both
-  // P2PQuicTransportImpls.
-  void Initialize(bool can_respond_to_crypto_handshake = true) {
-    // Quic crashes if packets are sent at time 0, and the clock defaults to 0.
-    clock_.AdvanceTime(quic::QuicTime::Delta::FromMilliseconds(1000));
-    runner_ = new net::test::TestTaskRunner(&clock_);
-    net::QuicChromiumAlarmFactory* alarm_factory =
-        new net::QuicChromiumAlarmFactory(runner_.get(), &clock_);
-    quic_transport_factory_ = std::make_unique<P2PQuicTransportFactoryImpl>(
-        &clock_, std::unique_ptr<net::QuicChromiumAlarmFactory>(alarm_factory));
-
-    std::unique_ptr<FakePacketTransport> client_packet_transport =
-        std::make_unique<FakePacketTransport>(alarm_factory, &clock_);
-    std::unique_ptr<FakePacketTransport> server_packet_transport =
-        std::make_unique<FakePacketTransport>(alarm_factory, &clock_);
+  // Supplying the |client_crypto_factory| and |server_crypto_factory| allows
+  // testing a failing QUIC handshake. The |client_certificate| and
+  // |server_certificate| must be the same certificates used in the crypto
+  // factories.
+  void Initialize(
+      std::unique_ptr<P2PQuicCryptoConfigFactory> client_crypto_factory,
+      std::unique_ptr<P2PQuicCryptoConfigFactory> server_crypto_factory) {
+    auto client_packet_transport =
+        std::make_unique<FakePacketTransport>(alarm_factory_.get(), &clock_);
+    auto server_packet_transport =
+        std::make_unique<FakePacketTransport>(alarm_factory_.get(), &clock_);
     // Connect the transports so that they can speak to each other.
     client_packet_transport->ConnectPeerTransport(
         server_packet_transport.get());
     server_packet_transport->ConnectPeerTransport(
         client_packet_transport.get());
-    rtc::scoped_refptr<rtc::RTCCertificate> client_cert =
-        CreateTestCertificate();
 
-    std::unique_ptr<QuicTransportDelegateForTest>
-        client_quic_transport_delegate =
-            std::make_unique<QuicTransportDelegateForTest>();
-    std::vector<rtc::scoped_refptr<rtc::RTCCertificate>> client_certificates;
-    client_certificates.push_back(client_cert);
-    P2PQuicTransportConfig client_config(client_quic_transport_delegate.get(),
-                                         client_packet_transport.get(),
-                                         client_certificates);
-    client_config.is_server = false;
-    client_config.can_respond_to_crypto_handshake =
-        can_respond_to_crypto_handshake;
-    // We can't downcast a unique_ptr to an object, so we have to release, cast
-    // it, then create a unique_ptr of the downcasted pointer.
-    P2PQuicTransportImpl* client_quic_transport_ptr =
-        static_cast<P2PQuicTransportImpl*>(
-            quic_transport_factory_
-                ->CreateQuicTransport(std::move(client_config))
-                .release());
+    rtc::scoped_refptr<rtc::RTCCertificate> client_certificate =
+        CreateTestCertificate();
+    auto client_quic_transport_delegate =
+        std::make_unique<MockP2PQuicTransportDelegate>();
+    P2PQuicTransportConfig client_config(
+        quic::Perspective::IS_CLIENT, {client_certificate},
+        kTransportDelegateReadBufferSize, kTransportWriteBufferSize);
+
     std::unique_ptr<P2PQuicTransportImpl> client_quic_transport =
-        std::unique_ptr<P2PQuicTransportImpl>(client_quic_transport_ptr);
+        P2PQuicTransportImpl::Create(
+            &clock_, alarm_factory_.get(), quic_random_,
+            client_quic_transport_delegate.get(), client_packet_transport.get(),
+            client_config, std::move(client_crypto_factory));
+
     client_peer_ = std::make_unique<QuicPeerForTest>(
         std::move(client_packet_transport),
         std::move(client_quic_transport_delegate),
-        std::move(client_quic_transport), client_cert);
+        std::move(client_quic_transport), client_certificate);
 
-    std::unique_ptr<QuicTransportDelegateForTest>
-        server_quic_transport_delegate =
-            std::make_unique<QuicTransportDelegateForTest>();
+    auto server_quic_transport_delegate =
+        std::make_unique<MockP2PQuicTransportDelegate>();
 
-    rtc::scoped_refptr<rtc::RTCCertificate> server_cert =
+    rtc::scoped_refptr<rtc::RTCCertificate> server_certificate =
         CreateTestCertificate();
-    std::vector<rtc::scoped_refptr<rtc::RTCCertificate>> server_certificates;
-    server_certificates.push_back(server_cert);
-    P2PQuicTransportConfig server_config(server_quic_transport_delegate.get(),
-                                         server_packet_transport.get(),
-                                         server_certificates);
-    server_config.is_server = true;
-    server_config.can_respond_to_crypto_handshake =
-        can_respond_to_crypto_handshake;
-    P2PQuicTransportImpl* server_quic_transport_ptr =
-        static_cast<P2PQuicTransportImpl*>(
-            quic_transport_factory_
-                ->CreateQuicTransport(std::move(server_config))
-                .release());
+    P2PQuicTransportConfig server_config(
+        quic::Perspective::IS_SERVER, {server_certificate},
+        kTransportDelegateReadBufferSize, kTransportWriteBufferSize);
+
     std::unique_ptr<P2PQuicTransportImpl> server_quic_transport =
-        std::unique_ptr<P2PQuicTransportImpl>(server_quic_transport_ptr);
+        P2PQuicTransportImpl::Create(
+            &clock_, alarm_factory_.get(), quic_random_,
+            server_quic_transport_delegate.get(), server_packet_transport.get(),
+            server_config, std::move(server_crypto_factory));
+
     server_peer_ = std::make_unique<QuicPeerForTest>(
         std::move(server_packet_transport),
         std::move(server_quic_transport_delegate),
-        std::move(server_quic_transport), server_cert);
+        std::move(server_quic_transport), server_certificate);
   }
 
-  // Sets a FailingProofVerifier to the client transport before initializing
-  // the its crypto stream. This allows the client to fail the proof
-  // verification step during the crypto handshake.
+  // Connects both peer's underlying packet transports and creates both
+  // P2PQuicTransportImpls.
+  void Initialize() {
+    Initialize(std::make_unique<P2PQuicCryptoConfigFactoryImpl>(quic_random_),
+               std::make_unique<P2PQuicCryptoConfigFactoryImpl>(quic_random_));
+  }
+
+  // Uses a crypto config factory that returns a client configuration that
+  // will reject the QUIC handshake. This lets us simulate a failng handshake.
   void InitializeWithFailingProofVerification() {
-    // Allows us to initialize the crypto streams after constructing the
-    // objects.
-    Initialize(false);
-    // Create the client crypto config and insert it into the client transport.
-    std::unique_ptr<quic::ProofVerifier> proof_verifier(
-        new FailingProofVerifier);
-    std::unique_ptr<quic::QuicCryptoClientConfig> crypto_client_config =
-        std::make_unique<quic::QuicCryptoClientConfig>(
-            std::move(proof_verifier),
-            quic::TlsClientHandshaker::CreateSslCtx());
-    client_peer_->quic_transport()->set_crypto_client_config(
-        std::move(crypto_client_config));
-    // Now initialize the crypto streams.
-    client_peer_->quic_transport()->InitializeCryptoStream();
-    server_peer_->quic_transport()->InitializeCryptoStream();
-  }
-
-  // Drives the test until we are't expecting any more callbacks to be fired.
-  // This is done using the net::test::TestTaskRunner, which runs the tasks
-  // in the correct order and then advances the quic::MockClock to the time the
-  // task is run.
-  void RunUntilCallbacksFired() {
-    while (server_peer_->quic_transport_delegate()->IsExpectingCallback() ||
-           client_peer_->quic_transport_delegate()->IsExpectingCallback() ||
-           ExpectingStreamCallback()) {
-      // We shouldn't enter a case where we are expecting a callback
-      // and we're out of tasks to run.
-      ASSERT_GT(runner_->GetPostedTasks().size(), 0u);
-      runner_->RunNextTask();
-    }
-  }
-
-  bool ExpectingStreamCallback() {
-    return streams_setup_ && (client_stream_delegate_->IsExpectingCallback() ||
-                              server_stream_delegate_->IsExpectingCallback());
+    Initialize(std::make_unique<FailingQuicCryptoConfigFactory>(quic_random_),
+               std::make_unique<FailingQuicCryptoConfigFactory>(quic_random_));
   }
 
   // Drives the test by running the current tasks that are posted.
@@ -494,70 +516,64 @@ class P2PQuicTransportTest : public testing::Test {
     }
   }
 
-  // Starts the handshake, by setting the remote fingerprints and kicking off
-  // the handshake from the client.
-  void StartHandshake() {
-    std::vector<std::unique_ptr<rtc::SSLFingerprint>> server_fingerprints;
-    server_fingerprints.emplace_back(rtc::SSLFingerprint::Create(
-        "sha-256", server_peer_->certificate()->identity()));
-    // The server side doesn't currently need call this to set the remote
-    // fingerprints, but once P2P certificate verification is supported in the
-    // TLS 1.3 handshake this will ben necessary.
-    server_peer_->quic_transport()->Start(std::move(server_fingerprints));
-
-    std::vector<std::unique_ptr<rtc::SSLFingerprint>> client_fingerprints;
-    client_fingerprints.emplace_back(rtc::SSLFingerprint::Create(
-        "sha-256", client_peer_->certificate()->identity()));
-    client_peer_->quic_transport()->Start(std::move(client_fingerprints));
-  }
-
   // Sets up an initial handshake and connection between peers.
+  // This is done using a pre shared key.
   void Connect() {
-    client_peer_->quic_transport_delegate()->ExpectCallback(
-        TransportCallbackType::kOnConnected);
-    server_peer_->quic_transport_delegate()->ExpectCallback(
-        TransportCallbackType::kOnConnected);
-    StartHandshake();
-    RunUntilCallbacksFired();
-    ExpectSecureConnection();
+    CallbackRunLoop run_loop(runner());
+    EXPECT_CALL(*client_peer_->quic_transport_delegate(), OnConnected())
+        .WillOnce(FireCallback(run_loop.CreateCallback()));
+    EXPECT_CALL(*server_peer_->quic_transport_delegate(), OnConnected())
+        .WillOnce(FireCallback(run_loop.CreateCallback()));
+
+    server_peer_->quic_transport()->Start(
+        P2PQuicTransport::StartConfig("foobar"));
+    client_peer_->quic_transport()->Start(
+        P2PQuicTransport::StartConfig("foobar"));
+    run_loop.RunUntilCallbacksFired();
   }
 
   // Creates a P2PQuicStreamImpl on both the client and server side that are
-  // connected to each other.
+  // connected to each other. The client's stream is created with
+  // P2PQuicTransport::CreateStream, while the server's stream is initiated from
+  // the remote (client) side, with P2PQuicStream::Delegate::OnStream. This
+  // allows us to test at an integration level with connected streams.
   void SetupConnectedStreams() {
+    CallbackRunLoop run_loop(runner());
     // We must already have a secure connection before streams are created.
     ASSERT_TRUE(client_peer_->quic_transport()->IsEncryptionEstablished());
     ASSERT_TRUE(server_peer_->quic_transport()->IsEncryptionEstablished());
 
-    client_stream_ = client_peer_->quic_transport()->CreateStream();
-    ASSERT_TRUE(client_stream_);
-    client_stream_id_ = client_stream_->id();
-    client_stream_delegate_ = std::make_unique<QuicStreamDelegateForTesting>();
-    client_stream_->SetDelegate(client_stream_delegate_.get());
+    client_peer_->CreateStreamWithDelegate();
+    ASSERT_TRUE(client_peer_->stream());
+    ASSERT_TRUE(client_peer_->stream_delegate());
 
     // Send some data to trigger the remote side (server side) to get an
-    // incoming stream.
-    server_peer_->quic_transport_delegate()->ExpectCallback(
-        TransportCallbackType::kOnStream);
-    client_stream_->WriteOrBufferData("hello", false, nullptr);
-    RunUntilCallbacksFired();
+    // incoming stream. We capture the stream and set it's delegate when
+    // OnStream gets called on the mock object.
+    base::RepeatingCallback<void()> callback = run_loop.CreateCallback();
+    QuicPeerForTest* server_peer_ptr = server_peer_.get();
+    MockP2PQuicStreamDelegate* stream_delegate =
+        new MockP2PQuicStreamDelegate();
+    P2PQuicStream* server_stream;
+    EXPECT_CALL(*server_peer_->quic_transport_delegate(), OnStream(_))
+        .WillOnce(Invoke([&callback, &server_stream,
+                          &stream_delegate](P2PQuicStream* stream) {
+          stream->SetDelegate(stream_delegate);
+          server_stream = stream;
+          callback.Run();
+        }));
 
-    ASSERT_EQ(1u, server_peer_->quic_transport()->GetNumActiveStreams());
-    ASSERT_EQ(1u, client_peer_->quic_transport()->GetNumActiveStreams());
-    ASSERT_EQ(1u, server_peer_->quic_transport_delegate()->streams().size());
-    server_stream_ = server_peer_->quic_transport_delegate()->streams()[0];
-    ASSERT_TRUE(server_stream_);
-    server_stream_id_ = server_stream_->id();
-    server_stream_delegate_ = std::make_unique<QuicStreamDelegateForTesting>();
-    server_stream_->SetDelegate(server_stream_delegate_.get());
-    streams_setup_ = true;
-  }
-
-  void ExpectSecureConnection() {
-    EXPECT_TRUE(client_peer_->quic_transport()->IsEncryptionEstablished());
-    EXPECT_TRUE(client_peer_->quic_transport()->IsCryptoHandshakeConfirmed());
-    EXPECT_TRUE(server_peer_->quic_transport()->IsCryptoHandshakeConfirmed());
-    EXPECT_TRUE(server_peer_->quic_transport()->IsEncryptionEstablished());
+    client_peer_->stream()->WriteData(
+        VectorFromArray(kTriggerRemoteStreamPhrase),
+        /*fin=*/false);
+    run_loop.RunUntilCallbacksFired();
+    // Set the stream and delegate to the |server_peer_|, so that it can be
+    // accessed by tests later.
+    server_peer_ptr->SetStreamAndDelegate(
+        static_cast<P2PQuicStreamImpl*>(server_stream),
+        std::unique_ptr<MockP2PQuicStreamDelegate>(stream_delegate));
+    ASSERT_TRUE(client_peer_->stream());
+    ASSERT_TRUE(client_peer_->stream_delegate());
   }
 
   void ExpectConnectionNotEstablished() {
@@ -567,64 +583,26 @@ class P2PQuicTransportTest : public testing::Test {
     EXPECT_FALSE(server_peer_->quic_transport()->IsEncryptionEstablished());
   }
 
-  // Test that the callbacks were called appropriately after a successful
-  // crypto handshake.
-  void ExpectSuccessfulHandshake() {
-    EXPECT_EQ(1, client_peer_->quic_transport_delegate()->connected_count());
-    EXPECT_EQ(0, client_peer_->quic_transport_delegate()->stopped_count());
-    EXPECT_EQ(
-        0, client_peer_->quic_transport_delegate()->connection_failed_count());
-
-    EXPECT_EQ(1, server_peer_->quic_transport_delegate()->connected_count());
-    EXPECT_EQ(0, server_peer_->quic_transport_delegate()->stopped_count());
-    EXPECT_EQ(
-        0, server_peer_->quic_transport_delegate()->connection_failed_count());
-  }
-
   void ExpectTransportsClosed() {
     EXPECT_TRUE(client_peer_->quic_transport()->IsClosed());
     EXPECT_TRUE(server_peer_->quic_transport()->IsClosed());
   }
 
+  // Expects that streams of both the server and client transports are
+  // closed.
   void ExpectStreamsClosed() {
-    ASSERT_TRUE(streams_setup_);
     EXPECT_EQ(0u, client_peer_->quic_transport()->GetNumActiveStreams());
-    EXPECT_TRUE(
-        client_peer_->quic_transport()->IsClosedStream(client_stream_id_));
+    EXPECT_TRUE(client_peer_->quic_transport()->IsClosedStream(
+        client_peer()->stream_id()));
+
     EXPECT_EQ(0u, server_peer_->quic_transport()->GetNumActiveStreams());
-    EXPECT_TRUE(
-        server_peer()->quic_transport()->IsClosedStream(server_stream_id_));
+    EXPECT_TRUE(server_peer()->quic_transport()->IsClosedStream(
+        server_peer()->stream_id()));
   }
 
   // Exposes these private functions to the test.
   bool IsClientClosed() { return client_peer_->quic_transport()->IsClosed(); }
   bool IsServerClosed() { return server_peer_->quic_transport()->IsClosed(); }
-
-  // Tests that the callbacks were appropriately called after the client
-  // stops the connection. Only the server should receive the OnRemoteStopped()
-  // callback.
-  void ExpectClientStopped() {
-    ExpectTransportsClosed();
-    EXPECT_EQ(0, client_peer_->quic_transport_delegate()->stopped_count());
-    EXPECT_EQ(
-        0, client_peer_->quic_transport_delegate()->connection_failed_count());
-    EXPECT_EQ(1, server_peer_->quic_transport_delegate()->stopped_count());
-    EXPECT_EQ(
-        0, server_peer_->quic_transport_delegate()->connection_failed_count());
-  }
-
-  // Tests that the callbacks were appropriately called after the server
-  // stops the connection. Only the client should receive the OnRemoteStopped()
-  // callback.
-  void ExpectServerStopped() {
-    ExpectTransportsClosed();
-    EXPECT_EQ(1, client_peer_->quic_transport_delegate()->stopped_count());
-    EXPECT_EQ(
-        0, client_peer_->quic_transport_delegate()->connection_failed_count());
-    EXPECT_EQ(0, server_peer_->quic_transport_delegate()->stopped_count());
-    EXPECT_EQ(
-        0, server_peer_->quic_transport_delegate()->connection_failed_count());
-  }
 
   QuicPeerForTest* client_peer() { return client_peer_.get(); }
 
@@ -638,75 +616,114 @@ class P2PQuicTransportTest : public testing::Test {
     return server_peer_->quic_transport()->connection();
   }
 
-  P2PQuicStreamImpl* server_stream() { return server_stream_; }
+  scoped_refptr<net::test::TestTaskRunner> runner() { return runner_; }
 
-  P2PQuicStreamImpl* client_stream() { return client_stream_; }
-
-  quic::QuicStreamId server_stream_id() { return server_stream_id_; }
-
-  quic::QuicStreamId client_stream_id() { return client_stream_id_; }
-
-  QuicStreamDelegateForTesting* server_stream_delegate() {
-    return server_stream_delegate_.get();
-  }
-
-  QuicStreamDelegateForTesting* client_stream_delegate() {
-    return client_stream_delegate_.get();
+  template <wtf_size_t Size>
+  static Vector<uint8_t> VectorFromArray(const uint8_t (&array)[Size]) {
+    Vector<uint8_t> vector;
+    vector.Append(array, Size);
+    return vector;
   }
 
  private:
   quic::MockClock clock_;
+  quic::QuicRandom* quic_random_;
   // The TestTaskRunner is used by the QUIC library for setting/firing alarms.
   // We are able to explicitly run these tasks ourselves with the
   // TestTaskRunner.
   scoped_refptr<net::test::TestTaskRunner> runner_;
+  // This is eventually passed down to the QUIC library.
+  std::unique_ptr<net::QuicChromiumAlarmFactory> alarm_factory_;
 
   std::unique_ptr<P2PQuicTransportFactoryImpl> quic_transport_factory_;
   std::unique_ptr<QuicPeerForTest> client_peer_;
   std::unique_ptr<QuicPeerForTest> server_peer_;
-
-  // Stream objects, which are created with SetupConnectedStream().
-  bool streams_setup_ = false;
-  std::unique_ptr<QuicStreamDelegateForTesting> client_stream_delegate_;
-  std::unique_ptr<QuicStreamDelegateForTesting> server_stream_delegate_;
-  // The P2PQuicStreamImpls are owned by the P2PQuicTransport.
-  P2PQuicStreamImpl* client_stream_ = nullptr;
-  P2PQuicStreamImpl* server_stream_ = nullptr;
-  // We cache the values before the streams are potentially closed and deleted.
-  quic::QuicStreamId server_stream_id_;
-  quic::QuicStreamId client_stream_id_;
 };
 
-// Tests that we can connect two quic transports.
-TEST_F(P2PQuicTransportTest, HandshakeConnectsPeers) {
+// Tests that we can connect two quic transports using pre shared keys.
+TEST_F(P2PQuicTransportTest, HandshakeConnectsPeersWithPreSharedKeys) {
   Initialize();
-  Connect();
 
-  ExpectSuccessfulHandshake();
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(), OnConnected())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(), OnConnected())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+
+  server_peer()->quic_transport()->Start(
+      P2PQuicTransport::StartConfig("foobar"));
+  client_peer()->quic_transport()->Start(
+      P2PQuicTransport::StartConfig("foobar"));
+  run_loop.RunUntilCallbacksFired();
+
+  EXPECT_TRUE(client_peer()->quic_transport()->IsEncryptionEstablished());
+  EXPECT_TRUE(client_peer()->quic_transport()->IsCryptoHandshakeConfirmed());
+  EXPECT_TRUE(server_peer()->quic_transport()->IsCryptoHandshakeConfirmed());
+  EXPECT_TRUE(server_peer()->quic_transport()->IsEncryptionEstablished());
 }
 
+// Tests that we can connect two quic transports using remote certificate
+// fingerprints. Note that the fingerprints aren't currently used for
+// verification.
+TEST_F(P2PQuicTransportTest, HandshakeConnectsPeersWithRemoteCertificates) {
+  Initialize();
+
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(), OnConnected())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(), OnConnected())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+
+  // Start the handshake with the remote fingerprints.
+  std::vector<std::unique_ptr<rtc::SSLFingerprint>> server_fingerprints;
+  server_fingerprints.emplace_back(rtc::SSLFingerprint::Create(
+      "sha-256", server_peer()->certificate()->identity()));
+  server_peer()->quic_transport()->Start(
+      P2PQuicTransport::StartConfig(std::move(server_fingerprints)));
+
+  std::vector<std::unique_ptr<rtc::SSLFingerprint>> client_fingerprints;
+  client_fingerprints.emplace_back(rtc::SSLFingerprint::Create(
+      "sha-256", client_peer()->certificate()->identity()));
+  client_peer()->quic_transport()->Start(
+      P2PQuicTransport::StartConfig(std::move(client_fingerprints)));
+
+  run_loop.RunUntilCallbacksFired();
+
+  EXPECT_TRUE(client_peer()->quic_transport()->IsEncryptionEstablished());
+  EXPECT_TRUE(client_peer()->quic_transport()->IsCryptoHandshakeConfirmed());
+  EXPECT_TRUE(server_peer()->quic_transport()->IsCryptoHandshakeConfirmed());
+  EXPECT_TRUE(server_peer()->quic_transport()->IsEncryptionEstablished());
+}
 // Tests the standard case for the server side closing the connection.
 TEST_F(P2PQuicTransportTest, ServerStops) {
   Initialize();
   Connect();
-  client_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnRemoteStopped);
-  server_peer()->quic_transport()->Stop();
-  RunUntilCallbacksFired();
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(), OnRemoteStopped())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(), OnRemoteStopped())
+      .Times(0);
 
-  ExpectServerStopped();
+  server_peer()->quic_transport()->Stop();
+  run_loop.RunUntilCallbacksFired();
+
+  ExpectTransportsClosed();
 }
 
 // Tests the standard case for the client side closing the connection.
 TEST_F(P2PQuicTransportTest, ClientStops) {
   Initialize();
   Connect();
-  server_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnRemoteStopped);
-  client_peer()->quic_transport()->Stop();
-  RunUntilCallbacksFired();
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(), OnRemoteStopped())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(), OnRemoteStopped())
+      .Times(0);
 
-  ExpectClientStopped();
+  client_peer()->quic_transport()->Stop();
+  run_loop.RunUntilCallbacksFired();
+
+  ExpectTransportsClosed();
 }
 
 // Tests that if either side tries to close the connection a second time, it
@@ -714,95 +731,64 @@ TEST_F(P2PQuicTransportTest, ClientStops) {
 TEST_F(P2PQuicTransportTest, StopAfterStopped) {
   Initialize();
   Connect();
-  server_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnRemoteStopped);
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(), OnRemoteStopped())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
   client_peer()->quic_transport()->Stop();
-  RunUntilCallbacksFired();
+  run_loop.RunUntilCallbacksFired();
+
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(), OnRemoteStopped())
+      .Times(0);
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(), OnRemoteStopped())
+      .Times(0);
+
   client_peer()->quic_transport()->Stop();
   server_peer()->quic_transport()->Stop();
   RunCurrentTasks();
 
-  ExpectClientStopped();
-}
-
-// Tests that when the client closes the connection the subsequent call to
-// Start() will be ignored.
-TEST_F(P2PQuicTransportTest, ClientStopsBeforeClientStarts) {
-  Initialize();
-  server_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnRemoteStopped);
-  client_peer()->quic_transport()->Stop();
-  StartHandshake();
-  RunUntilCallbacksFired();
-
-  ExpectConnectionNotEstablished();
-  ExpectClientStopped();
-}
-
-// Tests that if the server closes the connection before the client starts the
-// handshake, the client side will already be closed and Start() will be
-// ignored.
-TEST_F(P2PQuicTransportTest, ServerStopsBeforeClientStarts) {
-  Initialize();
-  client_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnRemoteStopped);
-  server_peer()->quic_transport()->Stop();
-  StartHandshake();
-  RunUntilCallbacksFired();
-
-  ExpectConnectionNotEstablished();
-  ExpectServerStopped();
-}
-
-// Tests that when the server's connection fails and then a handshake is
-// attempted the transports will not become connected.
-TEST_F(P2PQuicTransportTest, ClientConnectionClosesBeforeHandshake) {
-  Initialize();
-  client_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
-  server_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
-  client_connection()->CloseConnection(
-      quic::QuicErrorCode::QUIC_INTERNAL_ERROR, "internal error",
-      quic::ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
-  StartHandshake();
-  RunUntilCallbacksFired();
-
-  ExpectConnectionNotEstablished();
-}
-
-// Tests that when the server's connection fails and then a handshake is
-// attempted the transports will not become connected.
-TEST_F(P2PQuicTransportTest, ServerConnectionClosesBeforeHandshake) {
-  Initialize();
-  client_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
-  server_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
-  server_connection()->CloseConnection(
-      quic::QuicErrorCode::QUIC_INTERNAL_ERROR, "internal error",
-      quic::ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
-  StartHandshake();
-  RunUntilCallbacksFired();
-
-  ExpectConnectionNotEstablished();
+  ExpectTransportsClosed();
 }
 
 // Tests that the appropriate callbacks are fired when the handshake fails.
 TEST_F(P2PQuicTransportTest, HandshakeFailure) {
   InitializeWithFailingProofVerification();
-  client_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
-  server_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
-  StartHandshake();
-  RunUntilCallbacksFired();
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, _))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, _))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
 
-  EXPECT_EQ(
-      1, client_peer()->quic_transport_delegate()->connection_failed_count());
-  EXPECT_EQ(
-      1, server_peer()->quic_transport_delegate()->connection_failed_count());
+  server_peer()->quic_transport()->Start(
+      P2PQuicTransport::StartConfig("foobar"));
+  client_peer()->quic_transport()->Start(
+      P2PQuicTransport::StartConfig("foobar"));
+  run_loop.RunUntilCallbacksFired();
+
   ExpectConnectionNotEstablished();
+  ExpectTransportsClosed();
+}
+
+// Tests that the handshake fails if the pre shared keys don't match.
+// In this case the handshake finishes, but the connection fails because packets
+// can't be decrypted.
+TEST_F(P2PQuicTransportTest, HandshakeFailsBecauseKeysDontMatch) {
+  Initialize();
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, _))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, _))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+
+  server_peer()->quic_transport()->Start(
+      P2PQuicTransport::StartConfig("foobar"));
+  client_peer()->quic_transport()->Start(
+      P2PQuicTransport::StartConfig("barfoo"));
+  run_loop.RunUntilCallbacksFired();
+
   ExpectTransportsClosed();
 }
 
@@ -811,21 +797,21 @@ TEST_F(P2PQuicTransportTest, HandshakeFailure) {
 TEST_F(P2PQuicTransportTest, ClientConnectionFailureAfterConnected) {
   Initialize();
   Connect();
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, /*from_remote=*/false))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, /*from_remote=*/true))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+
   // Close the connection with an internal QUIC error.
-  client_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
-  server_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
   client_connection()->CloseConnection(
       quic::QuicErrorCode::QUIC_INTERNAL_ERROR, "internal error",
       quic::ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
-  RunUntilCallbacksFired();
+  run_loop.RunUntilCallbacksFired();
 
   ExpectTransportsClosed();
-  EXPECT_EQ(
-      1, client_peer()->quic_transport_delegate()->connection_failed_count());
-  EXPECT_EQ(
-      1, server_peer()->quic_transport_delegate()->connection_failed_count());
 }
 
 // Tests that the appropriate callbacks are fired when the server's connection
@@ -833,21 +819,20 @@ TEST_F(P2PQuicTransportTest, ClientConnectionFailureAfterConnected) {
 TEST_F(P2PQuicTransportTest, ServerConnectionFailureAfterConnected) {
   Initialize();
   Connect();
-  // Close the connection with an internal QUIC error.
-  client_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
-  server_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, /*from_remote=*/true))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, /*from_remote=*/false))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+
   server_connection()->CloseConnection(
       quic::QuicErrorCode::QUIC_INTERNAL_ERROR, "internal error",
       quic::ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
-  RunUntilCallbacksFired();
+  run_loop.RunUntilCallbacksFired();
 
   ExpectTransportsClosed();
-  EXPECT_EQ(
-      1, client_peer()->quic_transport_delegate()->connection_failed_count());
-  EXPECT_EQ(
-      1, server_peer()->quic_transport_delegate()->connection_failed_count());
 }
 
 // Tests that closing the connection with no ACK frame does not make any
@@ -855,39 +840,41 @@ TEST_F(P2PQuicTransportTest, ServerConnectionFailureAfterConnected) {
 TEST_F(P2PQuicTransportTest, ConnectionFailureNoAckFrame) {
   Initialize();
   Connect();
-  client_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
-  server_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, _))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, _))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+
   client_connection()->CloseConnection(
       quic::QuicErrorCode::QUIC_INTERNAL_ERROR, "internal error",
       quic::ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET_WITH_NO_ACK);
-  RunUntilCallbacksFired();
+  run_loop.RunUntilCallbacksFired();
 
   ExpectTransportsClosed();
-  EXPECT_EQ(
-      1, client_peer()->quic_transport_delegate()->connection_failed_count());
-  EXPECT_EQ(
-      1, server_peer()->quic_transport_delegate()->connection_failed_count());
 }
 
 // Tests that a silent failure will only close on one side.
 TEST_F(P2PQuicTransportTest, ConnectionSilentFailure) {
   Initialize();
   Connect();
-  client_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnConnectionFailed);
+  CallbackRunLoop run_loop(runner());
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, _))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(),
+              OnConnectionFailed(_, _))
+      .Times(0);
+
   client_connection()->CloseConnection(
       quic::QuicErrorCode::QUIC_INTERNAL_ERROR, "internal error",
       quic::ConnectionCloseBehavior::SILENT_CLOSE);
-  RunUntilCallbacksFired();
+  run_loop.RunUntilCallbacksFired();
 
   EXPECT_TRUE(IsClientClosed());
-  EXPECT_EQ(
-      1, client_peer()->quic_transport_delegate()->connection_failed_count());
   EXPECT_FALSE(IsServerClosed());
-  EXPECT_EQ(
-      0, server_peer()->quic_transport_delegate()->connection_failed_count());
 }
 
 // Tests that the client transport can create a stream and an incoming stream
@@ -895,23 +882,34 @@ TEST_F(P2PQuicTransportTest, ConnectionSilentFailure) {
 TEST_F(P2PQuicTransportTest, ClientCreatesStream) {
   Initialize();
   Connect();
-  P2PQuicStreamImpl* client_stream =
-      client_peer()->quic_transport()->CreateStream();
+  CallbackRunLoop run_loop(runner());
+  client_peer()->CreateStreamWithDelegate();
+  ASSERT_TRUE(client_peer()->stream());
+
   RunCurrentTasks();
 
-  ASSERT_TRUE(client_stream);
   EXPECT_TRUE(client_peer()->quic_transport()->HasOpenDynamicStreams());
-  EXPECT_EQ(0, server_peer()->quic_transport_delegate()->on_stream_count());
   EXPECT_FALSE(server_peer()->quic_transport()->HasOpenDynamicStreams());
 
   // After sending data across it will trigger a stream to be created on the
   // server side.
-  server_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnStream);
-  client_stream->WriteOrBufferData("hello", false, nullptr);
-  RunUntilCallbacksFired();
+  MockP2PQuicStreamDelegate server_stream_delegate;
+  base::RepeatingCallback<void()> callback = run_loop.CreateCallback();
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(), OnStream(_))
+      .WillOnce(
+          Invoke([&callback, &server_stream_delegate](P2PQuicStream* stream) {
+            ASSERT_TRUE(stream);
+            // The Delegate must get immediately set to a new incoming stream.
+            stream->SetDelegate(&server_stream_delegate);
+            // Allows the run loop to run until this is fired.
+            callback.Run();
+          }));
 
-  EXPECT_EQ(1, server_peer()->quic_transport_delegate()->on_stream_count());
+  client_peer()->stream()->WriteData(
+      VectorFromArray(kTriggerRemoteStreamPhrase),
+      /*fin=*/false);
+  run_loop.RunUntilCallbacksFired();
+
   EXPECT_TRUE(server_peer()->quic_transport()->HasOpenDynamicStreams());
 }
 
@@ -920,23 +918,34 @@ TEST_F(P2PQuicTransportTest, ClientCreatesStream) {
 TEST_F(P2PQuicTransportTest, ServerCreatesStream) {
   Initialize();
   Connect();
-  P2PQuicStreamImpl* server_stream =
-      server_peer()->quic_transport()->CreateStream();
+  CallbackRunLoop run_loop(runner());
+  server_peer()->CreateStreamWithDelegate();
+  ASSERT_TRUE(server_peer()->stream());
+
   RunCurrentTasks();
 
-  ASSERT_TRUE(server_stream);
   EXPECT_TRUE(server_peer()->quic_transport()->HasOpenDynamicStreams());
-  EXPECT_EQ(0, client_peer()->quic_transport_delegate()->on_stream_count());
   EXPECT_FALSE(client_peer()->quic_transport()->HasOpenDynamicStreams());
 
   // After sending data across it will trigger a stream to be created on the
-  // client side.
-  client_peer()->quic_transport_delegate()->ExpectCallback(
-      TransportCallbackType::kOnStream);
-  server_stream->WriteOrBufferData("hello", false, nullptr);
-  RunUntilCallbacksFired();
+  // server side.
+  MockP2PQuicStreamDelegate client_stream_delegate;
+  base::RepeatingCallback<void()> callback = run_loop.CreateCallback();
+  EXPECT_CALL(*client_peer()->quic_transport_delegate(), OnStream(_))
+      .WillOnce(
+          Invoke([&callback, &client_stream_delegate](P2PQuicStream* stream) {
+            ASSERT_TRUE(stream);
+            // The Delegate must get immediately set to a new incoming stream.
+            stream->SetDelegate(&client_stream_delegate);
+            // Allows the run loop to run until this is fired.
+            callback.Run();
+          }));
 
-  EXPECT_EQ(1, client_peer()->quic_transport_delegate()->on_stream_count());
+  server_peer()->stream()->WriteData(
+      VectorFromArray(kTriggerRemoteStreamPhrase),
+      /*fin=*/false);
+  run_loop.RunUntilCallbacksFired();
+
   EXPECT_TRUE(client_peer()->quic_transport()->HasOpenDynamicStreams());
 }
 
@@ -976,11 +985,13 @@ TEST_F(P2PQuicTransportTest, ClientStreamReset) {
   Initialize();
   Connect();
   SetupConnectedStreams();
+  CallbackRunLoop run_loop(runner());
 
-  server_stream_delegate()->ExpectCallback(StreamCallbackType::kOnRemoteReset);
-  client_stream()->Reset();
-  RunUntilCallbacksFired();
+  EXPECT_CALL(*server_peer()->stream_delegate(), OnRemoteReset())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
 
+  client_peer()->stream()->Reset();
+  run_loop.RunUntilCallbacksFired();
   ExpectStreamsClosed();
 }
 
@@ -990,188 +1001,208 @@ TEST_F(P2PQuicTransportTest, ServerStreamReset) {
   Initialize();
   Connect();
   SetupConnectedStreams();
+  CallbackRunLoop run_loop(runner());
 
-  client_stream_delegate()->ExpectCallback(StreamCallbackType::kOnRemoteReset);
-  server_stream()->Reset();
-  RunUntilCallbacksFired();
+  EXPECT_CALL(*client_peer()->stream_delegate(), OnRemoteReset())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+
+  server_peer()->stream()->Reset();
+  run_loop.RunUntilCallbacksFired();
 
   ExpectStreamsClosed();
 }
 
-// Tests the basic case for calling Finish() on both sides.
-TEST_F(P2PQuicTransportTest, StreamFinishHandshake) {
+// Tests the basic case for sending a FIN bit on both sides.
+TEST_F(P2PQuicTransportTest, StreamClosedAfterSendingAndReceivingFin) {
   Initialize();
   Connect();
   SetupConnectedStreams();
+  CallbackRunLoop run_loop(runner());
 
-  server_stream_delegate()->ExpectCallback(StreamCallbackType::kOnRemoteFinish);
-  client_stream()->Finish();
-  RunUntilCallbacksFired();
+  EXPECT_CALL(*server_peer()->stream_delegate(),
+              OnDataReceived(_, /*fin=*/true))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+
+  client_peer()->stream()->WriteData({}, /*fin=*/true);
+  run_loop.RunUntilCallbacksFired();
 
   ASSERT_EQ(1u, server_peer()->quic_transport()->GetNumActiveStreams());
   ASSERT_EQ(1u, client_peer()->quic_transport()->GetNumActiveStreams());
-  EXPECT_EQ(0, client_stream_delegate()->remote_finish_count());
-  EXPECT_TRUE(client_stream()->write_side_closed());
-  EXPECT_FALSE(client_stream()->reading_stopped());
-  EXPECT_FALSE(server_stream()->write_side_closed());
-  EXPECT_TRUE(server_stream()->reading_stopped());
-  EXPECT_FALSE(
-      server_peer()->quic_transport()->IsClosedStream(server_stream_id()));
-  EXPECT_FALSE(
-      client_peer()->quic_transport()->IsClosedStream(client_stream_id()));
+  EXPECT_TRUE(client_peer()->stream()->write_side_closed());
+  EXPECT_FALSE(client_peer()->stream()->reading_stopped());
+  EXPECT_FALSE(server_peer()->stream()->write_side_closed());
+  EXPECT_TRUE(server_peer()->stream()->reading_stopped());
+  EXPECT_FALSE(server_peer()->quic_transport()->IsClosedStream(
+      server_peer()->stream_id()));
+  EXPECT_FALSE(client_peer()->quic_transport()->IsClosedStream(
+      client_peer()->stream_id()));
 
-  client_stream_delegate()->ExpectCallback(StreamCallbackType::kOnRemoteFinish);
-  server_stream()->Finish();
-  RunUntilCallbacksFired();
+  EXPECT_CALL(*client_peer()->stream_delegate(),
+              OnDataReceived(_, /*fin=*/true))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+
+  server_peer()->stream()->WriteData({}, /*fin=*/true);
+  run_loop.RunUntilCallbacksFired();
+
   // This is required so that the client acks the FIN back to the server side
   // and the server side removes its zombie streams.
   RunCurrentTasks();
 
   ASSERT_EQ(0u, server_peer()->quic_transport()->GetNumActiveStreams());
   ASSERT_EQ(0u, client_peer()->quic_transport()->GetNumActiveStreams());
-  EXPECT_EQ(1, server_stream_delegate()->remote_finish_count());
-  EXPECT_EQ(1, client_stream_delegate()->remote_finish_count());
-  EXPECT_TRUE(
-      server_peer()->quic_transport()->IsClosedStream(server_stream_id()));
-  EXPECT_TRUE(
-      client_peer()->quic_transport()->IsClosedStream(client_stream_id()));
+  EXPECT_TRUE(server_peer()->quic_transport()->IsClosedStream(
+      server_peer()->stream_id()));
+  EXPECT_TRUE(client_peer()->quic_transport()->IsClosedStream(
+      client_peer()->stream_id()));
 }
 
-// Tests that if a Reset() is called after Finish(), both sides close down
-// properly.
-TEST_F(P2PQuicTransportTest, StreamResetAfterFinish) {
+// Tests that if a Reset() is called after sending a FIN bit, both sides close
+// down properly.
+TEST_F(P2PQuicTransportTest, StreamResetAfterSendingFin) {
   Initialize();
   Connect();
   SetupConnectedStreams();
+  CallbackRunLoop run_loop(runner());
 
-  server_stream_delegate()->ExpectCallback(StreamCallbackType::kOnRemoteFinish);
-  client_stream()->Finish();
-  RunUntilCallbacksFired();
+  EXPECT_CALL(*server_peer()->stream_delegate(),
+              OnDataReceived(_, /*fin=*/true))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
 
-  server_stream_delegate()->ExpectCallback(StreamCallbackType::kOnRemoteReset);
-  client_stream()->Reset();
-  RunUntilCallbacksFired();
+  client_peer()->stream()->WriteData({}, /*fin=*/true);
+  run_loop.RunUntilCallbacksFired();
+
+  EXPECT_CALL(*server_peer()->stream_delegate(), OnRemoteReset())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*client_peer()->stream_delegate(), OnRemoteReset()).Times(0);
+
+  client_peer()->stream()->Reset();
+  run_loop.RunUntilCallbacksFired();
 
   ExpectStreamsClosed();
-  EXPECT_EQ(0, client_stream_delegate()->remote_reset_count());
 }
 
 // Tests that if a Reset() is called after receiving a stream frame with the FIN
 // bit set from the remote side, both sides close down properly.
-TEST_F(P2PQuicTransportTest, StreamResetAfterRemoteFinish) {
+TEST_F(P2PQuicTransportTest, StreamResetAfterReceivingFin) {
   Initialize();
   Connect();
   SetupConnectedStreams();
+  CallbackRunLoop run_loop(runner());
 
-  server_stream_delegate()->ExpectCallback(StreamCallbackType::kOnRemoteFinish);
-  client_stream()->Finish();
-  RunUntilCallbacksFired();
+  EXPECT_CALL(*server_peer()->stream_delegate(),
+              OnDataReceived(_, /*fin=*/true))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
 
-  client_stream_delegate()->ExpectCallback(StreamCallbackType::kOnRemoteReset);
+  client_peer()->stream()->WriteData({}, /*fin=*/true);
+  run_loop.RunUntilCallbacksFired();
+
+  EXPECT_CALL(*client_peer()->stream_delegate(), OnRemoteReset())
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->stream_delegate(), OnRemoteReset()).Times(0);
+
   // The server stream has received its FIN bit from the remote side, and
   // responds with a Reset() to close everything down.
-  server_stream()->Reset();
-  RunUntilCallbacksFired();
+  server_peer()->stream()->Reset();
+  run_loop.RunUntilCallbacksFired();
 
   ExpectStreamsClosed();
-  EXPECT_EQ(0, server_stream_delegate()->remote_reset_count());
 }
 
-// The following unit tests are more isolated to the P2PQuicStreamImpl
-// implementation. They only test a stream's behavior on one side (not any
-// interactions between two connected streams).
-
-TEST_F(P2PQuicTransportTest, StreamFinishSendsFinAndCanNoLongerWrite) {
+// Tests that when data is sent on a stream it is received on the other end.
+TEST_F(P2PQuicTransportTest, StreamDataSentThenReceivedOnRemoteSide) {
   Initialize();
   Connect();
-  P2PQuicStreamImpl* stream = client_peer()->quic_transport()->CreateStream();
+  SetupConnectedStreams();
+  CallbackRunLoop run_loop(runner());
+  const uint8_t kMessage[] = {'h', 'o', 'w', 'd', 'y'};
 
-  stream->Finish();
-  EXPECT_TRUE(stream->fin_sent());
-  EXPECT_TRUE(stream->write_side_closed());
-  EXPECT_FALSE(stream->reading_stopped());
+  EXPECT_CALL(*server_peer()->stream_delegate(),
+              OnDataReceived(ElementsAreArray(kMessage), false))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*client_peer()->stream_delegate(),
+              OnWriteDataConsumed(base::size(kMessage)))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+
+  client_peer()->stream()->WriteData(VectorFromArray(kMessage),
+                                     /* fin= */ false);
+  run_loop.RunUntilCallbacksFired();
 }
 
-TEST_F(P2PQuicTransportTest, StreamResetSendsRstAndBecomesClosed) {
+// Tests that if both sides have a stream that sends data and FIN bit
+// they both close down for reading and writing properly.
+TEST_F(P2PQuicTransportTest, StreamDataSentWithFinClosesStreams) {
   Initialize();
   Connect();
+  SetupConnectedStreams();
+  CallbackRunLoop run_loop(runner());
+  const uint8_t kServerMessage[] = {'s', 'e', 'r', 'v', 'e', 'r'};
+  const uint8_t kClientMessage[] = {'c', 'l', 'i', 'e', 'n', 't'};
 
-  P2PQuicStreamImpl* stream = client_peer()->quic_transport()->CreateStream();
-  quic::QuicStreamId stream_id = stream->id();
+  EXPECT_CALL(*server_peer()->stream_delegate(),
+              OnDataReceived(VectorFromArray(kClientMessage), true))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*server_peer()->stream_delegate(),
+              OnWriteDataConsumed(base::size(kServerMessage)))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
 
-  stream->Reset();
+  EXPECT_CALL(*client_peer()->stream_delegate(),
+              OnDataReceived(ElementsAreArray(kServerMessage), true))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
+  EXPECT_CALL(*client_peer()->stream_delegate(),
+              OnWriteDataConsumed(base::size(kClientMessage)))
+      .WillOnce(FireCallback(run_loop.CreateCallback()));
 
-  EXPECT_TRUE(client_peer()->quic_transport()->IsClosedStream(stream_id));
+  client_peer()->stream()->WriteData(VectorFromArray(kClientMessage),
+                                     /*fin=*/true);
+  server_peer()->stream()->WriteData(VectorFromArray(kServerMessage),
+                                     /*fin=*/true);
+  run_loop.RunUntilCallbacksFired();
+
+  ExpectStreamsClosed();
 }
 
-// Tests that when a stream receives a stream frame with the FIN bit set it
-// will fire the appropriate callback and close the stream for reading.
-TEST_F(P2PQuicTransportTest, StreamOnStreamFrameWithFin) {
+// Tests that the stats returned by the P2PQuicTransportImpl have the correct
+// number of incoming and outgoing streams.
+TEST_F(P2PQuicTransportTest, GetStatsForNumberOfStreams) {
   Initialize();
   Connect();
-  P2PQuicStreamImpl* stream = client_peer()->quic_transport()->CreateStream();
-  QuicStreamDelegateForTesting stream_delegate;
-  stream->SetDelegate(&stream_delegate);
 
-  quic::QuicStreamFrame fin_frame(stream->id(), /*fin=*/true, 0, 0);
-  stream->OnStreamFrame(fin_frame);
-  EXPECT_EQ(1, stream_delegate.remote_finish_count());
-  EXPECT_TRUE(stream->reading_stopped());
-  EXPECT_FALSE(stream->write_side_closed());
-}
+  P2PQuicTransportStats client_stats_1 =
+      client_peer()->quic_transport()->GetStats();
+  EXPECT_EQ(0u, client_stats_1.num_incoming_streams_created);
+  EXPECT_EQ(0u, client_stats_1.num_outgoing_streams_created);
+  P2PQuicTransportStats server_stats_1 =
+      server_peer()->quic_transport()->GetStats();
+  EXPECT_EQ(0u, server_stats_1.num_incoming_streams_created);
+  EXPECT_EQ(0u, server_stats_1.num_outgoing_streams_created);
 
-// Tests that when a stream receives a stream frame with the FIN bit set after
-// it has called Finish(), then the stream will close.
-TEST_F(P2PQuicTransportTest, StreamClosedAfterReceivesFin) {
-  Initialize();
-  Connect();
-  P2PQuicStreamImpl* stream = client_peer()->quic_transport()->CreateStream();
-  quic::QuicStreamId stream_id = stream->id();
-  QuicStreamDelegateForTesting stream_delegate;
-  stream->SetDelegate(&stream_delegate);
+  // Create a stream on the client side and send some data to trigger a stream
+  // creation on the remote side.
+  client_peer()->CreateStreamWithDelegate();
+  CallbackRunLoop run_loop(runner());
+  base::RepeatingCallback<void()> callback = run_loop.CreateCallback();
+  MockP2PQuicStreamDelegate server_stream_delegate;
+  EXPECT_CALL(*server_peer()->quic_transport_delegate(), OnStream(_))
+      .WillOnce(
+          Invoke([&callback, &server_stream_delegate](P2PQuicStream* stream) {
+            stream->SetDelegate(&server_stream_delegate);
+            callback.Run();
+          }));
+  client_peer()->stream()->WriteData(
+      VectorFromArray(kTriggerRemoteStreamPhrase),
+      /*fin=*/false);
+  run_loop.RunUntilCallbacksFired();
 
-  stream->Finish();
-  EXPECT_FALSE(client_peer()->quic_transport()->IsClosedStream(stream_id));
-  quic::QuicStreamFrame fin_frame(stream->id(), /*fin=*/true, 0, 0);
-  stream->OnStreamFrame(fin_frame);
-
-  EXPECT_TRUE(client_peer()->quic_transport()->IsClosedStream(stream_id));
-}
-
-// Tests that when a stream calls Finish() after receiving a stream frame with
-// the FIN bit then the stream will close.
-TEST_F(P2PQuicTransportTest, StreamClosedAfterFinish) {
-  Initialize();
-  Connect();
-  P2PQuicStreamImpl* stream = client_peer()->quic_transport()->CreateStream();
-  quic::QuicStreamId stream_id = stream->id();
-  QuicStreamDelegateForTesting stream_delegate;
-  stream->SetDelegate(&stream_delegate);
-
-  quic::QuicStreamFrame fin_frame(stream->id(), /*fin=*/true, 0, 0);
-  stream->OnStreamFrame(fin_frame);
-  EXPECT_FALSE(client_peer()->quic_transport()->IsClosedStream(stream_id));
-  stream->Finish();
-
-  EXPECT_TRUE(client_peer()->quic_transport()->IsClosedStream(stream_id));
-}
-
-// Tests that when a stream receives a RST_STREAM frame it will fire the
-// appropriate callback and the stream will become closed.
-TEST_F(P2PQuicTransportTest, StreamClosedAfterReceivingReset) {
-  Initialize();
-  Connect();
-  P2PQuicStreamImpl* stream = client_peer()->quic_transport()->CreateStream();
-  quic::QuicStreamId stream_id = stream->id();
-  QuicStreamDelegateForTesting stream_delegate;
-  stream->SetDelegate(&stream_delegate);
-
-  quic::QuicRstStreamFrame rst_frame(quic::kInvalidControlFrameId, stream_id,
-                                     quic::QUIC_STREAM_CANCELLED, 0);
-  stream->OnStreamReset(rst_frame);
-
-  EXPECT_EQ(1, stream_delegate.remote_reset_count());
-  EXPECT_TRUE(client_peer()->quic_transport()->IsClosedStream(stream_id));
+  P2PQuicTransportStats client_stats_2 =
+      client_peer()->quic_transport()->GetStats();
+  EXPECT_EQ(0u, client_stats_2.num_incoming_streams_created);
+  EXPECT_EQ(1u, client_stats_2.num_outgoing_streams_created);
+  EXPECT_GT(client_stats_2.timestamp, client_stats_1.timestamp);
+  P2PQuicTransportStats server_stats_2 =
+      server_peer()->quic_transport()->GetStats();
+  EXPECT_EQ(1u, server_stats_2.num_incoming_streams_created);
+  EXPECT_EQ(0u, server_stats_2.num_outgoing_streams_created);
+  EXPECT_GT(server_stats_2.timestamp, server_stats_1.timestamp);
 }
 
 }  // namespace blink

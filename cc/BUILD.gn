@@ -54,6 +54,8 @@ cc_component("cc") {
     "input/snap_fling_controller.h",
     "input/snap_fling_curve.cc",
     "input/snap_fling_curve.h",
+    "input/snap_selection_strategy.cc",
+    "input/snap_selection_strategy.h",
     "input/touch_action.h",
     "layers/append_quads_data.cc",
     "layers/append_quads_data.h",
@@ -148,6 +150,8 @@ cc_component("cc") {
     "raster/gpu_raster_buffer_provider.h",
     "raster/one_copy_raster_buffer_provider.cc",
     "raster/one_copy_raster_buffer_provider.h",
+    "raster/paint_worklet_image_provider.cc",
+    "raster/paint_worklet_image_provider.h",
     "raster/playback_image_provider.cc",
     "raster/playback_image_provider.h",
     "raster/raster_buffer.cc",
@@ -223,6 +227,8 @@ cc_component("cc") {
     "tiles/image_decode_cache_utils.h",
     "tiles/mipmap_util.cc",
     "tiles/mipmap_util.h",
+    "tiles/paint_worklet_image_cache.cc",
+    "tiles/paint_worklet_image_cache.h",
     "tiles/picture_layer_tiling.cc",
     "tiles/picture_layer_tiling.h",
     "tiles/picture_layer_tiling_set.cc",
@@ -343,9 +349,6 @@ cc_component("cc") {
     "trees/ukm_manager.h",
   ]
 
-  # TODO(khushalsagar): Remove once crbug.com/683263 is fixed.
-  configs = [ "//build/config/compiler:no_size_t_to_int_warning" ]
-
   public_deps = [
     "//cc/base",
     "//cc/paint",
@@ -360,7 +363,6 @@ cc_component("cc") {
     "//gpu",
     "//gpu/command_buffer/client:gles2_interface",
     "//gpu/command_buffer/client:raster_interface",
-    "//gpu/ipc:gl_in_process_context",
     "//gpu/skia_bindings:skia_bindings",
     "//gpu/vulkan:buildflags",
     "//media",  # For VideoLayerImpl.
@@ -494,6 +496,10 @@ cc_test_static_library("test_support") {
     "test/test_occlusion_tracker.h",
     "test/test_options_provider.cc",
     "test/test_options_provider.h",
+    "test/test_paint_worklet_input.cc",
+    "test/test_paint_worklet_input.h",
+    "test/test_paint_worklet_layer_painter.cc",
+    "test/test_paint_worklet_layer_painter.h",
     "test/test_skcanvas.cc",
     "test/test_skcanvas.h",
     "test/test_task_graph_runner.cc",
@@ -611,6 +617,7 @@ cc_test("cc_unittests") {
     "paint/display_item_list_unittest.cc",
     "paint/filter_operations_unittest.cc",
     "paint/oop_pixeltest.cc",
+    "paint/paint_cache_unittest.cc",
     "paint/paint_filter_unittest.cc",
     "paint/paint_image_unittest.cc",
     "paint/paint_op_buffer_unittest.cc",
@@ -638,6 +645,7 @@ cc_test("cc_unittests") {
     "tiles/gpu_image_decode_cache_unittest.cc",
     "tiles/image_controller_unittest.cc",
     "tiles/mipmap_util_unittest.cc",
+    "tiles/paint_worklet_image_cache_unittest.cc",
     "tiles/picture_layer_tiling_set_unittest.cc",
     "tiles/picture_layer_tiling_unittest.cc",
     "tiles/software_image_decode_cache_unittest.cc",
@@ -707,9 +715,6 @@ cc_test("cc_unittests") {
     # warnings for now.
     cflags = [ "/wd4250" ]
   }
-
-  # TODO(khushalsagar): Remove once crbug.com/683263 is fixed.
-  configs = [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   deps = [
     ":cc",

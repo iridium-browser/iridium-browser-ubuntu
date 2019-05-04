@@ -14,19 +14,18 @@
 #include "base/strings/sys_string_conversions.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/ntp/new_tab_page_tab_helper.h"
 #include "ios/chrome/browser/ui/fullscreen/fullscreen_controller_factory.h"
 #include "ios/chrome/browser/ui/fullscreen/scoped_fullscreen_disabler.h"
 #import "ios/chrome/browser/web/page_placeholder_tab_helper.h"
 #import "ios/chrome/browser/web/sad_tab_tab_helper_delegate.h"
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/web_state/navigation_context.h"
-#include "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-DEFINE_WEB_STATE_USER_DATA_KEY(SadTabTabHelper);
 
 const double SadTabTabHelper::kDefaultRepeatFailureInterval = 60.0f;
 
@@ -88,14 +87,28 @@ void SadTabTabHelper::WasShown(web::WebState* web_state) {
     requires_reload_on_becoming_visible_ = false;
   }
   UpdateFullscreenDisabler();
+  if (showing_sad_tab_) {
+    [delegate_ sadTabTabHelper:this
+        didShowForRepeatedFailure:repeated_failure_];
+  }
 }
 
 void SadTabTabHelper::WasHidden(web::WebState* web_state) {
   UpdateFullscreenDisabler();
+  if (showing_sad_tab_) {
+    [delegate_ sadTabTabHelperDidHide:this];
+  }
 }
 
 void SadTabTabHelper::RenderProcessGone(web::WebState* web_state) {
   DCHECK_EQ(web_state_, web_state);
+
+  // Don't present a sad tab on top of an NTP.
+  NewTabPageTabHelper* NTPHelper = NewTabPageTabHelper::FromWebState(web_state);
+  if (NTPHelper && NTPHelper->IsActive()) {
+    return;
+  }
+
   if (!web_state->IsVisible()) {
     requires_reload_on_becoming_visible_ = true;
     return;
@@ -117,6 +130,7 @@ void SadTabTabHelper::DidStartNavigation(
     web::NavigationContext* navigation_context) {
   // The sad tab is removed when a new navigation begins.
   SetIsShowingSadTab(false);
+  [delegate_ sadTabTabHelperDismissSadTab:this];
 }
 
 void SadTabTabHelper::DidFinishNavigation(
@@ -142,13 +156,13 @@ void SadTabTabHelper::PresentSadTab(const GURL& url_causing_failure) {
   double seconds_since_last_failure =
       last_failed_timer_ ? last_failed_timer_->Elapsed().InSecondsF() : DBL_MAX;
 
-  bool repeated_failure =
+  repeated_failure_ =
       (url_causing_failure.EqualsIgnoringRef(last_failed_url_) &&
        seconds_since_last_failure < repeat_failure_interval_);
 
   [delegate_ sadTabTabHelper:this
       presentSadTabForWebState:web_state_
-               repeatedFailure:repeated_failure];
+               repeatedFailure:repeated_failure_];
 
   last_failed_url_ = url_causing_failure;
   last_failed_timer_ = std::make_unique<base::ElapsedTimer>();

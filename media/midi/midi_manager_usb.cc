@@ -24,16 +24,16 @@ MidiManagerUsb::MidiManagerUsb(MidiService* service,
     : MidiManager(service), device_factory_(std::move(factory)) {}
 
 MidiManagerUsb::~MidiManagerUsb() {
-  bool result = service()->task_service()->UnbindInstance();
-  CHECK(result);
+  if (!service()->task_service()->UnbindInstance())
+    return;
+
+  // Finalization steps should be implemented after the UnbindInstance() call
+  // above, if we need.
 }
 
 void MidiManagerUsb::StartInitialization() {
-  if (!service()->task_service()->BindInstance()) {
-    NOTREACHED();
-    CompleteInitialization(Result::INITIALIZATION_ERROR);
-    return;
-  }
+  if (!service()->task_service()->BindInstance())
+    return CompleteInitialization(Result::INITIALIZATION_ERROR);
 
   Initialize();
 }
@@ -159,13 +159,13 @@ bool MidiManagerUsb::AddPorts(UsbMidiDevice* device, int device_id) {
     if (jacks[j].direction() == UsbMidiJack::DIRECTION_OUT) {
       output_streams_.push_back(
           std::make_unique<UsbMidiOutputStream>(jacks[j]));
-      AddOutputPort(MidiPortInfo(id, manufacturer, product_name, version,
-                                 PortState::OPENED));
+      AddOutputPort(mojom::PortInfo(id, manufacturer, product_name, version,
+                                    PortState::OPENED));
     } else {
       DCHECK_EQ(jacks[j].direction(), UsbMidiJack::DIRECTION_IN);
       input_stream_->Add(jacks[j]);
-      AddInputPort(MidiPortInfo(id, manufacturer, product_name, version,
-                                PortState::OPENED));
+      AddInputPort(mojom::PortInfo(id, manufacturer, product_name, version,
+                                   PortState::OPENED));
     }
   }
   return true;

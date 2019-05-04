@@ -21,6 +21,7 @@
 // <include src="../../../../../ui/login/display_manager.js">
 // <include src="md_header_bar.js">
 // <include src="md_top_header_bar.js">
+// <include src="demo_mode_test_helper.js">
 
 // <include
 // src="../../../../../ui/login/account_picker/md_screen_account_picker.js">
@@ -218,16 +219,6 @@ cr.define('cr.ui', function() {
   };
 
   /**
-   * Displays animations on successful authentication, that have to happen
-   * before login UI is dismissed.
-   */
-  Oobe.animateAuthenticationSuccess = function() {
-    login.HeaderBar.animateOut(function() {
-      chrome.send('unlockOnLoginSuccess');
-    });
-  };
-
-  /**
    * Displays animations that have to happen once login UI is fully displayed.
    */
   Oobe.animateOnceFullyDisplayed = function() {
@@ -352,7 +343,7 @@ cr.define('cr.ui', function() {
       });
 
       waitForOobeScreen('oauth-enrollment', function() {
-        chrome.send('oauthEnrollCompleteLogin', [username, 'authcode']);
+        chrome.send('oauthEnrollCompleteLogin', [username]);
       });
     }
   };
@@ -421,6 +412,13 @@ cr.define('cr.ui', function() {
 
     return $('oauth-enrollment')
         .classList.contains('oauth-enroll-state-success');
+  };
+
+  /**
+   * Starts online demo mode setup for telemetry.
+   */
+  Oobe.setUpOnlineDemoModeForTesting = function() {
+    DemoModeTestHelper.setUp('online');
   };
 
   /**

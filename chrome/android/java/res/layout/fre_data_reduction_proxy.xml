@@ -6,7 +6,6 @@
 -->
 <org.chromium.chrome.browser.firstrun.FirstRunView
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
@@ -63,7 +62,7 @@
                         android:gravity="start"
                         android:lineSpacingMultiplier="1.4"
                         android:text="@string/data_reduction_promo_summary"
-                        android:textAppearance="@style/BlackBodyDefault" />
+                        android:textAppearance="@style/TextAppearance.BlackBodyDefault" />
 
                     <android.support.v7.widget.SwitchCompat
                         android:id="@+id/enable_data_saver_switch"
@@ -72,7 +71,7 @@
                         android:lineSpacingMultiplier="1.4"
                         android:showText="false"
                         android:text="@string/data_reduction_enabled_switch"
-                        style="@style/BlackTitle2" />
+                        style="@style/TextAppearance.BlackTitle2" />
 
                 </LinearLayout>
             </LinearLayout>
@@ -89,7 +88,5 @@
         android:paddingStart="@dimen/fre_button_padding"
         android:paddingEnd="@dimen/fre_button_padding"
         android:text="@string/next"
-        android:textAppearance="@style/WhiteButtonText"
-        app:buttonColor="@color/light_active_color"
-        app:buttonRaised="false"/>
+        style="@style/FilledButton.Flat" />
 </org.chromium.chrome.browser.firstrun.FirstRunView>

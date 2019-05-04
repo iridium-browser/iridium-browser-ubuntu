@@ -8,14 +8,33 @@
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/strings/stringprintf.h"
 #include "media/base/bind_to_current_loop.h"
+#include "media/base/media_switches.h"
 #include "media/base/video_codecs.h"
+#include "media/capabilities/learning_helper.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 
 namespace media {
+
+namespace {
+
+const double kMaxSmoothDroppedFramesPercentParamDefault = .10;
+
+}  // namespace
+
+const char VideoDecodePerfHistory::kMaxSmoothDroppedFramesPercentParamName[] =
+    "smooth_threshold";
+
+// static
+double VideoDecodePerfHistory::GetMaxSmoothDroppedFramesPercent() {
+  return base::GetFieldTrialParamByFeatureAsDouble(
+      kMediaCapabilitiesWithParameters, kMaxSmoothDroppedFramesPercentParamName,
+      kMaxSmoothDroppedFramesPercentParamDefault);
+}
 
 VideoDecodePerfHistory::VideoDecodePerfHistory(
     std::unique_ptr<VideoDecodeStatsDB> db)
@@ -24,6 +43,11 @@ VideoDecodePerfHistory::VideoDecodePerfHistory(
       weak_ptr_factory_(this) {
   DVLOG(2) << __func__;
   DCHECK(db_);
+
+  // If the local learning experiment is enabled, then also create
+  // |learning_helper_| to send data to it.
+  if (base::FeatureList::IsEnabled(kMediaLearningExperiment))
+    learning_helper_ = std::make_unique<LearningHelper>();
 }
 
 VideoDecodePerfHistory::~VideoDecodePerfHistory() {
@@ -129,7 +153,7 @@ void VideoDecodePerfHistory::AssessStats(
 
   *is_power_efficient =
       percent_power_efficient >= kMinPowerEfficientDecodedFramePercent;
-  *is_smooth = percent_dropped <= kMaxSmoothDroppedFramesPercent;
+  *is_smooth = percent_dropped <= GetMaxSmoothDroppedFramesPercent();
 }
 
 void VideoDecodePerfHistory::OnGotStatsForRequest(
@@ -215,6 +239,9 @@ void VideoDecodePerfHistory::SavePerfRecord(ukm::SourceId source_id,
       targets.frames_decoded, targets.frames_dropped,
       targets.frames_power_efficient);
 
+  if (learning_helper_)
+    learning_helper_->AppendStats(video_key, new_stats);
+
   // Get past perf info and report UKM metrics before saving this record.
   db_->GetDecodeStats(
       video_key,
@@ -237,14 +264,13 @@ void VideoDecodePerfHistory::OnGotStatsForSave(
 
   if (!success) {
     DVLOG(3) << __func__ << " FAILED! Aborting save.";
-    std::move(save_done_cb).Run();
+    if (save_done_cb)
+      std::move(save_done_cb).Run();
     return;
   }
 
   ReportUkmMetrics(source_id, is_top_frame, player_id, video_key, new_stats,
                    past_stats.get());
-
-  // TODO(dalecurtis): Abort stats recording if db_ is in read-only mode.
 
   db_->AppendDecodeStats(
       video_key, new_stats,
@@ -323,6 +349,11 @@ void VideoDecodePerfHistory::ReportUkmMetrics(
 void VideoDecodePerfHistory::ClearHistory(base::OnceClosure clear_done_cb) {
   DVLOG(2) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // If we have a learning helper, then replace it.  This will erase any data
+  // that it currently has.
+  if (learning_helper_)
+    learning_helper_ = std::make_unique<LearningHelper>();
 
   if (db_init_status_ == FAILED) {
     DVLOG(3) << __func__ << " Can't clear history - No DB!";

@@ -15,15 +15,13 @@
 
 //////////////////////////////////////////////////////////////////////////////
 
-GrOpFlushState::GrOpFlushState(GrGpu* gpu,
-                               GrResourceProvider* resourceProvider,
-                               GrTokenTracker* tokenTracker)
-        : fVertexPool(gpu)
-        , fIndexPool(gpu)
+GrOpFlushState::GrOpFlushState(GrGpu* gpu, GrResourceProvider* resourceProvider,
+                               GrTokenTracker* tokenTracker, void* vertexSpace, void* indexSpace)
+        : fVertexPool(gpu, vertexSpace)
+        , fIndexPool(gpu, indexSpace)
         , fGpu(gpu)
         , fResourceProvider(resourceProvider)
-        , fTokenTracker(tokenTracker) {
-}
+        , fTokenTracker(tokenTracker) {}
 
 const GrCaps& GrOpFlushState::caps() const {
     return *fGpu->caps();
@@ -33,9 +31,9 @@ GrGpuRTCommandBuffer* GrOpFlushState::rtCommandBuffer() {
     return fCommandBuffer->asRTCommandBuffer();
 }
 
-void GrOpFlushState::executeDrawsAndUploadsForMeshDrawOp(uint32_t opID, const SkRect& opBounds) {
+void GrOpFlushState::executeDrawsAndUploadsForMeshDrawOp(const GrOp* op, const SkRect& opBounds) {
     SkASSERT(this->rtCommandBuffer());
-    while (fCurrDraw != fDraws.end() && fCurrDraw->fOpID == opID) {
+    while (fCurrDraw != fDraws.end() && fCurrDraw->fOp == op) {
         GrDeferredUploadToken drawToken = fTokenTracker->nextTokenToFlush();
         while (fCurrUpload != fInlineUploads.end() &&
                fCurrUpload->fUploadBeforeToken == drawToken) {
@@ -126,7 +124,7 @@ void GrOpFlushState::draw(sk_sp<const GrGeometryProcessor> gp, const GrPipeline*
     draw.fDynamicStateArrays = dynamicStateArrays;
     draw.fMeshes = meshes;
     draw.fMeshCnt = meshCnt;
-    draw.fOpID = fOpArgs->fOp->uniqueID();
+    draw.fOp = fOpArgs->fOp;
     if (firstDraw) {
         fBaseDrawToken = token;
     }
@@ -167,7 +165,7 @@ GrAppliedClip GrOpFlushState::detachAppliedClip() {
     return fOpArgs->fAppliedClip ? std::move(*fOpArgs->fAppliedClip) : GrAppliedClip();
 }
 
-GrGlyphCache* GrOpFlushState::glyphCache() const {
+GrStrikeCache* GrOpFlushState::glyphCache() const {
     return fGpu->getContext()->contextPriv().getGlyphCache();
 }
 

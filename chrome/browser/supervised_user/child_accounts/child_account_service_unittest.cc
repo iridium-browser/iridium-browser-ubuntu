@@ -29,17 +29,25 @@ class ChildAccountServiceTest : public ::testing::Test {
   ChildAccountServiceTest() = default;
 
   void SetUp() override {
-    ChromeSigninClientFactory::GetInstance()->SetTestingFactory(
-        &profile_, base::BindRepeating(&BuildTestSigninClient));
-    GaiaCookieManagerServiceFactory::GetInstance()->SetTestingFactory(
-        &profile_, base::BindRepeating(&BuildFakeGaiaCookieManagerService));
+    TestingProfile::Builder builder;
+    builder.AddTestingFactory(ChromeSigninClientFactory::GetInstance(),
+                              base::BindRepeating(&BuildTestSigninClient));
+    builder.AddTestingFactory(
+        GaiaCookieManagerServiceFactory::GetInstance(),
+        base::BindRepeating(&BuildFakeGaiaCookieManagerServiceWithURLLoader,
+                            &test_url_loader_factory_));
+    profile_ = builder.Build();
     gaia_cookie_manager_service_ = static_cast<FakeGaiaCookieManagerService*>(
-        GaiaCookieManagerServiceFactory::GetForProfile(&profile_));
+        GaiaCookieManagerServiceFactory::GetForProfile(profile_.get()));
   }
 
  protected:
   content::TestBrowserThreadBundle thread_bundle_;
-  TestingProfile profile_;
+
+  // test_url_loader_factory_ is declared before profile_ to guarantee that the
+  // former outlives the latter.
+  network::TestURLLoaderFactory test_url_loader_factory_;
+  std::unique_ptr<TestingProfile> profile_;
   FakeGaiaCookieManagerService* gaia_cookie_manager_service_ = nullptr;
 };
 
@@ -47,7 +55,7 @@ TEST_F(ChildAccountServiceTest, GetGoogleAuthState) {
   gaia_cookie_manager_service_->SetListAccountsResponseNoAccounts();
 
   ChildAccountService* child_account_service =
-      ChildAccountServiceFactory::GetForProfile(&profile_);
+      ChildAccountServiceFactory::GetForProfile(profile_.get());
 
   // Initial state should be PENDING.
   EXPECT_EQ(ChildAccountService::AuthState::PENDING,
@@ -66,7 +74,7 @@ TEST_F(ChildAccountServiceTest, GetGoogleAuthState) {
        /* valid = */ true,
        /* is_signed_out = */ false,
        /* verified = */ true});
-  gaia_cookie_manager_service_->TriggerListAccounts("ChildAccountServiceTest");
+  gaia_cookie_manager_service_->TriggerListAccounts();
   content::RunAllTasksUntilIdle();
   EXPECT_EQ(ChildAccountService::AuthState::AUTHENTICATED,
             child_account_service->GetGoogleAuthState());
@@ -77,7 +85,7 @@ TEST_F(ChildAccountServiceTest, GetGoogleAuthState) {
        /* valid = */ false,
        /* is_signed_out = */ false,
        /* verified = */ true});
-  gaia_cookie_manager_service_->TriggerListAccounts("ChildAccountServiceTest");
+  gaia_cookie_manager_service_->TriggerListAccounts();
   content::RunAllTasksUntilIdle();
   EXPECT_EQ(ChildAccountService::AuthState::NOT_AUTHENTICATED,
             child_account_service->GetGoogleAuthState());
@@ -88,7 +96,7 @@ TEST_F(ChildAccountServiceTest, GetGoogleAuthState) {
        /* valid = */ true,
        /* is_signed_out = */ true,
        /* verified = */ true});
-  gaia_cookie_manager_service_->TriggerListAccounts("ChildAccountServiceTest");
+  gaia_cookie_manager_service_->TriggerListAccounts();
   content::RunAllTasksUntilIdle();
   EXPECT_EQ(ChildAccountService::AuthState::NOT_AUTHENTICATED,
             child_account_service->GetGoogleAuthState());

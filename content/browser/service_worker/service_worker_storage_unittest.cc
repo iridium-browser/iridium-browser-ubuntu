@@ -12,8 +12,8 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -208,7 +208,7 @@ int WriteStringResponse(ServiceWorkerStorage* storage,
 int WriteBasicResponse(ServiceWorkerStorage* storage, int64_t id) {
   const char kHttpHeaders[] = "HTTP/1.0 200 HONKYDORY\0Content-Length: 5\0\0";
   const char kHttpBody[] = "Hello";
-  std::string headers(kHttpHeaders, arraysize(kHttpHeaders));
+  std::string headers(kHttpHeaders, base::size(kHttpHeaders));
   return WriteStringResponse(storage, id, headers, std::string(kHttpBody));
 }
 
@@ -550,12 +550,12 @@ class ServiceWorkerStorageTest : public testing::Test {
     return result.value();
   }
 
-  blink::ServiceWorkerStatusCode FindRegistrationForPattern(
+  blink::ServiceWorkerStatusCode FindRegistrationForScope(
       const GURL& scope,
       scoped_refptr<ServiceWorkerRegistration>* registration) {
     bool was_called = false;
     base::Optional<blink::ServiceWorkerStatusCode> result;
-    storage()->FindRegistrationForPattern(
+    storage()->FindRegistrationForScope(
         scope, MakeFindCallback(&was_called, &result, registration));
     EXPECT_FALSE(was_called);  // always async
     base::RunLoop().RunUntilIdle();
@@ -626,7 +626,7 @@ TEST_F(ServiceWorkerStorageTest, DisabledStorage) {
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorAbort,
             FindRegistrationForDocument(kDocumentUrl, &found_registration));
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorAbort,
-            FindRegistrationForPattern(kScope, &found_registration));
+            FindRegistrationForScope(kScope, &found_registration));
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorAbort,
             FindRegistrationForId(kRegistrationId, kScope.GetOrigin(),
                                   &found_registration));
@@ -719,7 +719,7 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
   EXPECT_FALSE(found_registration.get());
 
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorNotFound,
-            FindRegistrationForPattern(kScope, &found_registration));
+            FindRegistrationForScope(kScope, &found_registration));
   EXPECT_FALSE(found_registration.get());
 
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorNotFound,
@@ -763,9 +763,9 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
             found_registration->waiting_version()->used_features());
   found_registration = nullptr;
 
-  // But FindRegistrationForPattern is always async.
+  // But FindRegistrationForScope is always async.
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk,
-            FindRegistrationForPattern(kScope, &found_registration));
+            FindRegistrationForScope(kScope, &found_registration));
   EXPECT_EQ(live_registration, found_registration);
   found_registration = nullptr;
 
@@ -827,9 +827,9 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
   // Drop the live version too.
   live_version = nullptr;
 
-  // And FindRegistrationForPattern is always async.
+  // And FindRegistrationForScope is always async.
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk,
-            FindRegistrationForPattern(kScope, &found_registration));
+            FindRegistrationForScope(kScope, &found_registration));
   ASSERT_TRUE(found_registration.get());
   EXPECT_EQ(kRegistrationId, found_registration->id());
   EXPECT_TRUE(found_registration->HasOneRef());
@@ -929,7 +929,7 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
   EXPECT_FALSE(found_registration.get());
 
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorNotFound,
-            FindRegistrationForPattern(kScope, &found_registration));
+            FindRegistrationForScope(kScope, &found_registration));
   EXPECT_FALSE(found_registration.get());
 
   std::vector<ServiceWorkerRegistrationInfo> all_registrations;
@@ -970,7 +970,7 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
   found_registration = nullptr;
 
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk,
-            FindRegistrationForPattern(kScope, &found_registration));
+            FindRegistrationForScope(kScope, &found_registration));
   EXPECT_EQ(live_registration, found_registration);
   found_registration = nullptr;
 
@@ -1010,7 +1010,7 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
   EXPECT_FALSE(found_registration.get());
 
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorNotFound,
-            FindRegistrationForPattern(kScope, &found_registration));
+            FindRegistrationForScope(kScope, &found_registration));
   EXPECT_FALSE(found_registration.get());
 
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk,
@@ -1844,7 +1844,7 @@ class ServiceWorkerStorageOriginTrialsDiskTest
     bool IsOriginTrialsSupported() const override { return true; }
     base::StringPiece GetPublicKey() const override {
       return base::StringPiece(reinterpret_cast<const char*>(kTestPublicKey),
-                               arraysize(kTestPublicKey));
+                               base::size(kTestPublicKey));
     }
     bool IsOriginSecure(const GURL& url) const override {
       return content::IsOriginSecure(url);
@@ -1872,7 +1872,6 @@ TEST_F(ServiceWorkerStorageOriginTrialsDiskTest, FromMainScript) {
   http_info.ssl_info.cert =
       net::ImportCertFromFile(net::GetTestCertsDirectory(), "ok_cert.pem");
   EXPECT_TRUE(http_info.ssl_info.is_valid());
-  http_info.ssl_info.security_bits = 0x100;
   // SSL3 TLS_DHE_RSA_WITH_AES_256_CBC_SHA
   http_info.ssl_info.connection_status = 0x300039;
 

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/public/platform/web_crypto.h"
 #include "third_party/blink/public/platform/web_crypto_algorithm.h"
 #include "third_party/blink/renderer/platform/crypto.h"
@@ -39,7 +40,7 @@ static bool DigestsEqual(const DigestValue& digest1,
   if (digest1.size() != digest2.size())
     return false;
 
-  for (size_t i = 0; i < digest1.size(); i++) {
+  for (wtf_size_t i = 0; i < digest1.size(); i++) {
     if (digest1[i] != digest2[i])
       return false;
   }
@@ -80,7 +81,7 @@ bool SubresourceIntegrity::CheckSubresourceIntegrity(
   // FetchResponseType::kError never arrives because it is a loading error.
   DCHECK_NE(resource.GetResponse().GetType(),
             network::mojom::FetchResponseType::kError);
-  if (!resource.GetResponse().IsCORSSameOrigin()) {
+  if (!resource.GetResponse().IsCorsSameOrigin()) {
     report_info.AddConsoleErrorMessage(
         "Subresource Integrity: The resource '" + resource_url.ElidedString() +
         "' has an integrity attribute, but the resource "
@@ -321,7 +322,7 @@ SubresourceIntegrity::ParseAttributeAlgorithm(const UChar*& begin,
   // The last algorithm prefix is the ed25519 signature algorithm, which should
   // only be enabled if kSignatures is requested. We'll implement this by
   // adjusting the last_prefix index into the array.
-  size_t last_prefix = arraysize(kPrefixes);
+  size_t last_prefix = base::size(kPrefixes);
   if (features != IntegrityFeatures::kSignatures)
     last_prefix--;
 
@@ -335,7 +336,7 @@ SubresourceIntegrity::ParseIntegrityHeaderAlgorithm(
     IntegrityAlgorithm& algorithm) {
   static const AlgorithmPrefixPair kPrefixes[] = {
       {"ed25519", IntegrityAlgorithm::kEd25519}};
-  return ParseAlgorithmPrefix(begin, end, kPrefixes, arraysize(kPrefixes),
+  return ParseAlgorithmPrefix(begin, end, kPrefixes, base::size(kPrefixes),
                               algorithm);
 }
 
@@ -384,7 +385,8 @@ bool SubresourceIntegrity::ParseDigest(const UChar*& position,
   }
 
   // We accept base64url encoding, but normalize to "normal" base64 internally:
-  digest = NormalizeToBase64(String(begin, position - begin));
+  digest = NormalizeToBase64(
+      String(begin, static_cast<wtf_size_t>(position - begin)));
   return true;
 }
 
@@ -490,7 +492,7 @@ SubresourceIntegrity::ParseIntegrityAttribute(
       if (begin != position && report_info) {
         report_info->AddConsoleErrorMessage(
             "Ignoring unrecogized 'integrity' attribute option '" +
-            String(begin, position - begin) + "'.");
+            String(begin, static_cast<wtf_size_t>(position - begin)) + "'.");
       }
     }
 

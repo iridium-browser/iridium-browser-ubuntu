@@ -31,7 +31,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/extensions/extension_tab_util_delegate_chromeos.h"
-#include "chromeos/login/scoped_test_public_session_login_state.h"
+#include "chromeos/login/login_state/scoped_test_public_session_login_state.h"
 #endif
 
 namespace extensions {
@@ -63,11 +63,6 @@ class ExtensionActiveTabTest : public ExtensionApiTest,
     ASSERT_EQ(ShouldEnableRuntimeHostPermissions(),
               base::FeatureList::IsEnabled(
                   extensions_features::kRuntimeHostPermissions));
-
-    const char* runtime_host_permissions_arg =
-        ShouldEnableRuntimeHostPermissions() ? "RuntimeHostPermissionsEnabled"
-                                             : "RuntimeHostPermissionsDisabled";
-    SetCustomArg(runtime_host_permissions_arg);
   }
 
  private:

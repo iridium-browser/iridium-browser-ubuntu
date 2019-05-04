@@ -9,7 +9,6 @@ tablegen(LLVM WebAssemblyGenInstrInfo.inc -gen-instr-info)
 tablegen(LLVM WebAssemblyGenMCCodeEmitter.inc -gen-emitter)
 tablegen(LLVM WebAssemblyGenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM WebAssemblyGenSubtargetInfo.inc -gen-subtarget)
-tablegen(LLVM WebAssemblyGenStackifier.inc -gen-wasm-stackifier)
 
 add_public_tablegen_target(WebAssemblyCommonTableGen)
 
@@ -20,6 +19,7 @@ add_llvm_target(WebAssemblyCodeGen
   WebAssemblyCallIndirectFixup.cpp
   WebAssemblyCFGStackify.cpp
   WebAssemblyCFGSort.cpp
+  WebAssemblyDebugValueManager.cpp
   WebAssemblyLateEHPrepare.cpp
   WebAssemblyEHRestoreStackPointer.cpp
   WebAssemblyExceptionInfo.cpp
@@ -48,7 +48,7 @@ add_llvm_target(WebAssemblyCodeGen
   WebAssemblyRuntimeLibcallSignatures.cpp
   WebAssemblySelectionDAGInfo.cpp
   WebAssemblySetP2AlignOperands.cpp
-  WebAssemblyStoreResults.cpp
+  WebAssemblyMemIntrinsicResults.cpp
   WebAssemblySubtarget.cpp
   WebAssemblyTargetMachine.cpp
   WebAssemblyTargetObjectFile.cpp

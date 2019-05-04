@@ -12,6 +12,7 @@
 #include "base/callback_forward.h"
 #include "chromeos/services/assistant/assistant_settings_manager.h"
 #include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
+#include "chromeos/services/assistant/public/mojom/settings.mojom.h"
 
 namespace chromeos {
 namespace assistant {
@@ -30,9 +31,11 @@ class AssistantManagerService : public mojom::Assistant {
 
   ~AssistantManagerService() override = default;
 
-  // Start the assistant in the background with |token|. When the service is
-  // fully started |callback| will be called on the thread where ctor was run.
+  // Start the assistant in the background with |access_token|. When the service
+  // is fully started |callback| will be called on the thread where ctor was
+  // run.
   virtual void Start(const std::string& access_token,
+                     bool enable_hotword,
                      base::OnceClosure callback) = 0;
 
   // Stop the assistant.
@@ -49,20 +52,6 @@ class AssistantManagerService : public mojom::Assistant {
 
   // Returns a pointer of AssistantSettingsManager.
   virtual AssistantSettingsManager* GetAssistantSettingsManager() = 0;
-
-  using GetSettingsUiResponseCallback =
-      base::OnceCallback<void(const std::string&)>;
-  // Send request for getting settings ui.
-  virtual void SendGetSettingsUiRequest(
-      const std::string& selector,
-      GetSettingsUiResponseCallback callback) = 0;
-
-  using UpdateSettingsUiResponseCallback =
-      base::OnceCallback<void(const std::string&)>;
-  // Send request for updating settings ui.
-  virtual void SendUpdateSettingsUiRequest(
-      const std::string& update,
-      UpdateSettingsUiResponseCallback callback) = 0;
 };
 
 }  // namespace assistant

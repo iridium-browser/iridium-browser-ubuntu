@@ -20,6 +20,7 @@
 #include <string>
 
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "util/file/file_io.h"
 #include "util/linux/ptrace_broker.h"
@@ -92,7 +93,7 @@ struct Dirent64 {
 void ReadDentsAsThreadIDs(char* buffer,
                           size_t size,
                           std::vector<pid_t>* threads) {
-  while (size > sizeof(Dirent64)) {
+  while (size > offsetof(Dirent64, d_name)) {
     auto dirent = reinterpret_cast<Dirent64*>(buffer);
     if (size < dirent->d_reclen) {
       LOG(ERROR) << "short dirent";
@@ -270,7 +271,7 @@ bool PtraceClient::Threads(std::vector<pid_t>* threads) {
   threads->push_back(pid_);
 
   char path[32];
-  snprintf(path, arraysize(path), "/proc/%d/task", pid_);
+  snprintf(path, base::size(path), "/proc/%d/task", pid_);
 
   PtraceBroker::Request request;
   request.type = PtraceBroker::Request::kTypeListDirectory;

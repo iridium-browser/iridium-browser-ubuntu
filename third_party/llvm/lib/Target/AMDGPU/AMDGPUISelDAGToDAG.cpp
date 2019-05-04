@@ -978,8 +978,6 @@ bool AMDGPUDAGToDAGISel::SelectDS64Bit4ByteAligned(SDValue Addr, SDValue &Base,
 
   // default case
 
-  // FIXME: This is broken on SI where we still need to check if the base
-  // pointer is positive here.
   Base = Addr;
   Offset0 = CurDAG->getTargetConstant(0, DL, MVT::i8);
   Offset1 = CurDAG->getTargetConstant(1, DL, MVT::i8);
@@ -1456,9 +1454,13 @@ bool AMDGPUDAGToDAGISel::SelectMOVRELOffset(SDValue Index,
     ConstantSDNode *C1 = cast<ConstantSDNode>(N1);
 
     // (add n0, c0)
-    Base = N0;
-    Offset = CurDAG->getTargetConstant(C1->getZExtValue(), DL, MVT::i32);
-    return true;
+    // Don't peel off the offset (c0) if doing so could possibly lead
+    // the base (n0) to be negative.
+    if (C1->getSExtValue() <= 0 || CurDAG->SignBitIsZero(N0)) {
+      Base = N0;
+      Offset = CurDAG->getTargetConstant(C1->getZExtValue(), DL, MVT::i32);
+      return true;
+    }
   }
 
   if (isa<ConstantSDNode>(Index))

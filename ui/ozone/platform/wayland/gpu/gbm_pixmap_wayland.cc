@@ -37,7 +37,7 @@ GbmPixmapWayland::~GbmPixmapWayland() {
 bool GbmPixmapWayland::InitializeBuffer(gfx::Size size,
                                         gfx::BufferFormat format,
                                         gfx::BufferUsage usage) {
-  TRACE_EVENT1("Wayland", "GbmPixmapWayland::InitializeBuffer", "size",
+  TRACE_EVENT1("wayland", "GbmPixmapWayland::InitializeBuffer", "size",
                size.ToString());
   uint32_t flags = 0;
   switch (usage) {
@@ -58,13 +58,7 @@ bool GbmPixmapWayland::InitializeBuffer(gfx::Size size,
       break;
     case gfx::BufferUsage::GPU_READ_CPU_READ_WRITE:
     case gfx::BufferUsage::GPU_READ_CPU_READ_WRITE_PERSISTENT:
-      // mmap cannot be used with gbm buffers on a different process. That is,
-      // Linux disallows this and "permission denied" is returned. To overcome
-      // this and make software rasterization working, buffers must be created
-      // on the browser process and gbm_bo_map must be used.
-      // TODO(msisov): add support fir these two buffer usage cases.
-      // https://crbug.com/864914
-      LOG(FATAL) << "This scenario is not supported in Wayland now";
+      flags = GBM_BO_USE_LINEAR;
       break;
     default:
       NOTREACHED() << "Not supported buffer format";

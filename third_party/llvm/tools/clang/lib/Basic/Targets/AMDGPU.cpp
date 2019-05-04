@@ -13,10 +13,10 @@
 
 #include "AMDGPU.h"
 #include "clang/Basic/Builtins.h"
+#include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/MacroBuilder.h"
 #include "clang/Basic/TargetBuiltins.h"
-#include "clang/Frontend/CodeGenOptions.h"
 #include "llvm/ADT/StringSwitch.h"
 
 using namespace clang;
@@ -137,7 +137,9 @@ bool AMDGPUTargetInfo::initFeatureMap(
     switch (llvm::AMDGPU::parseArchAMDGCN(CPU)) {
     case GK_GFX906:
       Features["dl-insts"] = true;
+      Features["dot-insts"] = true;
       LLVM_FALLTHROUGH;
+    case GK_GFX909:
     case GK_GFX904:
     case GK_GFX902:
     case GK_GFX900:

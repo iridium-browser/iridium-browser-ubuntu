@@ -65,11 +65,8 @@ class EnterpriseEnrollmentHelper {
     // Called when some other error happens.
     virtual void OnOtherError(OtherError error) = 0;
 
-    // Called when enrollment finishes successfully. |additional_token| keeps
-    // the additional access token, if it was requested by setting the
-    // |fetch_additional_token| param of EnrollUsingProfile() to true.
-    // Otherwise, |additional_token| is empty.
-    virtual void OnDeviceEnrolled(const std::string& additional_token) = 0;
+    // Called when enrollment finishes successfully.
+    virtual void OnDeviceEnrolled() = 0;
 
     // Called when device attribute update permission granted,
     // |granted| indicates whether permission granted or not.
@@ -78,6 +75,10 @@ class EnterpriseEnrollmentHelper {
     // Called when device attribute upload finishes. |success| indicates
     // whether it is successful or not.
     virtual void OnDeviceAttributeUploadCompleted(bool success) = 0;
+
+    // Called when steps required to fully restore enrollment steps after
+    // version rollback are completed.
+    virtual void OnRestoreAfterRollbackCompleted() = 0;
   };
 
   // Factory method. Caller takes ownership of the returned object.
@@ -107,13 +108,21 @@ class EnterpriseEnrollmentHelper {
   // and passes it to the |status_consumer| on successful enrollment.
   // EnrollUsingAuthCode can be called only once during this object's lifetime,
   // and only if none of the EnrollUsing* methods was called before.
+  // TODO (alemate): Remove unused |fetch_additional_token| parameter.
   virtual void EnrollUsingAuthCode(const std::string& auth_code,
                                    bool fetch_additional_token) = 0;
 
   // Starts enterprise enrollment using |token|.
+  // This flow is used when enrollment is controlled by the paired device.
   // EnrollUsingToken can be called only once during this object's lifetime, and
   // only if none of the EnrollUsing* was called before.
   virtual void EnrollUsingToken(const std::string& token) = 0;
+
+  // Starts enterprise enrollment using enrollment |token| for authentication.
+  // This flow is used in OOBE configuration flow.
+  // EnrollUsingWorkflowToken can be called only once during this object's
+  // lifetime, and only if none of the EnrollUsing* was called before.
+  virtual void EnrollUsingEnrollmentToken(const std::string& token) = 0;
 
   // Starts enterprise enrollment using PCA attestation.
   // EnrollUsingAttestation can be called only once during the object's
@@ -125,6 +134,12 @@ class EnterpriseEnrollmentHelper {
   // into enrollment without authentication -- and applies policies which are
   // stored locally.
   virtual void EnrollForOfflineDemo() = 0;
+
+  // When chrome version is rolled back on the device via policy, the enrollment
+  // information is persisted (install attributes, DM token), but some steps
+  // should still be taken (e.g. create robot accounts on the device) as the
+  // stateful partition is reset.
+  virtual void RestoreAfterRollback() = 0;
 
   // Continue enrollment using license |type|.
   virtual void UseLicenseType(policy::LicenseType type) = 0;

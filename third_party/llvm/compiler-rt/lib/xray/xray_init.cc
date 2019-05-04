@@ -67,6 +67,9 @@ void __xray_init() XRAY_NEVER_INSTRUMENT {
   if (atomic_load(&XRayInitialized, memory_order_acquire))
     return;
 
+  // XRAY is not compatible with PaX MPROTECT
+  CheckMPROTECT();
+
   if (!atomic_load(&XRayFlagsInitialized, memory_order_acquire)) {
     initializeFlags();
     atomic_store(&XRayFlagsInitialized, true, memory_order_release);
@@ -106,8 +109,8 @@ __attribute__((section(".preinit_array"),
 #else
 // If we cannot use the .preinit_array section, we should instead use dynamic
 // initialisation.
-static bool UNUSED __local_xray_dyninit = [] {
+__attribute__ ((constructor (0)))
+static void __local_xray_dyninit() {
   __xray_init();
-  return true;
-}();
+}
 #endif

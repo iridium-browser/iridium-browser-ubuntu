@@ -415,7 +415,8 @@ void MenuController::Run(Widget* parent,
                          const gfx::Rect& bounds,
                          MenuAnchorPosition position,
                          bool context_menu,
-                         bool is_nested_drag) {
+                         bool is_nested_drag,
+                         base::flat_set<int> alerted_commands) {
   exit_type_ = EXIT_NONE;
   possible_drag_ = false;
   drag_in_progress_ = false;
@@ -454,6 +455,7 @@ void MenuController::Run(Widget* parent,
     DCHECK_EQ(owner_, parent);
   } else {
     showing_ = true;
+    alerted_commands_ = alerted_commands;
 
     if (owner_)
       owner_->RemoveObserver(this);
@@ -480,8 +482,8 @@ void MenuController::Run(Widget* parent,
   SetSelection(root, SELECTION_OPEN_SUBMENU | SELECTION_UPDATE_IMMEDIATELY);
 
   if (button) {
-    pressed_lock_ = std::make_unique<MenuButton::PressedLock>(
-        button, false, ui::LocatedEvent::FromIfValid(event));
+    pressed_lock_ = button->menu_button_event_handler()->TakeLock(
+        false, ui::LocatedEvent::FromIfValid(event));
   }
 
   if (for_drop_) {
@@ -781,7 +783,7 @@ void MenuController::OnMouseMoved(SubmenuView* source,
     ConvertLocatedEventForRootView(source, root_view, &event_for_root);
     View* view = root_view->GetEventHandlerForPoint(event_for_root.location());
     Button* button = Button::AsButton(view);
-    if (button && button->IsHotTracked())
+    if (button)
       SetHotTrackedButton(button);
   }
 
@@ -921,7 +923,7 @@ void MenuController::ViewHierarchyChanged(
 bool MenuController::GetDropFormats(
     SubmenuView* source,
     int* formats,
-    std::set<ui::Clipboard::FormatType>* format_types) {
+    std::set<ui::ClipboardFormatType>* format_types) {
   return source->GetMenuItem()->GetDelegate()->GetDropFormats(
       source->GetMenuItem(), formats, format_types);
 }
@@ -1118,7 +1120,23 @@ ui::PostDispatchAction MenuController::OnWillDispatchKeyEvent(
 
   if (event->type() == ui::ET_KEY_PRESSED) {
     base::WeakPtr<MenuController> this_ref = AsWeakPtr();
+#if defined(OS_MACOSX)
+    // Special handling for Option-Up and Option-Down, which should behave like
+    // Home and End respectively in menus.
+    if ((event->flags() & ui::EF_ALT_DOWN)) {
+      if (event->key_code() == ui::VKEY_UP) {
+        OnKeyDown(ui::VKEY_HOME);
+      } else if (event->key_code() == ui::VKEY_DOWN) {
+        OnKeyDown(ui::VKEY_END);
+      } else {
+        OnKeyDown(event->key_code());
+      }
+    } else {
+      OnKeyDown(event->key_code());
+    }
+#else
     OnKeyDown(event->key_code());
+#endif
     // Key events can lead to this being deleted.
     if (!this_ref)
       return ui::POST_DISPATCH_NONE;
@@ -1230,9 +1248,6 @@ void MenuController::SetSelection(MenuItemView* menu_item,
     menu_item->SetSelectionOfActionableSubmenu(
         (selection_types & SELECTION_OPEN_SUBMENU) != 0);
   }
-
-  if (menu_item && menu_item->GetDelegate())
-    menu_item->GetDelegate()->SelectionChanged(menu_item);
 
   DCHECK(menu_item || (selection_types & SELECTION_EXIT) != 0);
 
@@ -1348,6 +1363,14 @@ void MenuController::OnKeyDown(ui::KeyboardCode key_code) {
     return;
 
   switch (key_code) {
+    case ui::VKEY_HOME:
+      MoveSelectionToFirstOrLastItem(INCREMENT_SELECTION_DOWN);
+      break;
+
+    case ui::VKEY_END:
+      MoveSelectionToFirstOrLastItem(INCREMENT_SELECTION_UP);
+      break;
+
     case ui::VKEY_UP:
       IncrementSelection(INCREMENT_SELECTION_UP);
       break;
@@ -1601,7 +1624,7 @@ bool MenuController::ShowSiblingMenu(SubmenuView* source,
 
   // There is a sibling menu, update the button state, hide the current menu
   // and show the new one.
-  pressed_lock_.reset(new MenuButton::PressedLock(button, true, nullptr));
+  pressed_lock_ = button->menu_button_event_handler()->TakeLock(true, nullptr);
 
   // Need to reset capture when we show the menu again, otherwise we aren't
   // going to get any events.
@@ -1924,7 +1947,15 @@ void MenuController::OpenMenuImpl(MenuItemView* item, bool show) {
     // than 0) is fine.
     const int kGroupingId = 1001;
 
+    // Show alerts on the requested MenuItemViews.
+    for (int i = 0; i < item->GetSubmenu()->GetMenuItemCount(); ++i) {
+      MenuItemView* subitem = item->GetSubmenu()->GetMenuItemAt(i);
+      if (alerted_commands_.contains(subitem->GetCommand()))
+        subitem->SetAlerted(true);
+    }
+
     item->GetSubmenu()->ShowAt(owner_, bounds, do_capture);
+
     // Figure out if the mouse is under the menu; if so, remember the mouse
     // location so we can ignore the first mouse move event(s) with that
     // location. We do this after ShowAt because ConvertPointFromScreen
@@ -2155,7 +2186,7 @@ gfx::Rect MenuController::CalculateMenuBounds(MenuItemView* item,
       // Menu fits above anchor bounds.
       menu_bounds.set_y(above_anchor);
       item->set_actual_menu_position(MenuItemView::POSITION_ABOVE_BOUNDS);
-    } else {
+    } else if (item->GetDelegate()->ShouldTryPositioningBesideAnchor()) {
       const int left_of_anchor = anchor_bounds.x() - menu_bounds.width();
       const int right_of_anchor = anchor_bounds.right();
 
@@ -2173,6 +2204,11 @@ gfx::Rect MenuController::CalculateMenuBounds(MenuItemView* item,
         if (menu_bounds.x() < monitor_bounds.x())
           menu_bounds.set_x(right_of_anchor);
       }
+    } else {
+      // The delegate doesn't want the menu repositioned to the side, and it
+      // doesn't fit on the screen in any orientation - just clip the menu to
+      // the screen and let the scrolling arrows appear.
+      menu_bounds.Intersect(monitor_bounds);
     }
   }
 
@@ -2410,6 +2446,27 @@ void MenuController::IncrementSelection(
       }
     }
   }
+}
+
+void MenuController::MoveSelectionToFirstOrLastItem(
+    SelectionIncrementDirectionType direction) {
+  MenuItemView* item = pending_state_.item;
+  DCHECK(item);
+  MenuItemView* submenu = nullptr;
+
+  if (pending_state_.submenu_open && item->SubmenuIsShowing()) {
+    if (!item->GetSubmenu()->GetMenuItemCount())
+      return;
+
+    // A menu is selected and open, but none of its children are selected,
+    // select the first or last menu item that is visible and enabled.
+    submenu = item;
+  } else {
+    submenu = item->GetParentMenuItem();
+  }
+
+  MenuItemView* to_select = FindInitialSelectableMenuItem(submenu, direction);
+  SetInitialHotTrackedView(to_select, direction);
 }
 
 MenuItemView* MenuController::FindInitialSelectableMenuItem(
@@ -2788,7 +2845,7 @@ MenuItemView* MenuController::ExitTopMostMenu() {
   }
 #endif
 
-  std::unique_ptr<MenuButton::PressedLock> nested_pressed_lock;
+  std::unique_ptr<MenuButtonEventHandler::PressedLock> nested_pressed_lock;
   bool nested_menu = !menu_stack_.empty();
   if (nested_menu) {
     DCHECK(!menu_stack_.empty());

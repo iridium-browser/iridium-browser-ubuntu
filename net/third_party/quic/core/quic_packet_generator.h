@@ -1,7 +1,7 @@
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
+
 // Responsible for generating packets on behalf of a QuicConnection.
 // Packets are serialized just-in-time.  Control frames are queued.
 // Ack and Feedback frames will be requested from the Connection
@@ -145,6 +145,20 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
   // Creates a connectivity probing packet.
   OwningSerializedPacketPointer SerializeConnectivityProbingPacket();
 
+  // Create connectivity probing request and response packets using PATH
+  // CHALLENGE and PATH RESPONSE frames, respectively.
+  // SerializePathChallengeConnectivityProbingPacket will pad the packet to be
+  // MTU bytes long.
+  OwningSerializedPacketPointer SerializePathChallengeConnectivityProbingPacket(
+      QuicPathFrameBuffer* payload);
+
+  // If |is_padded| is true then SerializePathResponseConnectivityProbingPacket
+  // will pad the packet to be MTU bytes long, else it will not pad the packet.
+  // |payloads| is cleared.
+  OwningSerializedPacketPointer SerializePathResponseConnectivityProbingPacket(
+      const QuicDeque<QuicPathFrameBuffer>& payloads,
+      const bool is_padded);
+
   // Re-serializes frames with the original packet's packet number length.
   // Used for retransmitting packets to ensure they aren't too long.
   void ReserializeAllFrames(const QuicPendingRetransmission& retransmission,
@@ -205,6 +219,16 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
     packet_creator_.set_debug_delegate(debug_delegate);
   }
 
+  bool should_send_ack() const { return should_send_ack_; }
+
+  void set_fully_pad_crypto_hadshake_packets(bool new_value) {
+    fully_pad_crypto_handshake_packets_ = new_value;
+  }
+
+  bool fully_pad_crypto_handshake_packets() const {
+    return fully_pad_crypto_handshake_packets_;
+  }
+
  private:
   friend class test::QuicPacketGeneratorPeer;
 
@@ -233,6 +257,9 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
   QuicPacketCreator packet_creator_;
   QuicFrames queued_control_frames_;
 
+  // Transmission type of the next serialized packet.
+  TransmissionType next_transmission_type_;
+
   // True if packet flusher is currently attached.
   bool flusher_attached_;
 
@@ -246,6 +273,9 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
   QuicStopWaitingFrame pending_stop_waiting_frame_;
 
   QuicRandom* random_generator_;
+
+  // Whether crypto handshake packets should be fully padded.
+  bool fully_pad_crypto_handshake_packets_;
 };
 
 }  // namespace quic

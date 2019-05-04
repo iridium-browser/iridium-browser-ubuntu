@@ -28,6 +28,7 @@ import android.net.wifi.WifiManager;
 import android.net.wifi.p2p.WifiP2pGroup;
 import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Build;
+import android.support.annotation.Nullable;
 import android.telephony.TelephonyManager;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -35,7 +36,6 @@ import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import javax.annotation.Nullable;
 
 /**
  * Borrowed from Chromium's
@@ -297,7 +297,8 @@ public class NetworkMonitorAutoDetect extends BroadcastReceiver {
           // https://android.googlesource.com/platform/frameworks/base/+/d6a7980d
           NetworkInfo underlyingActiveNetworkInfo = connectivityManager.getActiveNetworkInfo();
           // We use the NetworkInfo of the underlying network if it is not of TYPE_VPN itself.
-          if (underlyingActiveNetworkInfo.getType() != ConnectivityManager.TYPE_VPN) {
+          if (underlyingActiveNetworkInfo != null
+              && underlyingActiveNetworkInfo.getType() != ConnectivityManager.TYPE_VPN) {
             return new NetworkState(networkInfo.isConnected(), ConnectivityManager.TYPE_VPN, -1,
                 underlyingActiveNetworkInfo.getType(), underlyingActiveNetworkInfo.getSubtype());
           }

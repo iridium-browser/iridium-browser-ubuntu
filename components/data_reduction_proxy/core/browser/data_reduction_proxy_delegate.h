@@ -14,7 +14,6 @@
 #include "url/gurl.h"
 
 namespace net {
-class NetLog;
 class ProxyInfo;
 class ProxyServer;
 }
@@ -24,7 +23,6 @@ namespace data_reduction_proxy {
 class DataReductionProxyBypassStats;
 class DataReductionProxyConfig;
 class DataReductionProxyConfigurator;
-class DataReductionProxyEventCreator;
 class DataReductionProxyIOData;
 
 class DataReductionProxyDelegate : public net::ProxyDelegate {
@@ -33,9 +31,7 @@ class DataReductionProxyDelegate : public net::ProxyDelegate {
   // outlives this class instance.
   DataReductionProxyDelegate(DataReductionProxyConfig* config,
                              const DataReductionProxyConfigurator* configurator,
-                             DataReductionProxyEventCreator* event_creator,
-                             DataReductionProxyBypassStats* bypass_stats,
-                             net::NetLog* net_log);
+                             DataReductionProxyBypassStats* bypass_stats);
 
   ~DataReductionProxyDelegate() override;
 
@@ -48,6 +44,11 @@ class DataReductionProxyDelegate : public net::ProxyDelegate {
                       const net::ProxyRetryInfoMap& proxy_retry_info,
                       net::ProxyInfo* result) override;
   void OnFallback(const net::ProxyServer& bad_proxy, int net_error) override;
+  void OnBeforeTunnelRequest(const net::ProxyServer& proxy_server,
+                             net::HttpRequestHeaders* extra_headers) override {}
+  net::Error OnTunnelHeadersReceived(
+      const net::ProxyServer& proxy_server,
+      const net::HttpResponseHeaders& response_headers) override;
 
  protected:
   // Protected so that it can be overridden during testing.
@@ -76,12 +77,9 @@ class DataReductionProxyDelegate : public net::ProxyDelegate {
 
   const DataReductionProxyConfig* config_;
   const DataReductionProxyConfigurator* configurator_;
-  DataReductionProxyEventCreator* event_creator_;
   DataReductionProxyBypassStats* bypass_stats_;
 
   DataReductionProxyIOData* io_data_;
-
-  net::NetLog* net_log_;
 
   base::ThreadChecker thread_checker_;
 

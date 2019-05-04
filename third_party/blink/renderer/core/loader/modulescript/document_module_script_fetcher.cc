@@ -12,22 +12,20 @@
 
 namespace blink {
 
-DocumentModuleScriptFetcher::DocumentModuleScriptFetcher(
-    ResourceFetcher* fetcher)
-    : fetcher_(fetcher) {
-  DCHECK(fetcher_);
-}
-
-void DocumentModuleScriptFetcher::Fetch(FetchParameters& fetch_params,
-                                        ModuleGraphLevel level,
-                                        ModuleScriptFetcher::Client* client) {
+void DocumentModuleScriptFetcher::Fetch(
+    FetchParameters& fetch_params,
+    ResourceFetcher* fetch_client_settings_object_fetcher,
+    ModuleGraphLevel level,
+    ModuleScriptFetcher::Client* client) {
+  DCHECK(fetch_client_settings_object_fetcher);
   DCHECK(!client_);
   client_ = client;
 
   if (FetchIfLayeredAPI(fetch_params))
     return;
 
-  ScriptResource::Fetch(fetch_params, fetcher_, this);
+  ScriptResource::Fetch(fetch_params, fetch_client_settings_object_fetcher,
+                        this, ScriptResource::kNoStreaming);
 }
 
 void DocumentModuleScriptFetcher::NotifyFinished(Resource* resource) {
@@ -42,14 +40,13 @@ void DocumentModuleScriptFetcher::NotifyFinished(Resource* resource) {
   }
 
   ModuleScriptCreationParams params(
-      script_resource->GetResponse().Url(), script_resource->SourceText(),
-      script_resource->GetResourceRequest().GetFetchCredentialsMode(),
-      script_resource->CalculateAccessControlStatus());
+      script_resource->GetResponse().CurrentRequestUrl(),
+      script_resource->SourceText(),
+      script_resource->GetResourceRequest().GetFetchCredentialsMode());
   client_->NotifyFetchFinished(params, error_messages);
 }
 
 void DocumentModuleScriptFetcher::Trace(blink::Visitor* visitor) {
-  visitor->Trace(fetcher_);
   visitor->Trace(client_);
   ResourceClient::Trace(visitor);
 }
@@ -77,8 +74,7 @@ bool DocumentModuleScriptFetcher::FetchIfLayeredAPI(
 
   ModuleScriptCreationParams params(
       layered_api_url, ParkableString(source_text.ReleaseImpl()),
-      fetch_params.GetResourceRequest().GetFetchCredentialsMode(),
-      kSharableCrossOrigin);
+      fetch_params.GetResourceRequest().GetFetchCredentialsMode());
   client_->NotifyFetchFinished(params, HeapVector<Member<ConsoleMessage>>());
   return true;
 }

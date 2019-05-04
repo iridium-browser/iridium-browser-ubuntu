@@ -57,6 +57,9 @@ class PLATFORM_EXPORT ScriptWrappableMarkingVisitor
   template <typename T>
   inline static void WriteBarrier(const T* dst_object);
 
+  template <typename T>
+  static void WriteBarrier(TraceWrapperMember<T>* array, size_t length);
+
   static void WriteBarrier(v8::Isolate*, const WrapperTypeInfo*, void*);
 
   static void WriteBarrier(v8::Isolate*,
@@ -72,6 +75,8 @@ class PLATFORM_EXPORT ScriptWrappableMarkingVisitor
 
   bool WrapperTracingInProgress() const { return tracing_in_progress_; }
 
+  void AbortTracingForTermination();
+
   // v8::EmbedderHeapTracer interface.
   void TracePrologue() override;
   void RegisterV8References(const std::vector<std::pair<void*, void*>>&
@@ -79,9 +84,8 @@ class PLATFORM_EXPORT ScriptWrappableMarkingVisitor
   void RegisterV8Reference(const std::pair<void*, void*>& internal_fields);
   bool AdvanceTracing(double deadline_in_ms) override;
   void TraceEpilogue() override;
-  void AbortTracing() override;
   void EnterFinalPause(EmbedderStackState) override;
-  size_t NumberOfWrappersToTrace() override;
+  bool IsTracingDone() override;
 
   // ScriptWrappableVisitor interface.
   void Visit(const TraceWrapperV8Reference<v8::Value>&) override;
@@ -226,6 +230,25 @@ inline void ScriptWrappableMarkingVisitor::WriteBarrier(const T* dst_object) {
   CurrentVisitor(thread_state->GetIsolate())
       ->VisitWithWrappers(const_cast<T*>(dst_object),
                           TraceDescriptorFor(dst_object));
+}
+
+template <typename T>
+inline void ScriptWrappableMarkingVisitor::WriteBarrier(
+    TraceWrapperMember<T>* array,
+    size_t length) {
+  if (!ThreadState::IsAnyWrapperTracing() || !array)
+    return;
+
+  const ThreadState* thread_state =
+      ThreadStateFor<ThreadingTrait<T>::kAffinity>::GetState();
+  DCHECK(thread_state);
+  // Bail out if tracing is not in progress.
+  if (!thread_state->IsWrapperTracing())
+    return;
+
+  for (size_t i = 0; i < length; ++i) {
+    CurrentVisitor(thread_state->GetIsolate())->Trace(array[i]);
+  }
 }
 
 }  // namespace blink

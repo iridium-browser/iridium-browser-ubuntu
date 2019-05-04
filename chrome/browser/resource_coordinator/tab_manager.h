@@ -46,6 +46,7 @@ class WebContents;
 namespace resource_coordinator {
 
 class BackgroundTabNavigationThrottle;
+class PageSignalReceiver;
 
 #if defined(OS_CHROMEOS)
 class TabManagerDelegate;
@@ -90,7 +91,9 @@ class TabManager : public LifecycleUnitObserver,
 
   class WebContentsData;
 
-  TabManager();
+  // |page_signal_receiver| might be null.
+  TabManager(PageSignalReceiver* page_signal_receiver,
+             TabLoadTracker* tab_load_tracker);
   ~TabManager() override;
 
   // Start/Stop the Tab Manager.
@@ -266,14 +269,9 @@ class TabManager : public LifecycleUnitObserver,
   // min time to purge times this value.
   const int kDefaultMinMaxTimeToPurgeRatio = 4;
 
-  static void PurgeMemoryAndDiscardTab(LifecycleUnitDiscardReason reason);
-
   // Returns true if the |url| represents an internal Chrome web UI page that
   // can be easily reloaded and hence makes a good choice to discard.
   static bool IsInternalPage(const GURL& url);
-
-  // Purges data structures in the browser that can be easily recomputed.
-  void PurgeBrowserMemory();
 
   // Callback for when |update_timer_| fires. Takes care of executing the tasks
   // that need to be run periodically (see comment in implementation).
@@ -547,6 +545,9 @@ class TabManager : public LifecycleUnitObserver,
 
   // A clock that advances when Chrome is in use.
   UsageClock usage_clock_;
+
+  // The tab load tracker observed by this instance.
+  TabLoadTracker* const tab_load_tracker_;
 
   // Weak pointer factory used for posting delayed tasks.
   base::WeakPtrFactory<TabManager> weak_ptr_factory_;

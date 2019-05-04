@@ -26,8 +26,12 @@ class MediaRouterViewsUI : public MediaRouterUIBase,
   void StartCasting(const std::string& sink_id,
                     MediaCastMode cast_mode) override;
   void StopCasting(const std::string& route_id) override;
+  void ChooseLocalFile(
+      base::OnceCallback<void(const ui::SelectedFileInfo*)> callback) override;
+  void ClearIssue(const Issue::Id& issue_id) override;
 
   // MediaRouterUIBase:
+  // Also filters cloud sinks in incognito windows.
   std::vector<MediaSinkWithCastModes> GetEnabledSinks() const override;
 
  private:
@@ -39,6 +43,8 @@ class MediaRouterViewsUI : public MediaRouterUIBase,
   FRIEND_TEST_ALL_PREFIXES(MediaRouterViewsUITest, DisconnectingState);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterViewsUITest, AddAndRemoveIssue);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterViewsUITest, ShowDomainForHangouts);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterViewsUIIncognitoTest,
+                           HidesCloudSinksForIncognito);
 
   // MediaRouterUIBase:
   void InitCommon(content::WebContents* initiator) override;
@@ -62,6 +68,7 @@ class MediaRouterViewsUI : public MediaRouterUIBase,
   // MediaRouterFileDialogDelegate:
   void FileDialogFileSelected(const ui::SelectedFileInfo& file_info) override;
   void FileDialogSelectionFailed(const IssueInfo& issue) override;
+  void FileDialogSelectionCanceled() override;
 
   // This value is set whenever there is an outstanding issue.
   base::Optional<Issue> issue_;
@@ -80,6 +87,9 @@ class MediaRouterViewsUI : public MediaRouterUIBase,
   // Observers for dialog model updates.
   // TODO(takumif): CastDialogModel should manage the observers.
   base::ObserverList<CastDialogController::Observer>::Unchecked observers_;
+
+  base::OnceCallback<void(const ui::SelectedFileInfo*)>
+      file_selection_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaRouterViewsUI);
 };

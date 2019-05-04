@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <vector>
+#include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
 #include "ui/display/display.h"
@@ -23,7 +24,8 @@ class ArCore {
 
   // Initializes the runtime and returns whether it was successful.
   // If successful, the runtime must be paused when this method returns.
-  virtual bool Initialize() = 0;
+  virtual bool Initialize(
+      base::android::ScopedJavaLocalRef<jobject> application_context) = 0;
 
   virtual void SetDisplayGeometry(
       const gfx::Size& frame_size,
@@ -43,11 +45,16 @@ class ArCore {
 
   virtual bool RequestHitTest(
       const mojom::XRRayPtr& ray,
-      const gfx::Size& image_size,
       std::vector<mojom::XRHitResultPtr>* hit_results) = 0;
 
   virtual void Pause() = 0;
   virtual void Resume() = 0;
+};
+
+class ArCoreFactory {
+ public:
+  virtual ~ArCoreFactory() = default;
+  virtual std::unique_ptr<ArCore> Create() = 0;
 };
 
 }  // namespace device

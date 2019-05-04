@@ -80,6 +80,13 @@ void DoProcessNotificationResponse(NotificationCommon::Operation operation,
                                    const base::Optional<bool>& by_user) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
+  // Profile ID can be empty for system notifications, which are not bound to a
+  // profile, but system notifications are transient and thus not handled by
+  // this NotificationPlatformBridge.
+  // When transient notifications are supported, this should route the
+  // notification response to the system NotificationDisplayService.
+  DCHECK(!profile_id.empty());
+
   ProfileManager* profileManager = g_browser_process->profile_manager();
   DCHECK(profileManager);
 
@@ -193,10 +200,11 @@ NotificationPlatformBridgeMac::~NotificationPlatformBridgeMac() {
 }
 
 // static
-NotificationPlatformBridge* NotificationPlatformBridge::Create() {
+std::unique_ptr<NotificationPlatformBridge>
+NotificationPlatformBridge::Create() {
   base::scoped_nsobject<AlertDispatcherImpl> alert_dispatcher(
       [[AlertDispatcherImpl alloc] init]);
-  return new NotificationPlatformBridgeMac(
+  return std::make_unique<NotificationPlatformBridgeMac>(
       [NSUserNotificationCenter defaultUserNotificationCenter],
       alert_dispatcher.get());
 }
@@ -335,6 +343,8 @@ void NotificationPlatformBridgeMac::SetReadyCallback(
     NotificationBridgeReadyCallback callback) {
   std::move(callback).Run(true);
 }
+
+void NotificationPlatformBridgeMac::DisplayServiceShutDown(Profile* profile) {}
 
 // static
 void NotificationPlatformBridgeMac::ProcessNotificationResponse(

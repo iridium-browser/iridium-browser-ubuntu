@@ -19,9 +19,10 @@ import * as m from 'mithril';
 import {forwardRemoteCalls} from '../base/remote';
 import {Actions} from '../common/actions';
 import {State} from '../common/state';
-import {TimeSpan} from '../common/time';
+
 import {globals, QuantizedLoad, ThreadDesc} from './globals';
 import {HomePage} from './home_page';
+import {openBufferWithLegacyTraceViewer} from './legacy_trace_viewer';
 import {RecordPage} from './record_page';
 import {Router} from './router';
 import {ViewerPage} from './viewer_page';
@@ -34,17 +35,10 @@ class FrontendApi {
 
   updateState(state: State) {
     globals.state = state;
-
     // If the visible time in the global state has been updated more recently
     // than the visible time handled by the frontend @ 60fps, update it. This
     // typically happens when restoring the state from a permalink.
-    const vizTraceTime = globals.state.visibleTraceTime;
-    if (vizTraceTime.lastUpdate >
-        globals.frontendLocalState.visibleTimeLastUpdate) {
-      globals.frontendLocalState.updateVisibleTime(
-          new TimeSpan(vizTraceTime.startSec, vizTraceTime.endSec));
-    }
-
+    globals.frontendLocalState.mergeState(state.frontendLocalState);
     this.redraw();
   }
 
@@ -52,12 +46,16 @@ class FrontendApi {
   // want to keep in the global state. Figure out a more generic and type-safe
   // mechanism to achieve this.
 
-  publishOverviewData(data: {[key: string]: QuantizedLoad}) {
-    for (const key of Object.keys(data)) {
+  publishOverviewData(data: {[key: string]: QuantizedLoad | QuantizedLoad[]}) {
+    for (const [key, value] of Object.entries(data)) {
       if (!globals.overviewStore.has(key)) {
         globals.overviewStore.set(key, []);
       }
-      globals.overviewStore.get(key)!.push(data[key]);
+      if (value instanceof Array) {
+        globals.overviewStore.get(key)!.push(...value);
+      } else {
+        globals.overviewStore.get(key)!.push(value);
+      }
     }
     globals.rafScheduler.scheduleRedraw();
   }
@@ -78,6 +76,13 @@ class FrontendApi {
       globals.threads.set(thread.utid, thread);
     });
     this.redraw();
+  }
+
+  // For opening JSON/HTML traces with the legacy catapult viewer.
+  publishLegacyTrace(args: {data: ArrayBuffer, size: number}) {
+    const arr = new Uint8Array(args.data, 0, args.size);
+    const str = (new TextDecoder('utf-8')).decode(arr);
+    openBufferWithLegacyTraceViewer('trace.json', str, 0);
   }
 
   private redraw(): void {
@@ -107,7 +112,7 @@ function main() {
       },
       dispatch);
   forwardRemoteCalls(channel.port2, new FrontendApi(router));
-  globals.initialize(dispatch);
+  globals.initialize(dispatch, controller);
 
   globals.rafScheduler.domRedraw = () =>
       m.render(document.body, m(router.resolve(globals.state.route)));
@@ -120,9 +125,7 @@ function main() {
   // /?s=xxxx for permalinks.
   const stateHash = router.param('s');
   if (stateHash) {
-    // TODO(hjd): Should requestId not be set to nextId++ in the controller?
     globals.dispatch(Actions.loadPermalink({
-      requestId: new Date().toISOString(),
       hash: stateHash,
     }));
   }

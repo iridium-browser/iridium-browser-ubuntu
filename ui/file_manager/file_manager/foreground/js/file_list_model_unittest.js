@@ -34,14 +34,21 @@ function assertEntryArrayEquals(entryArray, names) {
 
 function makeSimpleFileListModel(names) {
   var fileListModel = new FileListModel(new TestMetadataModel({}));
-  for (var i = 0; i < names.length; i++)
-    fileListModel.push({ name: names[i], isDirectory: false });
+  for (var i = 0; i < names.length; i++) {
+    fileListModel.push({name: names[i], isDirectory: false});
+  }
   return fileListModel;
 }
 
-// MetadataModel for this test.
-// It is supposed to provide metadata from TEST_METADATA to work with the
-// FileListModel.
+/**
+ * MetadataModel for this test.
+ * It is supposed to provide metadata from TEST_METADATA to work with the
+ * FileListModel.
+ *
+ * @constructor
+ * @extends {MetadataModel}
+ * @param {Object} testdata
+ */
 function TestMetadataModel(testdata) {
   this.testdata_ = testdata;
 }
@@ -52,8 +59,9 @@ TestMetadataModel.prototype = {
     for (var i = 0; i < entries.length; i++) {
       var metadata = {};
       if (!entries[i].isDirectory && this.testdata_[entries[i].name]) {
-        for (var j = 0; j < names.length; j++)
+        for (var j = 0; j < names.length; j++) {
           metadata[names[j]] = this.testdata_[entries[i].name][names[j]];
+        }
       }
       result.push(metadata);
     }

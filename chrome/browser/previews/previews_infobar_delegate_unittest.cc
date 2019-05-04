@@ -26,9 +26,9 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/android/android_theme_resources.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/infobars/mock_infobar_service.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_test_harness.h"
 #include "chrome/browser/page_load_metrics/page_load_tracker.h"
 #include "chrome/browser/previews/previews_ui_tab_helper.h"
@@ -111,8 +111,12 @@ class TestPreviewsWebContentsObserver
   }
 
  private:
+  friend class content::WebContentsUserData<TestPreviewsWebContentsObserver>;
   content::ReloadType last_navigation_reload_type_;
+  WEB_CONTENTS_USER_DATA_KEY_DECL();
 };
+
+WEB_CONTENTS_USER_DATA_KEY_IMPL(TestPreviewsWebContentsObserver)
 
 class TestOptOutObserver : public page_load_metrics::PageLoadMetricsObserver {
  public:
@@ -200,16 +204,15 @@ class PreviewsInfoBarDelegateUnitTest
     std::unique_ptr<TestPreviewsLogger> previews_logger =
         std::make_unique<TestPreviewsLogger>();
     previews_logger_ = previews_logger.get();
-    previews_decider_impl_ = std::make_unique<previews::PreviewsDeciderImpl>(
-        base::MessageLoopCurrent::Get()->task_runner(),
-        base::MessageLoopCurrent::Get()->task_runner(),
-        base::DefaultClock::GetInstance());
+    std::unique_ptr<previews::PreviewsDeciderImpl> decider =
+        std::make_unique<previews::PreviewsDeciderImpl>(
+            base::DefaultClock::GetInstance());
+    previews_decider_impl_ = decider.get();
     test_network_quality_tracker_ =
         std::make_unique<network::TestNetworkQualityTracker>();
     previews_ui_service_ = std::make_unique<previews::PreviewsUIService>(
-        previews_decider_impl_.get(),
-        base::MessageLoopCurrent::Get()->task_runner(),
-        nullptr /* previews_opt_out_store */, nullptr /* previews_opt_guide */,
+        std::move(decider), nullptr /* previews_opt_out_store */,
+        nullptr /* previews_opt_guide */,
         base::BindRepeating(&IsPreviewsEnabled), std::move(previews_logger),
         blacklist::BlacklistData::AllowedTypesAndVersions(),
         test_network_quality_tracker_.get());
@@ -240,18 +243,8 @@ class PreviewsInfoBarDelegateUnitTest
     field_trial_list_.reset(new base::FieldTrialList(nullptr));
     base::FieldTrialParamAssociator::GetInstance()->ClearAllParamsForTesting();
 
-    const std::string kTrialName = "TrialName";
-    const std::string kGroupName = "GroupName";
-
-    base::AssociateFieldTrialParams(kTrialName, kGroupName, variation_params);
-    base::FieldTrial* field_trial =
-        base::FieldTrialList::CreateFieldTrial(kTrialName, kGroupName);
-
-    std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-    feature_list->RegisterFieldTrialOverride(
-        previews::features::kStalePreviewsTimestamp.name,
-        base::FeatureList::OVERRIDE_ENABLE_FEATURE, field_trial);
-    scoped_feature_list_.InitWithFeatureList(std::move(feature_list));
+    scoped_feature_list_.InitAndEnableFeatureWithParameters(
+        previews::features::kStalePreviewsTimestamp, variation_params);
   }
 
   void TestStalePreviews(
@@ -301,7 +294,7 @@ class PreviewsInfoBarDelegateUnitTest
   std::unique_ptr<base::HistogramTester> tester_;
 
   TestPreviewsLogger* previews_logger_;
-  std::unique_ptr<previews::PreviewsDeciderImpl> previews_decider_impl_;
+  previews::PreviewsDeciderImpl* previews_decider_impl_;
   std::unique_ptr<previews::PreviewsUIService> previews_ui_service_;
   std::unique_ptr<network::NetworkQualityTracker> test_network_quality_tracker_;
 };
@@ -628,14 +621,14 @@ TEST_F(PreviewsInfoBarDelegateUnitTest,
 TEST_F(PreviewsInfoBarDelegateUnitTest,
        DISABLE_ON_WINDOWS(PreviewInfobarTimestampFinchParamsUMA)) {
   std::map<std::string, std::string> variation_params;
-  variation_params["min_staleness_in_minutes"] = "1";
+  variation_params["min_staleness_in_minutes"] = "2";
   variation_params["max_staleness_in_minutes"] = "5";
   EnableStalePreviewsTimestamp(variation_params);
 
   TestStalePreviews(
-      1, false /* is_reload */,
+      2, false /* is_reload */,
       l10n_util::GetStringFUTF16(IDS_PREVIEWS_INFOBAR_TIMESTAMP_MINUTES,
-                                 base::IntToString16(1)),
+                                 base::IntToString16(2)),
       PreviewsUITabHelper::PreviewsStalePreviewTimestamp::kTimestampShown);
 
   TestStalePreviews(6, false /* is_reload */, base::string16(),

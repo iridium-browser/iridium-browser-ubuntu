@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/views/frame/browser_view_layout.h"
 
-#include "base/macros.h"
+#include <algorithm>
+
 #include "base/observer_list.h"
+#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -27,7 +29,6 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/scrollbar_size.h"
@@ -169,7 +170,7 @@ WebContentsModalDialogHost*
   return dialog_host_.get();
 }
 
-gfx::Size BrowserViewLayout::GetMinimumSize() {
+gfx::Size BrowserViewLayout::GetMinimumSize(const views::View* host) const {
   gfx::Size tabstrip_size(
       browser()->SupportsWindowFeature(Browser::FEATURE_TABSTRIP) ?
       tab_strip_->GetMinimumSize() : gfx::Size());
@@ -185,7 +186,7 @@ gfx::Size BrowserViewLayout::GetMinimumSize() {
     bookmark_bar_size.Enlarge(0, -bookmark_bar_->GetToolbarOverlap());
   }
   gfx::Size infobar_container_size(infobar_container_->GetMinimumSize());
-  // TODO: Adjust the minimum height for the find bar.
+  // TODO(pkotwicz): Adjust the minimum height for the find bar.
 
   gfx::Size contents_size(contents_container_->GetMinimumSize());
   // Prevent having a 0x0 sized-contents as this can allow the window to be
@@ -205,7 +206,7 @@ gfx::Size BrowserViewLayout::GetMinimumSize() {
         bookmark_bar_size.width(),
         infobar_container_size.width(),
         contents_size.width() };
-  int min_width = *std::max_element(&widths[0], &widths[arraysize(widths)]);
+  int min_width = *std::max_element(&widths[0], &widths[base::size(widths)]);
   return gfx::Size(min_width, min_height);
 }
 

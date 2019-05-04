@@ -26,26 +26,14 @@ void CGaiaCredential::FinalRelease() {
   LOGFN(INFO);
 }
 
-HRESULT CGaiaCredential::FinishAuthentication(BSTR username,
-                                              BSTR password,
-                                              BSTR fullname,
-                                              BSTR* sid,
-                                              BSTR* error_text) {
-  LOGFN(INFO);
-  DCHECK(error_text);
+void CGaiaCredential::ResetInternalState() {
+  // Reset sid and username so that the credential can be signed in with
+  // another user in case it was cancelled in the middle of a password change
+  // sign in.
+  set_user_sid(CComBSTR());
+  set_username(CComBSTR());
 
-  OSUserManager* manager = OSUserManager::Get();
-  base::string16 comment(GetStringResource(IDS_USER_ACCOUNT_COMMENT));
-  HRESULT hr = CreateNewUser(manager, OLE2CW(username), OLE2CW(password),
-                     OLE2CW(fullname), comment.c_str(), true, sid);
-  if (FAILED(hr)) {
-    LOGFN(ERROR) << "CreateNewUser hr=" << putHR(hr)
-                 << " account=" << OLE2CW(username);
-    *error_text = AllocErrorString(IDS_CANT_CREATE_USER);
-    return hr;
-  }
-
-  return S_OK;
+  CGaiaCredentialBase::ResetInternalState();
 }
 
 }  // namespace credential_provider

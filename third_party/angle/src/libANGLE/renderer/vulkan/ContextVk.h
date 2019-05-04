@@ -14,63 +14,68 @@
 
 #include "common/PackedEnums.h"
 #include "libANGLE/renderer/ContextImpl.h"
+#include "libANGLE/renderer/vulkan/RendererVk.h"
 #include "libANGLE/renderer/vulkan/vk_helpers.h"
+
+namespace angle
+{
+struct FeaturesVk;
+}
 
 namespace rx
 {
-struct FeaturesVk;
 class RendererVk;
 
-class ContextVk : public ContextImpl, public vk::Context
+class ContextVk : public ContextImpl, public vk::Context, public vk::CommandBufferOwner
 {
   public:
-    ContextVk(const gl::ContextState &state, RendererVk *renderer);
+    ContextVk(const gl::State &state, gl::ErrorSet *errorSet, RendererVk *renderer);
     ~ContextVk() override;
 
-    gl::Error initialize() override;
+    angle::Result initialize() override;
 
     void onDestroy(const gl::Context *context) override;
 
     // Flush and finish.
-    gl::Error flush(const gl::Context *context) override;
-    gl::Error finish(const gl::Context *context) override;
+    angle::Result flush(const gl::Context *context) override;
+    angle::Result finish(const gl::Context *context) override;
 
     // Drawing methods.
     angle::Result drawArrays(const gl::Context *context,
                              gl::PrimitiveMode mode,
                              GLint first,
                              GLsizei count) override;
-    gl::Error drawArraysInstanced(const gl::Context *context,
-                                  gl::PrimitiveMode mode,
-                                  GLint first,
-                                  GLsizei count,
-                                  GLsizei instanceCount) override;
+    angle::Result drawArraysInstanced(const gl::Context *context,
+                                      gl::PrimitiveMode mode,
+                                      GLint first,
+                                      GLsizei count,
+                                      GLsizei instanceCount) override;
 
-    gl::Error drawElements(const gl::Context *context,
-                           gl::PrimitiveMode mode,
-                           GLsizei count,
-                           GLenum type,
-                           const void *indices) override;
-    gl::Error drawElementsInstanced(const gl::Context *context,
+    angle::Result drawElements(const gl::Context *context,
+                               gl::PrimitiveMode mode,
+                               GLsizei count,
+                               gl::DrawElementsType type,
+                               const void *indices) override;
+    angle::Result drawElementsInstanced(const gl::Context *context,
+                                        gl::PrimitiveMode mode,
+                                        GLsizei count,
+                                        gl::DrawElementsType type,
+                                        const void *indices,
+                                        GLsizei instances) override;
+    angle::Result drawRangeElements(const gl::Context *context,
                                     gl::PrimitiveMode mode,
+                                    GLuint start,
+                                    GLuint end,
                                     GLsizei count,
-                                    GLenum type,
-                                    const void *indices,
-                                    GLsizei instances) override;
-    gl::Error drawRangeElements(const gl::Context *context,
-                                gl::PrimitiveMode mode,
-                                GLuint start,
-                                GLuint end,
-                                GLsizei count,
-                                GLenum type,
-                                const void *indices) override;
-    gl::Error drawArraysIndirect(const gl::Context *context,
-                                 gl::PrimitiveMode mode,
-                                 const void *indirect) override;
-    gl::Error drawElementsIndirect(const gl::Context *context,
-                                   gl::PrimitiveMode mode,
-                                   GLenum type,
-                                   const void *indirect) override;
+                                    gl::DrawElementsType type,
+                                    const void *indices) override;
+    angle::Result drawArraysIndirect(const gl::Context *context,
+                                     gl::PrimitiveMode mode,
+                                     const void *indirect) override;
+    angle::Result drawElementsIndirect(const gl::Context *context,
+                                       gl::PrimitiveMode mode,
+                                       gl::DrawElementsType type,
+                                       const void *indirect) override;
 
     // Device loss
     GLenum getResetStatus() override;
@@ -101,7 +106,7 @@ class ContextVk : public ContextImpl, public vk::Context
     GLint64 getTimestamp() override;
 
     // Context switching
-    gl::Error onMakeCurrent(const gl::Context *context) override;
+    angle::Result onMakeCurrent(const gl::Context *context) override;
 
     // Native capabilities, unmodified by gl::Context.
     gl::Caps getNativeCaps() const override;
@@ -147,21 +152,41 @@ class ContextVk : public ContextImpl, public vk::Context
     // Path object creation
     std::vector<PathImpl *> createPaths(GLsizei) override;
 
-    gl::Error dispatchCompute(const gl::Context *context,
-                              GLuint numGroupsX,
-                              GLuint numGroupsY,
-                              GLuint numGroupsZ) override;
-    gl::Error dispatchComputeIndirect(const gl::Context *context, GLintptr indirect) override;
+    angle::Result dispatchCompute(const gl::Context *context,
+                                  GLuint numGroupsX,
+                                  GLuint numGroupsY,
+                                  GLuint numGroupsZ) override;
+    angle::Result dispatchComputeIndirect(const gl::Context *context, GLintptr indirect) override;
 
-    gl::Error memoryBarrier(const gl::Context *context, GLbitfield barriers) override;
-    gl::Error memoryBarrierByRegion(const gl::Context *context, GLbitfield barriers) override;
+    angle::Result memoryBarrier(const gl::Context *context, GLbitfield barriers) override;
+    angle::Result memoryBarrierByRegion(const gl::Context *context, GLbitfield barriers) override;
 
     VkDevice getDevice() const;
-    const FeaturesVk &getFeatures() const;
 
-    void invalidateCurrentPipeline();
+    ANGLE_INLINE const angle::FeaturesVk &getFeatures() const { return mRenderer->getFeatures(); }
+
+    ANGLE_INLINE void invalidateVertexAndIndexBuffers()
+    {
+        invalidateCurrentPipeline();
+        mDirtyBits.set(DIRTY_BIT_VERTEX_BUFFERS);
+        mDirtyBits.set(DIRTY_BIT_INDEX_BUFFER);
+    }
+
+    ANGLE_INLINE void onVertexAttributeChange(size_t attribIndex,
+                                              GLuint stride,
+                                              GLuint divisor,
+                                              VkFormat format,
+                                              GLuint relativeOffset)
+    {
+        invalidateVertexAndIndexBuffers();
+        mGraphicsPipelineDesc->updateVertexInput(&mGraphicsPipelineTransition,
+                                                 static_cast<uint32_t>(attribIndex), stride,
+                                                 divisor, format, relativeOffset);
+    }
+
     void invalidateDefaultAttribute(size_t attribIndex);
     void invalidateDefaultAttributes(const gl::AttributesMask &dirtyMask);
+    void onFramebufferChange(const vk::RenderPassDesc &renderPassDesc);
 
     vk::DynamicDescriptorPool *getDynamicDescriptorPool(uint32_t descriptorSetIndex);
     vk::DynamicQueryPool *getQueryPool(gl::QueryType queryType);
@@ -169,13 +194,15 @@ class ContextVk : public ContextImpl, public vk::Context
     const VkClearValue &getClearColorValue() const;
     const VkClearValue &getClearDepthStencilValue() const;
     VkColorComponentFlags getClearColorMask() const;
-    const VkRect2D &getScissor() const { return mPipelineDesc->getScissor(); }
-    gl::Error getIncompleteTexture(const gl::Context *context,
-                                   gl::TextureType type,
-                                   gl::Texture **textureOut);
+    angle::Result getIncompleteTexture(const gl::Context *context,
+                                       gl::TextureType type,
+                                       gl::Texture **textureOut);
     void updateColorMask(const gl::BlendState &blendState);
 
-    void handleError(VkResult errorCode, const char *file, unsigned int line) override;
+    void handleError(VkResult errorCode,
+                     const char *file,
+                     const char *function,
+                     unsigned int line) override;
     const gl::ActiveTextureArray<TextureVk *> &getActiveTextures() const;
 
     void setIndexBufferDirty() { mDirtyBits.set(DIRTY_BIT_INDEX_BUFFER); }
@@ -197,64 +224,75 @@ class ContextVk : public ContextImpl, public vk::Context
     using DirtyBits = angle::BitSet<DIRTY_BIT_MAX>;
 
     using DirtyBitHandler = angle::Result (ContextVk::*)(const gl::Context *,
-                                                         const gl::DrawCallParams &,
                                                          vk::CommandBuffer *commandBuffer);
 
     std::array<DirtyBitHandler, DIRTY_BIT_MAX> mDirtyBitHandlers;
 
-    angle::Result initPipeline(const gl::DrawCallParams &drawCallParams);
     angle::Result setupDraw(const gl::Context *context,
-                            const gl::DrawCallParams &drawCallParams,
+                            gl::PrimitiveMode mode,
+                            GLint firstVertex,
+                            GLsizei vertexOrIndexCount,
+                            gl::DrawElementsType indexTypeOrInvalid,
+                            const void *indices,
                             DirtyBits dirtyBitMask,
                             vk::CommandBuffer **commandBufferOut);
     angle::Result setupIndexedDraw(const gl::Context *context,
-                                   const gl::DrawCallParams &drawCallParams,
+                                   gl::PrimitiveMode mode,
+                                   GLsizei indexCount,
+                                   gl::DrawElementsType indexType,
+                                   const void *indices,
                                    vk::CommandBuffer **commandBufferOut);
     angle::Result setupLineLoopDraw(const gl::Context *context,
-                                    const gl::DrawCallParams &drawCallParams,
+                                    gl::PrimitiveMode mode,
+                                    GLint firstVertex,
+                                    GLsizei vertexOrIndexCount,
+                                    gl::DrawElementsType indexTypeOrInvalid,
+                                    const void *indices,
                                     vk::CommandBuffer **commandBufferOut);
 
-    void updateScissor(const gl::State &glState) const;
+    void updateViewport(FramebufferVk *framebufferVk,
+                        const gl::Rectangle &viewport,
+                        float nearPlane,
+                        float farPlane,
+                        bool invertViewport);
+    void updateDepthRange(float nearPlane, float farPlane);
+    void updateScissor(const gl::State &glState);
     void updateFlipViewportDrawFramebuffer(const gl::State &glState);
     void updateFlipViewportReadFramebuffer(const gl::State &glState);
 
     angle::Result updateActiveTextures(const gl::Context *context);
     angle::Result updateDefaultAttribute(size_t attribIndex);
 
+    ANGLE_INLINE void invalidateCurrentPipeline() { mDirtyBits.set(DIRTY_BIT_PIPELINE); }
+
     void invalidateCurrentTextures();
     void invalidateDriverUniforms();
 
     angle::Result handleDirtyDefaultAttribs(const gl::Context *context,
-                                            const gl::DrawCallParams &drawCallParams,
                                             vk::CommandBuffer *commandBuffer);
-    angle::Result handleDirtyPipeline(const gl::Context *context,
-                                      const gl::DrawCallParams &drawCallParams,
-                                      vk::CommandBuffer *commandBuffer);
-    angle::Result handleDirtyTextures(const gl::Context *context,
-                                      const gl::DrawCallParams &drawCallParams,
-                                      vk::CommandBuffer *commandBuffer);
+    angle::Result handleDirtyPipeline(const gl::Context *context, vk::CommandBuffer *commandBuffer);
+    angle::Result handleDirtyTextures(const gl::Context *context, vk::CommandBuffer *commandBuffer);
     angle::Result handleDirtyVertexBuffers(const gl::Context *context,
-                                           const gl::DrawCallParams &drawCallParams,
                                            vk::CommandBuffer *commandBuffer);
     angle::Result handleDirtyIndexBuffer(const gl::Context *context,
-                                         const gl::DrawCallParams &drawCallParams,
                                          vk::CommandBuffer *commandBuffer);
     angle::Result handleDirtyDriverUniforms(const gl::Context *context,
-                                            const gl::DrawCallParams &drawCallParams,
                                             vk::CommandBuffer *commandBuffer);
     angle::Result handleDirtyDescriptorSets(const gl::Context *context,
-                                            const gl::DrawCallParams &drawCallParams,
                                             vk::CommandBuffer *commandBuffer);
 
-    vk::PipelineAndSerial *mCurrentPipeline;
+    vk::PipelineHelper *mCurrentPipeline;
     gl::PrimitiveMode mCurrentDrawMode;
 
     // Keep a cached pipeline description structure that can be used to query the pipeline cache.
     // Kept in a pointer so allocations can be aligned, and structs can be portably packed.
-    std::unique_ptr<vk::PipelineDesc> mPipelineDesc;
+    std::unique_ptr<vk::GraphicsPipelineDesc> mGraphicsPipelineDesc;
+    vk::GraphicsPipelineTransitionBits mGraphicsPipelineTransition;
 
     // The descriptor pools are externally sychronized, so cannot be accessed from different
     // threads simultaneously. Hence, we keep them in the ContextVk instead of the RendererVk.
+    // Note that this implementation would need to change in shared resource scenarios. Likely
+    // we'd instead share a single set of dynamic descriptor pools between the share groups.
     // Same with query pools.
     vk::DescriptorSetLayoutArray<vk::DynamicDescriptorPool> mDynamicDescriptorPools;
     angle::PackedEnumMap<gl::QueryType, vk::DynamicQueryPool> mQueryPools;
@@ -272,7 +310,7 @@ class ContextVk : public ContextImpl, public vk::Context
 
     // The offset we had the last time we bound the index buffer.
     const GLvoid *mLastIndexBufferOffset;
-    GLenum mCurrentDrawElementsType;
+    gl::DrawElementsType mCurrentDrawElementsType;
 
     // Cached clear value/mask for color and depth/stencil.
     VkClearValue mClearColorValue;
@@ -304,6 +342,7 @@ class ContextVk : public ContextImpl, public vk::Context
     vk::DynamicBuffer mDriverUniformsBuffer;
     VkDescriptorSet mDriverUniformsDescriptorSet;
     vk::BindingPointer<vk::DescriptorSetLayout> mDriverUniformsSetLayout;
+    vk::SharedDescriptorPoolBinding mDriverUniformsDescriptorPoolBinding;
 
     // This cache should also probably include the texture index (shader location) and array
     // index (also in the shader). This info is used in the descriptor update step.

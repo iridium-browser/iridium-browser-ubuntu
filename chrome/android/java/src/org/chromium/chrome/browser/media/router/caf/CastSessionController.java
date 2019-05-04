@@ -4,6 +4,9 @@
 
 package org.chromium.chrome.browser.media.router.caf;
 
+import android.support.annotation.NonNull;
+import android.support.annotation.VisibleForTesting;
+
 import com.google.android.gms.cast.ApplicationMetadata;
 import com.google.android.gms.cast.Cast;
 import com.google.android.gms.cast.CastDevice;
@@ -21,15 +24,23 @@ public class CastSessionController extends BaseSessionController {
     private static final String TAG = "CafSessionCtrl";
 
     private List<String> mNamespaces = new ArrayList<String>();
-    private final CastListener mCastListener;
+    private CastListener mCastListener;
+    private CafNotificationController mNotificationController;
 
     public CastSessionController(CafBaseMediaRouteProvider provider) {
         super(provider);
         mCastListener = new CastListener();
+        mNotificationController = new CafNotificationController(this);
     }
 
     public List<String> getNamespaces() {
         return mNamespaces;
+    }
+
+    /** Init nested fields for testing. The reason is that nested classes are bound to the original
+     * instance instead of the spyed instance. */
+    void initNestedFieldsForTesting() {
+        mCastListener = new CastListener();
     }
 
     @Override
@@ -50,10 +61,13 @@ public class CastSessionController extends BaseSessionController {
 
     @Override
     public void onSessionEnded() {
-        CafMessageHandler messageHandler = getMessageHandler();
-        if (messageHandler == null) return;
-        messageHandler.onSessionEnded();
+        getMessageHandler().onSessionEnded();
         super.onSessionEnded();
+    }
+
+    @Override
+    public BaseNotificationController getNotificationController() {
+        return mNotificationController;
     }
 
     private class CastListener extends Cast.Listener {
@@ -70,24 +84,25 @@ public class CastSessionController extends BaseSessionController {
         @Override
         public void onVolumeChanged() {
             CastSessionController.this.onApplicationStatusChanged();
-            CafMessageHandler messageHandler = getMessageHandler();
-            if (messageHandler == null) return;
-            messageHandler.onVolumeChanged();
+            getMessageHandler().onVolumeChanged();
         }
     }
 
     private void onApplicationStatusChanged() {
         updateNamespaces();
 
-        CafMessageHandler messageHandler = getMessageHandler();
-        if (messageHandler != null) {
-            messageHandler.broadcastClientMessage(
-                    "update_session", messageHandler.buildSessionMessage());
-        }
+        getMessageHandler().broadcastClientMessage(
+                "update_session", getMessageHandler().buildSessionMessage());
     }
 
-    private void updateNamespaces() {
+    @VisibleForTesting
+    void updateNamespaces() {
         if (!isConnected()) return;
+
+        if (getSession().getApplicationMetadata() == null
+                || getSession().getApplicationMetadata().getSupportedNamespaces() == null) {
+            return;
+        }
 
         Set<String> namespacesToAdd =
                 new HashSet<>(getSession().getApplicationMetadata().getSupportedNamespaces());
@@ -129,10 +144,10 @@ public class CastSessionController extends BaseSessionController {
     @Override
     protected void onMessageReceived(CastDevice castDevice, String namespace, String message) {
         super.onMessageReceived(castDevice, namespace, message);
-        CafMessageHandler messageHandler = getMessageHandler();
-        if (messageHandler != null) messageHandler.onMessageReceived(namespace, message);
+        getMessageHandler().onMessageReceived(namespace, message);
     }
 
+    @NonNull
     private CafMessageHandler getMessageHandler() {
         return ((CafMediaRouteProvider) getProvider()).getMessageHandler();
     }

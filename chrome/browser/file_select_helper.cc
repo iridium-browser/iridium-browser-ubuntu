@@ -227,6 +227,7 @@ void FileSelectHelper::FileSelectionCanceled(void* params) {
 }
 
 void FileSelectHelper::StartNewEnumeration(const base::FilePath& path) {
+  base_dir_ = path;
   auto entry = std::make_unique<ActiveDirectoryEnumeration>(path);
   entry->lister_.reset(new net::DirectoryLister(
       path, net::DirectoryLister::NO_SORT_RECURSIVE, this));
@@ -253,6 +254,14 @@ void FileSelectHelper::LaunchConfirmationDialog(
 }
 
 void FileSelectHelper::OnListDone(int error) {
+  if (!web_contents_) {
+    // Web contents was destroyed under us (probably by closing the tab). We
+    // must notify |listener_| and release our reference to
+    // ourself. RunFileChooserEnd() performs this.
+    RunFileChooserEnd();
+    return;
+  }
+
   // This entry needs to be cleaned up when this function is done.
   std::unique_ptr<ActiveDirectoryEnumeration> entry =
       std::move(directory_enumeration_);
@@ -273,7 +282,7 @@ void FileSelectHelper::OnListDone(int error) {
           blink::mojom::NativeFileInfo::New(file_path, base::string16())));
     }
 
-    listener_->FileSelected(std::move(chooser_files),
+    listener_->FileSelected(std::move(chooser_files), base_dir_,
                             FileChooserParams::Mode::kUploadFolder);
     listener_.reset();
     EnumerateDirectoryEnd();
@@ -322,7 +331,7 @@ void FileSelectHelper::NotifyRenderFrameHostAndEnd(
 
 void FileSelectHelper::NotifyRenderFrameHostAndEndAfterConversion(
     std::vector<FileChooserFileInfoPtr> list) {
-  listener_->FileSelected(std::move(list), dialog_mode_);
+  listener_->FileSelected(std::move(list), base_dir_, dialog_mode_);
   listener_.reset();
 
   // No members should be accessed from here on.

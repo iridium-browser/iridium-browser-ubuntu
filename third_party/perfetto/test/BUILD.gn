@@ -29,15 +29,21 @@ source_set("end_to_end_integrationtests") {
     "../protos/perfetto/trace:zero",
     "../src/base:base",
     "../src/base:test_support",
+    "../src/traced/probes/ftrace",
   ]
   sources = [
     "end_to_end_integrationtest.cc",
   ]
-  if (is_android && !build_with_chromium) {
+  if (is_android && (perfetto_build_standalone || perfetto_build_with_android)) {
     deps += [ "../src/base:android_task_runner" ]
   }
   if (start_daemons_for_testing) {
     cflags = [ "-DPERFETTO_START_DAEMONS_FOR_TESTING" ]
+
+    # In CTS mode we use /syste/bin/perfetto for the cmdline tests and the
+    # perfetto_cmd is not required. Outside of CTS mode, instead, we need to
+    # build the cmdline code as part of the test executable.
+    deps += [ "../src/perfetto_cmd" ]
   }
 }
 
@@ -112,7 +118,7 @@ source_set("test_helper") {
   }
 }
 
-if (!build_with_chromium) {
+if (perfetto_build_standalone) {
   source_set("end_to_end_benchmarks") {
     testonly = true
     deps = [
@@ -130,7 +136,7 @@ if (!build_with_chromium) {
     sources = [
       "end_to_end_benchmark.cc",
     ]
-    if (is_android && !build_with_chromium) {
+    if (is_android) {
       deps += [ "../src/base:android_task_runner" ]
     }
     if (start_daemons_for_testing) {

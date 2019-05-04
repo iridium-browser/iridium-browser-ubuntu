@@ -4,6 +4,7 @@
 
 #import <objc/runtime.h>
 
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
@@ -12,6 +13,8 @@
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state_manager.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
+#import "ios/chrome/browser/ntp/new_tab_page_tab_helper.h"
+#import "ios/chrome/browser/ntp/new_tab_page_tab_helper_delegate.h"
 #include "ios/chrome/browser/sessions/ios_chrome_session_tab_helper.h"
 #import "ios/chrome/browser/sessions/session_ios.h"
 #import "ios/chrome/browser/sessions/session_window_ios.h"
@@ -22,6 +25,7 @@
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/tabs/tab_model_observer.h"
 #import "ios/chrome/browser/tabs/tab_private.h"
+#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/web/chrome_web_client.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
@@ -138,9 +142,9 @@ class TabModelTest
   TabModel* CreateTabModel(SessionServiceIOS* session_service,
                            SessionWindowIOS* session_window) {
     TabModel* tab_model([[TabModel alloc]
-        initWithSessionWindow:session_window
-               sessionService:session_service
-                 browserState:chrome_browser_state_.get()]);
+        initWithSessionService:session_service
+                  browserState:chrome_browser_state_.get()]);
+    [tab_model restoreSessionWindow:session_window forInitialRestore:YES];
     [tab_model setPrimary:YES];
     return tab_model;
   }
@@ -383,10 +387,16 @@ TEST_P(TabModelTest, RestoreSessionOnNTPTest) {
                                   atIndex:0
                              inBackground:NO];
   web::WebStateImpl* web_state = static_cast<web::WebStateImpl*>(tab.webState);
+
+  // Create NTPTabHelper to ensure VisibleURL is set to kChromeUINewTabURL.
+  if (base::FeatureList::IsEnabled(kBrowserContainerContainsNTP)) {
+    id delegate = OCMProtocolMock(@protocol(NewTabPageTabHelperDelegate));
+    NewTabPageTabHelper::CreateForWebState(web_state, delegate);
+  }
   web_state->GetNavigationManagerImpl().CommitPendingItem();
 
   SessionWindowIOS* window(CreateSessionWindow());
-  [tab_model_ restoreSessionWindow:window];
+  [tab_model_ restoreSessionWindow:window forInitialRestore:NO];
 
   ASSERT_EQ(3U, [tab_model_ count]);
   EXPECT_NSEQ([tab_model_ tabAtIndex:1], [tab_model_ currentTab]);
@@ -421,7 +431,7 @@ TEST_P(TabModelTest, RestoreSessionOn2NtpTest) {
   web_state->GetNavigationManagerImpl().CommitPendingItem();
 
   SessionWindowIOS* window(CreateSessionWindow());
-  [tab_model_ restoreSessionWindow:window];
+  [tab_model_ restoreSessionWindow:window forInitialRestore:NO];
 
   ASSERT_EQ(5U, [tab_model_ count]);
   EXPECT_NSEQ([tab_model_ tabAtIndex:3], [tab_model_ currentTab]);
@@ -452,7 +462,7 @@ TEST_P(TabModelTest, RestoreSessionOnAnyTest) {
   web_state->GetNavigationManagerImpl().CommitPendingItem();
 
   SessionWindowIOS* window(CreateSessionWindow());
-  [tab_model_ restoreSessionWindow:window];
+  [tab_model_ restoreSessionWindow:window forInitialRestore:NO];
 
   ASSERT_EQ(4U, [tab_model_ count]);
   EXPECT_NSEQ([tab_model_ tabAtIndex:2], [tab_model_ currentTab]);
@@ -676,20 +686,6 @@ TEST_P(TabModelTest, MoveTabs) {
   // TabModel asserts that there are no observer when it is deallocated,
   // so remove the observer before the end of the method.
   [tab_model_ removeObserver:tab_model_observer];
-}
-
-TEST_P(TabModelTest, ParentTabModel) {
-  std::unique_ptr<web::WebState> web_state = web::WebState::Create(
-      web::WebState::CreateParams(chrome_browser_state_.get()));
-  AttachTabHelpers(web_state.get(), /*for_prerender=*/false);
-
-  Tab* tab = LegacyTabHelper::GetTabForWebState(web_state.get());
-  EXPECT_NSEQ(nil, [tab parentTabModel]);
-
-  [tab_model_ webStateList]->InsertWebState(0, std::move(web_state),
-                                            WebStateList::INSERT_FORCE_INDEX,
-                                            WebStateOpener());
-  EXPECT_NSEQ(tab_model_, [tab parentTabModel]);
 }
 
 TEST_P(TabModelTest, TabCreatedOnInsertion) {

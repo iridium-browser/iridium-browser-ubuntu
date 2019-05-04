@@ -172,9 +172,8 @@ void ProducerIPCClientImpl::OnServiceRequest(
     return;
   }
 
-  PERFETTO_DLOG("Unknown async request %d received from tracing service",
-                cmd.cmd_case());
-  PERFETTO_DCHECK(false);
+  PERFETTO_DFATAL("Unknown async request %d received from tracing service",
+                  cmd.cmd_case());
 }
 
 void ProducerIPCClientImpl::RegisterDataSource(
@@ -206,6 +205,34 @@ void ProducerIPCClientImpl::UnregisterDataSource(const std::string& name) {
   req.set_data_source_name(name);
   producer_port_.UnregisterDataSource(
       req, ipc::Deferred<protos::UnregisterDataSourceResponse>());
+}
+
+void ProducerIPCClientImpl::RegisterTraceWriter(uint32_t writer_id,
+                                                uint32_t target_buffer) {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+  if (!connected_) {
+    PERFETTO_DLOG(
+        "Cannot RegisterTraceWriter(), not connected to tracing service");
+    return;
+  }
+  protos::RegisterTraceWriterRequest req;
+  req.set_trace_writer_id(writer_id);
+  req.set_target_buffer(target_buffer);
+  producer_port_.RegisterTraceWriter(
+      req, ipc::Deferred<protos::RegisterTraceWriterResponse>());
+}
+
+void ProducerIPCClientImpl::UnregisterTraceWriter(uint32_t writer_id) {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+  if (!connected_) {
+    PERFETTO_DLOG(
+        "Cannot UnregisterTraceWriter(), not connected to tracing service");
+    return;
+  }
+  protos::UnregisterTraceWriterRequest req;
+  req.set_trace_writer_id(writer_id);
+  producer_port_.UnregisterTraceWriter(
+      req, ipc::Deferred<protos::UnregisterTraceWriterResponse>());
 }
 
 void ProducerIPCClientImpl::CommitData(const CommitDataRequest& req,

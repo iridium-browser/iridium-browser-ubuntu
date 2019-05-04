@@ -135,10 +135,19 @@ Polymer({
       type: Boolean,
       value: false,
     },
+
+    /**
+     * Turns on "incognito mode". (FIXME after https://crbug.com/900351 is
+     * fixed).
+     */
+    isIncognitoUi: {
+      type: Boolean,
+      value: false,
+    },
   },
 
   focus: function() {
-    this.$.pinKeyboard.focus();
+    this.$.pinKeyboard.focusInput();
   },
 
   /** @override */
@@ -161,7 +170,8 @@ Polymer({
     this.enableSubmit = false;
     this.isConfirmStep = false;
     this.hideProblem_();
-    this.onPinChange_();
+    this.onPinChange_(
+        new CustomEvent('pin-change', {detail: {pin: this.pinKeyboardValue_}}));
   },
 
   /**
@@ -272,13 +282,17 @@ Polymer({
     }
   },
 
-  /** @private */
-  onPinChange_: function() {
+  /**
+   * @param {!CustomEvent<{pin: string}>} e Custom event containing the new pin.
+   * @private
+   */
+  onPinChange_: function(e) {
+    const newPin = e.detail.pin;
     if (!this.isConfirmStep) {
-      if (this.pinKeyboardValue_) {
+      if (newPin) {
         this.quickUnlockPrivate.checkCredential(
-            chrome.quickUnlockPrivate.QuickUnlockMode.PIN,
-            this.pinKeyboardValue_, this.processPinProblems_.bind(this));
+            chrome.quickUnlockPrivate.QuickUnlockMode.PIN, newPin,
+            this.processPinProblems_.bind(this));
       } else {
         this.enableSubmit = false;
       }
@@ -286,7 +300,7 @@ Polymer({
     }
 
     this.hideProblem_();
-    this.enableSubmit = this.pinKeyboardValue_.length > 0;
+    this.enableSubmit = newPin.length > 0;
   },
 
   /** @private */
@@ -314,13 +328,15 @@ Polymer({
   /** This is called by container object when user initiated submit. */
   doSubmit: function() {
     if (!this.isConfirmStep) {
-      if (!this.enableSubmit)
+      if (!this.enableSubmit) {
         return;
+      }
       this.initialPin_ = this.pinKeyboardValue_;
       this.pinKeyboardValue_ = '';
       this.isConfirmStep = true;
-      this.onPinChange_();
-      this.$.pinKeyboard.focus();
+      this.onPinChange_(new CustomEvent(
+          'pin-change', {detail: {pin: this.pinKeyboardValue_}}));
+      this.$.pinKeyboard.focusInput();
       this.writeUma(LockScreenProgress.ENTER_PIN);
       return;
     }
@@ -330,7 +346,7 @@ Polymer({
       this.showProblem_(MessageType.MISMATCH, ProblemType.ERROR);
       this.enableSubmit = false;
       // Focus the PIN keyboard and highlight the entire PIN.
-      this.$.pinKeyboard.focus(0, this.pinKeyboardValue_.length + 1);
+      this.$.pinKeyboard.focusInput(0, this.pinKeyboardValue_.length + 1);
       return;
     }
 

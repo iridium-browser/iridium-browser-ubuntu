@@ -16,7 +16,7 @@
 #include "net/log/net_log_source.h"
 #include "services/network/p2p/socket_throttler.h"
 #include "services/network/public/mojom/p2p.mojom.h"
-#include "third_party/webrtc/media/base/rtputils.h"
+#include "third_party/webrtc/media/base/rtp_utils.h"
 
 namespace {
 
@@ -426,15 +426,9 @@ void P2PSocketUdp::SetOption(P2PSocketOption option, int32_t value) {
   }
 }
 
-// TODO(crbug.com/812137): We don't call SetDiffServCodePoint for the Windows
-// UDP socket, because this is known to cause a hanging thread.
 int P2PSocketUdp::SetSocketDiffServCodePointInternal(
     net::DiffServCodePoint dscp) {
-#if defined(OS_WIN)
-  return net::OK;
-#else
   return socket_->SetDiffServCodePoint(dscp);
-#endif
 }
 
 }  // namespace network

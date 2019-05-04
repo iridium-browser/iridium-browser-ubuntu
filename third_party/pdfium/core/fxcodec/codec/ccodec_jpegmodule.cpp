@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "core/fxcodec/codec/ccodec_scanlinedecoder.h"
+#include "core/fxcodec/codec/cfx_codec_memory.h"
 #include "core/fxcodec/fx_codec.h"
 #include "core/fxcrt/fx_memory.h"
 #include "core/fxcrt/fx_safe_types.h"
@@ -76,11 +77,11 @@ static void _src_skip_data(struct jpeg_decompress_struct* cinfo, long num) {
 }
 
 static boolean _src_fill_buffer(j_decompress_ptr cinfo) {
-  return 0;
+  return FALSE;
 }
 
 static boolean _src_resync(j_decompress_ptr cinfo, int desired) {
-  return 0;
+  return FALSE;
 }
 
 static void _error_do_nothing(j_common_ptr cinfo) {}
@@ -145,7 +146,7 @@ static bool JpegLoadInfo(pdfium::span<const uint8_t> src_span,
     jpeg_destroy_decompress(&cinfo);
     return false;
   }
-  int ret = jpeg_read_header(&cinfo, true);
+  int ret = jpeg_read_header(&cinfo, TRUE);
   if (ret != JPEG_HEADER_OK) {
     jpeg_destroy_decompress(&cinfo);
     return false;
@@ -221,7 +222,7 @@ bool CCodec_JpegDecoder::InitDecode() {
   }
   cinfo.image_width = m_OrigWidth;
   cinfo.image_height = m_OrigHeight;
-  int ret = jpeg_read_header(&cinfo, true);
+  int ret = jpeg_read_header(&cinfo, TRUE);
   if (ret != JPEG_HEADER_OK)
     return false;
 
@@ -438,7 +439,7 @@ int CCodec_JpegModule::ReadHeader(Context* pContext,
                                   int* nComps,
                                   CFX_DIBAttribute* pAttribute) {
   auto* ctx = static_cast<CJpegContext*>(pContext);
-  int ret = jpeg_read_header(&ctx->m_Info, true);
+  int ret = jpeg_read_header(&ctx->m_Info, TRUE);
   if (ret == JPEG_SUSPENDED)
     return 2;
   if (ret != JPEG_HEADER_OK)

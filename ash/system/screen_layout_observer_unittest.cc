@@ -6,11 +6,10 @@
 
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/system/message_center/notification_tray.h"
-#include "ash/system/tray/system_tray.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/command_line.h"
+#include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -38,16 +37,6 @@ class ScreenLayoutObserverTest : public AshTestBase {
   ~ScreenLayoutObserverTest() override;
 
  protected:
-  void SetUp() override {
-    AshTestBase::SetUp();
-    NotificationTray::DisableAnimationsForTest(true);
-  }
-
-  void TearDown() override {
-    NotificationTray::DisableAnimationsForTest(false);
-    AshTestBase::TearDown();
-  }
-
   ScreenLayoutObserver* GetScreenLayoutObserver();
   void CheckUpdate();
 
@@ -81,7 +70,7 @@ ScreenLayoutObserver* ScreenLayoutObserverTest::GetScreenLayoutObserver() {
 void ScreenLayoutObserverTest::CloseNotification() {
   message_center::MessageCenter::Get()->RemoveNotification(
       ScreenLayoutObserver::kNotificationId, false);
-  RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
 }
 
 void ScreenLayoutObserverTest::ClickNotification() {

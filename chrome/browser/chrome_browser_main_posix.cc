@@ -99,7 +99,7 @@ void ExitHandler::OnSessionRestoreDone(int /* num_tabs */) {
 void ExitHandler::Exit() {
 #if defined(OS_CHROMEOS)
   // On ChromeOS, exiting on signal should be always clean.
-  chrome::ExitCleanly();
+  chrome::ExitIgnoreUnloadHandlers();
 #else
   chrome::AttemptExit();
 #endif
@@ -111,10 +111,8 @@ void ExitHandler::Exit() {
 
 ChromeBrowserMainPartsPosix::ChromeBrowserMainPartsPosix(
     const content::MainFunctionParams& parameters,
-    std::unique_ptr<ui::DataPack> data_pack,
     ChromeFeatureListCreator* chrome_feature_list_creator)
     : ChromeBrowserMainParts(parameters,
-                             std::move(data_pack),
                              chrome_feature_list_creator) {}
 
 int ChromeBrowserMainPartsPosix::PreEarlyInitialization() {

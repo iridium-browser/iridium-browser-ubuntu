@@ -26,7 +26,6 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/page_state.h"
 #include "content/public/common/url_utils.h"
 #include "content/public/test/browser_side_navigation_test_utils.h"
@@ -51,7 +50,8 @@ TestWebContents::TestWebContents(BrowserContext* browser_context)
       delegate_view_override_(nullptr),
       expect_set_history_offset_and_length_(false),
       expect_set_history_offset_and_length_history_length_(0),
-      pause_subresource_loading_called_(false) {
+      pause_subresource_loading_called_(false),
+      audio_group_id_(base::UnguessableToken::Create()) {
   if (!RenderProcessHostImpl::get_render_process_host_factory_for_testing()) {
     // Most unit tests should prefer to create a generic MockRenderProcessHost
     // (instead of a real RenderProcessHostImpl).  Tests that need to use a
@@ -82,13 +82,12 @@ TestWebContents::~TestWebContents() {
   EXPECT_FALSE(expect_set_history_offset_and_length_);
 }
 
-TestRenderFrameHost* TestWebContents::GetMainFrame() const {
+TestRenderFrameHost* TestWebContents::GetMainFrame() {
   return static_cast<TestRenderFrameHost*>(WebContentsImpl::GetMainFrame());
 }
 
-TestRenderViewHost* TestWebContents::GetRenderViewHost() const {
-    return static_cast<TestRenderViewHost*>(
-        WebContentsImpl::GetRenderViewHost());
+TestRenderViewHost* TestWebContents::GetRenderViewHost() {
+  return static_cast<TestRenderViewHost*>(WebContentsImpl::GetRenderViewHost());
 }
 
 TestRenderFrameHost* TestWebContents::GetPendingMainFrame() {
@@ -108,14 +107,14 @@ int TestWebContents::DownloadImage(const GURL& url,
   return g_next_image_download_id;
 }
 
-const GURL& TestWebContents::GetLastCommittedURL() const {
+const GURL& TestWebContents::GetLastCommittedURL() {
   if (last_committed_url_.is_valid()) {
     return last_committed_url_;
   }
   return WebContentsImpl::GetLastCommittedURL();
 }
 
-const base::string16& TestWebContents::GetTitle() const {
+const base::string16& TestWebContents::GetTitle() {
   if (title_)
     return title_.value();
 
@@ -179,8 +178,7 @@ void TestWebContents::TestDidNavigateWithSequenceNumber(
   params.original_request_url = GURL();
   params.is_overriding_user_agent = false;
   params.history_list_was_cleared = false;
-  params.render_view_routing_id = 0;
-  params.origin = url::Origin();
+  params.origin = url::Origin::Create(url);
   params.insecure_request_policy = blink::kLeaveInsecureRequestsAlone;
   params.has_potentially_trustworthy_unique_origin = false;
 
@@ -276,7 +274,7 @@ bool TestWebContents::CreateRenderViewForRenderManager(
 std::unique_ptr<WebContents> TestWebContents::Clone() {
   std::unique_ptr<WebContentsImpl> contents =
       Create(GetBrowserContext(), SiteInstance::Create(GetBrowserContext()));
-  contents->GetController().CopyStateFrom(controller_, true);
+  contents->GetController().CopyStateFrom(&controller_, true);
   return contents;
 }
 
@@ -321,7 +319,7 @@ void TestWebContents::TestSetIsLoading(bool value) {
 }
 
 void TestWebContents::CommitPendingNavigation() {
-  const NavigationEntry* entry = GetController().GetPendingEntry();
+  NavigationEntry* entry = GetController().GetPendingEntry();
   DCHECK(entry);
 
   TestRenderFrameHost* old_rfh = GetMainFrame();
@@ -419,6 +417,7 @@ void TestWebContents::CreateNewWindow(
     int32_t main_frame_route_id,
     int32_t main_frame_widget_route_id,
     const mojom::CreateNewWindowParams& params,
+    bool has_user_gesture,
     SessionStorageNamespace* session_storage_namespace) {}
 
 void TestWebContents::CreateNewWidget(int32_t render_process_id,
@@ -474,6 +473,10 @@ void TestWebContents::SetPageImportanceSignals(PageImportanceSignals signals) {
 
 void TestWebContents::SetLastActiveTime(base::TimeTicks last_active_time) {
   last_active_time_ = last_active_time;
+}
+
+base::UnguessableToken TestWebContents::GetAudioGroupId() {
+  return audio_group_id_;
 }
 
 }  // namespace content

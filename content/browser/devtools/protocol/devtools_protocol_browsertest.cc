@@ -14,7 +14,7 @@
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/download/public/common/download_file_factory.h"
@@ -56,6 +56,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/layout.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -243,7 +244,8 @@ IN_PROC_BROWSER_TEST_F(SyntheticKeyEventTest, KeyEventSynthesizeKey) {
   EXPECT_EQ("\"Escape\"", key);
 }
 
-IN_PROC_BROWSER_TEST_F(SyntheticKeyEventTest, KeyboardEventAck) {
+// Flaky: https://crbug.com/889878
+IN_PROC_BROWSER_TEST_F(SyntheticKeyEventTest, DISABLED_KeyboardEventAck) {
   NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
   Attach();
   ASSERT_TRUE(content::ExecuteScript(
@@ -500,6 +502,9 @@ class CaptureScreenshotTest : public DevToolsProtocolTest {
 };
 
 IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest, CaptureScreenshot) {
+  // TODO(crbug.com/877172): CopyOutputRequests not allowed.
+  if (features::IsSingleProcessMash())
+    return;
   // This test fails consistently on low-end Android devices.
   // See crbug.com/653637.
   // TODO(eseckler): Reenable with error limit if necessary.
@@ -522,6 +527,9 @@ IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest, CaptureScreenshot) {
 }
 
 IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest, CaptureScreenshotJpeg) {
+  // TODO(crbug.com/877172): CopyOutputRequests not allowed.
+  if (features::IsSingleProcessMash())
+    return;
   // This test fails consistently on low-end Android devices.
   // See crbug.com/653637.
   // TODO(eseckler): Reenable with error limit if necessary.
@@ -576,6 +584,9 @@ IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest,
 // of a page that does not specify one.
 IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest,
                        SetDefaultBackgroundColorOverride) {
+  // TODO(crbug.com/877172): CopyOutputRequests not allowed.
+  if (features::IsSingleProcessMash())
+    return;
   if (base::SysInfo::IsLowEndDevice())
     return;
 
@@ -616,6 +627,9 @@ IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest,
 // and semi-transparent background, and that setDeviceMetricsOverride doesn't
 // affect it.
 IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest, TransparentScreenshots) {
+  // TODO(crbug.com/877172): CopyOutputRequests not allowed.
+  if (features::IsSingleProcessMash())
+    return;
   if (base::SysInfo::IsLowEndDevice())
     return;
 

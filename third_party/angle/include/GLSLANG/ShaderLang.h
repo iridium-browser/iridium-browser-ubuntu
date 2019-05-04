@@ -12,6 +12,7 @@
 
 #include <array>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -25,7 +26,7 @@
 
 // Version number for shader translation API.
 // It is incremented every time the API changes.
-#define ANGLE_SH_VERSION 201
+#define ANGLE_SH_VERSION 205
 
 enum ShShaderSpec
 {
@@ -265,6 +266,14 @@ const ShCompileOptions SH_CLAMP_FRAG_DEPTH = UINT64_C(1) << 38;
 // prior to version 397.31.
 const ShCompileOptions SH_REWRITE_REPEATED_ASSIGN_TO_SWIZZLED = UINT64_C(1) << 39;
 
+// Rewrite gl_DrawID as a uniform int
+const ShCompileOptions SH_EMULATE_GL_DRAW_ID = UINT64_C(1) << 40;
+
+// This flag initializes shared variables to 0.
+// It is to avoid ompute shaders being able to read undefined values that could be coming from
+// another webpage/application.
+const ShCompileOptions SH_INIT_SHARED_VARIABLES = UINT64_C(1) << 41;
+
 // Defines alternate strategies for implementing array index clamping.
 enum ShArrayIndexClampingStrategy
 {
@@ -314,6 +323,8 @@ struct ShBuiltInResources
     int EXT_YUV_target;
     int EXT_geometry_shader;
     int OES_texture_storage_multisample_2d_array;
+    int ANGLE_texture_multisample;
+    int ANGLE_multi_draw;
 
     // Set to 1 to enable replacing GL_EXT_draw_buffers #extension directives
     // with GL_NV_draw_buffers in ESSL output. This flag can be used to emulate
@@ -617,6 +628,19 @@ bool GetUniformBlockRegister(const ShHandle handle,
 // Gives a map from uniform names to compiler-assigned registers in the default uniform block.
 // Note that the map contains also registers of samplers that have been extracted from structs.
 const std::map<std::string, unsigned int> *GetUniformRegisterMap(const ShHandle handle);
+
+// Sampler, image and atomic counters share registers(t type and u type),
+// GetReadonlyImage2DRegisterIndex and GetImage2DRegisterIndex return the first index into
+// a range of reserved registers for image2D/iimage2D/uimage2D variables.
+// Parameters: handle: Specifies the compiler
+unsigned int GetReadonlyImage2DRegisterIndex(const ShHandle handle);
+unsigned int GetImage2DRegisterIndex(const ShHandle handle);
+
+// The method records these used function names related with image2D/iimage2D/uimage2D, these
+// functions will be dynamically generated.
+// Parameters:
+// handle: Specifies the compiler
+const std::set<std::string> *GetUsedImage2DFunctionNames(const ShHandle handle);
 
 bool HasValidGeometryShaderInputPrimitiveType(const ShHandle handle);
 bool HasValidGeometryShaderOutputPrimitiveType(const ShHandle handle);

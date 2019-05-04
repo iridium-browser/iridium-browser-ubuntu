@@ -85,7 +85,7 @@ class WebGLCompatibilityTest : public ANGLETest
     {
         ASSERT_GL_NO_ERROR();
 
-        const std::string samplingVs =
+        constexpr char kVS[] =
             "attribute vec4 position;\n"
             "varying vec2 texcoord;\n"
             "void main()\n"
@@ -94,7 +94,7 @@ class WebGLCompatibilityTest : public ANGLETest
             "    texcoord = (position.xy * 0.5) + 0.5;\n"
             "}\n";
 
-        const std::string samplingFs =
+        constexpr char kFS[] =
             "precision mediump float;\n"
             "uniform sampler2D tex;\n"
             "uniform vec4 subtractor;\n"
@@ -115,7 +115,7 @@ class WebGLCompatibilityTest : public ANGLETest
             "    }\n"
             "}\n";
 
-        ANGLE_GL_PROGRAM(samplingProgram, samplingVs, samplingFs);
+        ANGLE_GL_PROGRAM(samplingProgram, kVS, kFS);
         glUseProgram(samplingProgram.get());
 
         // Need RGBA8 renderbuffers for enough precision on the readback
@@ -238,8 +238,7 @@ class WebGLCompatibilityTest : public ANGLETest
 };
 
 class WebGL2CompatibilityTest : public WebGLCompatibilityTest
-{
-};
+{};
 
 // Context creation would fail if EGL_ANGLE_create_context_webgl_compatibility was not available so
 // the GL extension should always be present
@@ -320,10 +319,10 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionStandardDerivitives)
 {
     EXPECT_FALSE(extensionEnabled("GL_OES_standard_derivatives"));
 
-    const std::string source =
+    constexpr char kFS[] =
         "#extension GL_OES_standard_derivatives : require\n"
         "void main() { gl_FragColor = vec4(dFdx(vec2(1.0, 1.0)).x, 1, 0, 1); }\n";
-    ASSERT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, source));
+    ASSERT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, kFS));
 
     if (extensionRequestable("GL_OES_standard_derivatives"))
     {
@@ -331,7 +330,7 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionStandardDerivitives)
         EXPECT_GL_NO_ERROR();
         EXPECT_TRUE(extensionEnabled("GL_OES_standard_derivatives"));
 
-        GLuint shader = CompileShader(GL_FRAGMENT_SHADER, source);
+        GLuint shader = CompileShader(GL_FRAGMENT_SHADER, kFS);
         ASSERT_NE(0u, shader);
         glDeleteShader(shader);
     }
@@ -342,14 +341,14 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionTextureLOD)
 {
     EXPECT_FALSE(extensionEnabled("GL_EXT_shader_texture_lod"));
 
-    const std::string source =
+    constexpr char kFS[] =
         "#extension GL_EXT_shader_texture_lod : require\n"
         "uniform sampler2D u_texture;\n"
         "void main() {\n"
         "    gl_FragColor = texture2DGradEXT(u_texture, vec2(0.0, 0.0), vec2(0.0, 0.0), vec2(0.0, "
         "0.0));\n"
         "}\n";
-    ASSERT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, source));
+    ASSERT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, kFS));
 
     if (extensionRequestable("GL_EXT_shader_texture_lod"))
     {
@@ -357,7 +356,7 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionTextureLOD)
         EXPECT_GL_NO_ERROR();
         EXPECT_TRUE(extensionEnabled("GL_EXT_shader_texture_lod"));
 
-        GLuint shader = CompileShader(GL_FRAGMENT_SHADER, source);
+        GLuint shader = CompileShader(GL_FRAGMENT_SHADER, kFS);
         ASSERT_NE(0u, shader);
         glDeleteShader(shader);
     }
@@ -368,13 +367,13 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionFragDepth)
 {
     EXPECT_FALSE(extensionEnabled("GL_EXT_frag_depth"));
 
-    const std::string source =
+    constexpr char kFS[] =
         "#extension GL_EXT_frag_depth : require\n"
         "void main() {\n"
         "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
         "    gl_FragDepthEXT = 1.0;\n"
         "}\n";
-    ASSERT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, source));
+    ASSERT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, kFS));
 
     if (extensionRequestable("GL_EXT_frag_depth"))
     {
@@ -382,7 +381,7 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionFragDepth)
         EXPECT_GL_NO_ERROR();
         EXPECT_TRUE(extensionEnabled("GL_EXT_frag_depth"));
 
-        GLuint shader = CompileShader(GL_FRAGMENT_SHADER, source);
+        GLuint shader = CompileShader(GL_FRAGMENT_SHADER, kFS);
         ASSERT_NE(0u, shader);
         glDeleteShader(shader);
     }
@@ -435,7 +434,7 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionEGLImage)
     EXPECT_FALSE(extensionEnabled("GL_OES_EGL_image_external_essl3"));
     EXPECT_FALSE(extensionEnabled("NV_EGL_stream_consumer_external"));
 
-    const std::string &fragES2 =
+    constexpr char kFSES2[] =
         "#extension GL_OES_EGL_image_external : require\n"
         "precision highp float;\n"
         "uniform samplerExternalOES sampler;\n"
@@ -443,9 +442,9 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionEGLImage)
         "{\n"
         "    gl_FragColor = texture2D(sampler, vec2(0, 0));\n"
         "}";
-    EXPECT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, fragES2));
+    EXPECT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, kFSES2));
 
-    const std::string &fragES3 =
+    constexpr char kFSES3[] =
         "#version 300 es\n"
         "#extension GL_OES_EGL_image_external : require\n"
         "precision highp float;\n"
@@ -456,7 +455,7 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionEGLImage)
         "}";
     if (getClientMajorVersion() > 3)
     {
-        EXPECT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, fragES3));
+        EXPECT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, kFSES3));
     }
 
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
@@ -472,7 +471,7 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionEGLImage)
         EXPECT_GL_NO_ERROR();
         EXPECT_TRUE(extensionEnabled("GL_OES_EGL_image_external"));
 
-        EXPECT_NE(0u, CompileShader(GL_FRAGMENT_SHADER, fragES2));
+        EXPECT_NE(0u, CompileShader(GL_FRAGMENT_SHADER, kFSES2));
 
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
         EXPECT_GL_NO_ERROR();
@@ -486,11 +485,11 @@ TEST_P(WebGLCompatibilityTest, EnableExtensionEGLImage)
             EXPECT_GL_NO_ERROR();
             EXPECT_TRUE(extensionEnabled("GL_OES_EGL_image_external_essl3"));
 
-            EXPECT_NE(0u, CompileShader(GL_FRAGMENT_SHADER, fragES3));
+            EXPECT_NE(0u, CompileShader(GL_FRAGMENT_SHADER, kFSES3));
         }
         else
         {
-            EXPECT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, fragES3));
+            EXPECT_EQ(0u, CompileShader(GL_FRAGMENT_SHADER, kFSES3));
         }
     }
 }
@@ -501,7 +500,7 @@ TEST_P(WebGLCompatibilityTest, ExtensionCompilerSpec)
     EXPECT_TRUE(extensionEnabled("GL_ANGLE_webgl_compatibility"));
 
     // Use of reserved _webgl prefix should fail when the shader specification is for WebGL.
-    const std::string &vert =
+    constexpr char kVS[] =
         "struct Foo {\n"
         "    int _webgl_bar;\n"
         "};\n"
@@ -511,13 +510,13 @@ TEST_P(WebGLCompatibilityTest, ExtensionCompilerSpec)
         "}";
 
     // Default fragement shader.
-    const std::string &frag =
+    constexpr char kFS[] =
         "void main()\n"
         "{\n"
         "    gl_FragColor = vec4(1.0,0.0,0.0,1.0);\n"
         "}";
 
-    GLuint program = CompileProgram(vert, frag);
+    GLuint program = CompileProgram(kVS, kFS);
     EXPECT_EQ(0u, program);
     glDeleteProgram(program);
 }
@@ -579,7 +578,9 @@ TEST_P(WebGLCompatibilityTest, EnableTextureStorage)
         EXPECT_GL_NO_ERROR();
 
         const GLenum alwaysAcceptableFormats[] = {
-            GL_ALPHA8_EXT, GL_LUMINANCE8_EXT, GL_LUMINANCE8_ALPHA8_EXT,
+            GL_ALPHA8_EXT,
+            GL_LUMINANCE8_EXT,
+            GL_LUMINANCE8_ALPHA8_EXT,
         };
         for (const auto &acceptableFormat : alwaysAcceptableFormats)
         {
@@ -849,7 +850,9 @@ TEST_P(WebGLCompatibilityTest, EnablePackUnpackSubImageExtension)
     ANGLE_SKIP_TEST_IF(getClientMajorVersion() >= 3);
 
     constexpr GLenum parameters[] = {
-        GL_UNPACK_ROW_LENGTH_EXT, GL_UNPACK_SKIP_ROWS_EXT, GL_UNPACK_SKIP_PIXELS_EXT,
+        GL_UNPACK_ROW_LENGTH_EXT,
+        GL_UNPACK_SKIP_ROWS_EXT,
+        GL_UNPACK_SKIP_PIXELS_EXT,
     };
 
     for (GLenum param : parameters)
@@ -923,7 +926,9 @@ TEST_P(WebGLCompatibilityTest, EnablePackPackSubImageExtension)
     ANGLE_SKIP_TEST_IF(getClientMajorVersion() >= 3);
 
     constexpr GLenum parameters[] = {
-        GL_PACK_ROW_LENGTH, GL_PACK_SKIP_ROWS, GL_PACK_SKIP_PIXELS,
+        GL_PACK_ROW_LENGTH,
+        GL_PACK_SKIP_ROWS,
+        GL_PACK_SKIP_PIXELS,
     };
 
     for (GLenum param : parameters)
@@ -1038,18 +1043,18 @@ TEST_P(WebGLCompatibilityTest, EnableProgramBinaryExtension)
     glGetIntegerv(GL_PROGRAM_BINARY_FORMATS, &result);
     EXPECT_GL_ERROR(GL_INVALID_ENUM);
 
-    const std::string &vert =
+    constexpr char kVS[] =
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n"
         "}\n";
-    const std::string &frag =
+    constexpr char kFS[] =
         "precision highp float;\n"
         "void main()\n"
         "{\n"
         "    gl_FragColor = vec4(1.0);\n"
         "}\n";
-    ANGLE_GL_PROGRAM(program, vert, frag);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
 
     glGetProgramiv(program, GL_PROGRAM_BINARY_LENGTH, &result);
     EXPECT_GL_ERROR(GL_INVALID_ENUM);
@@ -1175,21 +1180,21 @@ TEST_P(WebGLCompatibilityTest, FramebufferAttachmentSizeMismatch)
 // Test that client-side array buffers are forbidden in WebGL mode
 TEST_P(WebGLCompatibilityTest, ForbidsClientSideArrayBuffer)
 {
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute vec3 a_pos;\n"
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(a_pos, 1.0);\n"
         "}\n";
 
-    const std::string &frag =
+    constexpr char kFS[] =
         "precision highp float;\n"
         "void main()\n"
         "{\n"
         "    gl_FragColor = vec4(1.0);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, frag);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
 
     GLint posLocation = glGetAttribLocation(program.get(), "a_pos");
     ASSERT_NE(-1, posLocation);
@@ -1207,21 +1212,21 @@ TEST_P(WebGLCompatibilityTest, ForbidsClientSideArrayBuffer)
 // Test that client-side element array buffers are forbidden in WebGL mode
 TEST_P(WebGLCompatibilityTest, ForbidsClientSideElementBuffer)
 {
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute vec3 a_pos;\n"
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(a_pos, 1.0);\n"
         "}\n";
 
-    const std::string &frag =
+    constexpr char kFS[] =
         "precision highp float;\n"
         "void main()\n"
         "{\n"
         "    gl_FragColor = vec4(1.0);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, frag);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
 
     GLint posLocation = glGetAttribLocation(program.get(), "a_pos");
     ASSERT_NE(-1, posLocation);
@@ -1242,27 +1247,27 @@ TEST_P(WebGLCompatibilityTest, ForbidsClientSideElementBuffer)
     // Use the pointer with value of 1 for indices instead of an actual pointer because WebGL also
     // enforces that the top bit of indices must be 0 (i.e. offset >= 0) and would generate
     // GL_INVALID_VALUE in that case. Using a null pointer gets caught by another check.
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, reinterpret_cast<const void*>(intptr_t(1)));
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, reinterpret_cast<const void *>(intptr_t(1)));
     EXPECT_GL_ERROR(GL_INVALID_OPERATION);
 }
 
 // Test that client-side array buffers are forbidden even if the program doesn't use the attribute
 TEST_P(WebGLCompatibilityTest, ForbidsClientSideArrayBufferEvenNotUsedOnes)
 {
-    const std::string &vert =
+    constexpr char kVS[] =
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(1.0);\n"
         "}\n";
 
-    const std::string &frag =
+    constexpr char kFS[] =
         "precision highp float;\n"
         "void main()\n"
         "{\n"
         "    gl_FragColor = vec4(1.0);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, frag);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
 
     glUseProgram(program.get());
 
@@ -1418,14 +1423,14 @@ TEST_P(WebGLCompatibilityTest, MaxStride)
 // Test the checks for OOB reads in the vertex buffers, non-instanced version
 TEST_P(WebGLCompatibilityTest, DrawArraysBufferOutOfBoundsNonInstanced)
 {
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute float a_pos;\n"
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(a_pos, a_pos, a_pos, 1.0);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(program, kVS, essl1_shaders::fs::Red());
     GLint posLocation = glGetAttribLocation(program.get(), "a_pos");
     ASSERT_NE(-1, posLocation);
     glUseProgram(program.get());
@@ -1436,7 +1441,7 @@ TEST_P(WebGLCompatibilityTest, DrawArraysBufferOutOfBoundsNonInstanced)
 
     glEnableVertexAttribArray(posLocation);
 
-    const uint8_t* zeroOffset = nullptr;
+    const uint8_t *zeroOffset = nullptr;
 
     // Test touching the last element is valid.
     glVertexAttribPointer(posLocation, 1, GL_UNSIGNED_BYTE, GL_FALSE, 0, zeroOffset + 12);
@@ -1475,14 +1480,14 @@ TEST_P(WebGLCompatibilityTest, LargeIndexRange)
 {
     ANGLE_SKIP_TEST_IF(!ensureExtensionEnabled("GL_OES_element_index_uint"));
 
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute vec4 a_Position;\n"
         "void main()\n"
         "{\n"
         "    gl_Position = a_Position;\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(program, kVS, essl1_shaders::fs::Red());
     glUseProgram(program.get());
 
     glEnableVertexAttribArray(glGetAttribLocation(program, "a_Position"));
@@ -1497,7 +1502,10 @@ TEST_P(WebGLCompatibilityTest, LargeIndexRange)
 
     constexpr GLuint kMaxIntAsGLuint = static_cast<GLuint>(std::numeric_limits<GLint>::max());
     constexpr GLuint kIndexData[]    = {
-        kMaxIntAsGLuint, kMaxIntAsGLuint + 1, kMaxIntAsGLuint + 2, kMaxIntAsGLuint + 3,
+        kMaxIntAsGLuint,
+        kMaxIntAsGLuint + 1,
+        kMaxIntAsGLuint + 2,
+        kMaxIntAsGLuint + 3,
     };
 
     GLBuffer indexBuffer;
@@ -1518,14 +1526,14 @@ TEST_P(WebGLCompatibilityTest, LargeIndexRange)
 // Test for drawing with a null index buffer
 TEST_P(WebGLCompatibilityTest, NullIndexBuffer)
 {
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute float a_pos;\n"
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(a_pos, a_pos, a_pos, 1.0);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(program, kVS, essl1_shaders::fs::Red());
     glUseProgram(program.get());
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
@@ -1538,7 +1546,7 @@ TEST_P(WebGLCompatibilityTest, NullIndexBuffer)
 // Test the checks for OOB reads in the vertex buffers, instanced version
 TEST_P(WebGL2CompatibilityTest, DrawArraysBufferOutOfBoundsInstanced)
 {
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute float a_pos;\n"
         "attribute float a_w;\n"
         "void main()\n"
@@ -1546,9 +1554,9 @@ TEST_P(WebGL2CompatibilityTest, DrawArraysBufferOutOfBoundsInstanced)
         "    gl_Position = vec4(a_pos, a_pos, a_pos, a_w);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(program, kVS, essl1_shaders::fs::Red());
     GLint posLocation = glGetAttribLocation(program.get(), "a_pos");
-    GLint wLocation = glGetAttribLocation(program.get(), "a_w");
+    GLint wLocation   = glGetAttribLocation(program.get(), "a_w");
     ASSERT_NE(-1, posLocation);
     ASSERT_NE(-1, wLocation);
     glUseProgram(program.get());
@@ -1564,7 +1572,7 @@ TEST_P(WebGL2CompatibilityTest, DrawArraysBufferOutOfBoundsInstanced)
     glEnableVertexAttribArray(wLocation);
     glVertexAttribDivisor(wLocation, 1);
 
-    const uint8_t* zeroOffset = nullptr;
+    const uint8_t *zeroOffset = nullptr;
 
     // Test touching the last element is valid.
     glVertexAttribPointer(wLocation, 1, GL_UNSIGNED_BYTE, GL_FALSE, 0, zeroOffset + 12);
@@ -1604,7 +1612,7 @@ TEST_P(WebGLCompatibilityTest, DrawArraysBufferOutOfBoundsInstancedANGLE)
     glRequestExtensionANGLE("GL_ANGLE_instanced_arrays");
     EXPECT_GL_NO_ERROR();
 
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute float a_pos;\n"
         "attribute float a_w;\n"
         "void main()\n"
@@ -1612,9 +1620,9 @@ TEST_P(WebGLCompatibilityTest, DrawArraysBufferOutOfBoundsInstancedANGLE)
         "    gl_Position = vec4(a_pos, a_pos, a_pos, a_w);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(program, kVS, essl1_shaders::fs::Red());
     GLint posLocation = glGetAttribLocation(program.get(), "a_pos");
-    GLint wLocation = glGetAttribLocation(program.get(), "a_w");
+    GLint wLocation   = glGetAttribLocation(program.get(), "a_w");
     ASSERT_NE(-1, posLocation);
     ASSERT_NE(-1, wLocation);
     glUseProgram(program.get());
@@ -1630,7 +1638,7 @@ TEST_P(WebGLCompatibilityTest, DrawArraysBufferOutOfBoundsInstancedANGLE)
     glEnableVertexAttribArray(wLocation);
     glVertexAttribDivisorANGLE(wLocation, 1);
 
-    const uint8_t* zeroOffset = nullptr;
+    const uint8_t *zeroOffset = nullptr;
 
     // Test touching the last element is valid.
     glVertexAttribPointer(wLocation, 1, GL_UNSIGNED_BYTE, GL_FALSE, 0, zeroOffset + 12);
@@ -1666,14 +1674,14 @@ TEST_P(WebGLCompatibilityTest, DrawArraysBufferOutOfBoundsInstancedANGLE)
 // Test the checks for OOB reads in the index buffer
 TEST_P(WebGLCompatibilityTest, DrawElementsBufferOutOfBoundsInIndexBuffer)
 {
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute float a_pos;\n"
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(a_pos, a_pos, a_pos, 1.0);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(program, kVS, essl1_shaders::fs::Red());
     GLint posLocation = glGetAttribLocation(program.get(), "a_pos");
     ASSERT_NE(-1, posLocation);
     glUseProgram(program.get());
@@ -1719,14 +1727,14 @@ TEST_P(WebGLCompatibilityTest, DrawElementsBufferOutOfBoundsInIndexBuffer)
 // Test the checks for OOB in vertex buffers caused by indices, non-instanced version
 TEST_P(WebGLCompatibilityTest, DrawElementsBufferOutOfBoundsInVertexBuffer)
 {
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute float a_pos;\n"
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(a_pos, a_pos, a_pos, 1.0);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(program, kVS, essl1_shaders::fs::Red());
     GLint posLocation = glGetAttribLocation(program.get(), "a_pos");
     ASSERT_NE(-1, posLocation);
     glUseProgram(program.get());
@@ -1856,7 +1864,7 @@ TEST_P(WebGLCompatibilityTest, InvalidAttributeAndUniformNames)
         "    */gl_FragColor = vec4(1.0);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, frag);
+    ANGLE_GL_PROGRAM(program, vert.c_str(), frag.c_str());
     EXPECT_GL_NO_ERROR();
 
     for (char invalidChar : invalidSet)
@@ -1882,7 +1890,7 @@ TEST_P(WebGLCompatibilityTest, InvalidAttributeAndUniformNames)
     for (char invalidChar : invalidSet)
     {
         std::string invalidAttribName = validAttribName + invalidChar;
-        const char *invalidVert[] = {
+        const char *invalidVert[]     = {
             "attribute float ",
             invalidAttribName.c_str(),
             ";\n",
@@ -1983,14 +1991,14 @@ TEST_P(WebGLCompatibilityTest, BindAttribLocationLimitation)
 // Test that having no attributes with a zero divisor is valid in WebGL2
 TEST_P(WebGL2CompatibilityTest, InstancedDrawZeroDivisor)
 {
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute float a_pos;\n"
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(a_pos, a_pos, a_pos, 1.0);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(program, kVS, essl1_shaders::fs::Red());
 
     GLint posLocation = glGetAttribLocation(program.get(), "a_pos");
     ASSERT_NE(-1, posLocation);
@@ -2069,7 +2077,7 @@ TEST_P(WebGLCompatibilityTest, DefaultPosition)
     // Draw a quad where each vertex is red if gl_Position is (0,0,0,0) before it is set,
     // and green otherwise.  The center of each quadrant will be red if and only if all
     // four corners are red.
-    const std::string vertexShader =
+    constexpr char kVS[] =
         "attribute vec3 pos;\n"
         "varying vec4 color;\n"
         "void main() {\n"
@@ -2081,14 +2089,14 @@ TEST_P(WebGLCompatibilityTest, DefaultPosition)
         "    gl_Position = vec4(pos,1);\n"
         "}\n";
 
-    const std::string fragmentShader =
+    constexpr char kFS[] =
         "precision mediump float;\n"
         "varying vec4 color;\n"
         "void main() {\n"
         "    gl_FragColor = color;\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vertexShader, fragmentShader);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
     drawQuad(program.get(), "pos", 0.0f, 1.0f, true);
     EXPECT_PIXEL_COLOR_EQ(getWindowWidth() * 1 / 4, getWindowHeight() * 1 / 4, GLColor::red);
     EXPECT_PIXEL_COLOR_EQ(getWindowWidth() * 1 / 4, getWindowHeight() * 3 / 4, GLColor::red);
@@ -2100,7 +2108,7 @@ TEST_P(WebGLCompatibilityTest, DefaultPosition)
 // Based on WebGL test conformance/renderbuffers/feedback-loop.html.
 TEST_P(WebGLCompatibilityTest, RenderingFeedbackLoop)
 {
-    const std::string vertexShader =
+    constexpr char kVS[] =
         "attribute vec4 a_position;\n"
         "varying vec2 v_texCoord;\n"
         "void main() {\n"
@@ -2108,7 +2116,7 @@ TEST_P(WebGLCompatibilityTest, RenderingFeedbackLoop)
         "    v_texCoord = (a_position.xy * 0.5) + 0.5;\n"
         "}\n";
 
-    const std::string fragmentShader =
+    constexpr char kFS[] =
         "precision mediump float;\n"
         "varying vec2 v_texCoord;\n"
         "uniform sampler2D u_texture;\n"
@@ -2128,7 +2136,7 @@ TEST_P(WebGLCompatibilityTest, RenderingFeedbackLoop)
 
     ASSERT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
 
-    ANGLE_GL_PROGRAM(program, vertexShader, fragmentShader);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
 
     GLint uniformLoc = glGetUniformLocation(program.get(), "u_texture");
     ASSERT_NE(-1, uniformLoc);
@@ -2203,14 +2211,14 @@ TEST_P(WebGLCompatibilityTest, MaxDrawBuffersAttachmentPoints)
 // Test that the offset in the index buffer is forced to be a multiple of the element size
 TEST_P(WebGLCompatibilityTest, DrawElementsOffsetRestriction)
 {
-    const std::string &vert =
+    constexpr char kVS[] =
         "attribute vec3 a_pos;\n"
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(a_pos, 1.0);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vert, essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(program, kVS, essl1_shaders::fs::Red());
 
     GLint posLocation = glGetAttribLocation(program.get(), "a_pos");
     ASSERT_NE(-1, posLocation);
@@ -2292,7 +2300,7 @@ void WebGLCompatibilityTest::drawBuffersEXTFeedbackLoop(GLuint program,
 // Based on WebGL test conformance/extensions/webgl-draw-buffers-feedback-loop.html
 TEST_P(WebGLCompatibilityTest, RenderingFeedbackLoopWithDrawBuffersEXT)
 {
-    const std::string vertexShader =
+    constexpr char kVS[] =
         "attribute vec4 aPosition;\n"
         "varying vec2 texCoord;\n"
         "void main() {\n"
@@ -2300,7 +2308,7 @@ TEST_P(WebGLCompatibilityTest, RenderingFeedbackLoopWithDrawBuffersEXT)
         "    texCoord = (aPosition.xy * 0.5) + 0.5;\n"
         "}\n";
 
-    const std::string fragmentShader =
+    constexpr char kFS[] =
         "#extension GL_EXT_draw_buffers : require\n"
         "precision mediump float;\n"
         "uniform sampler2D tex;\n"
@@ -2328,7 +2336,7 @@ TEST_P(WebGLCompatibilityTest, RenderingFeedbackLoopWithDrawBuffersEXT)
     // Test skipped because MAX_DRAW_BUFFERS is too small.
     ANGLE_SKIP_TEST_IF(maxDrawBuffers < 2);
 
-    ANGLE_GL_PROGRAM(program, vertexShader, fragmentShader);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
     glUseProgram(program.get());
     glViewport(0, 0, width, height);
 
@@ -2438,30 +2446,30 @@ void WebGLCompatibilityTest::drawBuffersFeedbackLoop(GLuint program,
 // Based on WebGL test conformance/glsl/misc/shaders-with-invariance.html.
 TEST_P(WebGLCompatibilityTest, BuiltInInvariant)
 {
-    const std::string vertexShaderVariant =
+    constexpr char kVS[] =
         "varying vec4 v_varying;\n"
         "void main()\n"
         "{\n"
         "    gl_PointSize = 1.0;\n"
         "    gl_Position = v_varying;\n"
         "}";
-    const std::string fragmentShaderInvariantGlFragCoord =
+    constexpr char kFSInvariantGlFragCoord[] =
         "invariant gl_FragCoord;\n"
         "void main()\n"
         "{\n"
         "    gl_FragColor = gl_FragCoord;\n"
         "}";
-    const std::string fragmentShaderInvariantGlPointCoord =
+    constexpr char kFSInvariantGlPointCoord[] =
         "invariant gl_PointCoord;\n"
         "void main()\n"
         "{\n"
         "    gl_FragColor = vec4(gl_PointCoord, 0.0, 0.0);\n"
         "}";
 
-    GLuint program = CompileProgram(vertexShaderVariant, fragmentShaderInvariantGlFragCoord);
+    GLuint program = CompileProgram(kVS, kFSInvariantGlFragCoord);
     EXPECT_EQ(0u, program);
 
-    program = CompileProgram(vertexShaderVariant, fragmentShaderInvariantGlPointCoord);
+    program = CompileProgram(kVS, kFSInvariantGlPointCoord);
     EXPECT_EQ(0u, program);
 }
 
@@ -2469,13 +2477,13 @@ TEST_P(WebGLCompatibilityTest, BuiltInInvariant)
 // Based on WebGL test conformance/glsl/misc/shaders-with-name-conflicts.html.
 TEST_P(WebGLCompatibilityTest, GlobalNamesConflict)
 {
-    const std::string vertexShader =
+    constexpr char kVS[] =
         "attribute vec4 foo;\n"
         "void main()\n"
         "{\n"
         "    gl_Position = foo;\n"
         "}";
-    const std::string fragmentShader =
+    constexpr char kFS[] =
         "precision mediump float;\n"
         "uniform vec4 foo;\n"
         "void main()\n"
@@ -2483,7 +2491,7 @@ TEST_P(WebGLCompatibilityTest, GlobalNamesConflict)
         "    gl_FragColor = foo;\n"
         "}";
 
-    GLuint program = CompileProgram(vertexShader, fragmentShader);
+    GLuint program = CompileProgram(kVS, kFS);
     EXPECT_EQ(0u, program);
 }
 
@@ -3167,7 +3175,7 @@ TEST_P(WebGLCompatibilityTest, FramebufferAttachmentConsistancy)
 // Based on WebGL test conformance2/rendering/rendering-sampling-feedback-loop.html
 TEST_P(WebGL2CompatibilityTest, RenderingFeedbackLoopWithDrawBuffers)
 {
-    const std::string vertexShader =
+    constexpr char kVS[] =
         "#version 300 es\n"
         "in vec4 aPosition;\n"
         "out vec2 texCoord;\n"
@@ -3176,7 +3184,7 @@ TEST_P(WebGL2CompatibilityTest, RenderingFeedbackLoopWithDrawBuffers)
         "    texCoord = (aPosition.xy * 0.5) + 0.5;\n"
         "}\n";
 
-    const std::string fragmentShader =
+    constexpr char kFS[] =
         "#version 300 es\n"
         "precision mediump float;\n"
         "uniform sampler2D tex;\n"
@@ -3194,7 +3202,7 @@ TEST_P(WebGL2CompatibilityTest, RenderingFeedbackLoopWithDrawBuffers)
     // ES3 requires a minimum value of 4 for MAX_DRAW_BUFFERS.
     ASSERT_GE(maxDrawBuffers, 2);
 
-    ANGLE_GL_PROGRAM(program, vertexShader, fragmentShader);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
     glUseProgram(program.get());
     glViewport(0, 0, width, height);
 
@@ -3226,7 +3234,7 @@ TEST_P(WebGL2CompatibilityTest, RenderingFeedbackLoopWithDrawBuffers)
 // Based on WebGL test conformance2/rendering/depth-stencil-feedback-loop.html
 TEST_P(WebGL2CompatibilityTest, RenderingFeedbackLoopWithDepthStencil)
 {
-    const std::string vertexShader =
+    constexpr char kVS[] =
         "#version 300 es\n"
         "in vec4 aPosition;\n"
         "out vec2 texCoord;\n"
@@ -3235,7 +3243,7 @@ TEST_P(WebGL2CompatibilityTest, RenderingFeedbackLoopWithDepthStencil)
         "    texCoord = (aPosition.xy * 0.5) + 0.5;\n"
         "}\n";
 
-    const std::string fragmentShader =
+    constexpr char kFS[] =
         "#version 300 es\n"
         "precision mediump float;\n"
         "uniform sampler2D tex;\n"
@@ -3248,7 +3256,7 @@ TEST_P(WebGL2CompatibilityTest, RenderingFeedbackLoopWithDepthStencil)
     GLsizei width  = 8;
     GLsizei height = 8;
 
-    ANGLE_GL_PROGRAM(program, vertexShader, fragmentShader);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
     glUseProgram(program.get());
 
     glViewport(0, 0, width, height);
@@ -3565,13 +3573,13 @@ TEST_P(WebGL2CompatibilityTest, BlitFramebufferSameImage)
 // buffer types
 TEST_P(WebGL2CompatibilityTest, FragmentShaderColorBufferTypeMissmatch)
 {
-    const std::string vertexShader =
+    constexpr char kVS[] =
         "#version 300 es\n"
         "void main() {\n"
         "    gl_Position = vec4(0, 0, 0, 1);\n"
         "}\n";
 
-    const std::string fragmentShader =
+    constexpr char kFS[] =
         "#version 300 es\n"
         "precision mediump float;\n"
         "layout(location = 0) out vec4 floatOutput;\n"
@@ -3583,7 +3591,7 @@ TEST_P(WebGL2CompatibilityTest, FragmentShaderColorBufferTypeMissmatch)
         "    intOutput = ivec4(0, 0, 0, 1);\n"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vertexShader, fragmentShader);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
     glUseProgram(program.get());
 
     GLuint floatLocation = glGetFragDataLocation(program, "floatOutput");
@@ -3657,7 +3665,7 @@ TEST_P(WebGL2CompatibilityTest, FragmentShaderColorBufferTypeMissmatch)
 // types
 TEST_P(WebGL2CompatibilityTest, VertexShaderAttributeTypeMismatch)
 {
-    const std::string vertexShader =
+    constexpr char kVS[] =
         "#version 300 es\n"
         "in vec4 floatInput;\n"
         "in uvec4 uintInput;\n"
@@ -3666,7 +3674,7 @@ TEST_P(WebGL2CompatibilityTest, VertexShaderAttributeTypeMismatch)
         "    gl_Position = vec4(floatInput.x, uintInput.x, intInput.x, 1);\n"
         "}\n";
 
-    const std::string fragmentShader =
+    constexpr char kFS[] =
         "#version 300 es\n"
         "precision mediump float;\n"
         "out vec4 outputColor;\n"
@@ -3674,7 +3682,7 @@ TEST_P(WebGL2CompatibilityTest, VertexShaderAttributeTypeMismatch)
         "    outputColor = vec4(0, 0, 0, 1);"
         "}\n";
 
-    ANGLE_GL_PROGRAM(program, vertexShader, fragmentShader);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
     glUseProgram(program.get());
 
     GLint floatLocation = glGetAttribLocation(program, "floatInput");
@@ -3819,11 +3827,17 @@ TEST_P(WebGLCompatibilityTest, DrawBuffers)
     ASSERT_GL_NO_ERROR();
 
     GLenum allDrawBuffers[] = {
-        GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3,
+        GL_COLOR_ATTACHMENT0,
+        GL_COLOR_ATTACHMENT1,
+        GL_COLOR_ATTACHMENT2,
+        GL_COLOR_ATTACHMENT3,
     };
 
     GLenum halfDrawBuffers[] = {
-        GL_NONE, GL_NONE, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3,
+        GL_NONE,
+        GL_NONE,
+        GL_COLOR_ATTACHMENT2,
+        GL_COLOR_ATTACHMENT3,
     };
 
     // Test that when using gl_FragColor, only the first attachment is written to.
@@ -3947,7 +3961,10 @@ TEST_P(WebGLCompatibilityTest, GenerateMipmapUnsizedFloatingPointTexture)
     glBindTexture(GL_TEXTURE_2D, texture);
 
     constexpr GLColor32F data[4] = {
-        kFloatRed, kFloatRed, kFloatGreen, kFloatBlue,
+        kFloatRed,
+        kFloatRed,
+        kFloatGreen,
+        kFloatBlue,
     };
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_FLOAT, data);
     ASSERT_GL_NO_ERROR();
@@ -3975,7 +3992,10 @@ TEST_P(WebGLCompatibilityTest, GenerateMipmapSizedFloatingPointTexture)
     glBindTexture(GL_TEXTURE_2D, texture);
 
     constexpr GLColor32F data[4] = {
-        kFloatRed, kFloatRed, kFloatGreen, kFloatBlue,
+        kFloatRed,
+        kFloatRed,
+        kFloatGreen,
+        kFloatBlue,
     };
     glTexStorage2DEXT(GL_TEXTURE_2D, 2, GL_RGBA32F, 2, 2);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 2, 2, GL_RGBA, GL_FLOAT, data);
@@ -4170,19 +4190,19 @@ TEST_P(WebGLCompatibilityTest, EnableCompressedTextureExtensionLossyDecode)
 // qualifiers.
 TEST_P(WebGL2CompatibilityTest, UniformBlockPrecisionMismatch)
 {
-    const std::string vertexShader =
+    constexpr char kVS[] =
         "#version 300 es\n"
         "uniform Block { mediump vec4 val; };\n"
         "void main() { gl_Position = val; }\n";
-    const std::string fragmentShader =
+    constexpr char kFS[] =
         "#version 300 es\n"
         "uniform Block { highp vec4 val; };\n"
         "out highp vec4 out_FragColor;\n"
         "void main() { out_FragColor = val; }\n";
 
-    GLuint vs = CompileShader(GL_VERTEX_SHADER, vertexShader);
+    GLuint vs = CompileShader(GL_VERTEX_SHADER, kVS);
     ASSERT_NE(0u, vs);
-    GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fragmentShader);
+    GLuint fs = CompileShader(GL_FRAGMENT_SHADER, kFS);
     ASSERT_NE(0u, fs);
 
     GLuint program = glCreateProgram();
@@ -4203,7 +4223,7 @@ TEST_P(WebGL2CompatibilityTest, UniformBlockPrecisionMismatch)
 // Test no attribute vertex shaders
 TEST_P(WebGL2CompatibilityTest, NoAttributeVertexShader)
 {
-    const std::string vertexShader =
+    constexpr char kVS[] =
         "#version 300 es\n"
         "void main()\n"
         "{\n"
@@ -4212,7 +4232,7 @@ TEST_P(WebGL2CompatibilityTest, NoAttributeVertexShader)
         "    gl_Position = vec4(vec2(xy) * 2. - 1., 0, 1);\n"
         "}";
 
-    ANGLE_GL_PROGRAM(program, vertexShader, essl3_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(program, kVS, essl3_shaders::fs::Red());
     glUseProgram(program);
 
     glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -4254,6 +4274,30 @@ TEST_P(WebGL2CompatibilityTest, TransformFeedbackCheckNullDeref)
     EXPECT_GL_ERROR(GL_INVALID_OPERATION);
 }
 
+// We should forbid two transform feedback outputs going to the same buffer.
+TEST_P(WebGL2CompatibilityTest, TransformFeedbackDoubleBinding)
+{
+    constexpr char kVS[] =
+        R"(attribute float a; varying float b; varying float c; void main() { b = a; c = a; })";
+    constexpr char kFS[] = R"(void main(){})";
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
+    static const char *varyings[] = {"b", "c"};
+    glTransformFeedbackVaryings(program, 2, varyings, GL_SEPARATE_ATTRIBS);
+    glLinkProgram(program);
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    // Bind the transform feedback varyings to non-overlapping regions of the same buffer.
+    GLBuffer buffer;
+    glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, buffer, 0, 4);
+    glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 1, buffer, 4, 4);
+    glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, 8, nullptr, GL_STATIC_DRAW);
+    ASSERT_GL_NO_ERROR();
+    // Two varyings bound to the same buffer should be an error.
+    glBeginTransformFeedback(GL_POINTS);
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+}
+
 // Check the return type of a given parameter upon getting the active uniforms.
 TEST_P(WebGL2CompatibilityTest, UniformVariablesReturnTypes)
 {
@@ -4281,4 +4325,4 @@ ANGLE_INSTANTIATE_TEST(WebGLCompatibilityTest,
                        ES3_OPENGLES());
 
 ANGLE_INSTANTIATE_TEST(WebGL2CompatibilityTest, ES3_D3D11(), ES3_OPENGL(), ES3_OPENGLES());
-}  // namespace
+}  // namespace angle

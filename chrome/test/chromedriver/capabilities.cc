@@ -11,7 +11,7 @@
 #include "base/callback.h"
 #include "base/json/string_escape.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
@@ -25,6 +25,7 @@
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/logging.h"
 #include "chrome/test/chromedriver/session.h"
+#include "chrome/test/chromedriver/util.h"
 
 namespace {
 
@@ -222,22 +223,24 @@ Status ParseTimeouts(const base::Value& option, Capabilities* capabilities) {
   const base::DictionaryValue* timeouts;
   if (!option.GetAsDictionary(&timeouts))
     return Status(kInvalidArgument, "'timeouts' must be a JSON object");
-
-  std::map<std::string, Parser> parser_map;
-  parser_map["script"] =
-      base::BindRepeating(&ParseTimeDelta, &capabilities->script_timeout);
-  parser_map["pageLoad"] =
-      base::BindRepeating(&ParseTimeDelta, &capabilities->page_load_timeout);
-  parser_map["implicit"] = base::BindRepeating(
-      &ParseTimeDelta, &capabilities->implicit_wait_timeout);
-
   for (const auto& it : timeouts->DictItems()) {
-    if (parser_map.find(it.first) == parser_map.end())
+    int64_t timeout_ms_int64 = -1;
+    if (!GetOptionalSafeInt(timeouts, it.first, &timeout_ms_int64)
+        || timeout_ms_int64 < 0)
+      return Status(kInvalidArgument, "value must be a non-negative integer");
+    base::TimeDelta timeout =
+                          base::TimeDelta::FromMilliseconds(timeout_ms_int64);
+    const std::string& type = it.first;
+    if (type == "script") {
+      capabilities->script_timeout = timeout;
+    } else if (type == "pageLoad") {
+      capabilities->page_load_timeout = timeout;
+    } else if (type == "implicit") {
+      capabilities->implicit_wait_timeout = timeout;
+    } else {
       return Status(kInvalidArgument,
-                    "unrecognized 'timeouts' option: " + it.first);
-    Status status = parser_map[it.first].Run(it.second, capabilities);
-    if (status.IsError())
-      return Status(kInvalidArgument, "cannot parse " + it.first, status);
+                    "unrecognized 'timeouts' option: " + type);
+    }
   }
   return Status(kOk);
 }
@@ -271,14 +274,17 @@ Status ParseExtensions(const base::Value& option, Capabilities* capabilities) {
   return Status(kOk);
 }
 
-Status ParseProxy(const base::Value& option, Capabilities* capabilities) {
+Status ParseProxy(bool w3c_compliant,
+                  const base::Value& option,
+                  Capabilities* capabilities) {
   const base::DictionaryValue* proxy_dict;
   if (!option.GetAsDictionary(&proxy_dict))
     return Status(kInvalidArgument, "must be a dictionary");
   std::string proxy_type;
   if (!proxy_dict->GetString("proxyType", &proxy_type))
     return Status(kInvalidArgument, "'proxyType' must be a string");
-  proxy_type = base::ToLowerASCII(proxy_type);
+  if (!w3c_compliant)
+    proxy_type = base::ToLowerASCII(proxy_type);
   if (proxy_type == "direct") {
     capabilities->switches.SetSwitch("no-proxy-server");
   } else if (proxy_type == "system") {
@@ -297,7 +303,7 @@ Status ParseProxy(const base::Value& option, Capabilities* capabilities) {
     const std::string kSocksProxy = "socksProxy";
     const base::Value* option_value = NULL;
     std::string proxy_servers;
-    for (size_t i = 0; i < arraysize(proxy_servers_options); ++i) {
+    for (size_t i = 0; i < base::size(proxy_servers_options); ++i) {
       if (!proxy_dict->Get(proxy_servers_options[i][0], &option_value) ||
           option_value->is_none()) {
         continue;
@@ -696,6 +702,7 @@ PerfLoggingPrefs::~PerfLoggingPrefs() {}
 Capabilities::Capabilities()
     : accept_insecure_certs(false),
       page_load_strategy(PageLoadStrategy::kNormal),
+      strict_file_interactability(false),
       android_use_running_app(false),
       detach(false),
       extension_load_timeout(base::TimeDelta::FromSeconds(10)),
@@ -713,7 +720,8 @@ bool Capabilities::IsRemoteBrowser() const {
   return debugger_address.IsValid();
 }
 
-Status Capabilities::Parse(const base::DictionaryValue& desired_caps) {
+Status Capabilities::Parse(const base::DictionaryValue& desired_caps,
+                           bool w3c_compliant) {
   std::map<std::string, Parser> parser_map;
 
   // W3C defined capabilities.
@@ -725,20 +733,25 @@ Status Capabilities::Parse(const base::DictionaryValue& desired_caps) {
   parser_map["platformName"] =
       base::BindRepeating(&ParseString, &platform_name);
   parser_map["pageLoadStrategy"] = base::BindRepeating(&ParsePageLoadStrategy);
-  parser_map["proxy"] = base::BindRepeating(&ParseProxy);
+  parser_map["proxy"] = base::BindRepeating(&ParseProxy, w3c_compliant);
   parser_map["timeouts"] = base::BindRepeating(&ParseTimeouts);
-  // TODO(https://crbug.com/chromedriver/2596): "unexpectedAlertBehaviour" is
-  // legacy name of "unhandledPromptBehavior", remove when we stop supporting
-  // legacy mode.
-  parser_map["unexpectedAlertBehaviour"] =
-      base::BindRepeating(&ParseUnhandledPromptBehavior);
+  parser_map["strictFileInteractability"] =
+      base::BindRepeating(&ParseBoolean, &strict_file_interactability);
+  if (!w3c_compliant) {
+    // TODO(https://crbug.com/chromedriver/2596): "unexpectedAlertBehaviour" is
+    // legacy name of "unhandledPromptBehavior", remove when we stop supporting
+    // legacy mode.
+    parser_map["unexpectedAlertBehaviour"] =
+        base::BindRepeating(&ParseUnhandledPromptBehavior);
+  }
   parser_map["unhandledPromptBehavior"] =
       base::BindRepeating(&ParseUnhandledPromptBehavior);
 
   // ChromeDriver specific capabilities.
   // goog:chromeOptions is the current spec conformance, but chromeOptions is
-  // still supported
-  if (desired_caps.GetDictionary("goog:chromeOptions", nullptr)) {
+  // still supported in legacy mode.
+  if (w3c_compliant ||
+      desired_caps.GetDictionary("goog:chromeOptions", nullptr)) {
     parser_map["goog:chromeOptions"] = base::BindRepeating(&ParseChromeOptions);
   } else {
     parser_map["chromeOptions"] = base::BindRepeating(&ParseChromeOptions);
@@ -753,14 +766,24 @@ Status Capabilities::Parse(const base::DictionaryValue& desired_caps) {
         base::BindRepeating(&ParseBoolean, &network_emulation_enabled);
   }
 
-  for (auto it = parser_map.begin(); it != parser_map.end(); ++it) {
-    const base::Value* capability = NULL;
-    if (desired_caps.Get(it->first, &capability)) {
-      Status status = it->second.Run(*capability, this);
-      if (status.IsError()) {
-        return Status(kInvalidArgument, "cannot parse capability: " + it->first,
-                      status);
-      }
+  for (base::DictionaryValue::Iterator it(desired_caps); !it.IsAtEnd();
+       it.Advance()) {
+    if (it.value().is_none())
+      continue;
+    if (parser_map.find(it.key()) == parser_map.end()) {
+      // The specified capability is unrecognized. W3C spec requires us to
+      // return an error if capability does not contain ":".
+      // In legacy mode, for backward compatibility reasons,
+      // we ignore unrecognized capabilities.
+      if (w3c_compliant && it.key().find(':') == std::string::npos)
+        return Status(kInvalidArgument, "unrecognized capability: " + it.key());
+      else
+        continue;
+    }
+    Status status = parser_map[it.key()].Run(it.value(), this);
+    if (status.IsError()) {
+      return Status(kInvalidArgument, "cannot parse capability: " + it.key(),
+                    status);
     }
   }
   // Perf log must be enabled if perf log prefs are specified; otherwise, error.
@@ -800,17 +823,6 @@ Status Capabilities::CheckSupport() const {
       page_load_strategy != PageLoadStrategy::kNone) {
     return Status(kInvalidArgument, "'pageLoadStrategy=" + page_load_strategy +
                                         "' not yet supported");
-  }
-
-  // TODO(https://crbug.com/chromedriver/2597): Some unhandledPromptBehavior
-  // modes not yet supported.
-  if (unhandled_prompt_behavior.length() > 0 &&
-      unhandled_prompt_behavior != kAccept &&
-      unhandled_prompt_behavior != kDismiss &&
-      unhandled_prompt_behavior != kIgnore) {
-    return Status(kInvalidArgument,
-                  "'unhandledPromptBehavior=" + unhandled_prompt_behavior +
-                      "' not yet supported");
   }
 
   return Status(kOk);

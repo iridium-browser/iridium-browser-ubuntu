@@ -32,7 +32,8 @@ class TopicInvalidationMap;
 // which were passed to InvalidationHandlers.
 class FCMInvalidationListener : public InvalidationListener,
                                 public AckHandler,
-                                FCMSyncNetworkChannel::Observer {
+                                FCMSyncNetworkChannel::Observer,
+                                PerUserTopicRegistrationManager::Observer {
  public:
   typedef base::OnceCallback<std::unique_ptr<InvalidationClient>(
       NetworkChannel* network_channel,
@@ -84,7 +85,14 @@ class FCMInvalidationListener : public InvalidationListener,
   void OnFCMSyncNetworkChannelStateChanged(
       InvalidatorState invalidator_state) override;
 
+  // PerUserTopicRegistrationManager::Observer implementation.
+  void OnSubscriptionChannelStateChanged(
+      InvalidatorState invalidator_state) override;
+
   void DoRegistrationUpdate();
+
+  void RequestDetailedStatus(
+      base::Callback<void(const base::DictionaryValue&)> callback) const;
 
   void StopForTest();
 
@@ -129,8 +137,8 @@ class FCMInvalidationListener : public InvalidationListener,
   // Stored to pass to |per_user_topic_registration_manager_| on start.
   TopicSet registered_topics_;
 
-  // The states of the ticl and FCM channel.
-  InvalidatorState ticl_state_;
+  // The states of the HTTP and FCM channel.
+  InvalidatorState subscription_channel_state_;
   InvalidatorState fcm_network_state_;
 
   std::unique_ptr<PerUserTopicRegistrationManager>

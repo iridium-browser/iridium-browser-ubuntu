@@ -8,6 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "absl/memory/memory.h"
 #include "api/test/simulated_network.h"
 #include "call/fake_network_pipe.h"
 #include "call/simulated_network.h"
@@ -41,8 +42,8 @@ class ProbingTest : public test::EndToEndTest {
         state_(0),
         sender_call_(nullptr) {}
 
-  void ModifySenderCallConfig(Call::Config* config) override {
-    config->bitrate_config.start_bitrate_bps = start_bitrate_bps_;
+  void ModifySenderBitrateConfig(BitrateConstraints* bitrate_config) override {
+    bitrate_config->start_bitrate_bps = start_bitrate_bps_;
   }
 
   void OnCallsCreated(Call* sender_call, Call* receiver_call) override {

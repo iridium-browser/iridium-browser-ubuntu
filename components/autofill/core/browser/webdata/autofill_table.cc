@@ -34,6 +34,8 @@
 #include "components/autofill/core/browser/webdata/autofill_table_encryptor.h"
 #include "components/autofill/core/browser/webdata/autofill_table_encryptor_factory.h"
 #include "components/autofill/core/common/autofill_clock.h"
+#include "components/autofill/core/common/autofill_constants.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/autofill_util.h"
 #include "components/autofill/core/common/form_field_data.h"
@@ -482,6 +484,9 @@ bool AutofillTable::MigrateToVersion(int version,
     case 80:
       *update_compatible_version = true;
       return MigrateToVersion80AddIsClientValidityStatesUpdatedColumn();
+    case 81:
+      *update_compatible_version = true;
+      return MigrateToVersion81CleanUpWrongModelTypeData();
   }
   return true;
 }
@@ -500,22 +505,28 @@ bool AutofillTable::AddFormFieldValue(const FormFieldData& element,
 bool AutofillTable::GetFormValuesForElementName(
     const base::string16& name,
     const base::string16& prefix,
-    std::vector<base::string16>* values,
+    std::vector<AutofillEntry>* entries,
     int limit) {
-  DCHECK(values);
+  DCHECK(entries);
   bool succeeded = false;
 
   if (prefix.empty()) {
     sql::Statement s;
-    s.Assign(
-        db_->GetUniqueStatement("SELECT value FROM autofill WHERE name = ? "
-                                "ORDER BY count DESC LIMIT ?"));
+    s.Assign(db_->GetUniqueStatement(
+        "SELECT name, value, date_created, date_last_used FROM autofill "
+        "WHERE name = ? "
+        "ORDER BY count DESC LIMIT ?"));
     s.BindString16(0, name);
     s.BindInt(1, limit);
 
-    values->clear();
-    while (s.Step())
-      values->push_back(s.ColumnString16(0));
+    entries->clear();
+    while (s.Step()) {
+      entries->push_back(AutofillEntry(
+          AutofillKey(/*name=*/s.ColumnString16(0),
+                      /*value=*/s.ColumnString16(1)),
+          /*date_created=*/base::Time::FromTimeT(s.ColumnInt64(2)),
+          /*date_last_used=*/base::Time::FromTimeT(s.ColumnInt64(3))));
+    }
 
     succeeded = s.Succeeded();
   } else {
@@ -524,28 +535,33 @@ bool AutofillTable::GetFormValuesForElementName(
     next_prefix.back()++;
 
     sql::Statement s1;
-    s1.Assign(
-        db_->GetUniqueStatement("SELECT value FROM autofill "
-                                "WHERE name = ? AND "
-                                "value_lower >= ? AND "
-                                "value_lower < ? "
-                                "ORDER BY count DESC "
-                                "LIMIT ?"));
+    s1.Assign(db_->GetUniqueStatement(
+        "SELECT name, value, date_created, date_last_used FROM autofill "
+        "WHERE name = ? AND "
+        "value_lower >= ? AND "
+        "value_lower < ? "
+        "ORDER BY count DESC "
+        "LIMIT ?"));
     s1.BindString16(0, name);
     s1.BindString16(1, prefix_lower);
     s1.BindString16(2, next_prefix);
     s1.BindInt(3, limit);
 
-    values->clear();
-    while (s1.Step())
-      values->push_back(s1.ColumnString16(0));
+    entries->clear();
+    while (s1.Step()) {
+      entries->push_back(AutofillEntry(
+          AutofillKey(/*name=*/s1.ColumnString16(0),
+                      /*value=*/s1.ColumnString16(1)),
+          /*date_created=*/base::Time::FromTimeT(s1.ColumnInt64(2)),
+          /*date_last_used=*/base::Time::FromTimeT(s1.ColumnInt64(3))));
+    }
 
     succeeded = s1.Succeeded();
 
     if (IsFeatureSubstringMatchEnabled()) {
       sql::Statement s2;
       s2.Assign(db_->GetUniqueStatement(
-          "SELECT value FROM autofill "
+          "SELECT name, value, date_created, date_last_used FROM autofill "
           "WHERE name = ? AND ("
           " value LIKE '% ' || :prefix || '%' ESCAPE '!' OR "
           " value LIKE '%.' || :prefix || '%' ESCAPE '!' OR "
@@ -561,8 +577,13 @@ bool AutofillTable::GetFormValuesForElementName(
       s2.BindString16(1,
                       Substitute(prefix_lower, base::ASCIIToUTF16("_%"), 0x21));
       s2.BindInt(2, limit);
-      while (s2.Step())
-        values->push_back(s2.ColumnString16(0));
+      while (s2.Step()) {
+        entries->push_back(AutofillEntry(
+            AutofillKey(/*name=*/s2.ColumnString16(0),
+                        /*value=*/s2.ColumnString16(1)),
+            /*date_created=*/base::Time::FromTimeT(s2.ColumnInt64(2)),
+            /*date_last_used=*/base::Time::FromTimeT(s2.ColumnInt64(3))));
+      }
 
       succeeded &= s2.Succeeded();
     }
@@ -678,8 +699,17 @@ bool AutofillTable::RemoveFormElementsAddedBetween(
 
 bool AutofillTable::RemoveExpiredFormElements(
     std::vector<AutofillChange>* changes) {
+  int64_t period = kExpirationPeriodInDays;
+  auto change_type = AutofillChange::REMOVE;
+
+  if (base::FeatureList::IsEnabled(
+          autofill::features::kAutocompleteRetentionPolicyEnabled)) {
+    period = kAutocompleteRetentionPolicyPeriodInDays;
+    change_type = AutofillChange::EXPIRE;
+  }
+
   base::Time expiration_time =
-      AutofillClock::Now() - base::TimeDelta::FromDays(kExpirationPeriodInDays);
+      AutofillClock::Now() - base::TimeDelta::FromDays(period);
 
   // Query for the name and value of all form elements that were last used
   // before the |expiration_time|.
@@ -691,7 +721,7 @@ bool AutofillTable::RemoveExpiredFormElements(
     base::string16 name = select_for_delete.ColumnString16(0);
     base::string16 value = select_for_delete.ColumnString16(1);
     tentative_changes.push_back(
-        AutofillChange(AutofillChange::REMOVE, AutofillKey(name, value)));
+        AutofillChange(change_type, AutofillKey(name, value)));
   }
 
   if (!select_for_delete.Succeeded())
@@ -1339,6 +1369,24 @@ bool AutofillTable::UpdateServerCardMetadata(const CreditCard& credit_card) {
   return db_->GetLastChangeCount() > 0;
 }
 
+bool AutofillTable::UpdateServerCardMetadata(
+    const AutofillMetadata& card_metadata) {
+  // Do not check if there was a record that got deleted. Inserting a new one is
+  // also fine.
+  RemoveServerCardMetadata(card_metadata.id);
+  sql::Statement s(
+      db_->GetUniqueStatement("INSERT INTO server_card_metadata(use_count, "
+                              "use_date, billing_address_id, id)"
+                              "VALUES (?,?,?,?)"));
+  s.BindInt64(0, card_metadata.use_count);
+  s.BindInt64(1, card_metadata.use_date.ToInternalValue());
+  s.BindString(2, card_metadata.billing_address_id);
+  s.BindString(3, card_metadata.id);
+  s.Run();
+
+  return db_->GetLastChangeCount() > 0;
+}
+
 bool AutofillTable::RemoveServerCardMetadata(const std::string& id) {
   sql::Statement remove(
       db_->GetUniqueStatement("DELETE FROM server_card_metadata WHERE id = ?"));
@@ -1415,6 +1463,24 @@ bool AutofillTable::UpdateServerAddressMetadata(
   return db_->GetLastChangeCount() > 0;
 }
 
+bool AutofillTable::UpdateServerAddressMetadata(
+    const AutofillMetadata& address_metadata) {
+  // Do not check if there was a record that got deleted. Inserting a new one is
+  // also fine.
+  RemoveServerAddressMetadata(address_metadata.id);
+  sql::Statement s(
+      db_->GetUniqueStatement("INSERT INTO server_address_metadata(use_count, "
+                              "use_date, has_converted, id)"
+                              "VALUES (?,?,?,?)"));
+  s.BindInt64(0, address_metadata.use_count);
+  s.BindInt64(1, address_metadata.use_date.ToInternalValue());
+  s.BindBool(2, address_metadata.has_converted);
+  s.BindString(3, address_metadata.id);
+  s.Run();
+
+  return db_->GetLastChangeCount() > 0;
+}
+
 bool AutofillTable::RemoveServerAddressMetadata(const std::string& id) {
   sql::Statement remove(db_->GetUniqueStatement(
       "DELETE FROM server_address_metadata WHERE id = ?"));
@@ -1443,6 +1509,111 @@ bool AutofillTable::GetServerAddressesMetadata(
     (*addresses_metadata)[address_metadata.id] = address_metadata;
   }
   return s.Succeeded();
+}
+
+void AutofillTable::SetServerCardsData(
+    const std::vector<CreditCard>& credit_cards) {
+  sql::Transaction transaction(db_);
+  if (!transaction.Begin())
+    return;
+
+  // Delete all old values.
+  sql::Statement masked_delete(
+      db_->GetUniqueStatement("DELETE FROM masked_credit_cards"));
+  masked_delete.Run();
+
+  // Add all the masked cards.
+  sql::Statement masked_insert(
+      db_->GetUniqueStatement("INSERT INTO masked_credit_cards("
+                              "id,"            // 0
+                              "network,"       // 1
+                              "type,"          // 2
+                              "status,"        // 3
+                              "name_on_card,"  // 4
+                              "last_four,"     // 5
+                              "exp_month,"     // 6
+                              "exp_year,"      // 7
+                              "bank_name)"     // 8
+                              "VALUES (?,?,?,?,?,?,?,?,?)"));
+  for (const CreditCard& card : credit_cards) {
+    DCHECK_EQ(CreditCard::MASKED_SERVER_CARD, card.record_type());
+    masked_insert.BindString(0, card.server_id());
+    masked_insert.BindString(1, card.network());
+    masked_insert.BindInt(2, card.card_type());
+    masked_insert.BindString(3,
+                             ServerStatusEnumToString(card.GetServerStatus()));
+    masked_insert.BindString16(4, card.GetRawInfo(CREDIT_CARD_NAME_FULL));
+    masked_insert.BindString16(5, card.LastFourDigits());
+    masked_insert.BindString16(6, card.GetRawInfo(CREDIT_CARD_EXP_MONTH));
+    masked_insert.BindString16(7,
+                               card.GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR));
+    masked_insert.BindString(8, card.bank_name());
+    masked_insert.Run();
+    masked_insert.Reset(true);
+  }
+
+  // Delete all items in the unmasked table that aren't in the new set.
+  sql::Statement unmasked_delete(db_->GetUniqueStatement(
+      "DELETE FROM unmasked_credit_cards WHERE id NOT IN "
+      "(SELECT id FROM masked_credit_cards)"));
+  unmasked_delete.Run();
+
+  transaction.Commit();
+}
+
+void AutofillTable::SetServerAddressesData(
+    const std::vector<AutofillProfile>& profiles) {
+  sql::Transaction transaction(db_);
+  if (!transaction.Begin())
+    return;
+
+  // Delete existing server addresses.
+  sql::Statement delete_old(
+      db_->GetUniqueStatement("DELETE FROM server_addresses"));
+  delete_old.Run();
+
+  // Add the new server addresses.
+  sql::Statement insert(db_->GetUniqueStatement(
+      "INSERT INTO server_addresses("
+      "id,"
+      "recipient_name,"
+      "company_name,"
+      "street_address,"
+      "address_1,"     // ADDRESS_HOME_STATE
+      "address_2,"     // ADDRESS_HOME_CITY
+      "address_3,"     // ADDRESS_HOME_DEPENDENT_LOCALITY
+      "address_4,"     // Not supported in AutofillProfile yet.
+      "postal_code,"   // ADDRESS_HOME_ZIP
+      "sorting_code,"  // ADDRESS_HOME_SORTING_CODE
+      "country_code,"  // ADDRESS_HOME_COUNTRY
+      "phone_number,"  // PHONE_HOME_WHOLE_NUMBER
+      "language_code) "
+      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+  for (const auto& profile : profiles) {
+    DCHECK(profile.record_type() == AutofillProfile::SERVER_PROFILE);
+
+    int index = 0;
+    insert.BindString(index++, profile.server_id());
+    insert.BindString16(index++, profile.GetRawInfo(NAME_FULL));
+    insert.BindString16(index++, profile.GetRawInfo(COMPANY_NAME));
+    insert.BindString16(index++,
+                        profile.GetRawInfo(ADDRESS_HOME_STREET_ADDRESS));
+    insert.BindString16(index++, profile.GetRawInfo(ADDRESS_HOME_STATE));
+    insert.BindString16(index++, profile.GetRawInfo(ADDRESS_HOME_CITY));
+    insert.BindString16(index++,
+                        profile.GetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY));
+    index++;  // SKip address_4 which we haven't added to AutofillProfile yet.
+    insert.BindString16(index++, profile.GetRawInfo(ADDRESS_HOME_ZIP));
+    insert.BindString16(index++, profile.GetRawInfo(ADDRESS_HOME_SORTING_CODE));
+    insert.BindString16(index++, profile.GetRawInfo(ADDRESS_HOME_COUNTRY));
+    insert.BindString16(index++, profile.GetRawInfo(PHONE_HOME_WHOLE_NUMBER));
+    insert.BindString(index++, profile.language_code());
+
+    insert.Run();
+    insert.Reset(true);
+  }
+
+  transaction.Commit();
 }
 
 void AutofillTable::SetPaymentsCustomerData(
@@ -2440,6 +2611,11 @@ bool AutofillTable::MigrateToVersion78AddModelTypeColumns() {
                               "(model_type, storage_key, value) "
                               "SELECT ?, storage_key, value "
                               "FROM autofill_sync_metadata"));
+  // Note: This uses the *wrong* ID for the ModelType - instead of
+  // |syncer::ModelTypeToHistogramInt|, this should be |GetKeyValueForModelType|
+  // aka |syncer::ModelTypeToStableIdentifier|. But at this point, fixing it
+  // here would just make an even bigger mess. Instead, we clean this up in the
+  // migration to version 81. See also crbug.com/895826.
   insert_metadata.BindInt(0, syncer::ModelTypeToHistogramInt(syncer::AUTOFILL));
 
   // Prior to this migration, the table was a singleton, containing only one
@@ -2448,6 +2624,7 @@ bool AutofillTable::MigrateToVersion78AddModelTypeColumns() {
       db_->GetUniqueStatement("INSERT INTO autofill_model_type_state_temp "
                               "(model_type, value) SELECT ?, value "
                               "FROM autofill_model_type_state WHERE id=1"));
+  // Note: Like above, this uses the *wrong* ID for the ModelType.
   insert_state.BindInt(0, syncer::ModelTypeToHistogramInt(syncer::AUTOFILL));
 
   if (!insert_metadata.Run() || !insert_state.Run()) {
@@ -2472,6 +2649,32 @@ bool AutofillTable::MigrateToVersion80AddIsClientValidityStatesUpdatedColumn() {
       "ALTER TABLE autofill_profiles ADD COLUMN "
       "is_client_validity_states_updated BOOL NOT "
       "NULL DEFAULT FALSE");
+}
+
+bool AutofillTable::MigrateToVersion81CleanUpWrongModelTypeData() {
+  // The migration to version 78 inserted Sync data with wrong values in the
+  // model_type column of the autofill_model_type_state and
+  // autofill_sync_metadata tables. Here we just delete the bad data - no point
+  // in trying to recover anything, since by now it'll have been redownloaded
+  // anyway.
+  const int bad_model_type_id =
+      syncer::ModelTypeToHistogramInt(syncer::AUTOFILL);
+  DCHECK_NE(bad_model_type_id, GetKeyValueForModelType(syncer::AUTOFILL));
+
+  sql::Transaction transaction(db_);
+  if (!transaction.Begin())
+    return false;
+
+  sql::Statement delete_bad_model_type_state(db_->GetUniqueStatement(
+      "DELETE FROM autofill_model_type_state WHERE model_type = ?;"));
+  delete_bad_model_type_state.BindInt(0, bad_model_type_id);
+
+  sql::Statement delete_bad_sync_metadata(db_->GetUniqueStatement(
+      "DELETE FROM autofill_sync_metadata WHERE model_type = ?;"));
+  delete_bad_sync_metadata.BindInt(0, bad_model_type_id);
+
+  return delete_bad_model_type_state.Run() && delete_bad_sync_metadata.Run() &&
+         transaction.Commit();
 }
 
 bool AutofillTable::AddFormFieldValuesTime(

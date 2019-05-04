@@ -17,8 +17,12 @@
 #include "google_apis/gaia/oauth2_token_service.h"
 #include "ios/public/provider/chrome/browser/signin/chrome_identity_service.h"
 
-namespace browser_sync {
-class ProfileSyncService;
+namespace syncer {
+class SyncService;
+}
+
+namespace identity {
+class IdentityManager;
 }
 
 class AccountTrackerService;
@@ -26,7 +30,6 @@ class AuthenticationServiceDelegate;
 @class ChromeIdentity;
 class PrefService;
 class ProfileOAuth2TokenService;
-class SigninManager;
 class SyncSetupService;
 
 // AuthenticationService is the Chrome interface to the iOS shared
@@ -39,8 +42,8 @@ class AuthenticationService : public KeyedService,
                         ProfileOAuth2TokenService* token_service,
                         SyncSetupService* sync_setup_service,
                         AccountTrackerService* account_tracker,
-                        SigninManager* signin_manager,
-                        browser_sync::ProfileSyncService* sync_service);
+                        identity::IdentityManager* identity_manager,
+                        syncer::SyncService* sync_service);
   ~AuthenticationService() override;
 
   // Registers the preferences used by AuthenticationService;
@@ -198,8 +201,8 @@ class AuthenticationService : public KeyedService,
   ProfileOAuth2TokenService* token_service_ = nullptr;
   SyncSetupService* sync_setup_service_ = nullptr;
   AccountTrackerService* account_tracker_ = nullptr;
-  SigninManager* signin_manager_ = nullptr;
-  browser_sync::ProfileSyncService* sync_service_ = nullptr;
+  identity::IdentityManager* identity_manager_ = nullptr;
+  syncer::SyncService* sync_service_ = nullptr;
 
   // Whether Initialized has been called.
   bool initialized_ = false;

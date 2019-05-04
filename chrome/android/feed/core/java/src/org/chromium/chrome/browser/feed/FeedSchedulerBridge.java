@@ -12,7 +12,6 @@ import com.google.android.libraries.feed.api.sessionmanager.SessionManager;
 import com.google.android.libraries.feed.host.scheduler.SchedulerApi;
 import com.google.search.now.wire.feed.FeedQueryProto.FeedQuery.RequestReason;
 
-import org.chromium.base.Callback;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -62,7 +61,7 @@ public class FeedSchedulerBridge implements FeedScheduler {
 
     @Override
     public int shouldSessionRequestData(SessionManagerState sessionManagerState) {
-        assert mNativeBridge != 0;
+        if (mNativeBridge == 0) return SchedulerApi.RequestBehavior.UNKNOWN;
 
         @NativeRequestBehavior
         int nativeBehavior = nativeShouldSessionRequestData(mNativeBridge,
@@ -93,14 +92,16 @@ public class FeedSchedulerBridge implements FeedScheduler {
 
     @Override
     public void onReceiveNewContent(long contentCreationDateTimeMs) {
-        assert mNativeBridge != 0;
-        nativeOnReceiveNewContent(mNativeBridge, contentCreationDateTimeMs);
+        if (mNativeBridge != 0) {
+            nativeOnReceiveNewContent(mNativeBridge, contentCreationDateTimeMs);
+        }
     }
 
     @Override
     public void onRequestError(int networkResponseCode) {
-        assert mNativeBridge != 0;
-        nativeOnRequestError(mNativeBridge, networkResponseCode);
+        if (mNativeBridge != 0) {
+            nativeOnRequestError(mNativeBridge, networkResponseCode);
+        }
     }
 
     @Override
@@ -112,20 +113,19 @@ public class FeedSchedulerBridge implements FeedScheduler {
     @Override
     public void onFixedTimer(Runnable onCompletion) {
         assert mNativeBridge != 0;
-        // Convert to single argument Callback to make invoking from native more convenient.
-        nativeOnFixedTimer(mNativeBridge, (Void ignored) -> onCompletion.run());
-    }
-
-    @Override
-    public void onTaskReschedule() {
-        assert mNativeBridge != 0;
-        nativeOnTaskReschedule(mNativeBridge);
+        nativeOnFixedTimer(mNativeBridge, onCompletion);
     }
 
     @Override
     public void onSuggestionConsumed() {
         assert mNativeBridge != 0;
         nativeOnSuggestionConsumed(mNativeBridge);
+    }
+
+    @Override
+    public boolean onArticlesCleared(boolean suppressRefreshes) {
+        assert mNativeBridge != 0;
+        return nativeOnArticlesCleared(mNativeBridge, suppressRefreshes);
     }
 
     @CalledByNative
@@ -147,6 +147,7 @@ public class FeedSchedulerBridge implements FeedScheduler {
     private void cancelWakeUp() {
         FeedRefreshTask.cancelWakeUp();
     }
+
     private native long nativeInit(Profile profile);
     private native void nativeDestroy(long nativeFeedSchedulerBridge);
     private native int nativeShouldSessionRequestData(long nativeFeedSchedulerBridge,
@@ -156,8 +157,8 @@ public class FeedSchedulerBridge implements FeedScheduler {
     private native void nativeOnRequestError(
             long nativeFeedSchedulerBridge, int networkResponseCode);
     private native void nativeOnForegrounded(long nativeFeedSchedulerBridge);
-    private native void nativeOnFixedTimer(
-            long nativeFeedSchedulerBridge, Callback<Void> onCompletion);
-    private native void nativeOnTaskReschedule(long nativeFeedSchedulerBridge);
+    private native void nativeOnFixedTimer(long nativeFeedSchedulerBridge, Runnable onCompletion);
     private native void nativeOnSuggestionConsumed(long nativeFeedSchedulerBridge);
+    private native boolean nativeOnArticlesCleared(
+            long nativeFeedSchedulerBridge, boolean suppressRefreshes);
 }

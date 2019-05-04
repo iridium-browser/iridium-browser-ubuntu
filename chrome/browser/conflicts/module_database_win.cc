@@ -11,17 +11,19 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "chrome/browser/conflicts/module_database_observer_win.h"
+#include "content/public/browser/browser_task_traits.h"
 
 #if defined(GOOGLE_CHROME_BUILD)
+#include "base/enterprise_util.h"
 #include "base/feature_list.h"
 #include "base/task/post_task.h"
-#include "base/win/win_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/conflicts/incompatible_applications_updater_win.h"
 #include "chrome/browser/conflicts/module_load_attempt_log_listener_win.h"
 #include "chrome/browser/conflicts/third_party_conflicts_manager_win.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
+#include "chrome_elf/third_party_dlls/public_api.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -263,6 +265,20 @@ bool ModuleDatabase::IsThirdPartyBlockingPolicyEnabled() {
   return !third_party_blocking_enabled_pref->IsManaged() ||
          third_party_blocking_enabled_pref->GetValue()->GetBool();
 }
+
+// static
+void ModuleDatabase::DisableThirdPartyBlocking() {
+  // Immediately disable the hook. DisableHook() can be called concurrently.
+  DisableHook();
+
+  // Notify the ThirdPartyMetricsRecorder instance that the hook is disabled.
+  // Since this is meant for a heartbeat metric, the small latency introduced
+  // with the thread-hopping is perfectly acceptable.
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI}, base::BindOnce([]() {
+        ModuleDatabase::GetInstance()->third_party_metrics_.SetHookDisabled();
+      }));
+}
 #endif  // defined(GOOGLE_CHROME_BUILD)
 
 // static
@@ -318,7 +334,7 @@ void ModuleDatabase::OnRegisteredModulesEnumerated() {
 
 void ModuleDatabase::OnModuleInspected(
     const ModuleInfoKey& module_key,
-    std::unique_ptr<ModuleInspectionResult> inspection_result) {
+    ModuleInspectionResult inspection_result) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
   auto it = modules_.find(module_key);
@@ -364,7 +380,7 @@ void ModuleDatabase::MaybeInitializeThirdPartyConflictsManager() {
   // the command-line.
   // TODO(pmonette): Move IAttachmentExecute::Save() to a utility process and
   //                 remove this.
-  if (base::win::IsEnterpriseManaged() &&
+  if (base::IsMachineExternallyManaged() &&
       !AreThirdPartyFeaturesEnabledViaCommandLine()) {
     return;
   }

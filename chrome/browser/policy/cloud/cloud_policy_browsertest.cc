@@ -39,7 +39,6 @@
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/cloud_policy_refresh_scheduler.h"
-#include "components/policy/core/common/cloud/dm_auth.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/policy_map.h"
@@ -63,17 +62,18 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_policy_manager_factory_chromeos.h"
-#include "chromeos/chromeos_paths.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
+#include "chromeos/dbus/constants/dbus_paths.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "components/account_id/account_id.h"
 #include "components/user_manager/user_names.h"
 #else
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
-#include "components/signin/core/browser/signin_manager.h"
+#include "services/identity/public/cpp/identity_manager.h"
+#include "services/identity/public/cpp/identity_test_utils.h"
 #endif
 
 using testing::AnyNumber;
@@ -100,12 +100,6 @@ std::unique_ptr<KeyedService> BuildFakeProfileInvalidationProvider(
       std::make_unique<invalidation::ProfileIdentityProvider>(
           IdentityManagerFactory::GetForProfile(profile)));
 }
-
-#if !defined(OS_CHROMEOS)
-const char* GetTestGaiaId() {
-  return "gaia-id-user@example.com";
-}
-#endif
 
 const char* GetTestUser() {
 #if defined(OS_CHROMEOS)
@@ -223,10 +217,10 @@ class CloudPolicyTest : public InProcessBrowserTest,
 #else
     // Mock a signed-in user. This is used by the UserCloudPolicyStore to pass
     // the username to the UserCloudPolicyValidator.
-    SigninManager* signin_manager =
-        SigninManagerFactory::GetForProfile(browser()->profile());
-    ASSERT_TRUE(signin_manager);
-    signin_manager->SetAuthenticatedAccountInfo(GetTestGaiaId(), GetTestUser());
+    auto* identity_manager =
+        IdentityManagerFactory::GetForProfile(browser()->profile());
+    ASSERT_TRUE(identity_manager);
+    identity::SetPrimaryAccount(identity_manager, GetTestUser());
 
     UserCloudPolicyManager* policy_manager =
         UserCloudPolicyManagerFactory::GetForBrowserContext(
@@ -271,8 +265,9 @@ class CloudPolicyTest : public InProcessBrowserTest,
     policy_manager->core()->client()->Register(
         registration_type, em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
         em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
-        em::LicenseType::UNDEFINED, DMAuth::FromOAuthToken("bogus"),
-        std::string(), std::string(), std::string());
+        em::LicenseType::UNDEFINED, "oauth_token_unused" /* oauth_token */,
+        std::string() /* client_id */, std::string() /* requisition */,
+        std::string() /* current_state_key */);
     run_loop.Run();
     Mock::VerifyAndClearExpectations(&observer);
     policy_manager->core()->client()->RemoveObserver(&observer);
@@ -286,8 +281,8 @@ class CloudPolicyTest : public InProcessBrowserTest,
 #if defined(OS_CHROMEOS)
     // Get the path to the user policy key file.
     base::FilePath user_policy_key_dir;
-    ASSERT_TRUE(base::PathService::Get(chromeos::DIR_USER_POLICY_KEYS,
-                                       &user_policy_key_dir));
+    ASSERT_TRUE(base::PathService::Get(
+        chromeos::dbus_paths::DIR_USER_POLICY_KEYS, &user_policy_key_dir));
     std::string sanitized_username =
         chromeos::CryptohomeClient::GetStubSanitizedUsername(
             cryptohome::CreateAccountIdentifierFromAccountId(
@@ -439,7 +434,10 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyTest, FetchPolicyWithRotatedKey) {
 
   // Read the initial key.
   std::string initial_key;
-  ASSERT_TRUE(base::ReadFileToString(user_policy_key_file_, &initial_key));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    ASSERT_TRUE(base::ReadFileToString(user_policy_key_file_, &initial_key));
+  }
 
   PolicyMap default_policy;
   GetExpectedDefaultPolicy(&default_policy);
@@ -461,7 +459,10 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyTest, FetchPolicyWithRotatedKey) {
 
   // Verify that the key was rotated.
   std::string rotated_key;
-  ASSERT_TRUE(base::ReadFileToString(user_policy_key_file_, &rotated_key));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    ASSERT_TRUE(base::ReadFileToString(user_policy_key_file_, &rotated_key));
+  }
   EXPECT_NE(rotated_key, initial_key);
 
   // Another refresh using the same key won't rotate it again.
@@ -473,7 +474,10 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyTest, FetchPolicyWithRotatedKey) {
   EXPECT_TRUE(expected.Equals(policy_service->GetPolicies(
       PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))));
   std::string current_key;
-  ASSERT_TRUE(base::ReadFileToString(user_policy_key_file_, &current_key));
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    ASSERT_TRUE(base::ReadFileToString(user_policy_key_file_, &current_key));
+  }
   EXPECT_EQ(rotated_key, current_key);
 }
 #endif

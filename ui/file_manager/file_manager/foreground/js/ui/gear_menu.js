@@ -16,13 +16,6 @@ function GearMenu(element) {
       (queryRequiredElement('#gear-menu-drive-sync-settings', element));
 
   /**
-   * @type {!HTMLMenuItemElement}
-   * @const
-   */
-  this.hostedButton = /** @type {!HTMLMenuItemElement} */
-      (queryRequiredElement('#gear-menu-drive-hosted-settings', element));
-
-  /**
    * @type {!HTMLElement}
    * @const
    */
@@ -78,7 +71,6 @@ function GearMenu(element) {
 
   // Initialize attributes.
   this.syncButton.checkable = true;
-  this.hostedButton.checkable = true;
 }
 
 /**
@@ -119,8 +111,9 @@ GearMenu.prototype.setSpaceInfo = function(
   }
 
   spaceInfoPromise.then(function(spaceInfo) {
-    if (this.spaceInfoPromise_ != spaceInfoPromise)
+    if (this.spaceInfoPromise_ != spaceInfoPromise) {
       return;
+    }
     this.volumeSpaceInnerBar_.removeAttribute('pending');
     if (spaceInfo) {
       var sizeStr = util.bytesToString(spaceInfo.remainingSize);

@@ -9,9 +9,10 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory_handle.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/unguessable_token.h"
 #include "base/values.h"
@@ -32,14 +33,6 @@
 // First include of all message files to provide basic types.
 #include "tools/ipc_fuzzer/message_lib/all_messages.h"
 #include "tools/ipc_fuzzer/message_lib/all_message_null_macros.h"
-
-#if defined(COMPILER_GCC)
-#define PRETTY_FUNCTION __PRETTY_FUNCTION__
-#elif defined(COMPILER_MSVC)
-#define PRETTY_FUNCTION __FUNCSIG__
-#else
-#define PRETTY_FUNCTION __FUNCTION__
-#endif
 
 namespace IPC {
 class Message;
@@ -914,10 +907,10 @@ template <>
 struct FuzzTraits<gfx::Transform> {
   static bool Fuzz(gfx::Transform* p, Fuzzer* fuzzer) {
     SkMScalar matrix[16];
-    for (size_t i = 0; i < arraysize(matrix); i++) {
+    for (size_t i = 0; i < base::size(matrix); i++) {
       matrix[i] = p->matrix().get(i / 4, i % 4);
     }
-    if (!FuzzParamArray(&matrix[0], arraysize(matrix), fuzzer))
+    if (!FuzzParamArray(&matrix[0], base::size(matrix), fuzzer))
       return false;
     *p = gfx::Transform(matrix[0], matrix[1], matrix[2], matrix[3], matrix[4],
                         matrix[5], matrix[6], matrix[7], matrix[8], matrix[9],

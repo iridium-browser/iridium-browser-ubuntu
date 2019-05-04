@@ -34,7 +34,7 @@
 
 #include <memory>
 #include "third_party/blink/public/common/blob/blob_utils.h"
-#include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-shared.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -66,7 +66,7 @@ unsigned NavigationDisablerForBeforeUnload::navigation_disable_count_ = 0;
 
 class ScheduledURLNavigation : public ScheduledNavigation {
  protected:
-  ScheduledURLNavigation(Reason reason,
+  ScheduledURLNavigation(ClientNavigationReason reason,
                          double delay,
                          Document* origin_document,
                          const KURL& url,
@@ -131,8 +131,25 @@ class ScheduledRedirect final : public ScheduledURLNavigation {
                                    Document::HttpRefreshType http_refresh_type,
                                    WebFrameLoadType frame_load_type,
                                    base::TimeTicks input_timestamp) {
-    return new ScheduledRedirect(delay, origin_document, url, http_refresh_type,
-                                 frame_load_type, input_timestamp);
+    return MakeGarbageCollected<ScheduledRedirect>(
+        delay, origin_document, url, http_refresh_type, frame_load_type,
+        input_timestamp);
+  }
+
+  ScheduledRedirect(double delay,
+                    Document* origin_document,
+                    const KURL& url,
+                    Document::HttpRefreshType http_refresh_type,
+                    WebFrameLoadType frame_load_type,
+                    base::TimeTicks input_timestamp)
+      : ScheduledURLNavigation(ToReason(http_refresh_type),
+                               delay,
+                               origin_document,
+                               url,
+                               frame_load_type,
+                               false,
+                               input_timestamp) {
+    ClearUserGesture();
   }
 
   bool ShouldStartTimer(LocalFrame* frame) override {
@@ -156,33 +173,18 @@ class ScheduledRedirect final : public ScheduledURLNavigation {
   }
 
  private:
-  static Reason ToReason(Document::HttpRefreshType http_refresh_type) {
+  static ClientNavigationReason ToReason(
+      Document::HttpRefreshType http_refresh_type) {
     switch (http_refresh_type) {
       case Document::HttpRefreshType::kHttpRefreshFromHeader:
-        return Reason::kHttpHeaderRefresh;
+        return ClientNavigationReason::kHttpHeaderRefresh;
       case Document::HttpRefreshType::kHttpRefreshFromMetaTag:
-        return Reason::kMetaTagRefresh;
+        return ClientNavigationReason::kMetaTagRefresh;
       default:
         break;
     }
     NOTREACHED();
-    return Reason::kMetaTagRefresh;
-  }
-
-  ScheduledRedirect(double delay,
-                    Document* origin_document,
-                    const KURL& url,
-                    Document::HttpRefreshType http_refresh_type,
-                    WebFrameLoadType frame_load_type,
-                    base::TimeTicks input_timestamp)
-      : ScheduledURLNavigation(ToReason(http_refresh_type),
-                               delay,
-                               origin_document,
-                               url,
-                               frame_load_type,
-                               false,
-                               input_timestamp) {
-    ClearUserGesture();
+    return ClientNavigationReason::kMetaTagRefresh;
   }
 };
 
@@ -192,16 +194,15 @@ class ScheduledFrameNavigation final : public ScheduledURLNavigation {
                                           const KURL& url,
                                           WebFrameLoadType frame_load_type,
                                           base::TimeTicks input_timestamp) {
-    return new ScheduledFrameNavigation(origin_document, url, frame_load_type,
-                                        input_timestamp);
+    return MakeGarbageCollected<ScheduledFrameNavigation>(
+        origin_document, url, frame_load_type, input_timestamp);
   }
 
- private:
   ScheduledFrameNavigation(Document* origin_document,
                            const KURL& url,
                            WebFrameLoadType frame_load_type,
                            base::TimeTicks input_timestamp)
-      : ScheduledURLNavigation(Reason::kFrameNavigation,
+      : ScheduledURLNavigation(ClientNavigationReason::kFrameNavigation,
                                0.0,
                                origin_document,
                                url,
@@ -210,52 +211,19 @@ class ScheduledFrameNavigation final : public ScheduledURLNavigation {
                                input_timestamp) {}
 };
 
-class ScheduledReload final : public ScheduledNavigation {
- public:
-  static ScheduledReload* Create(LocalFrame* frame,
-                                 base::TimeTicks input_timestamp) {
-    return new ScheduledReload(frame, input_timestamp);
-  }
-
-  void Fire(LocalFrame* frame) override {
-    std::unique_ptr<UserGestureIndicator> gesture_indicator =
-        CreateUserGestureIndicator();
-    ResourceRequest resource_request = frame->Loader().ResourceRequestForReload(
-        WebFrameLoadType::kReload, ClientRedirectPolicy::kClientRedirect);
-    if (resource_request.IsNull())
-      return;
-    FrameLoadRequest request = FrameLoadRequest(nullptr, resource_request);
-    request.SetClientRedirect(ClientRedirectPolicy::kClientRedirect);
-    request.SetInputStartTime(InputTimestamp());
-    frame->Loader().StartNavigation(request, WebFrameLoadType::kReload);
-  }
-
-  KURL Url() const override { return frame_->GetDocument()->Url(); }
-
-  void Trace(blink::Visitor* visitor) override {
-    visitor->Trace(frame_);
-    ScheduledNavigation::Trace(visitor);
-  }
-
- private:
-  explicit ScheduledReload(LocalFrame* frame, base::TimeTicks input_timestamp)
-      : ScheduledNavigation(Reason::kReload,
-                            0.0,
-                            nullptr /*origin_document */,
-                            true,
-                            input_timestamp),
-        frame_(frame) {
-    DCHECK(frame->GetDocument());
-  }
-
-  Member<LocalFrame> frame_;
-};
-
 class ScheduledPageBlock final : public ScheduledNavigation {
  public:
   static ScheduledPageBlock* Create(Document* origin_document, int reason) {
-    return new ScheduledPageBlock(origin_document, reason);
+    return MakeGarbageCollected<ScheduledPageBlock>(origin_document, reason);
   }
+
+  ScheduledPageBlock(Document* origin_document, int reason)
+      : ScheduledNavigation(ClientNavigationReason::kPageBlock,
+                            0.0,
+                            origin_document,
+                            true,
+                            base::TimeTicks() /* input_timestamp */),
+        reason_(reason) {}
 
   void Fire(LocalFrame* frame) override {
     frame->Client()->LoadErrorPage(reason_);
@@ -264,14 +232,6 @@ class ScheduledPageBlock final : public ScheduledNavigation {
   KURL Url() const override { return KURL(); }
 
  private:
-  ScheduledPageBlock(Document* origin_document, int reason)
-      : ScheduledNavigation(Reason::kPageBlock,
-                            0.0,
-                            origin_document,
-                            true,
-                            base::TimeTicks() /* input_timestamp */),
-        reason_(reason) {}
-
   int reason_;
 };
 
@@ -281,8 +241,25 @@ class ScheduledFormSubmission final : public ScheduledNavigation {
                                          FormSubmission* submission,
                                          WebFrameLoadType frame_load_type,
                                          base::TimeTicks input_timestamp) {
-    return new ScheduledFormSubmission(document, submission, frame_load_type,
-                                       input_timestamp);
+    return MakeGarbageCollected<ScheduledFormSubmission>(
+        document, submission, frame_load_type, input_timestamp);
+  }
+
+  ScheduledFormSubmission(Document* document,
+                          FormSubmission* submission,
+                          WebFrameLoadType frame_load_type,
+                          base::TimeTicks input_timestamp)
+      : ScheduledNavigation(submission->Method() == FormSubmission::kGetMethod
+                                ? ClientNavigationReason::kFormSubmissionGet
+                                : ClientNavigationReason::kFormSubmissionPost,
+                            0,
+                            document,
+                            true,
+                            input_timestamp),
+        submission_(submission),
+        frame_load_type_(frame_load_type) {
+    DCHECK_NE(submission->Method(), FormSubmission::kDialogMethod);
+    DCHECK(submission_->Form());
   }
 
   void Fire(LocalFrame* frame) override {
@@ -303,23 +280,6 @@ class ScheduledFormSubmission final : public ScheduledNavigation {
   }
 
  private:
-  ScheduledFormSubmission(Document* document,
-                          FormSubmission* submission,
-                          WebFrameLoadType frame_load_type,
-                          base::TimeTicks input_timestamp)
-      : ScheduledNavigation(submission->Method() == FormSubmission::kGetMethod
-                                ? Reason::kFormSubmissionGet
-                                : Reason::kFormSubmissionPost,
-                            0,
-                            document,
-                            true,
-                            input_timestamp),
-        submission_(submission),
-        frame_load_type_(frame_load_type) {
-    DCHECK_NE(submission->Method(), FormSubmission::kDialogMethod);
-    DCHECK(submission_->Form());
-  }
-
   Member<FormSubmission> submission_;
   WebFrameLoadType frame_load_type_;
 };
@@ -335,29 +295,6 @@ bool NavigationScheduler::LocationChangePending() {
 
 bool NavigationScheduler::IsNavigationScheduledWithin(double interval) const {
   return redirect_ && redirect_->Delay() <= interval;
-}
-
-// TODO(dcheng): There are really two different load blocking concepts at work
-// here and they have been incorrectly tangled together.
-//
-// 1. NavigationDisablerForBeforeUnload is for blocking navigation scheduling
-//    during a beforeunload events. Scheduled navigations during beforeunload
-//    would make it possible to get trapped in an endless loop of beforeunload
-//    dialogs.
-//
-//    Checking Frame::isNavigationAllowed() doesn't make sense in this context:
-//    NavigationScheduler is always cleared when a new load commits, so it's
-//    impossible for a scheduled navigation to clobber a navigation that just
-//    committed.
-//
-// 2. FrameNavigationDisabler / LocalFrame::isNavigationAllowed() are intended
-//    to prevent Documents from being reattached during destruction, since it
-//    can cause bugs with security origin confusion. This is primarily intended
-//    to block /synchronous/ navigations during things lke
-//    Document::detachLayoutTree().
-inline bool NavigationScheduler::ShouldScheduleReload() const {
-  return frame_->GetPage() && frame_->IsNavigationAllowed() &&
-         NavigationDisablerForBeforeUnload::IsNavigationAllowed();
 }
 
 inline bool NavigationScheduler::ShouldScheduleNavigation(
@@ -462,14 +399,6 @@ void NavigationScheduler::ScheduleFormSubmission(Document* document,
                                            frame_load_type, InputTimestamp()));
 }
 
-void NavigationScheduler::ScheduleReload() {
-  if (!ShouldScheduleReload())
-    return;
-  if (frame_->GetDocument()->Url().IsEmpty())
-    return;
-  Schedule(ScheduledReload::Create(frame_, InputTimestamp()));
-}
-
 void NavigationScheduler::NavigateTask() {
   if (!frame_->GetPage())
     return;
@@ -525,13 +454,16 @@ void NavigationScheduler::StartTimer() {
       WTF::Bind(&NavigationScheduler::NavigateTask, WrapWeakPersistent(this)),
       TimeDelta::FromSecondsD(redirect_->Delay()));
 
-  probe::frameScheduledNavigation(frame_, redirect_.Get());
+  probe::frameScheduledNavigation(frame_, redirect_->Url(), redirect_->Delay(),
+                                  redirect_->GetReason());
 }
 
 void NavigationScheduler::Cancel() {
   if (navigate_task_handle_.IsActive()) {
     probe::frameClearedScheduledNavigation(frame_);
   }
+  if (frame_->GetDocument())
+    frame_->GetDocument()->CancelPendingJavaScriptUrl();
   navigate_task_handle_.Cancel();
   redirect_.Clear();
 }

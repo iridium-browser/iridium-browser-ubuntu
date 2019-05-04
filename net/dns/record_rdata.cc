@@ -7,8 +7,8 @@
 #include <numeric>
 
 #include "base/big_endian.h"
-#include "net/dns/dns_protocol.h"
 #include "net/dns/dns_response.h"
+#include "net/dns/public/dns_protocol.h"
 
 namespace net {
 
@@ -29,6 +29,7 @@ bool RecordRdata::HasValidSize(const base::StringPiece& data, uint16_t type) {
     case dns_protocol::kTypeTXT:
     case dns_protocol::kTypeNSEC:
     case dns_protocol::kTypeOPT:
+    case dns_protocol::kTypeSOA:
       return true;
     default:
       VLOG(1) << "Unsupported RDATA type.";

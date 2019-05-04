@@ -10,15 +10,16 @@
 
 #include "test/fake_vp8_encoder.h"
 
+#include <algorithm>
+
+#include "absl/types/optional.h"
+#include "api/video_codecs/create_vp8_temporal_layers.h"
+#include "api/video_codecs/vp8_temporal_layers.h"
 #include "common_types.h"  // NOLINT(build/include)
-#include "modules/video_coding/codecs/vp8/include/vp8_temporal_layers.h"
+#include "modules/video_coding/codecs/interface/common_constants.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "modules/video_coding/utility/simulcast_utility.h"
-#include "rtc_base/checks.h"
-#include "rtc_base/logging.h"
-#include "rtc_base/random.h"
-#include "rtc_base/timeutils.h"
 
 namespace {
 
@@ -83,18 +84,18 @@ void FakeVP8Encoder::SetupTemporalLayers(const VideoCodec& codec) {
 
   int num_streams = SimulcastUtility::NumberOfSimulcastStreams(codec);
   for (int i = 0; i < num_streams; ++i) {
-    TemporalLayersType type;
+    Vp8TemporalLayersType type;
     int num_temporal_layers =
         SimulcastUtility::NumberOfTemporalLayers(codec, i);
     if (SimulcastUtility::IsConferenceModeScreenshare(codec) && i == 0) {
-      type = TemporalLayersType::kBitrateDynamic;
+      type = Vp8TemporalLayersType::kBitrateDynamic;
       // Legacy screenshare layers supports max 2 layers.
       num_temporal_layers = std::max<int>(2, num_temporal_layers);
     } else {
-      type = TemporalLayersType::kFixedPattern;
+      type = Vp8TemporalLayersType::kFixedPattern;
     }
     temporal_layers_.emplace_back(
-        TemporalLayers::CreateTemporalLayers(type, num_temporal_layers));
+        CreateVp8TemporalLayers(type, num_temporal_layers));
   }
 }
 
@@ -105,7 +106,6 @@ void FakeVP8Encoder::PopulateCodecSpecific(CodecSpecificInfo* codec_specific,
                                            uint32_t timestamp) {
   RTC_DCHECK_CALLED_SEQUENTIALLY(&sequence_checker_);
   codec_specific->codecType = kVideoCodecVP8;
-  codec_specific->codec_name = ImplementationName();
   CodecSpecificInfoVP8* vp8Info = &(codec_specific->codecSpecific.VP8);
   vp8Info->keyIdx = kNoKeyIdx;
   vp8Info->nonReference = false;
@@ -121,17 +121,23 @@ EncodedImageCallback::Result FakeVP8Encoder::OnEncodedImage(
   uint8_t stream_idx = encoded_image.SpatialIndex().value_or(0);
   CodecSpecificInfo overrided_specific_info;
   temporal_layers_[stream_idx]->UpdateLayerConfig(encoded_image.Timestamp());
-  PopulateCodecSpecific(&overrided_specific_info, encoded_image._length,
+  PopulateCodecSpecific(&overrided_specific_info, encoded_image.size(),
                         encoded_image._frameType, stream_idx,
                         encoded_image.Timestamp());
 
   // Write width and height to the payload the same way as the real encoder
   // does.
-  WriteFakeVp8(encoded_image._buffer, encoded_image._encodedWidth,
+  WriteFakeVp8(encoded_image.data(), encoded_image._encodedWidth,
                encoded_image._encodedHeight,
                encoded_image._frameType == kVideoFrameKey);
   return callback_->OnEncodedImage(encoded_image, &overrided_specific_info,
                                    fragments);
+}
+
+VideoEncoder::EncoderInfo FakeVP8Encoder::GetEncoderInfo() const {
+  EncoderInfo info;
+  info.implementation_name = "FakeVp8Encoder";
+  return info;
 }
 
 }  // namespace test

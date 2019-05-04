@@ -8,6 +8,7 @@
 #include "gm.h"
 #include "sk_tool_utils.h"
 #include "SkBitmap.h"
+#include "SkTextUtils.h"
 
 namespace skiagm {
 
@@ -64,10 +65,7 @@ protected:
     }
 
     void onDraw(SkCanvas* canvas) override {
-        SkPaint textPaint;
-        textPaint.setAntiAlias(true);
-        sk_tool_utils::set_portable_typeface(&textPaint);
-        textPaint.setTextAlign(SkPaint::kCenter_Align);
+        SkFont font(sk_tool_utils::create_portable_typeface());
 
         sk_tool_utils::draw_checkerboard(canvas,
                                          kWhite,
@@ -94,10 +92,10 @@ protected:
             this->drawTile(canvas, xOffset, yOffset, mode);
             canvas->restoreToCount(saveCount);
 
-            canvas->drawString(SkBlendMode_Name(mode),
+            SkTextUtils::DrawString(canvas, SkBlendMode_Name(mode),
                                xOffset + kBitmapSize/2.0f,
                                yOffset + kBitmapSize,
-                               textPaint);
+                               font, SkPaint(), SkTextUtils::kCenter_Align);
 
             xOffset += 256;
             if (xOffset >= 1024) {

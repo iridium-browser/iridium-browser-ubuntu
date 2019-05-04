@@ -14,11 +14,9 @@
 
 FakeSigninManagerBase::FakeSigninManagerBase(
     SigninClient* client,
-    AccountTrackerService* account_tracker_service,
-    SigninErrorController* signin_error_controller)
-    : SigninManagerBase(client,
-                        account_tracker_service,
-                        signin_error_controller) {}
+    ProfileOAuth2TokenService* token_service,
+    AccountTrackerService* account_tracker_service)
+    : SigninManagerBase(client, token_service, account_tracker_service) {}
 
 FakeSigninManagerBase::~FakeSigninManagerBase() {}
 
@@ -37,7 +35,6 @@ FakeSigninManager::FakeSigninManager(
                         token_service,
                         account_tracker_service,
                         cookie_manager_service,
-                        nullptr,
                         signin::AccountConsistencyMethod::kDisabled) {}
 
 FakeSigninManager::FakeSigninManager(
@@ -45,26 +42,11 @@ FakeSigninManager::FakeSigninManager(
     ProfileOAuth2TokenService* token_service,
     AccountTrackerService* account_tracker_service,
     GaiaCookieManagerService* cookie_manager_service,
-    SigninErrorController* signin_error_controller)
-    : FakeSigninManager(client,
-                        token_service,
-                        account_tracker_service,
-                        cookie_manager_service,
-                        signin_error_controller,
-                        signin::AccountConsistencyMethod::kDisabled) {}
-
-FakeSigninManager::FakeSigninManager(
-    SigninClient* client,
-    ProfileOAuth2TokenService* token_service,
-    AccountTrackerService* account_tracker_service,
-    GaiaCookieManagerService* cookie_manager_service,
-    SigninErrorController* signin_error_controller,
     signin::AccountConsistencyMethod account_consistency)
     : SigninManager(client,
                     token_service,
                     account_tracker_service,
                     cookie_manager_service,
-                    signin_error_controller,
                     account_consistency),
       token_service_(token_service) {}
 
@@ -75,7 +57,7 @@ void FakeSigninManager::StartSignInWithRefreshToken(
     const std::string& gaia_id,
     const std::string& username,
     const std::string& password,
-    const OAuthTokenFetchedCallback& oauth_fetched_callback) {
+    OAuthTokenFetchedCallback oauth_fetched_callback) {
   set_auth_in_progress(
       account_tracker_service()->SeedAccountInfo(gaia_id, username));
   set_password(password);
@@ -85,7 +67,7 @@ void FakeSigninManager::StartSignInWithRefreshToken(
   possibly_invalid_email_.assign(username);
 
   if (!oauth_fetched_callback.is_null())
-    oauth_fetched_callback.Run(refresh_token);
+    std::move(oauth_fetched_callback).Run(refresh_token);
 }
 
 void FakeSigninManager::CompletePendingSignin() {
@@ -103,8 +85,9 @@ void FakeSigninManager::SignIn(const std::string& gaia_id,
 }
 
 void FakeSigninManager::ForceSignOut() {
-  // SigninClients should always allow sign-out for SIGNOUT_TEST.
-  SignOut(signin_metrics::SIGNOUT_TEST,
+  // SigninClients should always allow sign-out for
+  // |FORCE_SIGNOUT_ALWAYS_ALLOWED_FOR_TESTS|.
+  SignOut(signin_metrics::FORCE_SIGNOUT_ALWAYS_ALLOWED_FOR_TEST,
           signin_metrics::SignoutDelete::IGNORE_METRIC);
 }
 
@@ -164,7 +147,7 @@ void FakeSigninManager::OnSignoutDecisionReached(
   client_->GetPrefs()->ClearPref(prefs::kGoogleServicesUserAccountId);
   client_->GetPrefs()->ClearPref(prefs::kSignedInTime);
 
-  FireGoogleSignedOut(account_id, account_info);
+  FireGoogleSignedOut(account_info);
 }
 
 #endif  // !defined (OS_CHROMEOS)

@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "ash/accessibility/accessibility_observer.h"
+#include "ash/app_list/app_list_controller_observer.h"
 #include "ash/shell_observer.h"
 #include "ash/wallpaper/wallpaper_controller_observer.h"
 #include "ash/wm/splitview/split_view_controller.h"
@@ -43,8 +44,9 @@ class BackdropDelegate;
 // 1) Has a aura::client::kHasBackdrop property = true.
 // 2) BackdropDelegate::HasBackdrop(aura::Window* window) returns true.
 // 3) Active ARC window when the spoken feedback is enabled.
-class BackdropController : public ShellObserver,
-                           public AccessibilityObserver,
+class BackdropController : public AccessibilityObserver,
+                           public AppListControllerObserver,
+                           public ShellObserver,
                            public SplitViewController::Observer,
                            public WallpaperControllerObserver {
  public:
@@ -57,6 +59,7 @@ class BackdropController : public ShellObserver,
   void OnWindowStackingChanged(aura::Window* window);
   void OnPostWindowStateTypeChange(wm::WindowState* window_state,
                                    mojom::WindowStateType old_type);
+  void OnDisplayMetricsChanged();
 
   void SetBackdropDelegate(std::unique_ptr<BackdropDelegate> delegate);
 
@@ -68,11 +71,13 @@ class BackdropController : public ShellObserver,
 
   // ShellObserver:
   void OnOverviewModeStarting() override;
-  void OnOverviewModeEnded() override;
-  void OnAppListVisibilityChanged(bool shown,
-                                  aura::Window* root_window) override;
+  void OnOverviewModeEnding(OverviewSession* overview_session) override;
+  void OnOverviewModeEndingAnimationComplete(bool canceled) override;
   void OnSplitViewModeStarting() override;
   void OnSplitViewModeEnded() override;
+
+  // AppListControllerObserver:
+  void OnAppListVisibilityChanged(bool shown, int64_t display_id) override;
 
   // AccessibilityObserver:
   void OnAccessibilityStatusChanged() override;
@@ -91,6 +96,8 @@ class BackdropController : public ShellObserver,
   void EnsureBackdropWidget();
 
   void UpdateAccessibilityMode();
+
+  void Layout();
 
   // Returns the current visible top level window in the container.
   aura::Window* GetTopmostWindowWithBackdrop();
@@ -130,8 +137,10 @@ class BackdropController : public ShellObserver,
   std::unique_ptr<ui::EventHandler> backdrop_event_handler_;
   ui::EventHandler* original_event_handler_ = nullptr;
 
-  // If true, the |RestackOrHideWindow| might recurse.
-  bool in_restacking_ = false;
+  // If true, skip updating background. Used to avoid recursive update
+  // when updating the window stack, or delay hiding the backdrop
+  // in overview mode.
+  bool pause_update_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(BackdropController);
 };

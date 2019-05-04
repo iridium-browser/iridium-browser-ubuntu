@@ -105,7 +105,7 @@ class PLATFORM_EXPORT ScrollPaintPropertyNode
     return state_.overscroll_behavior.y;
   }
 
-  base::Optional<cc::SnapContainerData> GetSnapContainerData() const {
+  base::Optional<SnapContainerData> GetSnapContainerData() const {
     return state_.snap_container_data;
   }
 

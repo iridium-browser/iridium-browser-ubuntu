@@ -17,6 +17,7 @@
 #include "chrome/browser/clipboard/clipboard_write_permission_context.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/generic_sensor/sensor_permission_context.h"
+#include "chrome/browser/idle/idle_detection_permission_context.h"
 #include "chrome/browser/media/midi_permission_context.h"
 #include "chrome/browser/media/midi_sysex_permission_context.h"
 #include "chrome/browser/media/webrtc/media_stream_device_permission_context.h"
@@ -124,6 +125,8 @@ ContentSettingsType PermissionTypeToContentSetting(PermissionType permission) {
       return CONTENT_SETTINGS_TYPE_PAYMENT_HANDLER;
     case PermissionType::BACKGROUND_FETCH:
       return CONTENT_SETTINGS_TYPE_BACKGROUND_FETCH;
+    case PermissionType::IDLE_DETECTION:
+      return CONTENT_SETTINGS_TYPE_IDLE_DETECTION;
     case PermissionType::NUM:
       // This will hit the NOTREACHED below.
       break;
@@ -310,6 +313,8 @@ PermissionManager::PermissionManager(Profile* profile) : profile_(profile) {
       std::make_unique<payments::PaymentHandlerPermissionContext>(profile);
   permission_contexts_[CONTENT_SETTINGS_TYPE_BACKGROUND_FETCH] =
       std::make_unique<BackgroundFetchPermissionContext>(profile);
+  permission_contexts_[CONTENT_SETTINGS_TYPE_IDLE_DETECTION] =
+      std::make_unique<IdleDetectionPermissionContext>(profile);
 }
 
 PermissionManager::~PermissionManager() {
@@ -396,10 +401,18 @@ int PermissionManager::RequestPermissions(
   for (size_t i = 0; i < permissions.size(); ++i) {
     const ContentSettingsType permission = permissions[i];
 
-    PermissionContextBase* context = GetPermissionContext(permission);
-    DCHECK(context);
     auto callback =
         std::make_unique<PermissionResponseCallback>(this, request_id, i);
+    auto status = GetPermissionOverrideForDevTools(canonical_requesting_origin,
+                                                   permission);
+    if (status != CONTENT_SETTING_DEFAULT) {
+      callback->OnPermissionsRequestResponseStatus(CONTENT_SETTING_ALLOW);
+      continue;
+    }
+
+    PermissionContextBase* context = GetPermissionContext(permission);
+    DCHECK(context);
+
     context->RequestPermission(
         web_contents, request, canonical_requesting_origin, user_gesture,
         base::Bind(
@@ -676,6 +689,10 @@ PermissionResult PermissionManager::GetPermissionStatusHelper(
     const GURL& embedding_origin) {
   GURL canonical_requesting_origin =
       GetCanonicalOrigin(requesting_origin, embedding_origin);
+  auto status =
+      GetPermissionOverrideForDevTools(canonical_requesting_origin, permission);
+  if (status != CONTENT_SETTING_DEFAULT)
+    return PermissionResult(status, PermissionStatusSource::UNSPECIFIED);
   PermissionContextBase* context = GetPermissionContext(permission);
   PermissionResult result = context->GetPermissionStatus(
       render_frame_host, canonical_requesting_origin.GetOrigin(),
@@ -684,4 +701,27 @@ PermissionResult PermissionManager::GetPermissionStatusHelper(
          result.content_setting == CONTENT_SETTING_ASK ||
          result.content_setting == CONTENT_SETTING_BLOCK);
   return result;
+}
+
+void PermissionManager::SetPermissionOverridesForDevTools(
+    const GURL& origin,
+    const PermissionOverrides& overrides) {
+  ContentSettingsTypeOverrides result;
+  for (const auto& item : overrides)
+    result.insert(PermissionTypeToContentSetting(item));
+  devtools_permission_overrides_[origin] = std::move(result);
+}
+
+void PermissionManager::ResetPermissionOverridesForDevTools() {
+  devtools_permission_overrides_.clear();
+}
+
+ContentSetting PermissionManager::GetPermissionOverrideForDevTools(
+    const GURL& origin,
+    ContentSettingsType permission) {
+  auto it = devtools_permission_overrides_.find(origin);
+  if (it == devtools_permission_overrides_.end())
+    return CONTENT_SETTING_DEFAULT;
+  return it->second.count(permission) ? CONTENT_SETTING_ALLOW
+                                      : CONTENT_SETTING_BLOCK;
 }

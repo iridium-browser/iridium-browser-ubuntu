@@ -10,7 +10,7 @@
 
 namespace blink {
 
-namespace StyleChangeReason {
+namespace style_change_reason {
 const char kActiveStylesheetsUpdate[] = "ActiveStylesheetsUpdate";
 const char kAnimation[] = "Animation";
 const char kAttribute[] = "Attribute";
@@ -19,6 +19,7 @@ const char kControlValue[] = "ControlValue";
 const char kControl[] = "Control";
 const char kDeclarativeContent[] = "Extension declarativeContent.css";
 const char kDesignMode[] = "DesignMode";
+const char kFindInvisible[] = "FindInvisible";
 const char kFontSizeChange[] = "FontSizeChange";
 const char kFonts[] = "Fonts";
 const char kFrame[] = "Frame";
@@ -50,9 +51,9 @@ const char kVisitedLink[] = "VisitedLink";
 const char kVisuallyOrdered[] = "VisuallyOrdered";
 const char kWritingModeChange[] = "WritingModeChange";
 const char kZoom[] = "Zoom";
-}  // namespace StyleChangeReason
+}  // namespace style_change_reason
 
-namespace StyleChangeExtraData {
+namespace style_change_extra_data {
 DEFINE_GLOBAL(AtomicString, g_active);
 DEFINE_GLOBAL(AtomicString, g_disabled);
 DEFINE_GLOBAL(AtomicString, g_drag);
@@ -77,6 +78,6 @@ void Init() {
   new (NotNull, (void*)&g_unresolved) AtomicString(":unresolved");
 }
 
-}  // namespace StyleChangeExtraData
+}  // namespace style_change_extra_data
 
 }  // namespace blink

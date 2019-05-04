@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
@@ -17,10 +19,12 @@
 #include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_ink_drop_util.h"
 #include "ui/accessibility/ax_node_data.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
+#include "ui/views/animation/ink_drop.h"
+#include "ui/views/animation/ink_drop_highlight.h"
+#include "ui/views/background.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
@@ -43,7 +47,6 @@ ToolbarButton::ToolbarButton(views::ButtonListener* listener,
   set_has_ink_drop_action_on_click(true);
   set_context_menu_controller(this);
   SetInkDropMode(InkDropMode::ON);
-  SetFocusPainter(nullptr);
 
   // Make sure icons are flipped by default so that back, forward, etc. follows
   // UI direction.
@@ -54,6 +57,11 @@ ToolbarButton::ToolbarButton(views::ButtonListener* listener,
   SetImageLabelSpacing(ChromeLayoutProvider::Get()->GetDistanceMetric(
       DISTANCE_RELATED_LABEL_HORIZONTAL_LIST));
   SetHorizontalAlignment(gfx::ALIGN_RIGHT);
+
+  // Because we're using the internal padding to keep track of the changes we
+  // make to the leading margin to handle Fitts' Law, it's easier to just
+  // allocate the property once and modify the value.
+  SetProperty(views::kInternalPaddingKey, new gfx::Insets());
 }
 
 ToolbarButton::~ToolbarButton() {}
@@ -89,7 +97,7 @@ void ToolbarButton::UpdateHighlightBackgroundAndInsets() {
   }
 
   gfx::Insets insets = GetLayoutInsets(TOOLBAR_BUTTON) + layout_inset_delta_ +
-                       gfx::Insets(0, leading_margin_, 0, 0);
+                       *GetProperty(views::kInternalPaddingKey);
   if (highlight_color_)
     insets += gfx::Insets(0, highlight_radius / 2, 0, 0);
 
@@ -104,9 +112,10 @@ void ToolbarButton::SetLayoutInsetDelta(const gfx::Insets& inset_delta) {
 }
 
 void ToolbarButton::SetLeadingMargin(int margin) {
-  if (leading_margin_ == margin)
+  gfx::Insets* const internal_padding = GetProperty(views::kInternalPaddingKey);
+  if (internal_padding->left() == margin)
     return;
-  leading_margin_ = margin;
+  internal_padding->set_left(margin);
   UpdateHighlightBackgroundAndInsets();
 }
 
@@ -119,10 +128,7 @@ bool ToolbarButton::IsMenuShowing() const {
 }
 
 void ToolbarButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
-  SetProperty(
-      views::kHighlightPathKey,
-      CreateToolbarHighlightPath(this, gfx::Insets(0, leading_margin_, 0, 0))
-          .release());
+  SetToolbarButtonHighlightPath(this, *GetProperty(views::kInternalPaddingKey));
 
   UpdateHighlightBackgroundAndInsets();
   LabelButton::OnBoundsChanged(previous_bounds);
@@ -131,7 +137,7 @@ void ToolbarButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
 gfx::Rect ToolbarButton::GetAnchorBoundsInScreen() const {
   gfx::Rect bounds = GetBoundsInScreen();
   gfx::Insets insets =
-      GetToolbarInkDropInsets(this, gfx::Insets(0, leading_margin_, 0, 0));
+      GetToolbarInkDropInsets(this, *GetProperty(views::kInternalPaddingKey));
   // If the button is extended, don't inset the leading edge. The anchored menu
   // should extend to the screen edge as well so the menu is easier to hit
   // (Fitts's law).
@@ -219,36 +225,9 @@ void ToolbarButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
     node_data->SetDefaultActionVerb(ax::mojom::DefaultActionVerb::kPress);
 }
 
-std::unique_ptr<views::InkDrop> ToolbarButton::CreateInkDrop() {
-  return CreateToolbarInkDrop<LabelButton>(this);
-}
-
-std::unique_ptr<views::InkDropRipple> ToolbarButton::CreateInkDropRipple()
-    const {
-  return CreateToolbarInkDropRipple<LabelButton>(
-      this, GetInkDropCenterBasedOnLastEvent(),
-      gfx::Insets(0, leading_margin_, 0, 0));
-}
-
 std::unique_ptr<views::InkDropHighlight> ToolbarButton::CreateInkDropHighlight()
     const {
-  if (highlight_color_) {
-    const int highlight_radius =
-        ChromeLayoutProvider::Get()->GetCornerRadiusMetric(
-            views::EMPHASIS_MAXIMUM, size());
-
-    // TODO(pbos): Unify with CreateToolbarInkDropHighlight which currently
-    // assumes a square inkdrop and uses different bounds for the center point.
-    auto highlight = std::make_unique<views::InkDropHighlight>(
-        size(), highlight_radius,
-        gfx::PointF(GetMirroredRect(GetLocalBounds()).CenterPoint()),
-        GetInkDropBaseColor());
-    highlight->set_visible_opacity(kToolbarInkDropHighlightVisibleOpacity);
-    return highlight;
-  }
-
-  return CreateToolbarInkDropHighlight<LabelButton>(
-      this, GetMirroredRect(GetContentsBounds()).CenterPoint());
+  return CreateToolbarInkDropHighlight(this);
 }
 
 SkColor ToolbarButton::GetInkDropBaseColor() const {
@@ -328,8 +307,10 @@ void ToolbarButton::OnMenuClosed() {
   menu_showing_ = false;
 
   // Set the state back to normal after the drop down menu is closed.
-  if (state() != STATE_DISABLED)
+  if (state() != STATE_DISABLED) {
+    GetInkDrop()->SetHovered(IsMouseHovered());
     SetState(STATE_NORMAL);
+  }
 
   menu_runner_.reset();
   menu_model_adapter_.reset();

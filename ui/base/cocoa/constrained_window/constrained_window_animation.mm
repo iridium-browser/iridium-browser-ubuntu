@@ -10,8 +10,8 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #import "base/mac/foundation_util.h"
-#include "base/macros.h"
 #include "base/native_library.h"
+#include "base/stl_util.h"
 #include "ui/gfx/animation/tween.h"
 
 // The window animations in this file use private APIs as described here:
@@ -84,7 +84,7 @@ NSPoint GetCGSWindowScreenOrigin(NSWindow* window) {
   // Origin is relative to the screen with the menu bar (the screen at index 0).
   // Note, this is not the same as mainScreen which is the screen with the key
   // window.
-  NSScreen* main_screen = [screens objectAtIndex:0];
+  NSScreen* main_screen = screens[0];
 
   NSRect window_frame = [window frame];
   NSRect screen_frame = [main_screen frame];
@@ -211,7 +211,7 @@ bool AreWindowServerEffectsDisabled() {
 
 @implementation ConstrainedWindowAnimationBase
 
-- (id)initWithWindow:(NSWindow*)window {
+- (instancetype)initWithWindow:(NSWindow*)window {
   if ((self = [self initWithDuration:kAnimationDuration
                       animationCurve:NSAnimationEaseInOut])) {
     window_.reset([window retain]);
@@ -325,7 +325,7 @@ bool AreWindowServerEffectsDisabled() {
   };
 
   CGFloat scale = 1;
-  for (int i = arraysize(frames) - 1; i >= 0; --i) {
+  for (int i = base::size(frames) - 1; i >= 0; --i) {
     if (value >= frames[i].value) {
       CGFloat delta = frames[i + 1].value - frames[i].value;
       CGFloat frame_progress = (value - frames[i].value) / delta;

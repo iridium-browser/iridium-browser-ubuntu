@@ -204,6 +204,9 @@ void MetalCodeGenerator::writeFunctionCall(const FunctionCall& c) {
         this->write("atan2");
     } else if (c.fFunction.fBuiltin && "inversesqrt" == c.fFunction.fName) {
         this->write("rsqrt");
+    } else if (c.fFunction.fBuiltin && "inverse" == c.fFunction.fName) {
+        SkASSERT(c.fArguments.size() == 1);
+        this->writeInverseHack(*c.fArguments[0]);
     } else if (c.fFunction.fBuiltin && "dFdx" == c.fFunction.fName) {
         this->write("dfdx");
     } else if (c.fFunction.fBuiltin && "dFdy" == c.fFunction.fName) {
@@ -242,6 +245,22 @@ void MetalCodeGenerator::writeFunctionCall(const FunctionCall& c) {
         this->writeExpression(arg, kSequence_Precedence);
     }
     this->write(")");
+}
+
+void MetalCodeGenerator::writeInverseHack(const Expression& mat) {
+    String name = "ERROR_MatrixInverseNotImplementedFor_" + mat.fType.name();
+    if (mat.fType == *fContext.fFloat2x2_Type) {
+        name = "_inverse2";
+        if (fWrittenIntrinsics.find(name) == fWrittenIntrinsics.end()) {
+            fWrittenIntrinsics.insert(name);
+            fExtraFunctions.writeText((
+                "float2x2 " + name + "(float2x2 m) {"
+                "    return float2x2(m[1][1], -m[0][1], -m[1][0], m[0][0]) * (1/determinant(m));"
+                "}"
+            ).c_str());
+        }
+    }
+    this->write(name);
 }
 
 void MetalCodeGenerator::writeSpecialIntrinsic(const FunctionCall & c, SpecialIntrinsic kind) {
@@ -305,7 +324,8 @@ void MetalCodeGenerator::writeConstructor(const Constructor& c) {
 }
 
 void MetalCodeGenerator::writeFragCoord() {
-    this->write("float4(_fragCoord.x, _anonInterface0.u_skRTHeight - _fragCoord.y, 0.0, 1.0)");
+    this->write("float4(_fragCoord.x, _anonInterface0.u_skRTHeight - _fragCoord.y, 0.0, "
+                "_fragCoord.w)");
 }
 
 void MetalCodeGenerator::writeVariableReference(const VariableReference& ref) {
@@ -1444,6 +1464,7 @@ bool MetalCodeGenerator::generateCode() {
     fOut = rawOut;
 
     write_stringstream(fHeader, *rawOut);
+    write_stringstream(fExtraFunctions, *rawOut);
     write_stringstream(body, *rawOut);
 #ifdef SK_MOLTENVK
     this->write("\0");

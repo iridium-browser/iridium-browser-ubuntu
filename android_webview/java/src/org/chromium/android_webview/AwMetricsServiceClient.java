@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
@@ -42,6 +43,8 @@ public class AwMetricsServiceClient {
     // in aw_metrics_service_client.cc.
     private static final int GUID_SIZE = 32 + 4;
     private static final String GUID_FILE_NAME = "metrics_guid";
+
+    private static final String PLAY_STORE_PACKAGE_NAME = "com.android.vending";
 
     private static boolean isAppOptedOut(Context appContext) {
         try {
@@ -82,6 +85,21 @@ public class AwMetricsServiceClient {
         if (sShouldEnable) {
             nativeSetHaveMetricsConsent(true);
         }
+    }
+
+    @CalledByNative
+    private static String getAppPackageName() {
+        Context appCtx = ContextUtils.getApplicationContext();
+        return shouldRecordPackageName(appCtx) ? appCtx.getPackageName() : null;
+    }
+
+    private static boolean shouldRecordPackageName(Context appCtx) {
+        // Only record if it is system apps or installed from PlayStore.
+        String packageName = appCtx.getPackageName();
+        String installerPackageName =
+                appCtx.getPackageManager().getInstallerPackageName(packageName);
+        return (appCtx.getApplicationInfo().flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                || (PLAY_STORE_PACKAGE_NAME.equals(installerPackageName));
     }
 
     public static native void nativeSetHaveMetricsConsent(boolean enabled);

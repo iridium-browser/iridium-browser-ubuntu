@@ -6,14 +6,14 @@
 
 #include "test_utils/ANGLETest.h"
 
-#include <memory>
 #include <stdint.h>
+#include <memory>
 
-#include "EGLWindow.h"
-#include "OSWindow.h"
 #include "common/string_utils.h"
 #include "test_utils/angle_test_configs.h"
 #include "test_utils/gl_raii.h"
+#include "util/EGLWindow.h"
+#include "util/OSWindow.h"
 
 using namespace angle;
 
@@ -246,13 +246,15 @@ TEST_P(ProgramBinaryTest, ZeroSizedUnlinkedBinary)
     ASSERT_EQ(0, length);
 }
 
-// Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
+// Use this to select which configurations (e.g. which renderer, which GLES major version) these
+// tests should be run against.
 ANGLE_INSTANTIATE_TEST(ProgramBinaryTest,
                        ES2_D3D9(),
                        ES2_D3D11(),
                        ES3_D3D11(),
                        ES2_OPENGL(),
-                       ES3_OPENGL());
+                       ES3_OPENGL(),
+                       ES2_VULKAN());
 
 class ProgramBinaryES3Test : public ANGLETest
 {
@@ -267,7 +269,7 @@ void ProgramBinaryES3Test::testBinaryAndUBOBlockIndexes(bool drawWithProgramFirs
     glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &binaryFormatCount);
     ANGLE_SKIP_TEST_IF(!binaryFormatCount);
 
-    const std::string &vertexShader =
+    constexpr char kVS[] =
         "#version 300 es\n"
         "uniform block {\n"
         "    float f;\n"
@@ -278,7 +280,8 @@ void ProgramBinaryES3Test::testBinaryAndUBOBlockIndexes(bool drawWithProgramFirs
         "    gl_Position = position;\n"
         "    color = vec4(f, f, f, 1);\n"
         "}";
-    const std::string &fragmentShader =
+
+    constexpr char kFS[] =
         "#version 300 es\n"
         "precision mediump float;\n"
         "in vec4 color;\n"
@@ -288,7 +291,7 @@ void ProgramBinaryES3Test::testBinaryAndUBOBlockIndexes(bool drawWithProgramFirs
         "}";
 
     // Init and draw with the program.
-    ANGLE_GL_PROGRAM(program, vertexShader, fragmentShader);
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
 
     float fData[4]   = {1.0f, 1.0f, 1.0f, 1.0f};
     GLuint bindIndex = 2;
@@ -376,7 +379,7 @@ TEST_P(ProgramBinaryES31Test, ProgramBinaryWithComputeShader)
     glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &binaryFormatCount);
     ANGLE_SKIP_TEST_IF(!binaryFormatCount);
 
-    const std::string &computeShader =
+    constexpr char kCS[] =
         "#version 310 es\n"
         "layout(local_size_x=4, local_size_y=3, local_size_z=1) in;\n"
         "uniform block {\n"
@@ -388,7 +391,7 @@ TEST_P(ProgramBinaryES31Test, ProgramBinaryWithComputeShader)
         "    vec4 color = texture(tex, f + g);\n"
         "}";
 
-    ANGLE_GL_COMPUTE_PROGRAM(program, computeShader);
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCS);
 
     // Read back the binary.
     GLint programLength = 0;
@@ -492,30 +495,27 @@ class ProgramBinaryTransformFeedbackTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        const std::string vertexShaderSource =
-            R"(#version 300 es
-            in vec4 inputAttribute;
-            out vec4 outputVarying;
-            void main()
-            {
-                outputVarying = inputAttribute;
-            })";
+        constexpr char kVS[] = R"(#version 300 es
+in vec4 inputAttribute;
+out vec4 outputVarying;
+void main()
+{
+    outputVarying = inputAttribute;
+})";
 
-        const std::string fragmentShaderSource =
-            R"(#version 300 es
-            precision highp float;
-            out vec4 outputColor;
-            void main()
-            {
-                outputColor = vec4(1,0,0,1);
-            })";
+        constexpr char kFS[] = R"(#version 300 es
+precision highp float;
+out vec4 outputColor;
+void main()
+{
+    outputColor = vec4(1,0,0,1);
+})";
 
         std::vector<std::string> transformFeedbackVaryings;
         transformFeedbackVaryings.push_back("outputVarying");
 
-        mProgram = CompileProgramWithTransformFeedback(
-            vertexShaderSource, fragmentShaderSource, transformFeedbackVaryings,
-            GL_SEPARATE_ATTRIBS);
+        mProgram = CompileProgramWithTransformFeedback(kVS, kFS, transformFeedbackVaryings,
+                                                       GL_SEPARATE_ATTRIBS);
         if (mProgram == 0)
         {
             FAIL() << "shader compilation failed.";
@@ -575,9 +575,10 @@ TEST_P(ProgramBinaryTransformFeedbackTest, GetTransformFeedbackVarying)
     // Query information about the transform feedback varying
     char varyingName[64];
     GLsizei varyingSize = 0;
-    GLenum varyingType = GL_NONE;
+    GLenum varyingType  = GL_NONE;
 
-    glGetTransformFeedbackVarying(mProgram, 0, 64, &writtenLength, &varyingSize, &varyingType, varyingName);
+    glGetTransformFeedbackVarying(mProgram, 0, 64, &writtenLength, &varyingSize, &varyingType,
+                                  varyingName);
     EXPECT_GL_NO_ERROR();
 
     EXPECT_EQ(13, writtenLength);
@@ -588,23 +589,25 @@ TEST_P(ProgramBinaryTransformFeedbackTest, GetTransformFeedbackVarying)
     EXPECT_GL_NO_ERROR();
 }
 
-// Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
-ANGLE_INSTANTIATE_TEST(ProgramBinaryTransformFeedbackTest,
-                       ES3_D3D11(),
-                       ES3_OPENGL());
+// Use this to select which configurations (e.g. which renderer, which GLES major version) these
+// tests should be run against.
+ANGLE_INSTANTIATE_TEST(ProgramBinaryTransformFeedbackTest, ES3_D3D11(), ES3_OPENGL());
 
 // For the ProgramBinariesAcrossPlatforms tests, we need two sets of params:
 // - a set to save the program binary
 // - a set to load the program binary
-// We combine these into one struct extending PlatformParameters so we can reuse existing ANGLE test macros
+// We combine these into one struct extending PlatformParameters so we can reuse existing ANGLE test
+// macros
 struct PlatformsWithLinkResult : PlatformParameters
 {
-    PlatformsWithLinkResult(PlatformParameters saveParams, PlatformParameters loadParamsIn, bool expectedLinkResultIn)
+    PlatformsWithLinkResult(PlatformParameters saveParams,
+                            PlatformParameters loadParamsIn,
+                            bool expectedLinkResultIn)
     {
-        majorVersion = saveParams.majorVersion;
-        minorVersion = saveParams.minorVersion;
-        eglParameters = saveParams.eglParameters;
-        loadParams = loadParamsIn;
+        majorVersion       = saveParams.majorVersion;
+        minorVersion       = saveParams.minorVersion;
+        eglParameters      = saveParams.eglParameters;
+        loadParams         = loadParamsIn;
         expectedLinkResult = expectedLinkResultIn;
     }
 
@@ -616,7 +619,7 @@ struct PlatformsWithLinkResult : PlatformParameters
 // to avoid returning the same parameter name twice. Such a conflict would happen
 // between ES2_D3D11_to_ES2D3D11 and ES2_D3D11_to_ES3D3D11 as they were both
 // named ES2_D3D11
-std::ostream &operator<<(std::ostream& stream, const PlatformsWithLinkResult &platform)
+std::ostream &operator<<(std::ostream &stream, const PlatformsWithLinkResult &platform)
 {
     const PlatformParameters &platform1 = platform;
     const PlatformParameters &platform2 = platform.loadParams;
@@ -629,25 +632,28 @@ class ProgramBinariesAcrossPlatforms : public testing::TestWithParam<PlatformsWi
   public:
     void SetUp() override
     {
-        mOSWindow = CreateOSWindow();
+        mOSWindow   = OSWindow::New();
         bool result = mOSWindow->initialize("ProgramBinariesAcrossRenderersTests", 100, 100);
 
         if (result == false)
         {
             FAIL() << "Failed to create OS window";
         }
+
+        mEntryPointsLib.reset(angle::OpenSharedLibrary(ANGLE_EGL_LIBRARY_NAME));
     }
 
     EGLWindow *createAndInitEGLWindow(angle::PlatformParameters &param)
     {
         EGLWindow *eglWindow =
-            new EGLWindow(param.majorVersion, param.minorVersion, param.eglParameters);
-        bool result = eglWindow->initializeGL(mOSWindow);
+            EGLWindow::New(param.majorVersion, param.minorVersion, param.eglParameters);
+        bool result = eglWindow->initializeGL(mOSWindow, mEntryPointsLib.get());
         if (result == false)
         {
-            SafeDelete(eglWindow);
-            eglWindow = nullptr;
+            EGLWindow::Delete(&eglWindow);
         }
+
+        angle::LoadGLES(eglGetProcAddress);
 
         return eglWindow;
     }
@@ -656,8 +662,7 @@ class ProgramBinariesAcrossPlatforms : public testing::TestWithParam<PlatformsWi
     {
         ASSERT_NE(nullptr, *eglWindow);
         (*eglWindow)->destroyGL();
-        SafeDelete(*eglWindow);
-        *eglWindow = nullptr;
+        EGLWindow::Delete(eglWindow);
     }
 
     GLuint createES2ProgramFromSource()
@@ -679,15 +684,10 @@ class ProgramBinariesAcrossPlatforms : public testing::TestWithParam<PlatformsWi
 
         glUseProgram(program);
 
-        const GLfloat vertices[] =
-        {
-            -1.0f,  1.0f, 0.5f,
-            -1.0f, -1.0f, 0.5f,
-             1.0f, -1.0f, 0.5f,
+        const GLfloat vertices[] = {
+            -1.0f, 1.0f, 0.5f, -1.0f, -1.0f, 0.5f, 1.0f, -1.0f, 0.5f,
 
-            -1.0f,  1.0f, 0.5f,
-             1.0f, -1.0f, 0.5f,
-             1.0f,  1.0f, 0.5f,
+            -1.0f, 1.0f, 0.5f, 1.0f,  -1.0f, 0.5f, 1.0f, 1.0f,  0.5f,
         };
 
         glVertexAttribPointer(positionLocation, 3, GL_FLOAT, GL_FALSE, 0, vertices);
@@ -704,13 +704,15 @@ class ProgramBinariesAcrossPlatforms : public testing::TestWithParam<PlatformsWi
     void TearDown() override
     {
         mOSWindow->destroy();
-        SafeDelete(mOSWindow);
+        OSWindow::Delete(&mOSWindow);
     }
 
-    OSWindow *mOSWindow;
+    OSWindow *mOSWindow = nullptr;
+    std::unique_ptr<angle::Library> mEntryPointsLib;
 };
 
-// Tries to create a program binary using one set of platform params, then load it using a different sent of params
+// Tries to create a program binary using one set of platform params, then load it using a different
+// sent of params
 TEST_P(ProgramBinariesAcrossPlatforms, CreateAndReloadBinary)
 {
     angle::PlatformParameters firstRenderer  = GetParam();
@@ -744,10 +746,11 @@ TEST_P(ProgramBinariesAcrossPlatforms, CreateAndReloadBinary)
     if (firstRenderer.eglParameters.deviceType != EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_WARP_ANGLE &&
         secondRenderer.eglParameters.deviceType == EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_WARP_ANGLE)
     {
-        std::string rendererString = std::string(reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
+        std::string rendererString =
+            std::string(reinterpret_cast<const char *>(glGetString(GL_RENDERER)));
         angle::ToLower(&rendererString);
 
-        auto basicRenderPos = rendererString.find(std::string("microsoft basic render"));
+        auto basicRenderPos     = rendererString.find(std::string("microsoft basic render"));
         auto softwareAdapterPos = rendererString.find(std::string("software adapter"));
 
         // The first renderer is using WARP, even though we didn't explictly request it
@@ -804,7 +807,8 @@ TEST_P(ProgramBinariesAcrossPlatforms, CreateAndReloadBinary)
 
     if (linkStatus != 0)
     {
-        // If the link was successful, then we should try to draw using the program to ensure it works as expected
+        // If the link was successful, then we should try to draw using the program to ensure it
+        // works as expected
         drawWithProgram(program);
         EXPECT_GL_NO_ERROR();
     }

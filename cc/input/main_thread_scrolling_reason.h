@@ -28,7 +28,7 @@ struct CC_EXPORT MainThreadScrollingReason {
     kHasNonLayerViewportConstrainedObjects = 1 << 1,
     kThreadedScrollingDisabled = 1 << 2,
     kScrollbarScrolling = 1 << 3,
-    kPageOverlay = 1 << 4,
+    kFrameOverlay = 1 << 4,
 
     // This bit is set when any of the other main thread scrolling reasons cause
     // an input event to be handled on the main thread, and the main thread
@@ -46,7 +46,6 @@ struct CC_EXPORT MainThreadScrollingReason {
     kHasOpacityAndLCDText = 1 << 16,
     kHasTransformAndLCDText = 1 << 17,
     kBackgroundNotOpaqueInRectAndLCDText = 1 << 18,
-    kHasBorderRadius = 1 << 19,
     kHasClipRelatedProperty = 1 << 20,
     kHasBoxShadowFromNonRootLayer = 1 << 21,
     kIsNotStackingContextAndLCDText = 1 << 22,
@@ -72,9 +71,8 @@ struct CC_EXPORT MainThreadScrollingReason {
 
   static const uint32_t kNonCompositedReasons =
       kHasOpacityAndLCDText | kHasTransformAndLCDText |
-      kBackgroundNotOpaqueInRectAndLCDText | kHasBorderRadius |
-      kHasClipRelatedProperty | kHasBoxShadowFromNonRootLayer |
-      kIsNotStackingContextAndLCDText;
+      kBackgroundNotOpaqueInRectAndLCDText | kHasClipRelatedProperty |
+      kHasBoxShadowFromNonRootLayer | kIsNotStackingContextAndLCDText;
 
   // Returns true if the given MainThreadScrollingReason can be set by the main
   // thread.
@@ -82,7 +80,7 @@ struct CC_EXPORT MainThreadScrollingReason {
     uint32_t reasons_set_by_main_thread =
         kNotScrollingOnMain | kHasBackgroundAttachmentFixedObjects |
         kHasNonLayerViewportConstrainedObjects | kThreadedScrollingDisabled |
-        kScrollbarScrolling | kPageOverlay | kHandlingScrollFromMainThread |
+        kScrollbarScrolling | kFrameOverlay | kHandlingScrollFromMainThread |
         kCustomScrollbarScrolling;
     return (reasons & reasons_set_by_main_thread) == reasons;
   }

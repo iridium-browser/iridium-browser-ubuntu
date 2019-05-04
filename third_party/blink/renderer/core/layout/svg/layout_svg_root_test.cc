@@ -7,7 +7,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_shape.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
+#include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
+#include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 
 namespace blink {
 
@@ -33,12 +35,35 @@ TEST_F(LayoutSVGRootTest, VisualRectMappingWithoutViewportClipWithBorder) {
 
   LayoutRect root_visual_rect =
       static_cast<const LayoutObject&>(root).LocalVisualRect();
-  // SVG root's overflow includes overflow from descendants.
-  EXPECT_EQ(LayoutRect(0, 0, 220, 190), root_visual_rect);
+  // SVG root's local overflow does not include overflow from descendants.
+  EXPECT_EQ(LayoutRect(0, 0, 220, 120), root_visual_rect);
 
   rect = root_visual_rect;
   EXPECT_TRUE(root.MapToVisualRectInAncestorSpace(&root, rect));
-  EXPECT_EQ(LayoutRect(0, 0, 220, 190), rect);
+  EXPECT_EQ(LayoutRect(0, 0, 220, 120), rect);
+}
+
+TEST_F(LayoutSVGRootTest, VisualOverflowExpandsLayer) {
+  EnableCompositing();
+  SetBodyInnerHTML(R"HTML(
+    <svg id='root' style='width: 100px; will-change: transform; height:
+    100px; overflow: visible; position: absolute;'>
+       <rect id='rect' x='0' y='0' width='100' height='100'/>
+    </svg>
+  )HTML");
+
+  const LayoutSVGRoot& root =
+      *ToLayoutSVGRoot(GetLayoutObjectByElementId("root"));
+  auto* paint_layer = root.Layer();
+  ASSERT_TRUE(paint_layer);
+  auto* graphics_layer = paint_layer->GraphicsLayerBacking(&root);
+  ASSERT_TRUE(graphics_layer);
+  EXPECT_EQ(graphics_layer->Size(), gfx::Size(100, 100));
+
+  GetDocument().getElementById("rect")->setAttribute("height", "200");
+  UpdateAllLifecyclePhasesForTest();
+
+  EXPECT_EQ(graphics_layer->Size(), gfx::Size(100, 200));
 }
 
 TEST_F(LayoutSVGRootTest, VisualRectMappingWithViewportClipAndBorder) {
@@ -55,8 +80,6 @@ TEST_F(LayoutSVGRootTest, VisualRectMappingWithViewportClipAndBorder) {
       *ToLayoutSVGShape(GetLayoutObjectByElementId("rect"));
 
   LayoutRect rect = SVGLayoutSupport::VisualRectInAncestorSpace(svg_rect, root);
-  // (80, 80, 100, 100) added by root's content rect offset from border rect,
-  // clipped by (10, 10, 200, 100).
   EXPECT_EQ(LayoutRect(90, 90, 100, 20), rect);
 
   LayoutRect root_visual_rect =
@@ -71,34 +94,6 @@ TEST_F(LayoutSVGRootTest, VisualRectMappingWithViewportClipAndBorder) {
   EXPECT_EQ(LayoutRect(0, 0, 220, 120), rect);
 }
 
-TEST_F(LayoutSVGRootTest, VisualRectMappingWithViewportClipWithoutBorder) {
-  SetBodyInnerHTML(R"HTML(
-    <svg id='root' style='width: 200px; height: 100px; overflow: hidden'
-    viewBox='0 0 200 100'>
-       <rect id='rect' x='80' y='80' width='100' height='100'/>
-    </svg>
-  )HTML");
-
-  const LayoutSVGRoot& root =
-      *ToLayoutSVGRoot(GetLayoutObjectByElementId("root"));
-  const LayoutSVGShape& svg_rect =
-      *ToLayoutSVGShape(GetLayoutObjectByElementId("rect"));
-
-  LayoutRect rect = SVGLayoutSupport::VisualRectInAncestorSpace(svg_rect, root);
-  // (80, 80, 100, 100) clipped by (0, 0, 200, 100).
-  EXPECT_EQ(LayoutRect(80, 80, 100, 20), rect);
-
-  LayoutRect root_visual_rect =
-      static_cast<const LayoutObject&>(root).LocalVisualRect();
-  // SVG root doesn't have box decoration background, so just use clipped
-  // overflow of children.
-  EXPECT_EQ(LayoutRect(80, 80, 100, 20), root_visual_rect);
-
-  rect = root_visual_rect;
-  EXPECT_TRUE(root.MapToVisualRectInAncestorSpace(&root, rect));
-  EXPECT_EQ(LayoutRect(80, 80, 100, 20), rect);
-}
-
 TEST_F(LayoutSVGRootTest,
        PaintedOutputOfObjectHasNoEffectRegardlessOfSizeEmpty) {
   SetBodyInnerHTML(R"HTML(
@@ -109,7 +104,7 @@ TEST_F(LayoutSVGRootTest,
 
   const LayoutSVGRoot& root =
       *ToLayoutSVGRoot(GetLayoutObjectByElementId("svg"));
-  EXPECT_TRUE(root.PaintedOutputOfObjectHasNoEffectRegardlessOfSize());
+  EXPECT_FALSE(root.PaintedOutputOfObjectHasNoEffectRegardlessOfSize());
 }
 
 TEST_F(LayoutSVGRootTest,

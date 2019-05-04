@@ -88,7 +88,8 @@ class FakeCredentialProviderEvents : public ICredentialProviderEvents {
 ///////////////////////////////////////////////////////////////////////////////
 
 // Fake the GaiaCredentialProvider COM object.
-class FakeGaiaCredentialProvider : public IGaiaCredentialProvider {
+class FakeGaiaCredentialProvider : public IGaiaCredentialProvider,
+                                   public IGaiaCredentialProviderForTesting {
  public:
   FakeGaiaCredentialProvider();
   virtual ~FakeGaiaCredentialProvider();
@@ -96,8 +97,8 @@ class FakeGaiaCredentialProvider : public IGaiaCredentialProvider {
   const CComBSTR& username() const { return username_; }
   const CComBSTR& password() const { return password_; }
   const CComBSTR& sid() const { return sid_; }
+  bool credentials_changed_fired() const { return credentials_changed_fired_; }
 
- private:
   // IGaiaCredentialProvider
   IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override;
   ULONG STDMETHODCALLTYPE AddRef() override;
@@ -105,11 +106,20 @@ class FakeGaiaCredentialProvider : public IGaiaCredentialProvider {
   IFACEMETHODIMP OnUserAuthenticated(IUnknown* credential,
                                      BSTR username,
                                      BSTR password,
-                                     BSTR sid) override;
+                                     BSTR sid,
+                                     BOOL password_stale) override;
+  IFACEMETHODIMP HasInternetConnection() override;
 
+  // IGaiaCredentialProviderForTesting
+  IFACEMETHODIMP SetHasInternetConnection(
+      HasInternetConnectionCheckType has_internet_connection) override;
+
+ private:
   CComBSTR username_;
   CComBSTR password_;
   CComBSTR sid_;
+  BOOL credentials_changed_fired_ = FALSE;
+  HasInternetConnectionCheckType has_internet_connection_ = kHicForceYes;
 };
 
 }  // namespace credential_provider

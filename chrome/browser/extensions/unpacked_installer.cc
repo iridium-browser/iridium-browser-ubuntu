@@ -14,7 +14,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
-#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/load_error_reporter.h"
@@ -241,8 +240,6 @@ int UnpackedInstaller::GetFlags() {
 bool UnpackedInstaller::LoadExtension(Manifest::Location location,
                                       int flags,
                                       std::string* error) {
-  base::AssertBlockingAllowed();
-
   // Clean up the kMetadataFolder if necessary. This prevents spurious
   // warnings/errors and ensures we don't treat a user provided file as one by
   // the Extension system.
@@ -267,7 +264,6 @@ bool UnpackedInstaller::LoadExtension(Manifest::Location location,
 
 bool UnpackedInstaller::IndexAndPersistRulesIfNeeded(std::string* error) {
   DCHECK(extension());
-  base::AssertBlockingAllowed();
 
   const ExtensionResource* resource =
       declarative_net_request::DNRManifestData::GetRulesetResource(extension());
@@ -301,8 +297,6 @@ bool UnpackedInstaller::IsLoadingUnpackedAllowed() const {
 }
 
 void UnpackedInstaller::GetAbsolutePath() {
-  base::AssertBlockingAllowed();
-
   extension_path_ = base::MakeAbsoluteFilePath(extension_path_);
 
   base::PostTaskWithTraits(
@@ -326,8 +320,6 @@ void UnpackedInstaller::CheckExtensionFileAccess() {
 }
 
 void UnpackedInstaller::LoadWithFileAccess(int flags) {
-  base::AssertBlockingAllowed();
-
   std::string error;
   if (!LoadExtension(Manifest::UNPACKED, flags, &error)) {
     base::PostTaskWithTraits(
@@ -350,10 +342,8 @@ void UnpackedInstaller::ReportExtensionLoadError(const std::string &error) {
         extension_path_, error, service_weak_->profile(), be_noisy_on_failure_);
   }
 
-  if (!callback_.is_null()) {
-    callback_.Run(nullptr, extension_path_, error);
-    callback_.Reset();
-  }
+  if (!callback_.is_null())
+    std::move(callback_).Run(nullptr, extension_path_, error);
 }
 
 void UnpackedInstaller::InstallExtension() {
@@ -372,10 +362,8 @@ void UnpackedInstaller::InstallExtension() {
                                       kInstallFlagInstallImmediately,
                                       dnr_ruleset_checksum_);
 
-  if (!callback_.is_null()) {
-    callback_.Run(extension(), extension_path_, std::string());
-    callback_.Reset();
-  }
+  if (!callback_.is_null())
+    std::move(callback_).Run(extension(), extension_path_, std::string());
 }
 
 }  // namespace extensions

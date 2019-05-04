@@ -24,7 +24,7 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
   void OverrideWebkitPrefs(content::RenderViewHost* render_view_host,
                            content::WebPreferences* prefs) override;
   content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
-  std::unique_ptr<base::Value> GetServiceManifestOverlay(
+  base::Optional<service_manager::Manifest> GetServiceManifestOverlay(
       base::StringPiece name) override;
   void RegisterOutOfProcessServices(OutOfProcessServiceMap* services) override;
   content::QuotaPermissionContext* CreateQuotaPermissionContext() override;
@@ -32,6 +32,8 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
       content::BrowserContext* context,
       content::StoragePartition* partition,
       ::storage::OptionalQuotaSettingsCallback callback) override;
+  content::GeneratedCodeCacheSettings GetGeneratedCodeCacheSettings(
+      content::BrowserContext* context) override;
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
@@ -57,14 +59,15 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
       net::ClientCertIdentityList client_certs,
       std::unique_ptr<content::ClientCertificateDelegate> delegate) override;
   void ResourceDispatcherHostCreated() override;
-  bool DoesSiteRequireDedicatedProcess(content::BrowserContext* browser_context,
-                                       const GURL& effective_site_url) override;
   bool ShouldEnableStrictSiteIsolation() override;
 
   ::network::mojom::NetworkContextPtr CreateNetworkContext(
       content::BrowserContext* context,
       bool in_memory,
       const base::FilePath& relative_partition_path) override;
+
+  std::string GetProduct() const override;
+  std::string GetUserAgent() const override;
 
  private:
   std::unique_ptr<base::Value> GetBrowserServiceManifestOverlay();

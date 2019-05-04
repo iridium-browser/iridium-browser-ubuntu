@@ -23,16 +23,19 @@
 #include "chromeos/dbus/concierge/service.pb.h"
 #include "chromeos/dbus/concierge_client.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "device/usb/public/mojom/device_manager.mojom.h"
+#include "mojo/public/cpp/bindings/associated_binding.h"
 
 class Profile;
 
 namespace crostini {
 
 // Result types for CrostiniManager::StartTerminaVmCallback etc.
-enum class ConciergeClientResult {
+enum class CrostiniResult {
   SUCCESS,
   DBUS_ERROR,
   UNPARSEABLE_RESPONSE,
+  INSUFFICIENT_DISK,
   CREATE_DISK_IMAGE_FAILED,
   VM_START_FAILED,
   VM_STOP_FAILED,
@@ -43,14 +46,22 @@ enum class ConciergeClientResult {
   CONTAINER_DOWNLOAD_TIMED_OUT,
   CONTAINER_CREATE_CANCELLED,
   CONTAINER_CREATE_FAILED,
+  CONTAINER_START_CANCELLED,
   CONTAINER_START_FAILED,
   LAUNCH_CONTAINER_APPLICATION_FAILED,
   INSTALL_LINUX_PACKAGE_FAILED,
-  INSTALL_LINUX_PACKAGE_ALREADY_ACTIVE,
+  BLOCKING_OPERATION_ALREADY_ACTIVE,
+  UNINSTALL_PACKAGE_FAILED,
   SSHFS_MOUNT_ERROR,
   OFFLINE_WHEN_UPGRADE_REQUIRED,
   LOAD_COMPONENT_FAILED,
+  PERMISSION_BROKER_ERROR,
+  ATTACH_USB_FAILED,
+  DETACH_USB_FAILED,
+  LIST_USB_FAILED,
+  UNKNOWN_USB_DEVICE,
   UNKNOWN_ERROR,
+  NOT_ALLOWED,
 };
 
 enum class InstallLinuxPackageProgressStatus {
@@ -66,6 +77,28 @@ enum class VmState {
   STOPPING,
 };
 
+enum class UninstallPackageProgressStatus {
+  SUCCEEDED,
+  FAILED,
+  UNINSTALLING,  // In progress
+};
+
+struct VmInfo {
+  VmState state;
+  vm_tools::concierge::VmInfo info;
+};
+
+struct ContainerInfo {
+  ContainerInfo(std::string name, std::string username, std::string homedir);
+  ~ContainerInfo();
+  ContainerInfo(const ContainerInfo&);
+
+  std::string name;
+  std::string username;
+  base::FilePath homedir;
+  bool sshfs_mounted = false;
+};
+
 // Return type when getting app icons from within a container.
 struct Icon {
   std::string desktop_file_id;
@@ -74,19 +107,40 @@ struct Icon {
   std::string content;
 };
 
-class InstallLinuxPackageProgressObserver {
+struct LinuxPackageInfo {
+  LinuxPackageInfo();
+  ~LinuxPackageInfo();
+
+  bool success;
+
+  // A textual reason for the failure, only set when success is false.
+  std::string failure_reason;
+
+  // The remaining fields are only set when success is true.
+  std::string name;
+  std::string version;
+  std::string summary;
+  std::string description;
+};
+
+class LinuxPackageOperationProgressObserver {
  public:
   // A successfully started package install will continually fire progress
   // events until it returns a status of SUCCEEDED or FAILED. The
   // |progress_percent| field is given as a percentage of the given step,
-  // DOWNLOADING or INSTALLING. |failure_reason| is returned from the container
-  // for a FAILED case, and not necessarily localized.
+  // DOWNLOADING or INSTALLING.
   virtual void OnInstallLinuxPackageProgress(
       const std::string& vm_name,
       const std::string& container_name,
       InstallLinuxPackageProgressStatus status,
-      int progress_percent,
-      const std::string& failure_reason) = 0;
+      int progress_percent) = 0;
+
+  // A successfully started package uninstall will continually fire progress
+  // events until it returns a status of SUCCEEDED or FAILED.
+  virtual void OnUninstallPackageProgress(const std::string& vm_name,
+                                          const std::string& container_name,
+                                          UninstallPackageProgressStatus status,
+                                          int progress_percent) = 0;
 };
 
 // CrostiniManager is a singleton which is used to check arguments for
@@ -97,12 +151,12 @@ class InstallLinuxPackageProgressObserver {
 // only the Concierge name is exposed outside of here.
 class CrostiniManager : public KeyedService,
                         public chromeos::ConciergeClient::Observer,
-                        public chromeos::CiceroneClient::Observer {
+                        public chromeos::CiceroneClient::Observer,
+                        public device::mojom::UsbDeviceManagerClient {
  public:
-  using ConciergeClientCallback =
-      base::OnceCallback<void(ConciergeClientResult result)>;
+  using CrostiniResultCallback =
+      base::OnceCallback<void(CrostiniResult result)>;
   using BoolCallback = base::OnceCallback<void(bool)>;
-  using CrostiniResultCallback = ConciergeClientCallback;
 
   // The type of the callback for CrostiniManager::StartConcierge.
   using StartConciergeCallback = BoolCallback;
@@ -112,14 +166,14 @@ class CrostiniManager : public KeyedService,
   using StartTerminaVmCallback = CrostiniResultCallback;
   // The type of the callback for CrostiniManager::CreateDiskImage.
   using CreateDiskImageCallback =
-      base::OnceCallback<void(ConciergeClientResult result,
+      base::OnceCallback<void(CrostiniResult result,
+                              vm_tools::concierge::DiskImageStatus,
                               const base::FilePath& disk_path)>;
   // The type of the callback for CrostiniManager::DestroyDiskImage.
   using DestroyDiskImageCallback = CrostiniResultCallback;
   // The type of the callback for CrostiniManager::ListVmDisks.
   using ListVmDisksCallback =
-      base::OnceCallback<void(ConciergeClientResult result,
-                              int64_t total_size)>;
+      base::OnceCallback<void(CrostiniResult result, int64_t total_size)>;
   // The type of the callback for CrostiniManager::StopVm.
   using StopVmCallback = CrostiniResultCallback;
   // The type of the callback for CrostiniManager::StartContainer.
@@ -130,17 +184,18 @@ class CrostiniManager : public KeyedService,
   using LaunchContainerApplicationCallback = CrostiniResultCallback;
   // The type of the callback for CrostiniManager::GetContainerAppIcons.
   using GetContainerAppIconsCallback =
-      base::OnceCallback<void(ConciergeClientResult result,
+      base::OnceCallback<void(CrostiniResult result,
                               const std::vector<Icon>& icons)>;
+  // The type of the callback for CrostiniManager::GetLinuxPackageInfo.
+  using GetLinuxPackageInfoCallback =
+      base::OnceCallback<void(const LinuxPackageInfo&)>;
   // The type of the callback for CrostiniManager::InstallLinuxPackage.
-  // |failure_reason| is returned from the container upon failure
-  // (INSTALL_LINUX_PACKAGE_FAILED), and not necessarily localized.
-  using InstallLinuxPackageCallback =
-      base::OnceCallback<void(ConciergeClientResult result,
-                              const std::string& failure_reason)>;
+  using InstallLinuxPackageCallback = CrostiniResultCallback;
+  // The type of the callback for CrostiniManager::UninstallPackageOwningFile.
+  using UninstallPackageOwningFileCallback = CrostiniResultCallback;
   // The type of the callback for CrostiniManager::GetContainerSshKeys.
   using GetContainerSshKeysCallback =
-      base::OnceCallback<void(ConciergeClientResult result,
+      base::OnceCallback<void(CrostiniResult result,
                               const std::string& container_public_key,
                               const std::string& host_private_key,
                               const std::string& hostname)>;
@@ -148,19 +203,33 @@ class CrostiniManager : public KeyedService,
   using RestartCrostiniCallback = CrostiniResultCallback;
   // The type of the callback for CrostiniManager::RemoveCrostini.
   using RemoveCrostiniCallback = CrostiniResultCallback;
+  // The type of the callback for CrostiniManager::AttachUsbDevice
+  using AttachUsbDeviceCallback = CrostiniResultCallback;
+  // The type of the callback for CrostiniManager::DetachUsbDevice
+  using DetachUsbDeviceCallback = CrostiniResultCallback;
+  // The type of the callback for CrostiniManager::ListUsbDevices
+  using ListUsbDevicesCallback = base::OnceCallback<void(
+      CrostiniResult result,
+      std::vector<device::mojom::UsbDeviceInfoPtr> devices)>;
+  // The type of the callback for CrostiniManager::SearchApp.
+  using SearchAppCallback =
+      base::OnceCallback<void(const std::vector<std::string>& package_names)>;
 
   // Observer class for the Crostini restart flow.
   class RestartObserver {
    public:
     virtual ~RestartObserver() {}
-    virtual void OnComponentLoaded(ConciergeClientResult result) = 0;
-    virtual void OnConciergeStarted(ConciergeClientResult result) = 0;
-    virtual void OnDiskImageCreated(ConciergeClientResult result) = 0;
-    virtual void OnVmStarted(ConciergeClientResult result) = 0;
+    virtual void OnComponentLoaded(CrostiniResult result) = 0;
+    virtual void OnConciergeStarted(CrostiniResult result) = 0;
+    virtual void OnDiskImageCreated(CrostiniResult result,
+                                    vm_tools::concierge::DiskImageStatus status,
+                                    int64_t disk_size_available) = 0;
+    virtual void OnVmStarted(CrostiniResult result) = 0;
     virtual void OnContainerDownloading(int32_t download_percent) = 0;
-    virtual void OnContainerCreated(ConciergeClientResult result) = 0;
-    virtual void OnContainerStarted(ConciergeClientResult result) = 0;
-    virtual void OnSshKeysFetched(ConciergeClientResult result) = 0;
+    virtual void OnContainerCreated(CrostiniResult result) = 0;
+    virtual void OnContainerStarted(CrostiniResult result) = 0;
+    virtual void OnContainerSetup(CrostiniResult result) = 0;
+    virtual void OnSshKeysFetched(CrostiniResult result) = 0;
   };
 
   static CrostiniManager* GetForProfile(Profile* profile);
@@ -213,6 +282,8 @@ class CrostiniManager : public KeyedService,
       const base::FilePath& disk_path,
       // The storage location for the disk image
       vm_tools::concierge::StorageLocation storage_location,
+      // The logical size of the disk image, in bytes
+      int64_t disk_size_bytes,
       CreateDiskImageCallback callback);
 
   // Checks the arguments for destroying a named Termina VM disk image.
@@ -285,13 +356,31 @@ class CrostiniManager : public KeyedService,
                             int scale,
                             GetContainerAppIconsCallback callback);
 
+  // Asynchronously retrieve information about a Linux Package (.deb) inside the
+  // container.
+  void GetLinuxPackageInfo(Profile* profile,
+                           std::string vm_name,
+                           std::string container_name,
+                           std::string package_path,
+                           GetLinuxPackageInfoCallback callback);
+
   // Begin installation of a Linux Package inside the container. If the
   // installation is successfully started, further updates will be sent to
-  // added InstallLinuxPackageProgressObservers.
+  // added LinuxPackageOperationProgressObservers.
   void InstallLinuxPackage(std::string vm_name,
                            std::string container_name,
                            std::string package_path,
                            InstallLinuxPackageCallback callback);
+
+  // Begin uninstallation of a Linux Package inside the container. The package
+  // is identified by its associated .desktop file's ID; we don't use package_id
+  // to avoid problems with stale package_ids (such as after upgrades). If the
+  // uninstallation is successfully started, further updates will be sent to
+  // added LinuxPackageOperationProgressObservers.
+  void UninstallPackageOwningFile(std::string vm_name,
+                                  std::string container_name,
+                                  std::string desktop_file_id,
+                                  UninstallPackageOwningFileCallback callback);
 
   // Asynchronously gets SSH server public key of container and trusted SSH
   // client private key which can be used to connect to the container.
@@ -299,6 +388,17 @@ class CrostiniManager : public KeyedService,
   void GetContainerSshKeys(std::string vm_name,
                            std::string container_name,
                            GetContainerSshKeysCallback callback);
+
+  void AttachUsbDevice(const std::string& vm_name,
+                       device::mojom::UsbDeviceInfoPtr device,
+                       AttachUsbDeviceCallback callback);
+
+  void DetachUsbDevice(const std::string& vm_name,
+                       device::mojom::UsbDeviceInfoPtr device,
+                       DetachUsbDeviceCallback callback);
+
+  void ListUsbDevices(const std::string& vm_name,
+                      ListUsbDevicesCallback callback);
 
   // Create the crosh-in-a-window that displays a shell in an container on a VM.
   static Browser* CreateContainerTerminal(const AppLaunchParams& launch_params,
@@ -316,6 +416,13 @@ class CrostiniManager : public KeyedService,
   void LaunchContainerTerminal(const std::string& vm_name,
                                const std::string& container_name,
                                const std::vector<std::string>& terminal_args);
+
+  // Searches for not installed packages that have names matching the passed
+  // plaintext search query and returns a vector containing their names.
+  void SearchApp(const std::string& vm_name,
+                 const std::string& container_name,
+                 const std::string& query,
+                 SearchAppCallback callback);
 
   using RestartId = int;
   static const RestartId kUninitializedRestartId = -1;
@@ -343,11 +450,11 @@ class CrostiniManager : public KeyedService,
   // Adds a callback to receive uninstall notification.
   void AddRemoveCrostiniCallback(RemoveCrostiniCallback remove_callback);
 
-  // Add/remove observers for package install progress.
-  void AddInstallLinuxPackageProgressObserver(
-      InstallLinuxPackageProgressObserver* observer);
-  void RemoveInstallLinuxPackageProgressObserver(
-      InstallLinuxPackageProgressObserver* observer);
+  // Add/remove observers for package install and uninstall progress.
+  void AddLinuxPackageOperationProgressObserver(
+      LinuxPackageOperationProgressObserver* observer);
+  void RemoveLinuxPackageOperationProgressObserver(
+      LinuxPackageOperationProgressObserver* observer);
 
   // ConciergeClient::Observer:
   void OnContainerStartupFailed(
@@ -361,12 +468,17 @@ class CrostiniManager : public KeyedService,
   void OnInstallLinuxPackageProgress(
       const vm_tools::cicerone::InstallLinuxPackageProgressSignal& signal)
       override;
+  void OnUninstallPackageProgress(
+      const vm_tools::cicerone::UninstallPackageProgressSignal& signal)
+      override;
   void OnLxdContainerCreated(
       const vm_tools::cicerone::LxdContainerCreatedSignal& signal) override;
   void OnLxdContainerDownloading(
       const vm_tools::cicerone::LxdContainerDownloadingSignal& signal) override;
   void OnTremplinStarted(
       const vm_tools::cicerone::TremplinStartedSignal& signal) override;
+  void OnLxdContainerStarting(
+      const vm_tools::cicerone::LxdContainerStartingSignal& signal) override;
 
   void RemoveCrostini(std::string vm_name,
                       std::string container_name,
@@ -374,12 +486,16 @@ class CrostiniManager : public KeyedService,
 
   void SetVmState(std::string vm_name, VmState vm_state);
   bool IsVmRunning(std::string vm_name);
-
   // Returns null if VM is not running.
-  base::Optional<vm_tools::concierge::VmInfo> GetVmInfo(std::string vm_name);
-  void AddRunningVmForTesting(std::string vm_name,
-                              vm_tools::concierge::VmInfo vm_info);
-  bool IsContainerRunning(std::string vm_name, std::string container_name);
+  base::Optional<VmInfo> GetVmInfo(std::string vm_name);
+  void AddRunningVmForTesting(std::string vm_name);
+
+  void SetContainerSshfsMounted(std::string vm_name,
+                                std::string container_name);
+  // Returns null if VM or container is not running.
+  base::Optional<ContainerInfo> GetContainerInfo(std::string vm_name,
+                                                 std::string container_name);
+  void AddRunningContainerForTesting(std::string vm_name, ContainerInfo info);
 
   // If the Crostini reporting policy is set, save the last app launch
   // time window and the Termina version in prefs for asynchronous reporting.
@@ -393,6 +509,12 @@ class CrostiniManager : public KeyedService,
       component_updater::CrOSComponentManager::Error error) {
     component_manager_load_error_for_testing_ = error;
   }
+
+  // device::mojom::UsbDeviceManagerClient::
+  void OnDeviceAdded(device::mojom::UsbDeviceInfoPtr device_info) override;
+  void OnDeviceRemoved(device::mojom::UsbDeviceInfoPtr device_info) override;
+
+  void SetUsbManagerForTesting(device::mojom::UsbDeviceManagerPtr usb_manager);
 
  private:
   class CrostiniRestarter;
@@ -429,7 +551,7 @@ class CrostiniManager : public KeyedService,
   // |callback|.
   void OnStartTremplin(std::string vm_name,
                        StartTerminaVmCallback callback,
-                       ConciergeClientResult result);
+                       CrostiniResult result);
 
   // Callback for ConciergeClient::StopVm. Called after the Concierge
   // service method finishes.
@@ -488,16 +610,64 @@ class CrostiniManager : public KeyedService,
       GetContainerAppIconsCallback callback,
       base::Optional<vm_tools::cicerone::ContainerAppIconResponse> reply);
 
+  // Callback for CrostiniManager::GetLinuxPackageInfo.
+  void OnGetLinuxPackageInfo(
+      GetLinuxPackageInfoCallback callback,
+      base::Optional<vm_tools::cicerone::LinuxPackageInfoResponse> reply);
+
   // Callback for CrostiniManager::InstallLinuxPackage.
   void OnInstallLinuxPackage(
       InstallLinuxPackageCallback callback,
       base::Optional<vm_tools::cicerone::InstallLinuxPackageResponse> reply);
+
+  // Callback for CrostiniManager::UninstallPackageOwningFile.
+  void OnUninstallPackageOwningFile(
+      UninstallPackageOwningFileCallback callback,
+      base::Optional<vm_tools::cicerone::UninstallPackageOwningFileResponse>
+          reply);
 
   // Callback for CrostiniManager::GetContainerSshKeys. Called after the
   // Concierge service finishes.
   void OnGetContainerSshKeys(
       GetContainerSshKeysCallback callback,
       base::Optional<vm_tools::concierge::ContainerSshKeysResponse> reply);
+
+  void OnUsbDeviceOpened(AttachUsbDeviceCallback callback,
+                         device::mojom::UsbDeviceInfoPtr device,
+                         const std::string& vm_name,
+                         base::File file);
+
+  // Callback for CrostiniManager::OnAttachUsbDeviceOpen
+  void OnAttachUsbDevice(
+      const std::string& vm_name,
+      device::mojom::UsbDeviceInfoPtr device,
+      AttachUsbDeviceCallback callback,
+      base::Optional<vm_tools::concierge::AttachUsbDeviceResponse> reply);
+
+  // Callback for CrostiniManager::DetachUsbDevice
+  void OnDetachUsbDevice(
+      const std::string& vm_name,
+      uint8_t guest_port,
+      device::mojom::UsbDeviceInfoPtr device,
+      DetachUsbDeviceCallback callback,
+      base::Optional<vm_tools::concierge::DetachUsbDeviceResponse> reply);
+
+  // Callback for CrostiniManager::ListUsbDevices
+  void OnListUsbDevices(
+      const std::string& vm_name,
+      ListUsbDevicesCallback callback,
+      base::Optional<vm_tools::concierge::ListUsbDeviceResponse> reply);
+
+  // Callback for CrostiniManager::OnListUsbDevices
+  void OnListUsbDeviceInfoPtrs(
+      const std::string& vm_name,
+      vm_tools::concierge::ListUsbDeviceResponse response,
+      ListUsbDevicesCallback callback,
+      std::vector<device::mojom::UsbDeviceInfoPtr> device_info);
+
+  // Callback for CrostiniManager::SearchApp.
+  void OnSearchApp(SearchAppCallback callback,
+                   base::Optional<vm_tools::cicerone::AppSearchResponse> reply);
 
   // Helper for CrostiniManager::MaybeUpgradeCrostini. Makes blocking calls to
   // check for file paths and registered components.
@@ -507,18 +677,14 @@ class CrostiniManager : public KeyedService,
   // checking component registration code may block.
   void MaybeUpgradeCrostiniAfterChecks();
 
-  // Helper for CrostiniManager::CreateDiskImage. Separated so it can be run
-  // off the main thread.
-  void CreateDiskImageAfterSizeCheck(
-      vm_tools::concierge::CreateDiskImageRequest request,
-      CreateDiskImageCallback callback,
-      int64_t free_disk_size);
 
-  void FinishRestart(CrostiniRestarter* restarter,
-                     ConciergeClientResult result);
+  void FinishRestart(CrostiniRestarter* restarter, CrostiniResult result);
 
   // Callback for CrostiniManager::RemoveCrostini.
-  void OnRemoveCrostini(ConciergeClientResult result);
+  void OnRemoveCrostini(CrostiniResult result);
+
+  void InitializeUsbDeviceManager();
+  void InitializeUsbDeviceManagerClient();
 
   Profile* profile_;
   std::string owner_id_;
@@ -548,21 +714,26 @@ class CrostiniManager : public KeyedService,
   std::multimap<std::pair<std::string, std::string>, CrostiniResultCallback>
       create_lxd_container_callbacks_;
 
+  // Pending StartLxdContainer callbacks are keyed by <vm_name, container_name>
+  // string pairs. These are used if StartLxdContainer indicates we need to
+  // wait for an LxdContainerStarting signal.
+  std::multimap<std::pair<std::string, std::string>, CrostiniResultCallback>
+      start_lxd_container_callbacks_;
+
   // Callbacks to run after Tremplin is started, keyed by vm_name. These are
   // used if StartTerminaVm completes but we need to wait from Tremplin to
   // start.
   std::multimap<std::string, base::OnceClosure> tremplin_started_callbacks_;
 
-  std::map<std::string, std::pair<VmState, vm_tools::concierge::VmInfo>>
-      running_vms_;
+  std::map<std::string, VmInfo> running_vms_;
 
   // Running containers as keyed by vm name.
-  std::multimap<std::string, std::string> running_containers_;
+  std::multimap<std::string, ContainerInfo> running_containers_;
 
   std::vector<RemoveCrostiniCallback> remove_crostini_callbacks_;
 
-  base::ObserverList<InstallLinuxPackageProgressObserver>::Unchecked
-      install_linux_package_progress_observers_;
+  base::ObserverList<LinuxPackageOperationProgressObserver>::Unchecked
+      linux_package_operation_progress_observers_;
 
   // Restarts by <vm_name, container_name>. Only one restarter flow is actually
   // running for a given container, other restarters will just have their
@@ -572,6 +743,16 @@ class CrostiniManager : public KeyedService,
 
   std::map<CrostiniManager::RestartId, scoped_refptr<CrostiniRestarter>>
       restarters_by_id_;
+
+  // A mapping from GUID -> (VM name, guest port) for each attached USB device
+  std::map<std::string, std::pair<std::string, uint8_t>> attached_usb_devices_;
+  // A mapping from (VM name, guest port) -> GUID for each attached USB device
+  std::map<std::pair<std::string, uint8_t>, std::string>
+      attached_usb_devices_reverse_;
+
+  mojo::AssociatedBinding<device::mojom::UsbDeviceManagerClient> binding_;
+
+  device::mojom::UsbDeviceManagerPtr usb_manager_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

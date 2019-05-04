@@ -102,15 +102,15 @@
     ],
     "cwd": "[START_DIR]/cache/work/skia",
     "env": {
+      "GOCACHE": "[START_DIR]/cache/go_cache",
       "GOPATH": "[START_DIR]/go_deps",
       "GOROOT": "[START_DIR]/go/go",
-      "PATH": "[START_DIR]/go/go/bin:[START_DIR]/go_deps:<PATH>"
+      "PATH": "[START_DIR]/go/go/bin:[START_DIR]/go_deps/bin:<PATH>"
     },
     "name": "infra_tests"
   },
   {
-    "name": "$result",
-    "recipe_result": null,
-    "status_code": 0
+    "jsonResult": null,
+    "name": "$result"
   }
 ]

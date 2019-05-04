@@ -13,6 +13,13 @@
 
 namespace policy {
 
+const char kPolicyConfictSameValue[] =
+    "Warning: More than one source is present for the policy, but the values "
+    "are the same.";
+const char kPolicyConfictDiffValue[] =
+    "Warning: More than one source with conflicting values is present for this "
+    "policy!";
+
 PolicyMap::Entry::Entry() = default;
 
 PolicyMap::Entry::~Entry() = default;
@@ -88,22 +95,22 @@ PolicyMap::~PolicyMap() {
 }
 
 const PolicyMap::Entry* PolicyMap::Get(const std::string& policy) const {
-  PolicyMapType::const_iterator entry = map_.find(policy);
+  auto entry = map_.find(policy);
   return entry == map_.end() ? nullptr : &entry->second;
 }
 
 PolicyMap::Entry* PolicyMap::GetMutable(const std::string& policy) {
-  PolicyMapType::iterator entry = map_.find(policy);
+  auto entry = map_.find(policy);
   return entry == map_.end() ? nullptr : &entry->second;
 }
 
 const base::Value* PolicyMap::GetValue(const std::string& policy) const {
-  PolicyMapType::const_iterator entry = map_.find(policy);
+  auto entry = map_.find(policy);
   return entry == map_.end() ? nullptr : entry->second.value.get();
 }
 
 base::Value* PolicyMap::GetMutableValue(const std::string& policy) {
-  PolicyMapType::iterator entry = map_.find(policy);
+  auto entry = map_.find(policy);
   return entry == map_.end() ? nullptr : entry->second.value.get();
 }
 
@@ -173,9 +180,16 @@ std::unique_ptr<PolicyMap> PolicyMap::DeepCopy() const {
 
 void PolicyMap::MergeFrom(const PolicyMap& other) {
   for (const auto& it : other) {
-    const Entry* entry = Get(it.first);
+    Entry* entry = GetMutable(it.first);
     if (!entry || it.second.has_higher_priority_than(*entry))
       Set(it.first, it.second.DeepCopy());
+    if (entry) {
+      // TODO(pastarmovj): Figure out a way to localize those errors.
+      if (entry->value && it.second.value->Equals(entry->value.get()))
+        GetMutable(it.first)->AddError(kPolicyConfictSameValue);
+      else
+        GetMutable(it.first)->AddError(kPolicyConfictDiffValue);
+    }
   }
 }
 
@@ -192,8 +206,8 @@ void PolicyMap::LoadFrom(const base::DictionaryValue* policies,
 void PolicyMap::GetDifferingKeys(const PolicyMap& other,
                                  std::set<std::string>* differing_keys) const {
   // Walk over the maps in lockstep, adding everything that is different.
-  const_iterator iter_this(begin());
-  const_iterator iter_other(other.begin());
+  auto iter_this(begin());
+  auto iter_other(other.begin());
   while (iter_this != end() && iter_other != other.end()) {
     const int diff = iter_this->first.compare(iter_other->first);
     if (diff == 0) {
@@ -251,7 +265,7 @@ bool PolicyMap::MapEntryEquals(const PolicyMap::PolicyMapType::value_type& a,
 void PolicyMap::FilterErase(
     const base::Callback<bool(const const_iterator)>& filter,
     bool deletion_value) {
-  PolicyMapType::iterator iter(map_.begin());
+  auto iter(map_.begin());
   while (iter != map_.end()) {
     if (filter.Run(iter) == deletion_value) {
       map_.erase(iter++);

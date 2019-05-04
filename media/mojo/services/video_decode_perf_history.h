@@ -24,6 +24,8 @@
 
 namespace media {
 
+class LearningHelper;
+
 // This class saves and retrieves video decode performance statistics on behalf
 // of the MediaCapabilities API. It also helps to grade the accuracy of the API
 // by comparing its history-based assessment of smoothness/power-efficiency to
@@ -49,6 +51,8 @@ class MEDIA_MOJO_EXPORT VideoDecodePerfHistory
       public VideoDecodeStatsDBProvider,
       public base::SupportsUserData::Data {
  public:
+  static const char kMaxSmoothDroppedFramesPercentParamName[];
+
   explicit VideoDecodePerfHistory(std::unique_ptr<VideoDecodeStatsDB> db);
   ~VideoDecodePerfHistory() override;
 
@@ -84,6 +88,10 @@ class MEDIA_MOJO_EXPORT VideoDecodePerfHistory
  private:
   friend class VideoDecodePerfHistoryTest;
 
+  // Decode capabilities will be described as "smooth" whenever the percentage
+  // of dropped frames is less-than-or-equal-to this value.
+  static double GetMaxSmoothDroppedFramesPercent();
+
   // Track the status of database lazy initialization.
   enum InitStatus {
     UNINITIALIZED,
@@ -91,11 +99,6 @@ class MEDIA_MOJO_EXPORT VideoDecodePerfHistory
     COMPLETE,
     FAILED,
   };
-
-  // Decode capabilities will be described as "smooth" whenever the percentage
-  // of dropped frames is less-than-or-equal-to this value. 10% chosen as a
-  // lenient value after manual testing.
-  static constexpr double kMaxSmoothDroppedFramesPercent = .10;
 
   // Decode capabilities will be described as "power efficient" whenever the
   // percentage of power efficient decoded frames is higher-than-or-equal-to
@@ -178,6 +181,9 @@ class MEDIA_MOJO_EXPORT VideoDecodePerfHistory
   // Maps bindings from several render-processes to this single browser-process
   // service.
   mojo::BindingSet<mojom::VideoDecodePerfHistory> bindings_;
+
+  // Optional helper for local learning.
+  std::unique_ptr<LearningHelper> learning_helper_;
 
   // Ensures all access to class members come on the same sequence.
   SEQUENCE_CHECKER(sequence_checker_);

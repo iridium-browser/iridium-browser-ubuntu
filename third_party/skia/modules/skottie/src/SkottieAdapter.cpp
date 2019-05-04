@@ -7,7 +7,9 @@
 
 #include "SkottieAdapter.h"
 
+#include "SkFont.h"
 #include "SkMatrix.h"
+#include "SkMatrix44.h"
 #include "SkPath.h"
 #include "SkRRect.h"
 #include "SkSGColor.h"
@@ -19,7 +21,10 @@
 #include "SkSGText.h"
 #include "SkSGTransform.h"
 #include "SkSGTrimEffect.h"
+#include "SkTextBlob.h"
+#include "SkTextUtils.h"
 #include "SkTo.h"
+#include "SkUTF.h"
 #include "SkottieValue.h"
 
 #include <cmath>
@@ -29,6 +34,8 @@ namespace skottie {
 
 RRectAdapter::RRectAdapter(sk_sp<sksg::RRect> wrapped_node)
     : fRRectNode(std::move(wrapped_node)) {}
+
+RRectAdapter::~RRectAdapter() = default;
 
 void RRectAdapter::apply() {
     // BM "position" == "center position"
@@ -40,10 +47,12 @@ void RRectAdapter::apply() {
    fRRectNode->setRRect(rr);
 }
 
-TransformAdapter::TransformAdapter(sk_sp<sksg::Matrix> matrix)
+TransformAdapter2D::TransformAdapter2D(sk_sp<sksg::Matrix<SkMatrix>> matrix)
     : fMatrixNode(std::move(matrix)) {}
 
-SkMatrix TransformAdapter::totalMatrix() const {
+TransformAdapter2D::~TransformAdapter2D() = default;
+
+SkMatrix TransformAdapter2D::totalMatrix() const {
     SkMatrix t = SkMatrix::MakeTrans(-fAnchorPoint.x(), -fAnchorPoint.y());
 
     t.postScale(fScale.x() / 100, fScale.y() / 100); // 100% based
@@ -54,13 +63,50 @@ SkMatrix TransformAdapter::totalMatrix() const {
     return t;
 }
 
-void TransformAdapter::apply() {
+void TransformAdapter2D::apply() {
+    fMatrixNode->setMatrix(this->totalMatrix());
+}
+
+TransformAdapter3D::Vec3::Vec3(const VectorValue& v) {
+    fX = v.size() > 0 ? v[0] : 0;
+    fY = v.size() > 1 ? v[1] : 0;
+    fZ = v.size() > 2 ? v[2] : 0;
+}
+
+TransformAdapter3D::TransformAdapter3D(sk_sp<sksg::Matrix<SkMatrix44>> matrix)
+    : fMatrixNode(std::move(matrix)) {}
+
+TransformAdapter3D::~TransformAdapter3D() = default;
+
+SkMatrix44 TransformAdapter3D::totalMatrix() const {
+    SkMatrix44 t;
+
+    t.setTranslate(-fAnchorPoint.fX, -fAnchorPoint.fY, -fAnchorPoint.fZ);
+    t.postScale(fScale.fX / 100, fScale.fY / 100, fScale.fZ / 100);
+
+    // TODO: SkMatrix44:postRotate()?
+    SkMatrix44 r;
+    r.setRotateDegreesAbout(1, 0, 0, fRotation.fX);
+    t.postConcat(r);
+    r.setRotateDegreesAbout(0, 1, 0, fRotation.fY);
+    t.postConcat(r);
+    r.setRotateDegreesAbout(0, 0, 1, fRotation.fZ);
+    t.postConcat(r);
+
+    t.postTranslate(fPosition.fX, fPosition.fY, fPosition.fZ);
+
+    return t;
+}
+
+void TransformAdapter3D::apply() {
     fMatrixNode->setMatrix(this->totalMatrix());
 }
 
 PolyStarAdapter::PolyStarAdapter(sk_sp<sksg::Path> wrapped_node, Type t)
     : fPathNode(std::move(wrapped_node))
     , fType(t) {}
+
+PolyStarAdapter::~PolyStarAdapter() = default;
 
 void PolyStarAdapter::apply() {
     static constexpr int kMaxPointCount = 100000;
@@ -148,6 +194,8 @@ TrimEffectAdapter::TrimEffectAdapter(sk_sp<sksg::TrimEffect> trimEffect)
     SkASSERT(fTrimEffect);
 }
 
+TrimEffectAdapter::~TrimEffectAdapter() = default;
+
 void TrimEffectAdapter::apply() {
     // BM semantics: start/end are percentages, offset is "degrees" (?!).
     const auto  start = fStart  / 100,
@@ -179,7 +227,7 @@ void TrimEffectAdapter::apply() {
 
 TextAdapter::TextAdapter(sk_sp<sksg::Group> root)
     : fRoot(std::move(root))
-    , fTextNode(sksg::Text::Make(nullptr, SkString()))
+    , fTextNode(sksg::TextBlob::Make())
     , fFillColor(sksg::Color::Make(SK_ColorTRANSPARENT))
     , fStrokeColor(sksg::Color::Make(SK_ColorTRANSPARENT))
     , fFillNode(sksg::Draw::Make(fTextNode, fFillColor))
@@ -198,21 +246,78 @@ TextAdapter::TextAdapter(sk_sp<sksg::Group> root)
     //
     // * where the text node is shared
 
-    fTextNode->setFlags(fTextNode->getFlags() |
-                        SkPaint::kAntiAlias_Flag |
-                        SkPaint::kSubpixelText_Flag);
-    fTextNode->setHinting(SkPaint::kNo_Hinting);
-
+    fFillColor->setAntiAlias(true);
+    fStrokeColor->setAntiAlias(true);
     fStrokeColor->setStyle(SkPaint::kStroke_Style);
 }
 
-void TextAdapter::apply() {
-    // Push text props to the scene graph.
-    fTextNode->setTypeface(fText.fTypeface);
-    fTextNode->setText(fText.fText);
-    fTextNode->setSize(fText.fTextSize);
-    fTextNode->setAlign(fText.fAlign);
+TextAdapter::~TextAdapter() = default;
 
+sk_sp<SkTextBlob> TextAdapter::makeBlob() const {
+    SkFont font(fText.fTypeface, fText.fTextSize);
+    font.setHinting(kNo_SkFontHinting);
+    font.setSubpixel(true);
+    font.setEdging(SkFont::Edging::kAntiAlias);
+
+    const auto align_fract = [](SkTextUtils::Align align) {
+        switch (align) {
+        case SkTextUtils::kLeft_Align:   return  0.0f;
+        case SkTextUtils::kCenter_Align: return -0.5f;
+        case SkTextUtils::kRight_Align:  return -1.0f;
+        }
+        return 0.0f; // go home, msvc...
+    }(fText.fAlign);
+
+    const auto line_spacing = font.getSpacing();
+    float y_off             = 0;
+    SkSTArray<256, SkGlyphID, true> line_glyph_buffer;
+    SkTextBlobBuilder builder;
+
+    const auto& push_line = [&](const char* start, const char* end) {
+        if (end > start) {
+            const auto len   = SkToSizeT(end - start);
+            line_glyph_buffer.reset(font.countText(start, len, kUTF8_SkTextEncoding));
+            SkAssertResult(font.textToGlyphs(start, len, kUTF8_SkTextEncoding, line_glyph_buffer.data(),
+                    line_glyph_buffer.count())
+                           == line_glyph_buffer.count());
+
+            const auto x_off = align_fract != 0
+                    ? align_fract * font.measureText(start, len, kUTF8_SkTextEncoding)
+                    : 0;
+            const auto& buf  = builder.allocRun(font, line_glyph_buffer.count(), x_off, y_off);
+            if (!buf.glyphs) {
+                return;
+            }
+
+            memcpy(buf.glyphs, line_glyph_buffer.data(),
+                   SkToSizeT(line_glyph_buffer.count()) * sizeof(SkGlyphID));
+
+            y_off += line_spacing;
+        }
+    };
+
+    const auto& is_line_break = [](SkUnichar uch) {
+        // TODO: other explicit breaks?
+        return uch == '\r';
+    };
+
+    const char* ptr        = fText.fText.c_str();
+    const char* line_start = ptr;
+    const char* end        = ptr + fText.fText.size();
+
+    while (ptr < end) {
+        if (is_line_break(SkUTF::NextUTF8(&ptr, end))) {
+            push_line(line_start, ptr - 1);
+            line_start = ptr;
+        }
+    }
+    push_line(line_start, ptr);
+
+    return builder.make();
+}
+
+void TextAdapter::apply() {
+    fTextNode->setBlob(this->makeBlob());
     fFillColor->setColor(fText.fFillColor);
     fStrokeColor->setColor(fText.fStrokeColor);
     fStrokeColor->setStrokeWidth(fText.fStrokeWidth);

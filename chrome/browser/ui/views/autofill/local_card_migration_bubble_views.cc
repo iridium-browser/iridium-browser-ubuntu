@@ -24,7 +24,6 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/controls/button/blue_button.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
@@ -85,7 +84,6 @@ int LocalCardMigrationBubbleViews::GetDialogButtons() const {
 
 base::string16 LocalCardMigrationBubbleViews::GetDialogButtonLabel(
     ui::DialogButton button) const {
-  // TODO(crbug.com/859254): Update OK button label once mock is finalized.
   return l10n_util::GetStringUTF16(
       button == ui::DIALOG_BUTTON_OK
           ? IDS_AUTOFILL_LOCAL_CARD_MIGRATION_BUBBLE_BUTTON_LABEL
@@ -106,7 +104,10 @@ void LocalCardMigrationBubbleViews::AddedToWidget() {
       ChromeLayoutProvider::Get()->GetDistanceMetric(
           DISTANCE_RELATED_CONTROL_VERTICAL_SMALL)));
   gfx::ImageSkia image = gfx::ImageSkiaOperations::CreateTiledImage(
-      gfx::CreateVectorIcon(kGooglePayLogoIcon, gfx::kPlaceholderColor),
+      gfx::CreateVectorIcon(kGooglePayLogoIcon,
+                            GetNativeTheme()->SystemDarkModeEnabled()
+                                ? gfx::kGoogleGrey200
+                                : gfx::kGoogleGrey700),
       /*x=*/0, /*y=*/0, kMigrationBubbleGooglePayLogoWidth,
       kMigrationBubbleGooglePayLogoHeight);
   views::ImageView* icon_view = new views::ImageView();
@@ -116,10 +117,12 @@ void LocalCardMigrationBubbleViews::AddedToWidget() {
       l10n_util::GetStringUTF16(IDS_AUTOFILL_GOOGLE_PAY_LOGO_ACCESSIBLE_NAME));
   title_container->AddChildView(icon_view);
 
-  auto* title = new views::Label(
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_LOCAL_CARD_MIGRATION_BUBBLE_TITLE),
-      views::style::CONTEXT_DIALOG_TITLE);
+  auto* title =
+      new views::Label(GetWindowTitle(), views::style::CONTEXT_DIALOG_TITLE);
   title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  // Need to set title's preferred size otherwise the long title
+  // would not be two-lined but would change the width of bubble.
+  title->SetPreferredSize(gfx::Size(0, 0));
   title->SetMultiLine(true);
   title_container->AddChildView(title);
 
@@ -128,6 +131,12 @@ void LocalCardMigrationBubbleViews::AddedToWidget() {
 
 bool LocalCardMigrationBubbleViews::ShouldShowCloseButton() const {
   return true;
+}
+
+base::string16 LocalCardMigrationBubbleViews::GetWindowTitle() const {
+  return controller_ ? l10n_util::GetStringUTF16(
+                           IDS_AUTOFILL_LOCAL_CARD_MIGRATION_BUBBLE_TITLE)
+                     : base::string16();
 }
 
 void LocalCardMigrationBubbleViews::WindowClosing() {

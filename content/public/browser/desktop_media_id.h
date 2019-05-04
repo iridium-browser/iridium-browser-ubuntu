@@ -45,7 +45,9 @@ struct CONTENT_EXPORT DesktopMediaID {
 
   DesktopMediaID(Type type, Id id) : type(type), id(id) {}
 
-  DesktopMediaID(Type type, Id id, WebContentsMediaCaptureId web_contents_id)
+  DesktopMediaID(Type type,
+                           Id id,
+                           WebContentsMediaCaptureId web_contents_id)
       : type(type), id(id), web_contents_id(web_contents_id) {}
 
   DesktopMediaID(Type type, Id id, bool audio_share)

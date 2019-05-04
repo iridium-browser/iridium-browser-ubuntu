@@ -9,7 +9,7 @@
 #include "base/auto_reset.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics_action.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "content/common/media/media_player_delegate_messages.h"
 #include "content/public/common/content_client.h"
 #include "content/public/renderer/content_renderer_client.h"
@@ -40,10 +40,6 @@ RendererWebMediaPlayerDelegate::RendererWebMediaPlayerDelegate(
     : RenderFrameObserver(render_frame),
       allow_idle_cleanup_(
           content::GetContentClient()->renderer()->IsIdleMediaSuspendEnabled()),
-      background_suspend_enabled_(
-          content::GetContentClient()
-              ->renderer()
-              ->IsBackgroundMediaSuspendEnabled(render_frame)),
       tick_clock_(base::DefaultTickClock::GetInstance()) {
   idle_cleanup_interval_ = base::TimeDelta::FromSeconds(5);
   idle_timeout_ = base::TimeDelta::FromSeconds(15);
@@ -170,10 +166,6 @@ void RendererWebMediaPlayerDelegate::
         blink::WebMediaPlayer::PipWindowResizedCallback callback) {
   picture_in_picture_window_resize_observer_ =
       std::make_pair(player_id, std::move(callback));
-}
-
-bool RendererWebMediaPlayerDelegate::IsBackgroundMediaSuspendEnabled() {
-  return background_suspend_enabled_;
 }
 
 void RendererWebMediaPlayerDelegate::DidPause(int player_id) {

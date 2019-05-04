@@ -81,7 +81,7 @@ std::unordered_map<String, Parser::LayoutToken>* Parser::layoutTokens;
 
 void Parser::InitLayoutMap() {
     layoutTokens = new std::unordered_map<String, LayoutToken>;
-    #define TOKEN(name, text) (*layoutTokens)[text] = LayoutToken::name;
+    #define TOKEN(name, text) (*layoutTokens)[text] = LayoutToken::name
     TOKEN(LOCATION,                     "location");
     TOKEN(OFFSET,                       "offset");
     TOKEN(BINDING,                      "binding");
@@ -121,7 +121,6 @@ void Parser::InitLayoutMap() {
     TOKEN(KEY,                          "key");
     TOKEN(TRACKED,                      "tracked");
     TOKEN(CTYPE,                        "ctype");
-    TOKEN(GRCOLOR4F,                    "GrColor4f");
     TOKEN(SKPMCOLOR4F,                  "SkPMColor4f");
     TOKEN(SKRECT,                       "SkRect");
     TOKEN(SKIRECT,                      "SkIRect");
@@ -729,8 +728,6 @@ Layout::CType Parser::layoutCType() {
         auto found = layoutTokens->find(text);
         if (found != layoutTokens->end()) {
             switch (found->second) {
-                case LayoutToken::GRCOLOR4F:
-                    return Layout::CType::kGrColor4f;
                 case LayoutToken::SKPMCOLOR4F:
                     return Layout::CType::kSkPMColor4f;
                 case LayoutToken::SKRECT:
@@ -916,7 +913,8 @@ Layout Parser::layout() {
 }
 
 /* layout? (UNIFORM | CONST | IN | OUT | INOUT | LOWP | MEDIUMP | HIGHP | FLAT | NOPERSPECTIVE |
-            READONLY | WRITEONLY | COHERENT | VOLATILE | RESTRICT | BUFFER)* */
+            READONLY | WRITEONLY | COHERENT | VOLATILE | RESTRICT | BUFFER | PLS | PLSIN |
+            PLSOUT)* */
 Modifiers Parser::modifiers() {
     Layout layout = this->layout();
     int flags = 0;
@@ -991,6 +989,18 @@ Modifiers Parser::modifiers() {
             case Token::HASSIDEEFFECTS:
                 this->nextToken();
                 flags |= Modifiers::kHasSideEffects_Flag;
+                break;
+            case Token::PLS:
+                this->nextToken();
+                flags |= Modifiers::kPLS_Flag;
+                break;
+            case Token::PLSIN:
+                this->nextToken();
+                flags |= Modifiers::kPLSIn_Flag;
+                break;
+            case Token::PLSOUT:
+                this->nextToken();
+                flags |= Modifiers::kPLSOut_Flag;
                 break;
             default:
                 return Modifiers(layout, flags);

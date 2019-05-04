@@ -44,7 +44,6 @@ class PassthroughProgramCacheTest : public GpuServiceTest,
   void CacheShader(const std::string& key, const std::string& shader) override {
   }
   void OnFenceSyncRelease(uint64_t release) override {}
-  bool OnWaitSyncToken(const gpu::SyncToken&) override { return false; }
   void OnDescheduleUntilFinished() override {}
   void OnRescheduleAfterFinished() override {}
   void OnSwapBuffers(uint64_t swap_id, uint32_t flags) override {}
@@ -53,8 +52,6 @@ class PassthroughProgramCacheTest : public GpuServiceTest,
   int32_t blob_count() { return blob_count_; }
 
  protected:
-  void SetUp() override { GpuServiceTest::SetUp(); }
-
   std::string MakeKey(size_t len, uint8_t start_byte) {
     std::string binary_key(len, '.');
 

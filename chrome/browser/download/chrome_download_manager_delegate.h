@@ -134,9 +134,9 @@ class ChromeDownloadManagerDelegate
   virtual safe_browsing::DownloadProtectionService*
       GetDownloadProtectionService();
 
-  // Called to show a file picker
-  virtual void ShowFilePicker(
-      const std::string& guid,
+  // Show file picker for |download|.
+  virtual void ShowFilePickerForDownload(
+      download::DownloadItem* download,
       const base::FilePath& suggested_path,
       const DownloadTargetDeterminerDelegate::ConfirmationCallback& callback);
 
@@ -185,6 +185,12 @@ class ChromeDownloadManagerDelegate
                            RequestConfirmation_Android);
 
   typedef std::vector<content::DownloadIdCallback> IdCallbackVector;
+
+  // Called to show a file picker for download with |guid|
+  void ShowFilePicker(
+      const std::string& guid,
+      const base::FilePath& suggested_path,
+      const DownloadTargetDeterminerDelegate::ConfirmationCallback& callback);
 
   // content::NotificationObserver implementation.
   void Observe(int type,
@@ -247,10 +253,13 @@ class ChromeDownloadManagerDelegate
   std::unique_ptr<DownloadLocationDialogBridge> location_dialog_bridge_;
 #endif
 
-  // Incremented by one for each download, the first available download id is
-  // assigned from history database or 1 when history database fails to
-  // intialize.
+  // If history database fails to initialize, this will always be kInvalidId.
+  // Otherwise, the first available download id is assigned from history
+  // database, and incremented by one for each download.
   uint32_t next_download_id_;
+
+  // Whether |next_download_id_| is retrieved from history db.
+  bool next_id_retrieved_;
 
   // The |GetNextId| callbacks that may be cached before loading the download
   // database.

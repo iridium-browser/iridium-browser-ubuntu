@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 #include "base/i18n/rtl.h"
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/base/hit_test.h"
 #include "ui/events/event_utils.h"
@@ -130,25 +130,6 @@ TEST_F(BubbleDialogDelegateViewTest, CreateDelegate) {
   EXPECT_FALSE(bubble_observer.widget_closed());
   bubble_widget->CloseNow();
   EXPECT_TRUE(bubble_observer.widget_closed());
-}
-
-TEST_F(BubbleDialogDelegateViewTest, MirrorArrowInRtl) {
-  std::string default_locale = base::i18n::GetConfiguredLocale();
-  std::unique_ptr<Widget> anchor_widget(CreateTestWidget());
-  for (bool rtl : {false, true}) {
-    base::i18n::SetICUDefaultLocale(rtl ? "he" : "en");
-    EXPECT_EQ(rtl, base::i18n::IsRTL());
-    for (bool mirror : {false, true}) {
-      TestBubbleDialogDelegateView* bubble =
-          new TestBubbleDialogDelegateView(anchor_widget->GetContentsView());
-      bubble->set_mirror_arrow_in_rtl(mirror);
-      BubbleDialogDelegateView::CreateBubble(bubble);
-      EXPECT_EQ(rtl && mirror ? BubbleBorder::horizontal_mirror(bubble->arrow())
-                              : bubble->arrow(),
-                bubble->GetBubbleFrameView()->bubble_border()->arrow());
-    }
-  }
-  base::i18n::SetICUDefaultLocale(default_locale);
 }
 
 TEST_F(BubbleDialogDelegateViewTest, CloseAnchorWidget) {
@@ -298,7 +279,7 @@ TEST_F(BubbleDialogDelegateViewTest, NonClientHitTest) {
       {0, HTNOWHERE}, {60, HTCLIENT}, {1000, HTNOWHERE},
   };
 
-  for (size_t i = 0; i < arraysize(cases); ++i) {
+  for (size_t i = 0; i < base::size(cases); ++i) {
     gfx::Point point(cases[i].point, cases[i].point);
     EXPECT_EQ(cases[i].hit, frame->NonClientHitTest(point))
         << " at point " << cases[i].point;

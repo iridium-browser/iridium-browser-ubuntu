@@ -4,6 +4,7 @@
 
 #include "components/autofill/core/browser/test_autofill_client.h"
 
+#include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/local_card_migration_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
@@ -17,11 +18,12 @@ TestAutofillClient::~TestAutofillClient() {
 }
 
 PersonalDataManager* TestAutofillClient::GetPersonalDataManager() {
-  return nullptr;
+  return &test_personal_data_manager_;
 }
 
-scoped_refptr<AutofillWebDataService> TestAutofillClient::GetDatabase() {
-  return scoped_refptr<AutofillWebDataService>(nullptr);
+AutocompleteHistoryManager*
+TestAutofillClient::GetAutocompleteHistoryManager() {
+  return &mock_autocomplete_history_manager_;
 }
 
 PrefService* TestAutofillClient::GetPrefs() {
@@ -34,6 +36,18 @@ syncer::SyncService* TestAutofillClient::GetSyncService() {
 
 identity::IdentityManager* TestAutofillClient::GetIdentityManager() {
   return identity_test_env_.identity_manager();
+}
+
+FormDataImporter* TestAutofillClient::GetFormDataImporter() {
+  return form_data_importer_.get();
+}
+
+payments::PaymentsClient* TestAutofillClient::GetPaymentsClient() {
+  return payments_client_.get();
+}
+
+LegacyStrikeDatabase* TestAutofillClient::GetLegacyStrikeDatabase() {
+  return test_legacy_strike_database_.get();
 }
 
 StrikeDatabase* TestAutofillClient::GetStrikeDatabase() {
@@ -50,10 +64,6 @@ ukm::SourceId TestAutofillClient::GetUkmSourceId() {
     UpdateSourceURL(GetUkmRecorder(), source_id_, form_origin_);
   }
   return source_id_;
-}
-
-void TestAutofillClient::InitializeUKMSources() {
-  UpdateSourceURL(GetUkmRecorder(), source_id_, form_origin_);
 }
 
 AddressNormalizer* TestAutofillClient::GetAddressNormalizer() {
@@ -83,6 +93,7 @@ void TestAutofillClient::ShowLocalCardMigrationDialog(
 
 void TestAutofillClient::ConfirmMigrateLocalCardToCloud(
     std::unique_ptr<base::DictionaryValue> legal_message,
+    const std::string& user_email,
     const std::vector<MigratableCreditCard>& migratable_credit_cards,
     LocalCardMigrationCallback start_migrating_cards_callback) {
   // If |migration_card_selection_| hasn't been preset by tests, default to
@@ -93,6 +104,12 @@ void TestAutofillClient::ConfirmMigrateLocalCardToCloud(
   }
   std::move(start_migrating_cards_callback).Run(migration_card_selection_);
 }
+
+void TestAutofillClient::ShowLocalCardMigrationResults(
+    const bool has_server_error,
+    const base::string16& tip_message,
+    const std::vector<MigratableCreditCard>& migratable_credit_cards,
+    MigrationDeleteCardCallback delete_local_card_callback) {}
 
 void TestAutofillClient::ConfirmSaveAutofillProfile(
     const AutofillProfile& profile,
@@ -105,31 +122,35 @@ void TestAutofillClient::ConfirmSaveAutofillProfile(
 void TestAutofillClient::ConfirmSaveCreditCardLocally(
     const CreditCard& card,
     bool show_prompt,
-    base::OnceClosure callback) {
+    LocalSaveCardPromptCallback callback) {
   confirm_save_credit_card_locally_called_ = true;
   offer_to_save_credit_card_bubble_was_shown_ = show_prompt;
-  std::move(callback).Run();
+  std::move(callback).Run(AutofillClient::ACCEPTED);
 }
+
+#if defined(OS_ANDROID)
+void TestAutofillClient::ConfirmAccountNameFixFlow(
+    base::OnceCallback<void(const base::string16&)> callback) {
+  credit_card_name_fix_flow_bubble_was_shown_ = true;
+  std::move(callback).Run(base::string16(base::ASCIIToUTF16("Gaia Name")));
+}
+#endif  // defined(OS_ANDROID)
 
 void TestAutofillClient::ConfirmSaveCreditCardToCloud(
     const CreditCard& card,
     std::unique_ptr<base::DictionaryValue> legal_message,
     bool should_request_name_from_user,
+    bool should_request_expiration_date_from_user,
     bool show_prompt,
-    base::OnceCallback<void(const base::string16&)> callback) {
+    UploadSaveCardPromptCallback callback) {
   offer_to_save_credit_card_bubble_was_shown_ = show_prompt;
-  std::move(callback).Run(base::string16());
+  std::move(callback).Run(AutofillClient::ACCEPTED, {});
 }
 
 void TestAutofillClient::ConfirmCreditCardFillAssist(
     const CreditCard& card,
-    const base::Closure& callback) {
-  callback.Run();
-}
-
-void TestAutofillClient::LoadRiskData(
-    base::OnceCallback<void(const std::string&)> callback) {
-  std::move(callback).Run("some risk data");
+    base::OnceClosure callback) {
+  std::move(callback).Run();
 }
 
 bool TestAutofillClient::HasCreditCardScanFeature() {
@@ -169,8 +190,6 @@ void TestAutofillClient::DidFillOrPreviewField(
     const base::string16& profile_full_name) {
 }
 
-void TestAutofillClient::DidInteractWithNonsecureCreditCardInput() {}
-
 bool TestAutofillClient::IsContextSecure() {
   // Simplified secure context check for tests.
   return form_origin_.SchemeIs("https");
@@ -180,10 +199,19 @@ bool TestAutofillClient::ShouldShowSigninPromo() {
   return false;
 }
 
-void TestAutofillClient::ExecuteCommand(int id) {}
-
 bool TestAutofillClient::AreServerCardsSupported() {
   return true;
+}
+
+void TestAutofillClient::ExecuteCommand(int id) {}
+
+void TestAutofillClient::LoadRiskData(
+    base::OnceCallback<void(const std::string&)> callback) {
+  std::move(callback).Run("some risk data");
+}
+
+void TestAutofillClient::InitializeUKMSources() {
+  UpdateSourceURL(GetUkmRecorder(), source_id_, form_origin_);
 }
 
 void TestAutofillClient::set_form_origin(const GURL& url) {

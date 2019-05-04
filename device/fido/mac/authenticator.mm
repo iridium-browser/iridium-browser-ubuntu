@@ -31,10 +31,8 @@ namespace mac {
 
 // static
 bool TouchIdAuthenticator::IsAvailable() {
-  if (base::FeatureList::IsEnabled(device::kWebAuthTouchId)) {
-    if (__builtin_available(macOS 10.12.2, *)) {
-      return TouchIdContext::TouchIdAvailable();
-    }
+  if (__builtin_available(macOS 10.12.2, *)) {
+    return TouchIdContext::TouchIdAvailable();
   }
   return false;
 }
@@ -136,7 +134,8 @@ base::string16 TouchIdAuthenticator::GetDisplayName() const {
   return base::string16();
 }
 
-FidoTransportProtocol TouchIdAuthenticator::AuthenticatorTransport() const {
+base::Optional<FidoTransportProtocol>
+TouchIdAuthenticator::AuthenticatorTransport() const {
   return FidoTransportProtocol::kInternal;
 }
 
@@ -155,13 +154,18 @@ AuthenticatorSupportedOptions TouchIdAuthenticatorOptions() {
 
 }  // namespace
 
-const AuthenticatorSupportedOptions& TouchIdAuthenticator::Options() const {
-  static const AuthenticatorSupportedOptions options =
+const base::Optional<AuthenticatorSupportedOptions>&
+TouchIdAuthenticator::Options() const {
+  static const base::Optional<AuthenticatorSupportedOptions> options =
       TouchIdAuthenticatorOptions();
   return options;
 }
 
 bool TouchIdAuthenticator::IsInPairingMode() const {
+  return false;
+}
+
+bool TouchIdAuthenticator::IsPaired() const {
   return false;
 }
 

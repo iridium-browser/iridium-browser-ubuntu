@@ -12,87 +12,80 @@ from tracing.value.diagnostics import generic_set
 
 class HistogramSet(object):
   def __init__(self, histograms=()):
-    self._histograms_by_guid = {}
+    self._histograms = set()
     self._shared_diagnostics_by_guid = {}
     for hist in histograms:
       self.AddHistogram(hist)
 
   @property
   def shared_diagnostics(self):
-    return self._shared_diagnostics_by_guid.itervalues()
+    return self._shared_diagnostics_by_guid.values()
 
   def RemoveOrphanedDiagnostics(self):
     orphans = set(self._shared_diagnostics_by_guid.keys())
-    for h in self._histograms_by_guid.itervalues():
-      for d in h.diagnostics.itervalues():
+    for h in self._histograms:
+      for d in h.diagnostics.values():
         if d.guid in orphans:
           orphans.remove(d.guid)
     for guid in orphans:
       del self._shared_diagnostics_by_guid[guid]
 
   def FilterHistograms(self, discard):
-    self._histograms_by_guid = dict(
-        (guid, hist)
-        for guid, hist in self._histograms_by_guid.iteritems()
+    self._histograms = set(
+        hist
+        for hist in self._histograms
         if not discard(hist))
 
   def AddHistogram(self, hist, diagnostics=None):
-    if hist.guid in self._histograms_by_guid:
-      raise ValueError('Cannot add same Histogram twice')
-
     if diagnostics:
-      for name, diag in diagnostics.iteritems():
+      for name, diag in diagnostics.items():
         hist.diagnostics[name] = diag
 
-    self._histograms_by_guid[hist.guid] = hist
+    self._histograms.add(hist)
 
-  def AddSharedDiagnostic(self, name, diag):
+  def AddSharedDiagnostic(self, diag):
+    self._shared_diagnostics_by_guid[diag.guid] = diag
+
+  def AddSharedDiagnosticToAllHistograms(self, name, diag):
     self._shared_diagnostics_by_guid[diag.guid] = diag
 
     for hist in self:
       hist.diagnostics[name] = diag
 
   def GetFirstHistogram(self):
-    for histogram in self._histograms_by_guid.itervalues():
+    for histogram in self._histograms:
       return histogram
 
   def GetHistogramsNamed(self, name):
     return [h for h in self if h.name == name]
 
+  def GetHistogramNamed(self, name):
+    hs = self.GetHistogramsNamed(name)
+    assert len(hs) == 1, 'Found %d Histograms names "%s"' % (len(hs), name)
+    return hs[0]
+
   def GetSharedDiagnosticsOfType(self, typ):
     return [d for d in self.shared_diagnostics if isinstance(d, typ)]
-
-  def LookupHistogram(self, guid):
-    return self._histograms_by_guid.get(guid)
 
   def LookupDiagnostic(self, guid):
     return self._shared_diagnostics_by_guid.get(guid)
 
-  def ResolveRelatedHistograms(self):
-    histograms = self
-    def HandleDiagnosticMap(dm):
-      for diag in dm.itervalues():
-        if isinstance(diag, histogram_module.RelatedHistogramMap):
-          diag.Resolve(histograms)
-
-    for hist in self:
-      HandleDiagnosticMap(hist.diagnostics)
-      for dm in hist.nan_diagnostic_maps:
-        HandleDiagnosticMap(dm)
-      for hbin in hist.bins:
-        for dm in hbin.diagnostic_maps:
-          HandleDiagnosticMap(dm)
-
   def __len__(self):
-    return len(self._histograms_by_guid)
+    return len(self._histograms)
 
   def __iter__(self):
-    for hist in self._histograms_by_guid.itervalues():
+    for hist in self._histograms:
       yield hist
 
   def ImportDicts(self, dicts):
     for d in dicts:
-      if d.get('type') in all_diagnostics.GetDiagnosticTypenames():
+      if 'type' in d:
+        # TODO(benjhayden): Forget about TagMaps in 2019Q2.
+        if d['type'] == 'TagMap':
+          continue
+
+        assert d['type'] in all_diagnostics.GetDiagnosticTypenames(), (
+            'Unrecognized shared diagnostic type ' + d['type'])
         diag = diagnostic.Diagnostic.FromDict(d)
         self._shared_diagnostics_by_guid[d['guid']] = diag
       else:
@@ -102,7 +95,7 @@ class HistogramSet(object):
 
   def AsDicts(self):
     dcts = []
-    for d in self._shared_diagnostics_by_guid.itervalues():
+    for d in self._shared_diagnostics_by_guid.values():
       dcts.append(d.AsDict())
     for h in self:
       dcts.append(h.AsDict())
@@ -127,7 +120,7 @@ class HistogramSet(object):
       return
 
     for hist in self:
-      for name, diag in hist.diagnostics.iteritems():
+      for name, diag in hist.diagnostics.items():
         if diag.has_guid and diag.guid == old_guid:
           hist.diagnostics[name] = new_diagnostic
 
@@ -136,14 +129,14 @@ class HistogramSet(object):
     diagnostics_to_histograms = collections.defaultdict(list)
 
     for hist in self:
-      for name, candidate in hist.diagnostics.iteritems():
+      for name, candidate in hist.diagnostics.items():
         diagnostics_to_histograms[candidate].append(hist)
 
         if name not in names_to_candidates:
           names_to_candidates[name] = set()
         names_to_candidates[name].add(candidate)
 
-    for name, candidates in names_to_candidates.iteritems():
+    for name, candidates in names_to_candidates.items():
       deduplicated_diagnostics = set()
 
       for candidate in candidates:

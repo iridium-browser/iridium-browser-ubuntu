@@ -24,6 +24,9 @@
 
 namespace base {
 class Thread;
+namespace test {
+class ScopedFeatureList;
+}
 }
 
 namespace viz {
@@ -78,7 +81,7 @@ class PixelTest : public testing::Test {
   viz::ResourceId AllocateAndFillSoftwareResource(const gfx::Size& size,
                                                   const SkBitmap& source);
 
-  // For SkiaRendererDDL.
+  // For SkiaRenderer.
   std::unique_ptr<base::Thread> gpu_thread_;
   std::unique_ptr<base::Thread> io_thread_;
   std::unique_ptr<viz::GpuServiceImpl> gpu_service_;
@@ -101,7 +104,6 @@ class PixelTest : public testing::Test {
   void SetUpGLWithoutRenderer(bool flipped_output_surface);
   void SetUpGLRenderer(bool flipped_output_surface);
   void SetUpSkiaRenderer();
-  void SetUpSkiaRendererDDL();
   void SetUpSoftwareRenderer();
 
   void TearDown() override;
@@ -109,7 +111,7 @@ class PixelTest : public testing::Test {
   void EnableExternalStencilTest();
 
  private:
-  void ReadbackResult(base::Closure quit_run_loop,
+  void ReadbackResult(base::OnceClosure quit_run_loop,
                       std::unique_ptr<viz::CopyOutputResult> result);
 
   bool PixelsMatchReference(const base::FilePath& ref_file,
@@ -118,6 +120,7 @@ class PixelTest : public testing::Test {
   void TearDownGpuServiceOnGpuThread(base::WaitableEvent* event);
 
   std::unique_ptr<gl::DisableNullDrawGLBindings> enable_pixel_output_;
+  std::unique_ptr<base::test::ScopedFeatureList> scoped_feature_list_;
 };
 
 template<typename RendererType>
@@ -170,19 +173,6 @@ class GLRendererWithFlippedSurface : public viz::GLRenderer {
                         std::move(current_task_runner)) {}
 };
 
-class SkiaRendererDDL : public viz::SkiaRenderer {
- public:
-  SkiaRendererDDL(const viz::RendererSettings* settings,
-                  viz::OutputSurface* output_surface,
-                  viz::DisplayResourceProvider* resource_provider,
-                  viz::SkiaOutputSurface* skia_output_surface)
-      : viz::SkiaRenderer(settings,
-                          output_surface,
-                          resource_provider,
-                          skia_output_surface,
-                          viz::SkiaRenderer::DrawMode::DDL) {}
-};
-
 template <>
 inline void RendererPixelTest<viz::GLRenderer>::SetUp() {
   SetUpGLRenderer(false);
@@ -211,11 +201,6 @@ inline void RendererPixelTest<SoftwareRendererWithExpandedViewport>::SetUp() {
 template <>
 inline void RendererPixelTest<viz::SkiaRenderer>::SetUp() {
   SetUpSkiaRenderer();
-}
-
-template <>
-inline void RendererPixelTest<SkiaRendererDDL>::SetUp() {
-  SetUpSkiaRendererDDL();
 }
 
 typedef RendererPixelTest<viz::GLRenderer> GLRendererPixelTest;

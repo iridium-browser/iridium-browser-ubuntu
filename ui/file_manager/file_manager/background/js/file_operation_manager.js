@@ -3,11 +3,14 @@
 // found in the LICENSE file.
 
 /**
+ * FileOperationManagerImpl: implementation of {FileOperationManager}.
+ *
  * @constructor
  * @struct
+ * @implements {FileOperationManager}
  * @extends {cr.EventTarget}
  */
-function FileOperationManager() {
+function FileOperationManagerImpl() {
   /**
    * @private {VolumeManager}
    */
@@ -45,21 +48,13 @@ function FileOperationManager() {
 }
 
 /**
- * Returns pending copy tasks for testing.
- * @return {!Array<!fileOperationUtil.Task>} Pending copy tasks.
- */
-FileOperationManager.prototype.getPendingCopyTasksForTesting = function() {
-  return this.pendingCopyTasks_;
-};
-
-/**
  * Adds an event listener for the tasks.
  * @param {string} type The name of the event.
  * @param {EventListenerType} handler The handler for the event.  This is called
  *     when the event is dispatched.
  * @override
  */
-FileOperationManager.prototype.addEventListener = function(type, handler) {
+FileOperationManagerImpl.prototype.addEventListener = function(type, handler) {
   this.eventRouter_.addEventListener(type, handler);
 };
 
@@ -69,32 +64,42 @@ FileOperationManager.prototype.addEventListener = function(type, handler) {
  * @param {EventListenerType} handler The handler to be removed.
  * @override
  */
-FileOperationManager.prototype.removeEventListener = function(type, handler) {
+FileOperationManagerImpl.prototype.removeEventListener = function(
+    type, handler) {
   this.eventRouter_.removeEventListener(type, handler);
 };
 
 /**
- * Says if there are any tasks in the queue.
+ * Checks if there are any tasks in the queue.
  * @return {boolean} True, if there are any tasks.
  */
-FileOperationManager.prototype.hasQueuedTasks = function() {
+FileOperationManagerImpl.prototype.hasQueuedTasks = function() {
   return Object.keys(this.runningCopyTasks_).length > 0 ||
       this.pendingCopyTasks_.length > 0 ||
       this.deleteTasks_.length > 0;
 };
 
 /**
+ * Returns pending copy tasks for testing.
+ * @return {!Array<!fileOperationUtil.Task>} Pending copy tasks.
+ */
+FileOperationManagerImpl.prototype.getPendingCopyTasksForTesting = function() {
+  return this.pendingCopyTasks_;
+};
+
+/**
  * Requests the specified task to be canceled.
  * @param {string} taskId ID of task to be canceled.
  */
-FileOperationManager.prototype.requestTaskCancel = function(taskId) {
+FileOperationManagerImpl.prototype.requestTaskCancel = function(taskId) {
   var task = null;
 
   // If the task is not on progress, remove it immediately.
   for (var i = 0; i < this.pendingCopyTasks_.length; i++) {
     task = this.pendingCopyTasks_[i];
-    if (task.taskId !== taskId)
+    if (task.taskId !== taskId) {
       continue;
+    }
     task.requestCancel();
     this.eventRouter_.sendProgressEvent(
         fileOperationUtil.EventRouter.EventType.CANCELED,
@@ -105,14 +110,16 @@ FileOperationManager.prototype.requestTaskCancel = function(taskId) {
 
   for (var volumeId in this.runningCopyTasks_) {
     task = this.runningCopyTasks_[volumeId];
-    if (task.taskId === taskId)
+    if (task.taskId === taskId) {
       task.requestCancel();
+    }
   }
 
   for (var i = 0; i < this.deleteTasks_.length; i++) {
     task = this.deleteTasks_[i];
-    if (task.taskId !== taskId)
+    if (task.taskId !== taskId) {
       continue;
+    }
     task.cancelRequested = true;
     // If the task is not on progress, remove it immediately.
     if (i !== 0) {
@@ -134,13 +141,16 @@ FileOperationManager.prototype.requestTaskCancel = function(taskId) {
  * @return {Promise} Promise fulfilled with the filtered entry. This is not
  *     rejected.
  */
-FileOperationManager.prototype.filterSameDirectoryEntry = function(
+FileOperationManagerImpl.prototype.filterSameDirectoryEntry = function(
     sourceEntries, targetEntry, isMove) {
-  if (!isMove)
+  if (!isMove) {
     return Promise.resolve(sourceEntries);
+  }
   // Utility function to concat arrays.
   var compactArrays = function(arrays) {
-    return arrays.filter(function(element) { return !!element; });
+    return arrays.filter(function(element) {
+      return !!element;
+    });
   };
   // Call processEntry for each item of entries.
   var processEntries = function(entries) {
@@ -150,15 +160,18 @@ FileOperationManager.prototype.filterSameDirectoryEntry = function(
   // Check all file entries and keeps only those need sharing operation.
   var processFileOrDirectoryEntries = function(entry) {
     return new Promise(function(resolve) {
-      entry.getParent(function(inParentEntry) {
-        if (!util.isSameEntry(inParentEntry, targetEntry))
-          resolve(entry);
-        else
-          resolve(null);
-      }, function(error) {
-        console.error(error.stack || error);
-        resolve(null);
-      });
+      entry.getParent(
+          function(inParentEntry) {
+            if (!util.isSameEntry(inParentEntry, targetEntry)) {
+              resolve(entry);
+            } else {
+              resolve(null);
+            }
+          },
+          function(error) {
+            console.error(error.stack || error);
+            resolve(null);
+          });
     });
   };
   return processEntries(sourceEntries);
@@ -176,20 +189,23 @@ FileOperationManager.prototype.filterSameDirectoryEntry = function(
  *     at another places, we need to specify the ID of the item. If the
  *     item is not created, FileOperationManager generates new ID.
  */
-FileOperationManager.prototype.paste = function(
+FileOperationManagerImpl.prototype.paste = function(
     sourceEntries, targetEntry, isMove, opt_taskId) {
   // Do nothing if sourceEntries is empty.
-  if (sourceEntries.length === 0)
+  if (sourceEntries.length === 0) {
     return;
+  }
 
-  this.filterSameDirectoryEntry(sourceEntries, targetEntry, isMove).then(
-      function(entries) {
-        if (entries.length === 0)
+  this.filterSameDirectoryEntry(sourceEntries, targetEntry, isMove)
+      .then(function(entries) {
+        if (entries.length === 0) {
           return;
+        }
         this.queueCopy_(targetEntry, entries, isMove, opt_taskId);
-  }.bind(this)).catch(function(error) {
-    console.error(error.stack || error);
-  });
+      }.bind(this))
+      .catch(function(error) {
+        console.error(error.stack || error);
+      });
 };
 
 /**
@@ -201,10 +217,10 @@ FileOperationManager.prototype.paste = function(
  * @param {boolean} isMove In case of move.
  * @param {string=} opt_taskId If the corresponding item has already created
  *     at another places, we need to specify the ID of the item. If the
- *     item is not created, FileOperationManager generates new ID.
+ *     item is not created, FileOperationManagerImpl generates new ID.
  * @private
  */
-FileOperationManager.prototype.queueCopy_ = function(
+FileOperationManagerImpl.prototype.queueCopy_ = function(
     targetDirEntry, entries, isMove, opt_taskId) {
   var task;
   var taskId = opt_taskId || this.generateTaskId();
@@ -242,7 +258,7 @@ FileOperationManager.prototype.queueCopy_ = function(
  *
  * @private
  */
-FileOperationManager.prototype.serviceAllTasks_ = function() {
+FileOperationManagerImpl.prototype.serviceAllTasks_ = function() {
   if (this.pendingCopyTasks_.length === 0 &&
       Object.keys(this.runningCopyTasks_).length === 0) {
     // All tasks have been serviced, clean up and exit.
@@ -295,8 +311,9 @@ FileOperationManager.prototype.serviceAllTasks_ = function() {
   }
 
   // There is no task which can run at now.
-  if (nextTask === null)
+  if (nextTask === null) {
     return;
+  }
 
   var onTaskProgress = function(task) {
     this.eventRouter_.sendProgressEvent(
@@ -347,16 +364,11 @@ FileOperationManager.prototype.serviceAllTasks_ = function() {
 };
 
 /**
- * Timeout before files are really deleted (to allow undo).
- */
-FileOperationManager.DELETE_TIMEOUT = 30 * 1000;
-
-/**
  * Schedules the files deletion.
  *
  * @param {Array<Entry>} entries The entries.
  */
-FileOperationManager.prototype.deleteEntries = function(entries) {
+FileOperationManagerImpl.prototype.deleteEntries = function(entries) {
   var task =
       /** @type {!fileOperationUtil.DeleteTask} */ (Object.preventExtensions({
         entries: entries,
@@ -391,8 +403,9 @@ FileOperationManager.prototype.deleteEntries = function(entries) {
     this.deleteTasks_.push(task);
     this.eventRouter_.sendDeleteEvent(
         fileOperationUtil.EventRouter.EventType.BEGIN, task);
-    if (this.deleteTasks_.length === 1)
+    if (this.deleteTasks_.length === 1) {
       this.serviceAllDeleteTasks_();
+    }
   }.bind(this));
 };
 
@@ -404,13 +417,14 @@ FileOperationManager.prototype.deleteEntries = function(entries) {
  *
  * @private
  */
-FileOperationManager.prototype.serviceAllDeleteTasks_ = function() {
+FileOperationManagerImpl.prototype.serviceAllDeleteTasks_ = function() {
   this.serviceDeleteTask_(
       this.deleteTasks_[0],
       function() {
         this.deleteTasks_.shift();
-        if (this.deleteTasks_.length)
+        if (this.deleteTasks_.length) {
           this.serviceAllDeleteTasks_();
+        }
       }.bind(this));
 };
 
@@ -421,7 +435,8 @@ FileOperationManager.prototype.serviceAllDeleteTasks_ = function() {
  * @param {function()} callback Callback run on task end.
  * @private
  */
-FileOperationManager.prototype.serviceDeleteTask_ = function(task, callback) {
+FileOperationManagerImpl.prototype.serviceDeleteTask_ = function(
+    task, callback) {
   var queue = new AsyncUtil.Queue();
 
   // Delete each entry.
@@ -453,12 +468,13 @@ FileOperationManager.prototype.serviceDeleteTask_ = function(task, callback) {
   queue.run(function(inCallback) {
     var EventType = fileOperationUtil.EventRouter.EventType;
     var reason;
-    if (error)
+    if (error) {
       reason = EventType.ERROR;
-    else if (task.cancelRequested)
+    } else if (task.cancelRequested) {
       reason = EventType.CANCELED;
-    else
+    } else {
       reason = EventType.SUCCESS;
+    }
     this.eventRouter_.sendDeleteEvent(reason, task);
     inCallback();
     callback();
@@ -471,7 +487,7 @@ FileOperationManager.prototype.serviceDeleteTask_ = function(task, callback) {
  * @param {!Array<!Entry>} selectionEntries The selected entries.
  * @param {!DirectoryEntry} dirEntry The directory containing the selection.
  */
-FileOperationManager.prototype.zipSelection = function(
+FileOperationManagerImpl.prototype.zipSelection = function(
     selectionEntries, dirEntry) {
   var zipTask = new fileOperationUtil.ZipTask(
       this.generateTaskId(), selectionEntries, dirEntry, dirEntry);
@@ -490,6 +506,6 @@ FileOperationManager.prototype.zipSelection = function(
  *
  * @return {string} New task ID.
  */
-FileOperationManager.prototype.generateTaskId = function() {
+FileOperationManagerImpl.prototype.generateTaskId = function() {
   return 'file-operation-' + this.taskIdCounter_++;
 };

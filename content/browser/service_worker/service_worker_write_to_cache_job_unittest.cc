@@ -9,10 +9,10 @@
 
 #include "base/bind_helpers.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
@@ -22,7 +22,6 @@
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
 #include "content/common/service_worker/service_worker_utils.h"
-#include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
@@ -66,18 +65,16 @@ std::string GenerateLongResponse() {
 net::URLRequestJob* CreateNormalURLRequestJob(
     net::URLRequest* request,
     net::NetworkDelegate* network_delegate) {
-  return new net::URLRequestTestJob(request,
-                                    network_delegate,
-                                    std::string(kHeaders, arraysize(kHeaders)),
-                                    kScriptCode,
-                                    true);
+  return new net::URLRequestTestJob(request, network_delegate,
+                                    std::string(kHeaders, base::size(kHeaders)),
+                                    kScriptCode, true);
 }
 
 net::URLRequestJob* CreateResponseJob(const std::string& response_data,
                                       net::URLRequest* request,
                                       net::NetworkDelegate* network_delegate) {
   return new net::URLRequestTestJob(request, network_delegate,
-                                    std::string(kHeaders, arraysize(kHeaders)),
+                                    std::string(kHeaders, base::size(kHeaders)),
                                     response_data, true);
 }
 
@@ -98,11 +95,9 @@ net::URLRequestJob* CreateInvalidMimeTypeJob(
       "Expires: Thu, 1 Jan 2100 20:00:00 GMT\n"
       "\n";
   return new net::URLRequestTestJob(
-      request,
-      network_delegate,
-      std::string(kPlainTextHeaders, arraysize(kPlainTextHeaders)),
-      kScriptCode,
-      true);
+      request, network_delegate,
+      std::string(kPlainTextHeaders, base::size(kPlainTextHeaders)),
+      kScriptCode, true);
 }
 
 class SSLCertificateErrorJob : public net::URLRequestTestJob {
@@ -142,11 +137,9 @@ class SSLCertificateErrorJob : public net::URLRequestTestJob {
 net::URLRequestJob* CreateSSLCertificateErrorJob(
     net::URLRequest* request,
     net::NetworkDelegate* network_delegate) {
-  return new SSLCertificateErrorJob(request,
-                                    network_delegate,
-                                    std::string(kHeaders, arraysize(kHeaders)),
-                                    kScriptCode,
-                                    true);
+  return new SSLCertificateErrorJob(request, network_delegate,
+                                    std::string(kHeaders, base::size(kHeaders)),
+                                    kScriptCode, true);
 }
 
 class CertStatusErrorJob : public net::URLRequestTestJob {
@@ -173,21 +166,19 @@ class CertStatusErrorJob : public net::URLRequestTestJob {
 net::URLRequestJob* CreateCertStatusErrorJob(
     net::URLRequest* request,
     net::NetworkDelegate* network_delegate) {
-  return new CertStatusErrorJob(request,
-                                network_delegate,
-                                std::string(kHeaders, arraysize(kHeaders)),
-                                kScriptCode,
-                                true);
+  return new CertStatusErrorJob(request, network_delegate,
+                                std::string(kHeaders, base::size(kHeaders)),
+                                kScriptCode, true);
 }
 
 class MockHttpProtocolHandler
     : public net::URLRequestJobFactory::ProtocolHandler {
  public:
-  typedef base::Callback<
-      net::URLRequestJob*(net::URLRequest*, net::NetworkDelegate*)> JobCallback;
+  using JobCallback =
+      base::RepeatingCallback<net::URLRequestJob*(net::URLRequest*,
+                                                  net::NetworkDelegate*)>;
 
-  explicit MockHttpProtocolHandler(ResourceContext* resource_context)
-      : resource_context_(resource_context) {}
+  MockHttpProtocolHandler() {}
   ~MockHttpProtocolHandler() override {}
 
   net::URLRequestJob* MaybeCreateJob(
@@ -196,17 +187,15 @@ class MockHttpProtocolHandler
     ServiceWorkerRequestHandler* handler =
         ServiceWorkerRequestHandler::GetHandler(request);
     if (handler) {
-      return handler->MaybeCreateJob(
-          request, network_delegate, resource_context_);
+      return handler->MaybeCreateJob(request, network_delegate, nullptr);
     }
     return create_job_callback_.Run(request, network_delegate);
   }
-  void SetCreateJobCallback(const JobCallback& callback) {
-    create_job_callback_ = callback;
+  void SetCreateJobCallback(JobCallback callback) {
+    create_job_callback_ = std::move(callback);
   }
 
  private:
-  ResourceContext* resource_context_;
   JobCallback create_job_callback_;
 };
 
@@ -308,7 +297,7 @@ class ServiceWorkerWriteToCacheJobTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
 
     url_request_context_.reset(new net::URLRequestContext);
-    mock_protocol_handler_ = new MockHttpProtocolHandler(&resource_context_);
+    mock_protocol_handler_ = new MockHttpProtocolHandler;
     url_request_job_factory_.reset(new net::URLRequestJobFactoryImpl);
     url_request_job_factory_->SetProtocolHandler(
         "https", base::WrapUnique(mock_protocol_handler_));
@@ -319,7 +308,7 @@ class ServiceWorkerWriteToCacheJobTest : public testing::Test {
         TRAFFIC_ANNOTATION_FOR_TESTS);
     ServiceWorkerRequestHandler::InitializeHandler(
         request_.get(), context_wrapper(), &blob_storage_context_, process_id,
-        provider_id, false, network::mojom::FetchRequestMode::kNoCORS,
+        provider_id, false, network::mojom::FetchRequestMode::kNoCors,
         network::mojom::FetchCredentialsMode::kOmit,
         network::mojom::FetchRedirectMode::kFollow,
         std::string() /* integrity */, false /* keepalive */,
@@ -442,7 +431,6 @@ class ServiceWorkerWriteToCacheJobTest : public testing::Test {
   MockHttpProtocolHandler* mock_protocol_handler_;
 
   storage::BlobStorageContext blob_storage_context_;
-  content::MockResourceContext resource_context_;
   ServiceWorkerRemoteProviderEndpoint remote_endpoint_;
 
   net::TestDelegate url_request_delegate_;

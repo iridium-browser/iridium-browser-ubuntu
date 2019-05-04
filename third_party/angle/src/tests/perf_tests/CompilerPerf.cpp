@@ -162,16 +162,73 @@ void main()
 
 const char *kTrickyESSL300Id = "TrickyESSL300";
 
-struct CompilerPerfParameters final : public angle::CompilerParameters
+constexpr int kNumIterationsPerStep = 4;
+
+struct CompilerParameters
+{
+    CompilerParameters() { output = SH_HLSL_4_1_OUTPUT; }
+
+    CompilerParameters(ShShaderOutput output) : output(output) {}
+
+    const char *str() const
+    {
+        switch (output)
+        {
+            case SH_HLSL_4_1_OUTPUT:
+                return "HLSL_4_1";
+            case SH_GLSL_450_CORE_OUTPUT:
+                return "GLSL_4_50";
+            case SH_ESSL_OUTPUT:
+                return "ESSL";
+            default:
+                UNREACHABLE();
+                return "unk";
+        }
+    }
+
+    ShShaderOutput output;
+};
+
+bool IsPlatformAvailable(const CompilerParameters &param)
+{
+    switch (param.output)
+    {
+        case SH_HLSL_4_1_OUTPUT:
+        case SH_HLSL_4_0_FL9_3_OUTPUT:
+        case SH_HLSL_3_0_OUTPUT:
+        {
+            TPoolAllocator allocator;
+            InitializePoolIndex();
+            allocator.push();
+            SetGlobalPoolAllocator(&allocator);
+            ShHandle translator =
+                sh::ConstructCompiler(GL_FRAGMENT_SHADER, SH_WEBGL2_SPEC, param.output);
+            bool success = translator != nullptr;
+            SetGlobalPoolAllocator(nullptr);
+            allocator.pop();
+            FreePoolIndex();
+            if (!success)
+            {
+                return false;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    return true;
+}
+
+struct CompilerPerfParameters final : public CompilerParameters
 {
     CompilerPerfParameters(ShShaderOutput output,
                            const char *shaderSource,
                            const char *shaderSourceId)
-        : angle::CompilerParameters(output), shaderSource(shaderSource)
+        : CompilerParameters(output), shaderSource(shaderSource)
     {
         testId = shaderSourceId;
         testId += "_";
-        testId += angle::CompilerParameters::str();
+        testId += CompilerParameters::str();
     }
 
     const char *shaderSource;
@@ -206,9 +263,9 @@ class CompilerPerfTest : public ANGLEPerfTest,
     sh::TCompiler *mTranslator;
 };
 
-CompilerPerfTest::CompilerPerfTest() : ANGLEPerfTest("CompilerPerf", GetParam().testId)
-{
-}
+CompilerPerfTest::CompilerPerfTest()
+    : ANGLEPerfTest("CompilerPerf", GetParam().testId, kNumIterationsPerStep)
+{}
 
 void CompilerPerfTest::SetUp()
 {
@@ -249,8 +306,6 @@ void CompilerPerfTest::step()
 
     ShCompileOptions compileOptions = SH_OBJECT_CODE | SH_VARIABLES |
                                       SH_INITIALIZE_UNINITIALIZED_LOCALS | SH_INIT_OUTPUT_VARIABLES;
-
-    const int kNumIterationsPerStep = 10;
 
 #if !defined(NDEBUG)
     // Make sure that compilation succeeds and print the info log if it doesn't in debug mode.

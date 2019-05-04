@@ -12,9 +12,11 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/wm/overview/cleanup_animation_observer.h"
+#include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/overview/scoped_overview_animation_settings.h"
-#include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/overview/start_animation_observer.h"
 #include "ash/wm/splitview/split_view_controller.h"
+#include "ash/wm/splitview/split_view_utils.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_transient_descendant_iterator.h"
 #include "base/no_destructor.h"
@@ -109,12 +111,8 @@ bool CanCoverAvailableWorkspace(aura::Window* window) {
   SplitViewController* split_view_controller =
       Shell::Get()->split_view_controller();
   if (split_view_controller->IsSplitViewModeActive())
-    return split_view_controller->CanSnap(window);
+    return CanSnapInSplitview(window);
   return wm::GetWindowState(window)->IsMaximizedOrFullscreenOrPinned();
-}
-
-bool IsOverviewSwipeToCloseEnabled() {
-  return base::FeatureList::IsEnabled(features::kOverviewSwipeToClose);
 }
 
 void FadeInWidgetAndMaybeSlideOnEnter(views::Widget* widget,
@@ -139,16 +137,21 @@ void FadeInWidgetAndMaybeSlideOnEnter(views::Widget* widget,
   ScopedOverviewAnimationSettings scoped_overview_animation_settings(
       animation_type, window);
   window->layer()->SetOpacity(1.0f);
-  if (slide)
+  if (slide) {
     window->SetTransform(original_transform);
+
+    auto start_observer = std::make_unique<StartAnimationObserver>();
+    scoped_overview_animation_settings.AddObserver(start_observer.get());
+    Shell::Get()->overview_controller()->AddStartAnimationObserver(
+        std::move(start_observer));
+  }
 }
 
 void FadeOutWidgetAndMaybeSlideOnExit(std::unique_ptr<views::Widget> widget,
                                       OverviewAnimationType animation_type,
                                       bool slide) {
   // The window selector controller may be nullptr on shutdown.
-  WindowSelectorController* controller =
-      Shell::Get()->window_selector_controller();
+  OverviewController* controller = Shell::Get()->overview_controller();
   if (!controller) {
     widget->SetOpacity(0.f);
     return;
@@ -205,11 +208,9 @@ std::unique_ptr<views::Widget> CreateBackgroundWidget(aura::Window* root_window,
   // Disable the "bounce in" animation when showing the window.
   ::wm::SetWindowVisibilityAnimationTransition(widget_window,
                                                ::wm::ANIMATE_NONE);
-  // The background widget should not activate the shelf when passing under it.
-  wm::GetWindowState(widget_window)->set_ignored_by_shelf(true);
   if (params.layer_type == ui::LAYER_SOLID_COLOR) {
     widget_window->layer()->SetColor(background_color);
-  } else {
+  } else if (params.layer_type == ui::LAYER_TEXTURED) {
     views::View* content_view = new views::View();
     content_view->SetBackground(std::make_unique<BackgroundWith1PxBorder>(
         background_color, border_color, border_thickness, border_radius));
@@ -233,8 +234,7 @@ gfx::Rect GetTransformedBounds(aura::Window* transformed_window,
     // Ignore other window types when computing bounding box of window
     // selector target item.
     if (window != transformed_window &&
-        (window->type() != aura::client::WINDOW_TYPE_NORMAL &&
-         window->type() != aura::client::WINDOW_TYPE_PANEL)) {
+        window->type() != aura::client::WINDOW_TYPE_NORMAL) {
       continue;
     }
     gfx::RectF window_bounds(window->GetTargetBounds());
@@ -265,8 +265,7 @@ gfx::Rect GetTargetBoundsInScreen(aura::Window* window) {
     // Ignore other window types when computing bounding box of window
     // selector target item.
     if (window_iter != window &&
-        window_iter->type() != aura::client::WINDOW_TYPE_NORMAL &&
-        window_iter->type() != aura::client::WINDOW_TYPE_PANEL) {
+        window_iter->type() != aura::client::WINDOW_TYPE_NORMAL) {
       continue;
     }
     gfx::Rect target_bounds = window_iter->GetTargetBounds();
@@ -291,7 +290,7 @@ void SetTransform(aura::Window* window, const gfx::Transform& transform) {
 }
 
 bool IsSlidingOutOverviewFromShelf() {
-  if (!Shell::Get()->window_selector_controller()->IsSelecting())
+  if (!Shell::Get()->overview_controller()->IsSelecting())
     return false;
 
   HomeLauncherGestureHandler* home_launcher_gesture_handler =

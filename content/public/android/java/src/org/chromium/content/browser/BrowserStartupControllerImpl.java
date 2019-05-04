@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.StrictMode;
 import android.support.annotation.IntDef;
 
+import org.chromium.base.BuildInfo;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
@@ -21,7 +22,6 @@ import org.chromium.base.library_loader.LoaderErrors;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.app.ContentMain;
 import org.chromium.content_public.browser.BrowserStartupController;
-import org.chromium.content_public.browser.BrowserStartupController.StartupCallback;
 import org.chromium.ui.resources.ResourceExtractor;
 
 import java.lang.annotation.Retention;
@@ -121,31 +121,35 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
     // Whether ServiceManager is started.
     private boolean mServiceManagerStarted;
 
-    private TracingControllerAndroid mTracingController;
+    private TracingControllerAndroidImpl mTracingController;
 
     BrowserStartupControllerImpl(int libraryProcessType) {
         mAsyncStartupCallbacks = new ArrayList<>();
         mServiceManagerCallbacks = new ArrayList<>();
         mLibraryProcessType = libraryProcessType;
-        ThreadUtils.postOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                addStartupCompletedObserver(new StartupCallback() {
-                    @Override
-                    public void onSuccess() {
-                        assert mTracingController == null;
-                        Context context = ContextUtils.getApplicationContext();
-                        mTracingController = new TracingControllerAndroid(context);
-                        mTracingController.registerReceiver(context);
-                    }
+        if (BuildInfo.isDebugAndroid()) {
+            // Only set up the tracing broadcast receiver on debug builds of the OS. Normal tracing
+            // should use the DevTools API.
+            ThreadUtils.postOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    addStartupCompletedObserver(new StartupCallback() {
+                        @Override
+                        public void onSuccess() {
+                            assert mTracingController == null;
+                            Context context = ContextUtils.getApplicationContext();
+                            mTracingController = new TracingControllerAndroidImpl(context);
+                            mTracingController.registerReceiver(context);
+                        }
 
-                    @Override
-                    public void onFailure() {
-                        // Startup failed.
-                    }
-                });
-            }
-        });
+                        @Override
+                        public void onFailure() {
+                            // Startup failed.
+                        }
+                    });
+                }
+            });
+        }
     }
 
     /**
@@ -177,6 +181,9 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
     public void startBrowserProcessesAsync(boolean startGpuProcess, boolean startServiceManagerOnly,
             final StartupCallback callback) throws ProcessInitException {
         assert ThreadUtils.runningOnUiThread() : "Tried to start the browser on the wrong thread.";
+        ServicificationStartupUma.getInstance().record(ServicificationStartupUma.getStartupMode(
+                mFullBrowserStartupDone, mServiceManagerStarted, startServiceManagerOnly));
+
         if (mFullBrowserStartupDone || (startServiceManagerOnly && mServiceManagerStarted)) {
             // Browser process initialization has already been completed, so we can immediately post
             // the callback.
@@ -226,6 +233,10 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
 
     @Override
     public void startBrowserProcessesSync(boolean singleProcess) throws ProcessInitException {
+        ServicificationStartupUma.getInstance().record(
+                ServicificationStartupUma.getStartupMode(mFullBrowserStartupDone,
+                        mServiceManagerStarted, false /* startServiceManagerOnly */));
+
         // If already started skip to checking the result
         if (!mFullBrowserStartupDone) {
             if (!mHasStartedInitializingBrowserProcess || !mPostResourceExtractionTasksCompleted) {
@@ -311,32 +322,34 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
             // callbacks will be deferred until browser startup completes.
             mCurrentBrowserStartType = BROWSER_START_TYPE_FULL_BROWSER;
             if (contentStart() > 0) enqueueCallbackExecution(STARTUP_FAILURE);
-        } else if (mCurrentBrowserStartType == BROWSER_START_TYPE_SERVICE_MANAGER_ONLY) {
-            // If full browser startup is not needed, execute all the callbacks now.
-            executeEnqueuedCallbacks(STARTUP_SUCCESS);
+            return;
         }
+
+        if (mCurrentBrowserStartType == BROWSER_START_TYPE_SERVICE_MANAGER_ONLY) {
+            executeServiceManagerCallbacks(STARTUP_SUCCESS);
+        }
+        recordStartupUma();
     }
 
     private void executeEnqueuedCallbacks(int startupResult) {
         assert ThreadUtils.runningOnUiThread() : "Callback from browser startup from wrong thread.";
-        // If only ServiceManager is launched, don't set mFullBrowserStartupDone, wait for the full
-        // browser launch to set this variable.
-        mFullBrowserStartupDone = mCurrentBrowserStartType == BROWSER_START_TYPE_FULL_BROWSER;
+        mFullBrowserStartupDone = true;
         mStartupSuccess = (startupResult <= 0);
-        if (mFullBrowserStartupDone) {
-            for (StartupCallback asyncStartupCallback : mAsyncStartupCallbacks) {
-                if (mStartupSuccess) {
-                    asyncStartupCallback.onSuccess();
-                } else {
-                    asyncStartupCallback.onFailure();
-                }
+        for (StartupCallback asyncStartupCallback : mAsyncStartupCallbacks) {
+            if (mStartupSuccess) {
+                asyncStartupCallback.onSuccess();
+            } else {
+                asyncStartupCallback.onFailure();
             }
-            // We don't want to hold on to any objects after we do not need them anymore.
-            mAsyncStartupCallbacks.clear();
         }
-        // The ServiceManager should have been started, call the callbacks now.
-        // TODO(qinmin): Handle mServiceManagerCallbacks in serviceManagerStarted() instead of
-        // here once http://crbug.com/854231 is fixed.
+        // We don't want to hold on to any objects after we do not need them anymore.
+        mAsyncStartupCallbacks.clear();
+
+        executeServiceManagerCallbacks(startupResult);
+    }
+
+    private void executeServiceManagerCallbacks(int startupResult) {
+        mStartupSuccess = (startupResult <= 0);
         for (StartupCallback serviceMangerCallback : mServiceManagerCallbacks) {
             if (mStartupSuccess) {
                 serviceMangerCallback.onSuccess();
@@ -415,12 +428,20 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
     }
 
     /**
+     * Can be overridden by testing.
+     */
+    @VisibleForTesting
+    void recordStartupUma() {
+        ServicificationStartupUma.getInstance().commit();
+    }
+
+    /**
      * Initialization needed for tests. Mainly used by content browsertests.
      */
     @Override
     public void initChromiumBrowserProcessForTests() {
         ResourceExtractor resourceExtractor = ResourceExtractor.get();
-        resourceExtractor.startExtractingResources();
+        resourceExtractor.startExtractingResources("en");
         resourceExtractor.waitForCompletion();
         nativeSetCommandLineFlags(false);
     }

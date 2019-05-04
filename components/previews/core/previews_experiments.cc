@@ -34,6 +34,14 @@ const char kVersion[] = "version";
 const char kEffectiveConnectionTypeThreshold[] =
     "max_allowed_effective_connection_type";
 
+// The session maximum threshold of EffectiveConnectionType above which previews
+// will not be served. This is maximum limit on top of any per-preview-type
+// threshold or per-page-pattern slow page trigger threshold. It is intended
+// to be Finch configured on a session basis to limit slow page triggering to
+// be a proportion of all eligible page loads.
+// See net/nqe/effective_connection_type.h for mapping from string to value.
+const char kSessionMaxECTTrigger[] = "session_max_ect_trigger";
+
 // Inflation parameters for estimating NoScript data savings.
 const char kNoScriptInflationPercent[] = "NoScriptInflationPercent";
 const char kNoScriptInflationBytes[] = "NoScriptInflationBytes";
@@ -165,6 +173,11 @@ int LitePageRedirectPreviewMaxServerBlacklistByteSize() {
       250 * 1024 /* 250KB */);
 }
 
+size_t LitePageRedirectPreviewMaxNavigationRestarts() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      features::kLitePageServerPreviews, "max_navigation_restart", 5);
+}
+
 int PreviewServerLoadshedMaxSeconds() {
   return base::GetFieldTrialParamByFeatureAsInt(
       features::kLitePageServerPreviews, "loadshed_max_seconds",
@@ -174,6 +187,11 @@ int PreviewServerLoadshedMaxSeconds() {
 bool LitePagePreviewsTriggerOnLocalhost() {
   return base::GetFieldTrialParamByFeatureAsBool(
       features::kLitePageServerPreviews, "trigger_on_localhost", false);
+}
+
+bool LitePagePreviewsOverridePageHints() {
+  return base::GetFieldTrialParamByFeatureAsBool(
+      features::kLitePageServerPreviews, "override_pagehints", false);
 }
 
 GURL GetLitePagePreviewsDomainURL() {
@@ -199,6 +217,16 @@ GURL GetLitePagePreviewsDomainURL() {
     return variable_host;
   }
   return GURL("https://litepages.googlezip.net/");
+}
+
+std::string LitePageRedirectPreviewExperiment() {
+  return GetFieldTrialParamValueByFeature(features::kLitePageServerPreviews,
+                                          "lite_page_preview_experiment");
+}
+
+bool IsInLitePageRedirectControl() {
+  return base::GetFieldTrialParamByFeatureAsBool(
+      features::kLitePageServerPreviews, "control_group", false);
 }
 
 net::EffectiveConnectionType GetECTThresholdForPreview(
@@ -229,6 +257,12 @@ net::EffectiveConnectionType GetECTThresholdForPreview(
   }
   NOTREACHED();
   return net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
+}
+
+net::EffectiveConnectionType GetSessionMaxECTThreshold() {
+  return GetParamValueAsECTByFeature(features::kSlowPageTriggering,
+                                     kSessionMaxECTTrigger,
+                                     net::EFFECTIVE_CONNECTION_TYPE_2G);
 }
 
 bool ArePreviewsAllowed() {
@@ -291,19 +325,6 @@ size_t GetMaxPageHintsInMemoryThreshhold() {
 
 bool IsOptimizationHintsEnabled() {
   return base::FeatureList::IsEnabled(features::kOptimizationHints);
-}
-
-net::EffectiveConnectionType EffectiveConnectionTypeThresholdForClientLoFi() {
-  return GetParamValueAsECTByFeature(features::kClientLoFi,
-                                     kEffectiveConnectionTypeThreshold,
-                                     net::EFFECTIVE_CONNECTION_TYPE_2G);
-}
-
-std::vector<std::string> GetBlackListedHostsForClientLoFiFieldTrial() {
-  return base::SplitString(base::GetFieldTrialParamValueByFeature(
-                               features::kClientLoFi, "short_host_blacklist"),
-                           ",", base::TRIM_WHITESPACE,
-                           base::SPLIT_WANT_NONEMPTY);
 }
 
 int NoScriptPreviewsInflationPercent() {

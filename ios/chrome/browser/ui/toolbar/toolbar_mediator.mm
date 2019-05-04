@@ -9,16 +9,18 @@
 #include "base/strings/sys_string_conversions.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/search_engines/search_engine_observer_bridge.h"
 #include "ios/chrome/browser/ui/bookmarks/bookmark_model_bridge_observer.h"
 #import "ios/chrome/browser/ui/ntp/ntp_util.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_consumer.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
+#import "ios/public/provider/chrome/browser/images/branded_image_provider.h"
 #import "ios/public/provider/chrome/browser/voice/voice_search_provider.h"
 #import "ios/web/public/navigation_manager.h"
 #import "ios/web/public/web_client.h"
-#include "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state/web_state.h"
 #import "ios/web/public/web_state/web_state_observer_bridge.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -27,10 +29,14 @@
 
 @interface ToolbarMediator ()<BookmarkModelBridgeObserver,
                               CRWWebStateObserver,
+                              SearchEngineObserving,
                               WebStateListObserving>
 
 // The current web state associated with the toolbar.
 @property(nonatomic, assign) web::WebState* webState;
+
+// The icon for the search button.
+@property(nonatomic, strong) UIImage* searchIcon;
 
 @end
 
@@ -39,12 +45,15 @@
   std::unique_ptr<WebStateListObserverBridge> _webStateListObserver;
   // Bridge to register for bookmark changes.
   std::unique_ptr<bookmarks::BookmarkModelBridge> _bookmarkModelBridge;
+  // Listen for default search engine changes.
+  std::unique_ptr<SearchEngineObserverBridge> _searchEngineObserver;
 }
 
 @synthesize bookmarkModel = _bookmarkModel;
 @synthesize consumer = _consumer;
 @synthesize webState = _webState;
 @synthesize webStateList = _webStateList;
+@synthesize searchIcon = _searchIcon;
 
 - (instancetype)init {
   self = [super init];
@@ -80,6 +89,7 @@
     _webState = nullptr;
   }
   _bookmarkModelBridge.reset();
+  _searchEngineObserver.reset();
 }
 
 #pragma mark - CRWWebStateObserver
@@ -168,6 +178,27 @@
 
 #pragma mark - Setters
 
+- (void)setIncognito:(BOOL)incognito {
+  if (incognito == _incognito)
+    return;
+
+  _incognito = incognito;
+  if (self.searchIcon) {
+    // If the searchEngine was already initialized, ask for the new image.
+    [self searchEngineChanged];
+  }
+}
+
+- (void)setTemplateURLService:(TemplateURLService*)templateURLService {
+  _templateURLService = templateURLService;
+  if (templateURLService) {
+    // Listen for default search engine changes.
+    _searchEngineObserver =
+        std::make_unique<SearchEngineObserverBridge>(self, templateURLService);
+    templateURLService->Load();
+  }
+}
+
 - (void)setWebState:(web::WebState*)webState {
   if (_webState) {
     _webState->RemoveObserver(_webStateObserver.get());
@@ -236,7 +267,7 @@
   DCHECK(self.consumer);
   [self updateConsumerForWebState:self.webState];
 
-  [self.consumer setIsNTP:IsVisibleUrlNewTabPage(self.webState)];
+  [self.consumer setIsNTP:IsVisibleURLNewTabPage(self.webState)];
   [self.consumer setLoadingState:self.webState->IsLoading()];
   [self updateBookmarksForWebState:self.webState];
   [self updateShareMenuForWebState:self.webState];
@@ -299,6 +330,25 @@
 - (void)bookmarkNodeDeleted:(const bookmarks::BookmarkNode*)node
                  fromFolder:(const bookmarks::BookmarkNode*)folder {
   // No-op -- required by BookmarkModelBridgeObserver but not used.
+}
+
+#pragma mark - SearchEngineObserving
+
+- (void)searchEngineChanged {
+  SearchEngineIcon searchEngineIcon = SEARCH_ENGINE_ICON_OTHER;
+  if (self.templateURLService &&
+      self.templateURLService->GetDefaultSearchProvider() &&
+      self.templateURLService->GetDefaultSearchProvider()->GetEngineType(
+          self.templateURLService->search_terms_data()) ==
+          SEARCH_ENGINE_GOOGLE) {
+    searchEngineIcon = SEARCH_ENGINE_ICON_GOOGLE_SEARCH;
+  }
+  UIImage* searchIcon =
+      ios::GetChromeBrowserProvider()
+          ->GetBrandedImageProvider()
+          ->GetToolbarSearchIcon(searchEngineIcon, self.incognito);
+  DCHECK(searchIcon);
+  [self.consumer setSearchIcon:searchIcon];
 }
 
 @end

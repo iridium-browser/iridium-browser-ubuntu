@@ -48,6 +48,10 @@
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/crostini/crostini_util.h"
+#endif
+
 #if defined(OS_MACOSX)
 #include "chrome/browser/app_controller_mac.h"
 #endif
@@ -661,13 +665,13 @@ void SessionService::BuildCommandsForTab(const SessionID& window_id,
   }
 
   for (int i = min_index; i < max_index; ++i) {
-    const NavigationEntry* entry = (i == pending_index) ?
-        tab->GetController().GetPendingEntry() :
-        tab->GetController().GetEntryAtIndex(i);
+    NavigationEntry* entry = (i == pending_index)
+                                 ? tab->GetController().GetPendingEntry()
+                                 : tab->GetController().GetEntryAtIndex(i);
     DCHECK(entry);
     if (ShouldTrackURLForRestore(entry->GetVirtualURL())) {
       const SerializedNavigationEntry navigation =
-          ContentSerializedNavigationBuilder::FromNavigationEntry(i, *entry);
+          ContentSerializedNavigationBuilder::FromNavigationEntry(i, entry);
       base_session_service_->AppendRebuildCommand(
           CreateUpdateTabNavigationCommand(session_id, navigation));
     }
@@ -851,6 +855,13 @@ bool SessionService::ShouldTrackChangesToWindow(
 bool SessionService::ShouldTrackBrowser(Browser* browser) const {
   if (browser->profile() != profile())
     return false;
+#if defined(OS_CHROMEOS)
+  // Do not track Crostini apps because they will be dead upon restoring the
+  // browser session since VMs do not automatically restart on session restore.
+  if (crostini::CrostiniAppIdFromAppName(browser->app_name())) {
+    return false;
+  }
+#endif
   // Never track app popup windows that do not have a trusted source (i.e.
   // popup windows spawned by an app). If this logic changes, be sure to also
   // change SessionRestoreImpl::CreateRestoredBrowser().

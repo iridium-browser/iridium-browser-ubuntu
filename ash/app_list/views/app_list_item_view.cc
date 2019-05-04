@@ -14,13 +14,11 @@
 #include "ash/app_list/views/apps_grid_view.h"
 #include "ash/public/cpp/app_list/app_list_config.h"
 #include "ash/public/cpp/app_list/app_list_constants.h"
-#include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_list/app_list_switches.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/animation/throb_animation.h"
@@ -94,7 +92,7 @@ class ClippedFolderIconImageSource : public gfx::CanvasImageSource {
 
   void Draw(gfx::Canvas* canvas) override {
     // Draw the unclipped icon on the center of the canvas with a circular mask.
-    gfx::Path circular_mask;
+    SkPath circular_mask;
     circular_mask.addCircle(SkFloatToScalar(size_.width() / 2),
                             SkFloatToScalar(size_.height() / 2),
                             SkIntToScalar(size_.width() / 2));
@@ -119,8 +117,6 @@ class ClippedFolderIconImageSource : public gfx::CanvasImageSource {
 class AppListItemView::IconImageView : public views::ImageView {
  public:
   IconImageView() {
-    SetPaintToLayer();
-    layer()->SetFillsBoundsOpaquely(false);
     set_can_process_events_within_subtree(false);
     SetVerticalAlignment(views::ImageView::LEADING);
   }
@@ -146,6 +142,7 @@ class AppListItemView::IconImageView : public views::ImageView {
   // Sets a rounded rect mask layer with |corner_radius| and |insets| to clip
   // the icon.
   void SetRoundedRectMaskLayer(int corner_radius, const gfx::Insets& insets) {
+    EnsureLayer();
     icon_mask_ = views::Painter::CreatePaintedLayer(
         views::Painter::CreateSolidRoundRectPainter(SK_ColorBLACK,
                                                     corner_radius, insets));
@@ -156,6 +153,14 @@ class AppListItemView::IconImageView : public views::ImageView {
     // Save the attributes in case the layer is recreated.
     mask_corner_radius_ = corner_radius;
     mask_insets_ = insets;
+  }
+
+  // Ensure that the view has a layer.
+  void EnsureLayer() {
+    if (!layer()) {
+      SetPaintToLayer();
+      layer()->SetFillsBoundsOpaquely(false);
+    }
   }
 
  private:
@@ -185,19 +190,16 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
                                  bool is_in_folder)
     : Button(apps_grid_view),
       is_folder_(item->GetItemType() == AppListFolderItem::kItemType),
-      is_in_folder_(is_in_folder),
       item_weak_(item),
       delegate_(delegate),
       apps_grid_view_(apps_grid_view),
       icon_(new IconImageView),
       title_(new views::Label),
       progress_bar_(new views::ProgressBar),
-      is_new_style_launcher_enabled_(
-          app_list_features::IsNewStyleLauncherEnabled()),
       weak_ptr_factory_(this) {
   SetFocusBehavior(FocusBehavior::ALWAYS);
 
-  if (is_new_style_launcher_enabled_ && is_folder_) {
+  if (is_folder_) {
     // Set background blur for folder icon and use mask layer to clip it into
     // circle. Note that blur is only enabled in tablet mode to improve dragging
     // smoothness.
@@ -208,7 +210,7 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
         gfx::Insets(AppListConfig::instance().folder_icon_insets()));
   }
 
-  if (is_new_style_launcher_enabled_ && !is_in_folder_ && !is_folder_) {
+  if (!is_in_folder && !is_folder_) {
     // To display shadow for icon while not affecting the icon's bounds, icon
     // shadow is behind the icon.
     icon_shadow_ = new views::ImageView;
@@ -218,7 +220,6 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
   }
 
   title_->SetBackgroundColor(SK_ColorTRANSPARENT);
-  title_->SetAutoColorReadabilityEnabled(false);
   title_->SetHandlesTooltips(false);
   title_->SetFontList(AppListConfig::instance().app_title_font());
   title_->SetLineHeight(AppListConfig::instance().app_title_max_line_height());
@@ -226,13 +227,11 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
   title_->SetEnabledColor(apps_grid_view_->is_in_folder()
                               ? kFolderGridTitleColor
                               : AppListConfig::instance().grid_title_color());
-  if (is_new_style_launcher_enabled_ && !is_in_folder_) {
+  if (!is_in_folder) {
     title_->SetShadows(
         gfx::ShadowValues(1, gfx::ShadowValue(gfx::Vector2d(), kTitleShadowBlur,
                                               kTitleShadowColor)));
   }
-
-  SetTitleSubpixelAA();
 
   AddChildView(icon_);
   AddChildView(title_);
@@ -242,7 +241,6 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
   SetItemName(base::UTF8ToUTF16(item->GetDisplayName()),
               base::UTF8ToUTF16(item->name()));
   SetItemIsInstalling(item->is_installing());
-  SetItemIsHighlighted(item->highlighted());
   item->AddObserver(this);
 
   set_context_menu_controller(this);
@@ -250,6 +248,9 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
   SetAnimationDuration(0);
 
   preview_circle_radius_ = 0;
+
+  SetPaintToLayer();
+  layer()->SetFillsBoundsOpaquely(false);
 }
 
 AppListItemView::~AppListItemView() {
@@ -270,11 +271,7 @@ void AppListItemView::SetIcon(const gfx::ImageSkia& icon) {
       icon, skia::ImageOperations::RESIZE_BEST,
       is_folder_ ? AppListConfig::instance().folder_unclipped_icon_size()
                  : AppListConfig::instance().grid_icon_size());
-
-  if (shadow_animator_)
-    shadow_animator_->SetOriginalImage(resized);
-  else
-    icon_->SetImage(resized);
+  icon_->SetImage(resized);
 
   if (icon_shadow_) {
     // Create a shadow for the shown icon.
@@ -310,7 +307,6 @@ void AppListItemView::SetUIState(UIState ui_state) {
       break;
   }
 
-  SetTitleSubpixelAA();
   SchedulePaint();
 }
 
@@ -371,8 +367,11 @@ void AppListItemView::OnTouchDragTimer(
 }
 
 void AppListItemView::CancelContextMenu() {
-  if (context_menu_)
-    context_menu_->Cancel();
+  if (!context_menu_)
+    return;
+
+  menu_close_initiated_from_drag_ = true;
+  context_menu_->Cancel();
 }
 
 void AppListItemView::OnDragEnded() {
@@ -395,22 +394,23 @@ void AppListItemView::SetAsAttemptedFolderTarget(bool is_target_folder) {
 
 void AppListItemView::SetItemName(const base::string16& display_name,
                                   const base::string16& full_name) {
-  title_->SetText(display_name);
+  const base::string16 folder_name_placeholder =
+      ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
+          IDS_APP_LIST_FOLDER_NAME_PLACEHOLDER);
+  if (is_folder_ && display_name.empty())
+    title_->SetText(folder_name_placeholder);
+  else
+    title_->SetText(display_name);
 
   tooltip_text_ = display_name == full_name ? base::string16() : full_name;
 
   // Use full name for accessibility.
   SetAccessibleName(
       is_folder_ ? l10n_util::GetStringFUTF16(
-                       IDS_APP_LIST_FOLDER_BUTTON_ACCESSIBILE_NAME, full_name)
+                       IDS_APP_LIST_FOLDER_BUTTON_ACCESSIBILE_NAME,
+                       full_name.empty() ? folder_name_placeholder : full_name)
                  : full_name);
   Layout();
-}
-
-void AppListItemView::SetItemIsHighlighted(bool is_highlighted) {
-  is_highlighted_ = is_highlighted;
-  SetTitleSubpixelAA();
-  SchedulePaint();
 }
 
 void AppListItemView::SetItemIsInstalling(bool is_installing) {
@@ -419,7 +419,6 @@ void AppListItemView::SetItemIsInstalling(bool is_installing) {
     title_->SetVisible(!is_installing);
     progress_bar_->SetVisible(is_installing);
   }
-  SetTitleSubpixelAA();
   SchedulePaint();
 }
 
@@ -436,6 +435,7 @@ void AppListItemView::OnContextMenuModelReceived(
     const gfx::Point& point,
     ui::MenuSourceType source_type,
     std::vector<ash::mojom::MenuItemPtr> menu) {
+  waiting_for_context_menu_options_ = false;
   if (menu.empty() || (context_menu_ && context_menu_->IsShowingMenu()))
     return;
 
@@ -446,26 +446,24 @@ void AppListItemView::OnContextMenuModelReceived(
   if (apps_grid_view_->IsDragViewMoved(*this))
     return;
 
+  menu_show_initiated_from_key_ = source_type == ui::MENU_SOURCE_KEYBOARD;
+
   if (!apps_grid_view_->IsSelectedView(this))
     apps_grid_view_->ClearAnySelectedView();
-  int run_types = views::MenuRunner::HAS_MNEMONICS;
 
-  if (source_type == ui::MENU_SOURCE_TOUCH)
+  int run_types = views::MenuRunner::HAS_MNEMONICS |
+                  views::MenuRunner::USE_TOUCHABLE_LAYOUT |
+                  views::MenuRunner::FIXED_ANCHOR |
+                  views::MenuRunner::CONTEXT_MENU;
+
+  if (source_type == ui::MENU_SOURCE_TOUCH && touch_dragging_)
     run_types |= views::MenuRunner::SEND_GESTURE_EVENTS_TO_OWNER;
 
-  views::MenuAnchorPosition anchor_position = views::MENU_ANCHOR_TOPLEFT;
-  gfx::Rect anchor_rect = gfx::Rect(point, gfx::Size());
-
-  if (::features::IsTouchableAppContextMenuEnabled()) {
-    run_types |= views::MenuRunner::USE_TOUCHABLE_LAYOUT |
-                 views::MenuRunner::FIXED_ANCHOR |
-                 views::MenuRunner::CONTEXT_MENU;
-    anchor_position = views::MENU_ANCHOR_BUBBLE_TOUCHABLE_RIGHT;
-    anchor_rect = apps_grid_view_->GetIdealBounds(this);
-    // Anchor the menu to the same rect that is used for selection highlight.
-    AdaptBoundsForSelectionHighlight(&anchor_rect);
-    views::View::ConvertRectToScreen(apps_grid_view_, &anchor_rect);
-  }
+  gfx::Rect anchor_rect =
+      apps_grid_view_->GetMirroredRect(apps_grid_view_->GetIdealBounds(this));
+  // Anchor the menu to the same rect that is used for selection highlight.
+  AdaptBoundsForSelectionHighlight(&anchor_rect);
+  views::View::ConvertRectToScreen(apps_grid_view_, &anchor_rect);
 
   context_menu_ = std::make_unique<AppListMenuModelAdapter>(
       item_weak_->GetMetadata()->id, this, source_type, this,
@@ -473,13 +471,23 @@ void AppListItemView::OnContextMenuModelReceived(
       base::BindOnce(&AppListItemView::OnMenuClosed,
                      weak_ptr_factory_.GetWeakPtr()));
   context_menu_->Build(std::move(menu));
-  context_menu_->Run(anchor_rect, anchor_position, run_types);
+  context_menu_->Run(anchor_rect, views::MENU_ANCHOR_BUBBLE_TOUCHABLE_RIGHT,
+                     run_types);
   apps_grid_view_->SetSelectedView(this);
 }
 
 void AppListItemView::ShowContextMenuForView(views::View* source,
                                              const gfx::Point& point,
                                              ui::MenuSourceType source_type) {
+  if (context_menu_ && context_menu_->IsShowingMenu())
+    return;
+  // Prevent multiple requests for context menus before the current request
+  // completes. If a second request is sent before the first one can respond,
+  // the Chrome side delegate will become unresponsive
+  // (https://crbug.com/881886).
+  if (waiting_for_context_menu_options_)
+    return;
+  waiting_for_context_menu_options_ = true;
   delegate_->GetContextMenuModel(
       item_weak_->id(),
       base::BindOnce(&AppListItemView::OnContextMenuModelReceived,
@@ -491,24 +499,6 @@ void AppListItemView::ExecuteCommand(int command_id, int event_flags) {
     delegate_->ContextMenuItemSelected(item_weak_->id(), command_id,
                                        event_flags);
   }
-}
-
-void AppListItemView::StateChanged(ButtonState old_state) {
-  if (state() == STATE_HOVERED || state() == STATE_PRESSED) {
-    if (shadow_animator_)
-      shadow_animator_->animation()->Show();
-    // Show the hover/tap highlight: for tap, lighter highlight replaces darker
-    // keyboard selection; for mouse hover, keyboard selection takes precedence.
-    if (!apps_grid_view_->IsSelectedView(this) || state() == STATE_PRESSED)
-      SetItemIsHighlighted(true);
-  } else {
-    if (shadow_animator_)
-      shadow_animator_->animation()->Hide();
-    SetItemIsHighlighted(false);
-    if (item_weak_)
-      item_weak_->set_highlighted(false);
-  }
-  SetTitleSubpixelAA();
 }
 
 bool AppListItemView::ShouldEnterPushedState(const ui::Event& event) {
@@ -537,7 +527,7 @@ void AppListItemView::PaintButtonContents(gfx::Canvas* canvas) {
                           flags);
   }
 
-  int preview_circle_radius = GetPreviewCircleRadius();
+  const int preview_circle_radius = GetPreviewCircleRadius();
   if (!preview_circle_radius)
     return;
 
@@ -588,7 +578,6 @@ void AppListItemView::Layout() {
   }
   title_->SetBoundsRect(
       GetTitleBoundsForTargetViewBounds(rect, title_->GetPreferredSize()));
-  SetTitleSubpixelAA();
   progress_bar_->SetBoundsRect(GetProgressBarBoundsForTargetViewBounds(
       rect, progress_bar_->GetPreferredSize()));
 }
@@ -636,6 +625,12 @@ bool AppListItemView::OnMouseDragged(const ui::MouseEvent& event) {
     SetUIState(UI_STATE_DRAGGING);
   }
   return true;
+}
+
+bool AppListItemView::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
+  // Ensure accelerators take priority in the app list. This ensures, e.g., that
+  // Ctrl+Space will switch input methods rather than activate the button.
+  return false;
 }
 
 void AppListItemView::OnFocus() {
@@ -724,30 +719,20 @@ bool AppListItemView::GetTooltipText(const gfx::Point& p,
   return handled;
 }
 
-void AppListItemView::ImageShadowAnimationProgressed(
-    ImageShadowAnimator* animator) {
-  icon_->SetImage(animator->shadow_image());
-  Layout();
-}
-
 void AppListItemView::OnDraggedViewEnter() {
-  if (!is_new_style_launcher_enabled_)
-    return;
-
   CreateDraggedViewHoverAnimation();
   dragged_view_hover_animation_->Show();
 }
 
 void AppListItemView::OnDraggedViewExit() {
-  if (!is_new_style_launcher_enabled_)
-    return;
-
   CreateDraggedViewHoverAnimation();
   dragged_view_hover_animation_->Hide();
 }
 
 void AppListItemView::SetBackgroundBlurEnabled(bool enabled) {
   DCHECK(is_folder_);
+  if (enabled)
+    icon_->EnsureLayer();
   icon_->layer()->SetBackgroundBlur(
       enabled ? AppListConfig::instance().blur_radius() : 0);
 }
@@ -773,7 +758,18 @@ void AppListItemView::AnimationProgressed(const gfx::Animation* animation) {
 }
 
 void AppListItemView::OnMenuClosed() {
-  OnBlur();
+  if (!menu_close_initiated_from_drag_) {
+    // If the menu was not closed due to a drag sequence(e.g. multi touch) reset
+    // the drag state.
+    SetState(STATE_NORMAL);
+    SetTouchDragging(false);
+  }
+
+  menu_close_initiated_from_drag_ = false;
+
+  // Keep the item focused if the menu was shown via keyboard.
+  if (!menu_show_initiated_from_key_)
+    OnBlur();
 }
 
 void AppListItemView::OnSyncDragEnd() {
@@ -815,6 +811,7 @@ void AppListItemView::SetDragUIState() {
   SetUIState(UI_STATE_DRAGGING);
 }
 
+// static
 gfx::Rect AppListItemView::GetIconBoundsForTargetViewBounds(
     const gfx::Rect& target_bounds,
     const gfx::Size& icon_size) {
@@ -824,6 +821,7 @@ gfx::Rect AppListItemView::GetIconBoundsForTargetViewBounds(
   return rect;
 }
 
+// static
 gfx::Rect AppListItemView::GetTitleBoundsForTargetViewBounds(
     const gfx::Rect& target_bounds,
     const gfx::Size& title_size) {
@@ -835,6 +833,7 @@ gfx::Rect AppListItemView::GetTitleBoundsForTargetViewBounds(
   return rect;
 }
 
+// static
 gfx::Rect AppListItemView::GetProgressBarBoundsForTargetViewBounds(
     const gfx::Rect& target_bounds,
     const gfx::Size& progress_bar_size) {
@@ -843,27 +842,6 @@ gfx::Rect AppListItemView::GetProgressBarBoundsForTargetViewBounds(
       (target_bounds.width() - progress_bar_bounds.width()) / 2);
   progress_bar_bounds.set_y(target_bounds.y());
   return progress_bar_bounds;
-}
-
-void AppListItemView::SetTitleSubpixelAA() {
-  // TODO(tapted): Enable AA for folders as well, taking care to play nice with
-  // the folder bubble animation.
-  bool enable_aa = !is_in_folder_ && ui_state_ == UI_STATE_NORMAL &&
-                   !is_highlighted_ && !apps_grid_view_->IsSelectedView(this) &&
-                   !apps_grid_view_->IsAnimatingView(this);
-
-  title_->SetSubpixelRenderingEnabled(enable_aa);
-  if (enable_aa) {
-    title_->SetBackgroundColor(app_list::kLabelBackgroundColor);
-    title_->SetBackground(
-        views::CreateSolidBackground(app_list::kLabelBackgroundColor));
-  } else {
-    // In other cases, keep the background transparent to ensure correct
-    // interactions with animations. This will temporarily disable subpixel AA.
-    title_->SetBackgroundColor(0);
-    title_->SetBackground(nullptr);
-  }
-  title_->SchedulePaint();
 }
 
 void AppListItemView::ItemIconChanged() {
@@ -891,18 +869,7 @@ void AppListItemView::ItemBeingDestroyed() {
 }
 
 int AppListItemView::GetPreviewCircleRadius() const {
-  if (is_new_style_launcher_enabled_ && !is_folder_) {
-    // The preview circle animation is only enabled for new style launcher.
-    return preview_circle_radius_;
-  }
-
-  if (!is_new_style_launcher_enabled_ &&
-      ui_state_ == UI_STATE_DROPPING_IN_FOLDER) {
-    // Show a static preview circle when new style launcher is not enabled.
-    return AppListConfig::instance().folder_dropping_circle_radius();
-  }
-
-  return 0;
+  return is_folder_ ? 0 : preview_circle_radius_;
 }
 
 void AppListItemView::CreateDraggedViewHoverAnimation() {

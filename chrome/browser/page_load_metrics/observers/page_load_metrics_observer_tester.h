@@ -47,15 +47,17 @@ class PageLoadMetricsObserverTester : public test::WeakMockTimerProvider {
   // to the browser process. These will update the timing information for the
   // most recently committed navigation.
   void SimulateTimingUpdate(const mojom::PageLoadTiming& timing);
+  void SimulateTimingUpdate(const mojom::PageLoadTiming& timing,
+                            content::RenderFrameHost* rfh);
   void SimulateTimingAndMetadataUpdate(const mojom::PageLoadTiming& timing,
                                        const mojom::PageLoadMetadata& metadata);
   void SimulateFeaturesUpdate(const mojom::PageLoadFeatures& new_features);
-  void SimulatePageLoadTimingUpdate(
-      const mojom::PageLoadTiming& timing,
-      const mojom::PageLoadMetadata& metadata,
-      const mojom::PageLoadFeatures& new_features);
   void SimulateResourceDataUseUpdate(
       const std::vector<mojom::ResourceDataUpdatePtr>& resources);
+  void SimulateResourceDataUseUpdate(
+      const std::vector<mojom::ResourceDataUpdatePtr>& resources,
+      content::RenderFrameHost* render_frame_host);
+  void SimulateRenderDataUpdate(const mojom::PageRenderData& render_data);
 
   // Simulates a loaded resource. Main frame resources must specify a
   // GlobalRequestID, using the SimulateLoadedResource() method that takes a
@@ -83,6 +85,12 @@ class PageLoadMetricsObserverTester : public test::WeakMockTimerProvider {
   void RegisterObservers(PageLoadTracker* tracker);
 
  private:
+  void SimulatePageLoadTimingUpdate(const mojom::PageLoadTiming& timing,
+                                    const mojom::PageLoadMetadata& metadata,
+                                    const mojom::PageLoadFeatures& new_features,
+                                    const mojom::PageRenderData& render_data,
+                                    content::RenderFrameHost* rfh);
+
   content::WebContents* web_contents() const { return web_contents_; }
 
   RegisterObserversCallback register_callback_;

@@ -9,10 +9,10 @@
 #include <stdint.h>
 
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/containers/hash_tables.h"
 #include "base/format_macros.h"
 #include "base/macros.h"
 #include "base/memory/discardable_memory_allocator.h"
@@ -21,7 +21,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_current.h"
 #include "base/process/process_handle.h"
 #include "base/synchronization/lock.h"
@@ -142,8 +141,8 @@ class DISCARDABLE_MEMORY_EXPORT DiscardableSharedMemoryManager
 
   base::Lock lock_;
   using MemorySegmentMap =
-      base::hash_map<int32_t, scoped_refptr<MemorySegment>>;
-  using ClientMap = base::hash_map<int, MemorySegmentMap>;
+      std::unordered_map<int32_t, scoped_refptr<MemorySegment>>;
+  using ClientMap = std::unordered_map<int, MemorySegmentMap>;
   ClientMap clients_;
   // Note: The elements in |segments_| are arranged in such a way that they form
   // a heap. The LRU memory segment always first.
@@ -158,9 +157,13 @@ class DISCARDABLE_MEMORY_EXPORT DiscardableSharedMemoryManager
   base::Closure enforce_memory_policy_callback_;
   bool enforce_memory_policy_pending_;
 
-  // The message loop for running mojom::DiscardableSharedMemoryManger
+  // The message loop for running mojom::DiscardableSharedMemoryManager
   // implementations.
-  base::MessageLoop* mojo_thread_message_loop_;
+  // TODO(altimin,gab): Allow weak pointers to be deleted on other threads
+  // when the thread is gone and remove this.
+  // A prerequisite for this is allowing objects to be bound to the lifetime
+  // of a sequence directly.
+  base::MessageLoopCurrent mojo_thread_message_loop_;
 
   base::WeakPtrFactory<DiscardableSharedMemoryManager> weak_ptr_factory_;
 

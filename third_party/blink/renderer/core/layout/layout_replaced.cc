@@ -38,7 +38,7 @@
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/replaced_painter.h"
-#include "third_party/blink/renderer/platform/length_functions.h"
+#include "third_party/blink/renderer/platform/geometry/length_functions.h"
 
 namespace blink {
 
@@ -99,8 +99,7 @@ void LayoutReplaced::UpdateLayout() {
   UpdateLogicalWidth();
   UpdateLogicalHeight();
 
-  overflow_.reset();
-  AddVisualEffectOverflow();
+  ClearLayoutOverflow();
   UpdateAfterLayout();
 
   ClearNeedsLayout();
@@ -116,7 +115,7 @@ void LayoutReplaced::IntrinsicSizeChanged() {
       static_cast<int>(kDefaultHeight * StyleRef().EffectiveZoom());
   intrinsic_size_ = LayoutSize(scaled_width, scaled_height);
   SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
-      LayoutInvalidationReason::kSizeChanged);
+      layout_invalidation_reason::kSizeChanged);
 }
 
 void LayoutReplaced::Paint(const PaintInfo& paint_info) const {
@@ -153,8 +152,19 @@ static inline bool LayoutObjectHasAspectRatio(
          layout_object->IsVideo();
 }
 
+void LayoutReplaced::RecalcVisualOverflow() {
+  LayoutObject::RecalcVisualOverflow();
+  ClearVisualOverflow();
+  AddVisualEffectOverflow();
+}
+
 void LayoutReplaced::ComputeIntrinsicSizingInfoForReplacedContent(
     IntrinsicSizingInfo& intrinsic_sizing_info) const {
+  if (ShouldApplySizeContainment()) {
+    intrinsic_sizing_info.size = FloatSize();
+    return;
+  }
+
   ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
 
   // Update our intrinsic size to match what was computed, so that
@@ -648,11 +658,7 @@ LayoutRect LayoutReplaced::PreSnappedRectForPersistentSizing(LayoutRect rect) {
 
 void LayoutReplaced::ComputeIntrinsicSizingInfo(
     IntrinsicSizingInfo& intrinsic_sizing_info) const {
-  if (ShouldApplySizeContainment()) {
-    intrinsic_sizing_info.size = FloatSize();
-    return;
-  }
-
+  DCHECK(!ShouldApplySizeContainment());
   intrinsic_sizing_info.size = FloatSize(IntrinsicLogicalWidth().ToFloat(),
                                          IntrinsicLogicalHeight().ToFloat());
 

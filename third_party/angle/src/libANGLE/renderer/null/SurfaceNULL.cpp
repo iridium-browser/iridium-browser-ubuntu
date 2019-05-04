@@ -16,13 +16,9 @@
 namespace rx
 {
 
-SurfaceNULL::SurfaceNULL(const egl::SurfaceState &surfaceState) : SurfaceImpl(surfaceState)
-{
-}
+SurfaceNULL::SurfaceNULL(const egl::SurfaceState &surfaceState) : SurfaceImpl(surfaceState) {}
 
-SurfaceNULL::~SurfaceNULL()
-{
-}
+SurfaceNULL::~SurfaceNULL() {}
 
 egl::Error SurfaceNULL::initialize(const egl::Display *display)
 {
@@ -73,9 +69,7 @@ egl::Error SurfaceNULL::getSyncValues(EGLuint64KHR *ust, EGLuint64KHR *msc, EGLu
     return egl::EglBadAccess();
 }
 
-void SurfaceNULL::setSwapInterval(EGLint interval)
-{
-}
+void SurfaceNULL::setSwapInterval(EGLint interval) {}
 
 EGLint SurfaceNULL::getWidth() const
 {
@@ -102,7 +96,7 @@ EGLint SurfaceNULL::getSwapBehavior() const
 angle::Result SurfaceNULL::initializeContents(const gl::Context *context,
                                               const gl::ImageIndex &imageIndex)
 {
-    return angle::Result::Continue();
+    return angle::Result::Continue;
 }
 
 }  // namespace rx

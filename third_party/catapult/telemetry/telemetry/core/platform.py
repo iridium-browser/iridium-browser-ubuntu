@@ -343,19 +343,6 @@ class Platform(object):
     real_logging.info('IsMonitoringPower: %s', self._is_monitoring_power)
     return self._is_monitoring_power
 
-  def CanMonitorNetworkData(self):
-    """Returns true if network data can be retrieved, false otherwise."""
-    return self._platform_backend.CanMonitorNetworkData()
-
-  def GetNetworkData(self, browser):
-    """Get current network data.
-    Returns:
-      Tuple of (sent_data, received_data) in kb if data can be found,
-      None otherwise.
-    """
-    assert browser.platform == self
-    return self._platform_backend.GetNetworkData(browser)
-
   def IsCooperativeShutdownSupported(self):
     """Indicates whether CooperativelyShutdown, below, is supported.
     It is not necessary to implement it on all platforms."""
@@ -442,15 +429,6 @@ class Platform(object):
 
     server = memory_cache_http_server.MemoryCacheHTTPServer(paths)
     self.StartLocalServer(server)
-
-    # Requires port forwarding if platform is on ChromeOS, and
-    # replaces the http_server port number with the one resolved by
-    # remote machine with ssh/adb remote port forwarding.
-    if (self.GetOSName() == 'chromeos' and
-        self._platform_backend.IsRemoteDevice()):
-      self._forwarder = self._platform_backend.forwarder_factory.Create(
-          local_port=self.http_server.port, remote_port=0)
-      self.http_server.port = self._forwarder.remote_port
     return True
 
   def StopAllLocalServers(self):

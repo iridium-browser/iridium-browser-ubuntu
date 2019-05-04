@@ -53,6 +53,8 @@ class CORE_EXPORT HTMLSelectElement final
 
  public:
   static HTMLSelectElement* Create(Document&);
+
+  explicit HTMLSelectElement(Document&);
   ~HTMLSelectElement() override;
 
   int selectedIndex() const;
@@ -172,12 +174,9 @@ class CORE_EXPORT HTMLSelectElement final
 
   bool HasNonInBodyInsertionMode() const override { return true; }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
   void CloneNonAttributePropertiesFrom(const Element&,
                                        CloneChildrenFlag) override;
-
- protected:
-  explicit HTMLSelectElement(Document&);
 
  private:
   const AtomicString& FormControlType() const override;
@@ -197,7 +196,7 @@ class CORE_EXPORT HTMLSelectElement final
   bool IsEnumeratable() const override { return true; }
   bool IsInteractiveContent() const override;
   bool SupportsAutofocus() const override;
-  bool SupportLabels() const override { return true; }
+  bool IsLabelable() const override { return true; }
 
   FormControlState SaveFormControlState() const override;
   void RestoreFormControlState(const FormControlState&) override;
@@ -233,9 +232,9 @@ class CORE_EXPORT HTMLSelectElement final
   bool HasPlaceholderLabelOption() const;
 
   enum SelectOptionFlag {
-    kDeselectOtherOptions = 1 << 0,
-    kDispatchInputAndChangeEvent = 1 << 1,
-    kMakeOptionDirty = 1 << 2,
+    kDeselectOtherOptionsFlag = 1 << 0,
+    kDispatchInputAndChangeEventFlag = 1 << 1,
+    kMakeOptionDirtyFlag = 1 << 2,
   };
   typedef unsigned SelectOptionFlags;
   void SelectOption(HTMLOptionElement*, SelectOptionFlags);

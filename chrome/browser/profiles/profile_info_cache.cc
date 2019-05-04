@@ -29,7 +29,7 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
-#include "components/signin/core/browser/profile_management_switches.h"
+#include "components/signin/core/browser/account_consistency_method.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -535,21 +535,28 @@ void ProfileInfoCache::SetGAIAPictureOfProfileAtIndex(size_t index,
   base::FilePath path = GetPathOfProfileAtIndex(index);
   std::string key = CacheKeyFromProfilePath(path);
 
-  // Delete the old bitmap from cache.
-  cached_avatar_images_.erase(key);
-
   std::string old_file_name;
   GetInfoForProfileAtIndex(index)->GetString(
       kGAIAPictureFileNameKey, &old_file_name);
   std::string new_file_name;
 
+  if (!image && old_file_name.empty()) {
+    // On Windows, Taskbar and Desktop icons are refreshed every time
+    // |OnProfileAvatarChanged| notification is fired.
+    // Updating from an empty image to a null image is a no-op and it is
+    // important to avoid firing |OnProfileAvatarChanged| in this case.
+    // See http://crbug.com/900374
+    DCHECK_EQ(0U, cached_avatar_images_.count(key));
+    return;
+  }
+
+  // Delete the old bitmap from cache.
+  cached_avatar_images_.erase(key);
   if (!image) {
     // Delete the old bitmap from disk.
-    if (!old_file_name.empty()) {
-      base::FilePath image_path = path.AppendASCII(old_file_name);
-      file_task_runner_->PostTask(FROM_HERE,
-                                  base::BindOnce(&DeleteBitmap, image_path));
-    }
+    base::FilePath image_path = path.AppendASCII(old_file_name);
+    file_task_runner_->PostTask(FROM_HERE,
+                                base::BindOnce(&DeleteBitmap, image_path));
   } else {
     // Save the new bitmap to disk.
     new_file_name =

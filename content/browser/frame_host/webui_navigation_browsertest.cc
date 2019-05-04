@@ -9,7 +9,6 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
-#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
@@ -290,8 +289,8 @@ IN_PROC_BROWSER_TEST_F(WebUINavigationBrowserTest,
   BrowserContext* browser_context = web_contents->GetBrowserContext();
   GURL chrome_url = GURL(std::string(kChromeUIScheme) + "://" +
                          std::string(kChromeUIGpuHost));
-  EXPECT_TRUE(SiteInstanceImpl::DoesSiteRequireDedicatedProcess(browser_context,
-                                                                chrome_url));
+  EXPECT_TRUE(SiteInstanceImpl::DoesSiteRequireDedicatedProcess(
+      browser_context, IsolationContext(), chrome_url));
 
   // Navigate to a WebUI page.
   EXPECT_TRUE(NavigateToURL(shell(), chrome_url));
@@ -311,8 +310,8 @@ IN_PROC_BROWSER_TEST_F(WebUINavigationBrowserTest,
 
   // Verify that the blob also requires a dedicated process and that it would
   // use the same site url as the original page.
-  EXPECT_TRUE(SiteInstanceImpl::DoesSiteRequireDedicatedProcess(browser_context,
-                                                                blob_url));
+  EXPECT_TRUE(SiteInstanceImpl::DoesSiteRequireDedicatedProcess(
+      browser_context, IsolationContext(), blob_url));
   EXPECT_EQ(chrome_url, SiteInstance::GetSiteForURL(browser_context, blob_url));
 }
 

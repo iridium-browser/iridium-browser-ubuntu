@@ -16,7 +16,6 @@
 #include "ash/login/ui/lock_screen.h"
 #include "ash/login/ui/login_auth_user_view.h"
 #include "ash/login/ui/login_big_user_view.h"
-#include "ash/login/ui/login_bubble.h"
 #include "ash/login/ui/login_detachable_base_model.h"
 #include "ash/login/ui/login_expanded_public_account_view.h"
 #include "ash/login/ui/login_public_account_user_view.h"
@@ -27,7 +26,6 @@
 #include "ash/login/ui/views_utils.h"
 #include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/ash_switches.h"
-#include "ash/root_window_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
@@ -44,6 +42,7 @@
 #include "components/user_manager/user_type.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/display/display.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/manager/managed_display_info.h"
@@ -102,7 +101,7 @@ void SetPreferredWidthForView(views::View* view, int width) {
 class AuthErrorLearnMoreButton : public views::Button,
                                  public views::ButtonListener {
  public:
-  AuthErrorLearnMoreButton(LoginBubble* parent_bubble)
+  explicit AuthErrorLearnMoreButton(LoginErrorBubble* parent_bubble)
       : views::Button(this), parent_bubble_(parent_bubble) {
     SetLayoutManager(std::make_unique<views::FillLayout>());
     auto* label =
@@ -115,15 +114,17 @@ class AuthErrorLearnMoreButton : public views::Button,
     label->SetFontList(base_font_list.Derive(0, gfx::Font::FontStyle::NORMAL,
                                              gfx::Font::Weight::NORMAL));
     AddChildView(label);
+
+    SetAccessibleName(l10n_util::GetStringUTF16(IDS_ASH_LEARN_MORE));
   }
 
   void ButtonPressed(Button* sender, const ui::Event& event) override {
     Shell::Get()->login_screen_controller()->ShowAccountAccessHelpApp();
-    parent_bubble_->Close();
+    parent_bubble_->Hide();
   }
 
  private:
-  LoginBubble* parent_bubble_ = nullptr;
+  LoginErrorBubble* parent_bubble_;
 
   DISALLOW_COPY_AND_ASSIGN(AuthErrorLearnMoreButton);
 };
@@ -293,20 +294,26 @@ views::View* LockContentsView::TestApi::note_action() const {
   return view_->note_action_;
 }
 
-LoginBubble* LockContentsView::TestApi::tooltip_bubble() const {
-  return view_->tooltip_bubble_.get();
+LoginTooltipView* LockContentsView::TestApi::tooltip_bubble() const {
+  return view_->tooltip_bubble_;
 }
 
-LoginBubble* LockContentsView::TestApi::auth_error_bubble() const {
-  return view_->auth_error_bubble_.get();
+LoginErrorBubble* LockContentsView::TestApi::auth_error_bubble() const {
+  return view_->auth_error_bubble_;
 }
 
-LoginBubble* LockContentsView::TestApi::detachable_base_error_bubble() const {
-  return view_->detachable_base_error_bubble_.get();
+LoginErrorBubble* LockContentsView::TestApi::detachable_base_error_bubble()
+    const {
+  return view_->detachable_base_error_bubble_;
 }
 
-LoginBubble* LockContentsView::TestApi::warning_banner_bubble() const {
-  return view_->warning_banner_bubble_.get();
+LoginErrorBubble* LockContentsView::TestApi::warning_banner_bubble() const {
+  return view_->warning_banner_bubble_;
+}
+
+LoginErrorBubble*
+LockContentsView::TestApi::supervised_user_deprecation_bubble() const {
+  return view_->supervised_user_deprecation_bubble_;
 }
 
 views::View* LockContentsView::TestApi::system_info() const {
@@ -324,9 +331,7 @@ views::View* LockContentsView::TestApi::main_view() const {
 
 LockContentsView::UserState::UserState(const mojom::LoginUserInfoPtr& user_info)
     : account_id(user_info->basic_user_info->account_id) {
-  fingerprint_state = user_info->allow_fingerprint_unlock
-                          ? mojom::FingerprintUnlockState::AVAILABLE
-                          : mojom::FingerprintUnlockState::UNAVAILABLE;
+  fingerprint_state = user_info->fingerprint_state;
   if (user_info->auth_type == proximity_auth::mojom::AuthType::ONLINE_SIGN_IN)
     force_online_sign_in = true;
 }
@@ -352,10 +357,15 @@ LockContentsView::LockContentsView(
   Shell::Get()->login_screen_controller()->AddObserver(this);
   Shell::Get()->system_tray_notifier()->AddSystemTrayFocusObserver(this);
   keyboard::KeyboardController::Get()->AddObserver(this);
-  auth_error_bubble_ = std::make_unique<LoginBubble>();
-  detachable_base_error_bubble_ = std::make_unique<LoginBubble>();
-  tooltip_bubble_ = std::make_unique<LoginBubble>();
-  warning_banner_bubble_ = std::make_unique<LoginBubble>();
+  auth_error_bubble_ = LoginErrorBubble::CreateDefault();
+  supervised_user_deprecation_bubble_ = LoginErrorBubble::CreateDefault();
+  supervised_user_deprecation_bubble_->SetPersistent(true);
+  detachable_base_error_bubble_ = LoginErrorBubble::CreateDefault();
+  detachable_base_error_bubble_->SetPersistent(true);
+  tooltip_bubble_ = new LoginTooltipView(base::UTF8ToUTF16("") /*message*/,
+                                         nullptr /*anchor_view*/);
+  warning_banner_bubble_ = LoginErrorBubble::CreateDefault();
+  warning_banner_bubble_->SetPersistent(true);
 
   // We reuse the focusable state on this view as a signal that focus should
   // switch to the system tray. LockContentsView should otherwise not be
@@ -379,7 +389,7 @@ LockContentsView::LockContentsView(
   system_info_ = new views::View();
   auto* system_info_layout =
       system_info_->SetLayoutManager(std::make_unique<views::BoxLayout>(
-          views::BoxLayout::kVertical, gfx::Insets(5, 8)));
+          views::BoxLayout::kVertical, gfx::Insets(6, 8)));
   system_info_layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_END);
   system_info_->SetVisible(false);
@@ -417,9 +427,14 @@ LockContentsView::~LockContentsView() {
   }
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(
       this);
+
+  CleanupBubbles();
 }
 
 void LockContentsView::FocusNextUser() {
+  if (users_.empty())
+    return;
+
   if (login_views_utils::HasFocusInAnyChildView(primary_big_view_)) {
     if (opt_secondary_big_view_) {
       SwapActiveAuthBetweenPrimaryAndSecondary(false /*is_primary*/);
@@ -456,6 +471,9 @@ void LockContentsView::FocusNextUser() {
 }
 
 void LockContentsView::FocusPreviousUser() {
+  if (users_.empty())
+    return;
+
   if (login_views_utils::HasFocusInAnyChildView(primary_big_view_)) {
     if (users_list_) {
       users_list_->user_view_at(users_list_->user_count() - 1)->RequestFocus();
@@ -632,6 +650,83 @@ void LockContentsView::OnPinEnabledForUserChanged(const AccountId& user,
     LayoutAuth(big_user, nullptr /*opt_to_hide*/, true /*animate*/);
 }
 
+void LockContentsView::OnFingerprintStateChanged(
+    const AccountId& account_id,
+    mojom::FingerprintState state) {
+  UserState* user_state = FindStateForUser(account_id);
+  if (!user_state)
+    return;
+
+  user_state->fingerprint_state = state;
+  LoginBigUserView* big_view =
+      TryToFindBigUser(account_id, true /*require_auth_active*/);
+  if (!big_view || !big_view->auth_user())
+    return;
+
+  // TODO(crbug.com/893298): Re-enable animation once the error bubble supports
+  // being displayed on the left. This also requires that we dynamically
+  // track/update the position of the bubble, or alternatively we set the bubble
+  // location to the target animation position and not the current position.
+  bool animate = true;
+  if (user_state->fingerprint_state ==
+      mojom::FingerprintState::DISABLED_FROM_TIMEOUT) {
+    animate = false;
+  }
+
+  big_view->auth_user()->SetFingerprintState(user_state->fingerprint_state);
+  LayoutAuth(big_view, nullptr /*opt_to_hide*/, animate);
+
+  if (user_state->fingerprint_state ==
+      mojom::FingerprintState::DISABLED_FROM_TIMEOUT) {
+    base::string16 error_text = l10n_util::GetStringUTF16(
+        IDS_ASH_LOGIN_FINGERPRINT_UNLOCK_DISABLED_FROM_TIMEOUT);
+    auto* label = new views::Label(error_text);
+    label->SetAutoColorReadabilityEnabled(false);
+    label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    label->SetEnabledColor(SK_ColorWHITE);
+    label->SetSubpixelRenderingEnabled(false);
+    const gfx::FontList& base_font_list = views::Label::GetDefaultFontList();
+    label->SetFontList(base_font_list.Derive(0, gfx::Font::FontStyle::NORMAL,
+                                             gfx::Font::Weight::NORMAL));
+    label->SetMultiLine(true);
+    label->SetAllowCharacterBreak(true);
+    // Make sure to set a maximum label width, otherwise text wrapping will
+    // significantly increase width and layout may not work correctly if
+    // the input string is very long.
+    label->SetMaximumWidth(
+        big_view->auth_user()->password_view()->GetPreferredSize().width());
+
+    auto* container = new NonAccessibleView();
+    container->SetLayoutManager(
+        std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
+    container->AddChildView(label);
+
+    auth_error_bubble_->SetAnchorView(big_view->auth_user()->password_view());
+    auth_error_bubble_->SetContent(container);
+    auth_error_bubble_->SetPersistent(true);
+    auth_error_bubble_->Show();
+  }
+}
+
+void LockContentsView::OnFingerprintAuthResult(const AccountId& account_id,
+                                               bool success) {
+  // Make sure the display backlight is not forced off if there is a fingerprint
+  // authentication attempt. If the display backlight is off, then the device
+  // will authenticate and dismiss the lock screen but it will not be visible to
+  // the user.
+  Shell::Get()->power_button_controller()->StopForcingBacklightsOff();
+
+  // |account_id| comes from IPC, make sure it refers to a valid user. The
+  // fingerprint scan could have also happened while switching users, so the
+  // associated account is no longer a big user.
+  LoginBigUserView* big_view =
+      TryToFindBigUser(account_id, true /*require_auth_active*/);
+  if (!big_view || !big_view->auth_user())
+    return;
+
+  big_view->auth_user()->NotifyFingerprintAuthResult(success);
+}
+
 void LockContentsView::OnAuthEnabledForUserChanged(
     const AccountId& user,
     bool enabled,
@@ -645,9 +740,11 @@ void LockContentsView::OnAuthEnabledForUserChanged(
 
   DCHECK(enabled || auth_reenabled_time);
   state->disable_auth = !enabled;
-  // TODO(crbug.com/845287): Reenable lock screen note when auth is reenabled.
-  if (state->disable_auth)
-    DisableLockScreenNote();
+  disable_lock_screen_note_ = state->disable_auth;
+  OnLockScreenNoteStateChanged(
+      disable_lock_screen_note_
+          ? mojom::TrayActionState::kNotAvailable
+          : Shell::Get()->tray_action()->GetLockScreenNoteState());
 
   LoginBigUserView* big_user =
       TryToFindBigUser(user, true /*require_auth_active*/);
@@ -703,10 +800,13 @@ void LockContentsView::OnShowEasyUnlockIcon(
   if (!big_user || !big_user->auth_user())
     return;
 
-  tooltip_bubble_->Close();
+  if (tooltip_bubble_->IsVisible())
+    tooltip_bubble_->Hide();
+
   if (icon->autoshow_tooltip) {
-    tooltip_bubble_->ShowTooltip(
-        icon->tooltip, big_user->auth_user()->password_view() /*anchor_view*/);
+    tooltip_bubble_->SetAnchorView(big_user->auth_user()->password_view());
+    tooltip_bubble_->SetText(icon->tooltip);
+    tooltip_bubble_->Show();
   }
 }
 
@@ -717,7 +817,8 @@ void LockContentsView::OnShowWarningBanner(const base::string16& message) {
                   "warning banner.";
     return;
   }
-  warning_banner_bubble_->Close();
+  if (warning_banner_bubble_->IsVisible())
+    warning_banner_bubble_->Hide();
   // Shows warning banner as a persistent error bubble.
   views::Label* label =
       new views::Label(message, views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT,
@@ -726,13 +827,16 @@ void LockContentsView::OnShowWarningBanner(const base::string16& message) {
   label->SetAutoColorReadabilityEnabled(false);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label->SetEnabledColor(SK_ColorWHITE);
-  warning_banner_bubble_->ShowErrorBubble(
-      label, CurrentBigUserView()->auth_user()->password_view() /*anchor_view*/,
-      LoginBubble::kFlagPersistent);
+
+  warning_banner_bubble_->SetContent(label);
+  warning_banner_bubble_->SetAnchorView(
+      CurrentBigUserView()->auth_user()->password_view());
+  warning_banner_bubble_->Show();
 }
 
 void LockContentsView::OnHideWarningBanner() {
-  warning_banner_bubble_->Close();
+  if (warning_banner_bubble_->IsVisible())
+    warning_banner_bubble_->Hide();
 }
 
 void LockContentsView::OnLockScreenNoteStateChanged(
@@ -777,6 +881,8 @@ void LockContentsView::OnSystemInfoChanged(
     for (int i = 0; i < 3; ++i)
       system_info_->AddChildView(create_info_label());
   }
+  if (::features::IsSingleProcessMash())
+    system_info_->AddChildView(create_info_label());
 
   if (show)
     system_info_->SetVisible(true);
@@ -790,6 +896,8 @@ void LockContentsView::OnSystemInfoChanged(
   update_label(0, os_version_label_text);
   update_label(1, enterprise_info_text);
   update_label(2, bluetooth_name);
+  if (::features::IsSingleProcessMash())
+    update_label(3, "SingleProcessMash");
 
   LayoutTopHeader();
 }
@@ -857,6 +965,12 @@ void LockContentsView::OnPublicSessionKeyboardLayoutsChanged(
   user_view->UpdateForUser(user_info, false /*animate*/);
 }
 
+void LockContentsView::OnPublicSessionShowFullManagementDisclosureChanged(
+    bool show_full_management_disclosure) {
+  expanded_view_->SetShowFullManagementDisclosure(
+      show_full_management_disclosure);
+}
+
 void LockContentsView::OnDetachableBasePairingStatusChanged(
     DetachableBasePairingStatus pairing_status) {
   // If the current big user is public account user, or the base is not paired,
@@ -868,11 +982,13 @@ void LockContentsView::OnDetachableBasePairingStatusChanged(
       (pairing_status == DetachableBasePairingStatus::kAuthenticated &&
        detachable_base_model_->PairedBaseMatchesLastUsedByUser(
            *CurrentBigUserView()->GetCurrentUser()->basic_user_info))) {
-    detachable_base_error_bubble_->Close();
+    if (detachable_base_error_bubble_->IsVisible())
+      detachable_base_error_bubble_->Hide();
     return;
   }
 
-  auth_error_bubble_->Close();
+  if (auth_error_bubble_->IsVisible())
+    auth_error_bubble_->Hide();
 
   base::string16 error_text =
       l10n_util::GetStringUTF16(IDS_ASH_LOGIN_ERROR_DETACHABLE_BASE_CHANGED);
@@ -885,77 +1001,15 @@ void LockContentsView::OnDetachableBasePairingStatusChanged(
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label->SetEnabledColor(SK_ColorWHITE);
 
-  detachable_base_error_bubble_->ShowErrorBubble(
-      label, CurrentBigUserView()->auth_user()->password_view() /*anchor_view*/,
-      LoginBubble::kFlagPersistent);
+  detachable_base_error_bubble_->SetContent(label);
+  detachable_base_error_bubble_->SetAnchorView(
+      CurrentBigUserView()->auth_user()->password_view());
+  detachable_base_error_bubble_->Show();
 
   // Remove the focus from the password field, to make user less likely to enter
   // the password without seeing the warning about detachable base change.
   if (GetWidget()->IsActive())
     GetWidget()->GetFocusManager()->ClearFocus();
-}
-
-void LockContentsView::OnFingerprintUnlockStateChanged(
-    const AccountId& account_id,
-    mojom::FingerprintUnlockState state) {
-  // Make sure the display backlight is not forced off if there is a fingerprint
-  // authentication attempt. If the display backlight is off, then the device
-  // will authenticate and dismiss the lock screen but it will not be visible to
-  // the user.
-  Shell::Get()->power_button_controller()->StopForcingBacklightsOff();
-
-  UserState* user_state = FindStateForUser(account_id);
-  if (!user_state)
-    return;
-
-  user_state->fingerprint_state = state;
-  LoginBigUserView* big_view =
-      TryToFindBigUser(account_id, true /*require_auth_active*/);
-  if (!big_view || !big_view->auth_user())
-    return;
-
-  // TODO(crbug.com/893298): Re-enable animation once the error bubble supports
-  // being displayed on the left. This also requires that we dynamically
-  // track/update the position of the bubble, or alternatively we set the bubble
-  // location to the target animation position and not the current position.
-  bool animate = true;
-  if (user_state->fingerprint_state ==
-      mojom::FingerprintUnlockState::AUTH_DISABLED_FROM_TIMEOUT) {
-    animate = false;
-  }
-
-  big_view->auth_user()->SetFingerprintState(user_state->fingerprint_state);
-  LayoutAuth(big_view, nullptr /*opt_to_hide*/, animate);
-
-  if (user_state->fingerprint_state ==
-      mojom::FingerprintUnlockState::AUTH_DISABLED_FROM_TIMEOUT) {
-    base::string16 error_text = l10n_util::GetStringUTF16(
-        IDS_ASH_LOGIN_FINGERPRINT_UNLOCK_DISABLED_FROM_TIMEOUT_MESSAGE);
-    auto* label = new views::Label(error_text);
-    label->SetAutoColorReadabilityEnabled(false);
-    label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    label->SetEnabledColor(SK_ColorWHITE);
-    label->SetSubpixelRenderingEnabled(false);
-    const gfx::FontList& base_font_list = views::Label::GetDefaultFontList();
-    label->SetFontList(base_font_list.Derive(0, gfx::Font::FontStyle::NORMAL,
-                                             gfx::Font::Weight::NORMAL));
-    label->SetMultiLine(true);
-    label->SetAllowCharacterBreak(true);
-    // Make sure to set a maximum label width, otherwise text wrapping will
-    // significantly increase width and layout may not work correctly if
-    // the input string is very long.
-    label->SetMaximumWidth(
-        big_view->auth_user()->password_view()->GetPreferredSize().width());
-
-    auto* container = new NonAccessibleView();
-    container->SetLayoutManager(
-        std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
-    container->AddChildView(label);
-
-    auth_error_bubble_->ShowErrorBubble(
-        container, big_view->auth_user()->password_view() /*anchor_view*/,
-        LoginBubble::kFlagPersistent);
-  }
 }
 
 void LockContentsView::SetAvatarForUser(const AccountId& account_id,
@@ -1030,25 +1084,12 @@ void LockContentsView::OnLockStateChanged(bool locked) {
   }
 }
 
-void LockContentsView::OnStateChanged(
-    const keyboard::KeyboardControllerState state) {
-  if (!primary_big_view_)
+void LockContentsView::OnKeyboardVisibilityStateChanged(bool is_visible) {
+  if (!primary_big_view_ || keyboard_shown_ == is_visible)
     return;
 
-  if (state == keyboard::KeyboardControllerState::SHOWN ||
-      state == keyboard::KeyboardControllerState::HIDDEN) {
-    bool keyboard_will_be_shown =
-        state == keyboard::KeyboardControllerState::SHOWN;
-    // Keyboard state can go from SHOWN -> SomeStateOtherThanShownOrHidden ->
-    // SHOWN when we click on the inactive BigUser while the virtual keyboard is
-    // active. In this case, we should do nothing, since
-    // SwapActiveAuthBetweenPrimaryAndSecondary handles the re-layout.
-    if (keyboard_shown_ == keyboard_will_be_shown)
-      return;
-    keyboard_shown_ = keyboard_will_be_shown;
-    LayoutAuth(CurrentBigUserView(), nullptr /*opt_to_hide*/,
-               false /*animate*/);
-  }
+  keyboard_shown_ = is_visible;
+  LayoutAuth(CurrentBigUserView(), nullptr /*opt_to_hide*/, false /*animate*/);
 }
 
 void LockContentsView::SuspendImminent(
@@ -1281,8 +1322,11 @@ void LockContentsView::SwapActiveAuthBetweenPrimaryAndSecondary(
 
 void LockContentsView::OnAuthenticate(bool auth_success) {
   if (auth_success) {
-    auth_error_bubble_->Close();
-    detachable_base_error_bubble_->Close();
+    if (auth_error_bubble_->IsVisible())
+      auth_error_bubble_->Hide();
+
+    if (detachable_base_error_bubble_->IsVisible())
+      detachable_base_error_bubble_->Hide();
 
     // Now that the user has been authenticated, update the user's last used
     // detachable base (if one is attached). This will prevent further
@@ -1334,19 +1378,19 @@ void LockContentsView::LayoutAuth(LoginBigUserView* to_update,
         to_update_auth = LoginAuthUserView::AUTH_DISABLED;
       } else {
         to_update_auth = LoginAuthUserView::AUTH_PASSWORD;
-        keyboard::KeyboardController* keyboard_controller =
-            GetKeyboardController();
-        const bool is_keyboard_visible =
-            keyboard_controller ? keyboard_controller->IsKeyboardVisible()
-                                : false;
-        if (state->show_pin && !is_keyboard_visible)
+        // Need to check |GetKeyboardControllerForView| as the keyboard may be
+        // visible, but the keyboard is in a different root window or the view
+        // has not been added to the widget. In these cases, the keyboard does
+        // not interfere with PIN entry.
+        const bool is_keyboard_visible_for_view =
+            GetKeyboardControllerForView() ? keyboard_shown_ : false;
+        if (state->show_pin && !is_keyboard_visible_for_view)
           to_update_auth |= LoginAuthUserView::AUTH_PIN;
         if (state->enable_tap_auth)
           to_update_auth |= LoginAuthUserView::AUTH_TAP;
-        if (state->fingerprint_state !=
-                mojom::FingerprintUnlockState::UNAVAILABLE &&
+        if (state->fingerprint_state != mojom::FingerprintState::UNAVAILABLE &&
             state->fingerprint_state !=
-                mojom::FingerprintUnlockState::AUTH_DISABLED_FROM_TIMEOUT) {
+                mojom::FingerprintState::DISABLED_FROM_TIMEOUT) {
           to_update_auth |= LoginAuthUserView::AUTH_FINGERPRINT;
         }
 
@@ -1443,13 +1487,14 @@ void LockContentsView::RemoveUser(bool is_primary) {
 }
 
 void LockContentsView::OnBigUserChanged() {
-  const AccountId new_big_user =
-      CurrentBigUserView()->GetCurrentUser()->basic_user_info->account_id;
+  const mojom::LoginUserInfoPtr& big_user =
+      CurrentBigUserView()->GetCurrentUser();
+  const AccountId big_user_account_id = big_user->basic_user_info->account_id;
 
   CurrentBigUserView()->RequestFocus();
 
-  Shell::Get()->login_screen_controller()->OnFocusPod(new_big_user);
-  UpdateEasyUnlockIconForUser(new_big_user);
+  Shell::Get()->login_screen_controller()->OnFocusPod(big_user_account_id);
+  UpdateEasyUnlockIconForUser(big_user_account_id);
 
   if (unlock_attempt_ > 0) {
     // Times a password was incorrectly entered until user gives up (change
@@ -1459,6 +1504,28 @@ void LockContentsView::OnBigUserChanged() {
 
     // Reset unlock attempt when the auth user changes.
     unlock_attempt_ = 0;
+  }
+
+  // http://crbug/866790: After Supervised Users are deprecated, remove this.
+  if (ash::features::IsSupervisedUserDeprecationNoticeEnabled() &&
+      big_user->basic_user_info->type == user_manager::USER_TYPE_SUPERVISED) {
+    base::string16 message = l10n_util::GetStringUTF16(
+        IDS_ASH_LOGIN_POD_LEGACY_SUPERVISED_EXPIRATION_WARNING);
+    // Shows supervised user deprecation message as a persistent error bubble.
+    views::Label* label =
+        new views::Label(message, views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT,
+                         views::style::STYLE_PRIMARY);
+    label->SetMultiLine(true);
+    label->SetAutoColorReadabilityEnabled(false);
+    label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    label->SetEnabledColor(SK_ColorWHITE);
+
+    supervised_user_deprecation_bubble_->SetContent(label);
+    supervised_user_deprecation_bubble_->SetAnchorView(
+        CurrentBigUserView()->auth_user()->password_view());
+    supervised_user_deprecation_bubble_->Show();
+  } else if (supervised_user_deprecation_bubble_->IsVisible()) {
+    supervised_user_deprecation_bubble_->Hide();
   }
 
   // The new auth user might have different last used detachable base - make
@@ -1552,8 +1619,7 @@ void LockContentsView::ShowAuthErrorMessage() {
   MakeSectionBold(label, error_text, bold_start, bold_length);
   label->set_auto_color_readability_enabled(false);
 
-  auto* learn_more_button =
-      new AuthErrorLearnMoreButton(auth_error_bubble_.get());
+  auto* learn_more_button = new AuthErrorLearnMoreButton(auth_error_bubble_);
 
   auto* container = new NonAccessibleView(kAuthErrorContainerName);
   container->SetLayoutManager(std::make_unique<views::BoxLayout>(
@@ -1562,9 +1628,13 @@ void LockContentsView::ShowAuthErrorMessage() {
   container->AddChildView(label);
   container->AddChildView(learn_more_button);
 
-  auth_error_bubble_->ShowErrorBubble(
-      container, big_view->auth_user()->password_view() /*anchor_view*/,
-      LoginBubble::kFlagsNone);
+  if (auth_error_bubble_->IsVisible())
+    auth_error_bubble_->Hide();
+
+  auth_error_bubble_->SetAnchorView(big_view->auth_user()->password_view());
+  auth_error_bubble_->SetContent(container);
+  auth_error_bubble_->SetPersistent(false);
+  auth_error_bubble_->Show();
 }
 
 void LockContentsView::OnEasyUnlockIconHovered() {
@@ -1579,9 +1649,9 @@ void LockContentsView::OnEasyUnlockIconHovered() {
   DCHECK(easy_unlock_state);
 
   if (!easy_unlock_state->tooltip.empty()) {
-    tooltip_bubble_->ShowTooltip(
-        easy_unlock_state->tooltip,
-        big_view->auth_user()->password_view() /*anchor_view*/);
+    tooltip_bubble_->SetAnchorView(big_view->auth_user()->password_view());
+    tooltip_bubble_->SetText(easy_unlock_state->tooltip);
+    tooltip_bubble_->Show();
   }
 }
 
@@ -1601,7 +1671,8 @@ void LockContentsView::OnEasyUnlockIconTapped() {
   }
 }
 
-keyboard::KeyboardController* LockContentsView::GetKeyboardController() const {
+keyboard::KeyboardController* LockContentsView::GetKeyboardControllerForView()
+    const {
   return GetWidget() ? GetKeyboardControllerForWidget(GetWidget()) : nullptr;
 }
 
@@ -1720,11 +1791,6 @@ void LockContentsView::SetDisplayStyle(DisplayStyle style) {
   Layout();
 }
 
-void LockContentsView::DisableLockScreenNote() {
-  disable_lock_screen_note_ = true;
-  OnLockScreenNoteStateChanged(mojom::TrayActionState::kNotAvailable);
-}
-
 void LockContentsView::RegisterAccelerators() {
   // Accelerators that apply on login and lock:
   accel_map_[ui::Accelerator(ui::VKEY_RIGHT, 0)] =
@@ -1780,6 +1846,31 @@ void LockContentsView::PerformAction(AcceleratorAction action) {
     default:
       NOTREACHED();
   }
+}
+
+void LockContentsView::CleanupBubbles() {
+  // If any of the error bubbles have been shown once, it is hosted by a
+  // widget under the Ash menu container, so we should Close the widget when we
+  // destroy LockContentsView (otherwise it will live for the entire lifetime of
+  // the Menu container). If a bubble has never been shown, then we can just
+  // delete it, since it is owned directly by LockContentsView.
+  auto cleanup = [](LoginBaseBubbleView* bubble) {
+    if (bubble->GetWidget())
+      bubble->GetWidget()->Close();
+    else
+      delete bubble;
+  };
+
+  cleanup(auth_error_bubble_);
+  auth_error_bubble_ = nullptr;
+  cleanup(detachable_base_error_bubble_);
+  detachable_base_error_bubble_ = nullptr;
+  cleanup(tooltip_bubble_);
+  tooltip_bubble_ = nullptr;
+  cleanup(warning_banner_bubble_);
+  warning_banner_bubble_ = nullptr;
+  cleanup(supervised_user_deprecation_bubble_);
+  supervised_user_deprecation_bubble_ = nullptr;
 }
 
 }  // namespace ash

@@ -6,7 +6,6 @@
 #define CONTENT_RENDERER_SERVICE_WORKER_SERVICE_WORKER_PROVIDER_STATE_FOR_CLIENT_H_
 
 #include <stdint.h>
-#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -14,14 +13,13 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
-#include "content/common/service_worker/controller_service_worker.mojom.h"
-#include "content/common/service_worker/service_worker_container.mojom.h"
-#include "content/common/service_worker/service_worker_provider.mojom.h"
 #include "content/renderer/service_worker/web_service_worker_provider_impl.h"
-#include "content/renderer/service_worker/web_service_worker_registration_impl.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/controller_service_worker.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_container.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_provider.mojom.h"
 #include "third_party/blink/public/platform/web_feature.mojom.h"
 
 namespace content {
@@ -51,6 +49,8 @@ struct ServiceWorkerProviderStateForClient {
   // The Client#id value of the client.
   std::string client_id;
 
+  base::UnguessableToken fetch_request_window_id;
+
   blink::mojom::ControllerServiceWorkerMode controller_mode =
       blink::mojom::ControllerServiceWorkerMode::kNoController;
 
@@ -68,10 +68,10 @@ struct ServiceWorkerProviderStateForClient {
   // - If this ServiceWorkerProviderContext is for a SharedWorker (technically
   //   speaking, for its shadow page), then |worker_clients| has one element:
   //   the shared worker.
-  std::vector<mojom::ServiceWorkerWorkerClientPtr> worker_clients;
+  std::vector<blink::mojom::ServiceWorkerWorkerClientPtr> worker_clients;
 
   // For adding new ServiceWorkerWorkerClients.
-  mojo::BindingSet<mojom::ServiceWorkerWorkerClientRegistry>
+  mojo::BindingSet<blink::mojom::ServiceWorkerWorkerClientRegistry>
       worker_client_registry_bindings;
 
   // S13nServiceWorker
@@ -88,12 +88,8 @@ struct ServiceWorkerProviderStateForClient {
   // subresource loader factory and lives on a background thread. This is
   // populated when GetSubresourceLoader() creates the subresource loader
   // factory and takes |controller_endpoint|.
-  mojom::ControllerServiceWorkerPtrInfo controller_endpoint;
-  mojom::ControllerServiceWorkerConnectorPtr controller_connector;
-
-  // For service worker clients. Map from registration id to JavaScript
-  // ServiceWorkerRegistration object.
-  std::map<int64_t, WebServiceWorkerRegistrationImpl*> registrations_;
+  blink::mojom::ControllerServiceWorkerPtrInfo controller_endpoint;
+  blink::mojom::ControllerServiceWorkerConnectorPtr controller_connector;
 };
 
 }  // namespace content

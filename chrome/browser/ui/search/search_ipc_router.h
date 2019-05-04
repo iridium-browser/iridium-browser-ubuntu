@@ -62,6 +62,9 @@ class SearchIPCRouter : public content::WebContentsObserver,
                                     const GURL& new_url,
                                     const std::string& new_title) = 0;
 
+    // Called when the EmbeddedSearch wants to reorder a custom link.
+    virtual bool OnReorderCustomLink(const GURL& url, int new_pos) = 0;
+
     // Called when the EmbeddedSearch wants to delete a custom link.
     virtual bool OnDeleteCustomLink(const GURL& url) = 0;
 
@@ -72,11 +75,6 @@ class SearchIPCRouter : public content::WebContentsObserver,
     // Called when the EmbeddedSearch wants to delete all custom links and
     // use Most Visited sites instead.
     virtual void OnResetCustomLinks() = 0;
-
-    // Called when the EmbeddedSearch wants to check if |url| resolves to an
-    // existing page.
-    virtual void OnDoesUrlResolve(const GURL& url,
-                                  DoesUrlResolveCallback callback) = 0;
 
     // Called to signal that an event has occurred on the New Tab Page at a
     // particular time since navigation start.
@@ -120,6 +118,25 @@ class SearchIPCRouter : public content::WebContentsObserver,
     // Called to open the file select dialog for selecting a
     // NTP background image.
     virtual void OnSelectLocalBackgroundImage() = 0;
+
+    // Called when a search suggestion is blocklisted on the local NTP.
+    virtual void OnBlocklistSearchSuggestion(int task_version,
+                                             long task_id) = 0;
+
+    // Called when a search suggestion is blocklisted on the local NTP and a
+    // hash is provided.
+    virtual void OnBlocklistSearchSuggestionWithHash(int task_version,
+                                                     long task_id,
+                                                     const uint8_t hash[4]) = 0;
+
+    // Called when a search suggestion is selected on the local NTP.
+    virtual void OnSearchSuggestionSelected(int task_version,
+                                            long task_id,
+                                            const uint8_t hash[4]) = 0;
+
+    // Called when a user selected to completely opt out of NTP search
+    // suggestions.
+    virtual void OnOptOutOfSearchSuggestions() = 0;
   };
 
   // An interface to be implemented by consumers of SearchIPCRouter objects to
@@ -137,10 +154,10 @@ class SearchIPCRouter : public content::WebContentsObserver,
     virtual bool ShouldProcessUndoAllMostVisitedDeletions() = 0;
     virtual bool ShouldProcessAddCustomLink() = 0;
     virtual bool ShouldProcessUpdateCustomLink() = 0;
+    virtual bool ShouldProcessReorderCustomLink() = 0;
     virtual bool ShouldProcessDeleteCustomLink() = 0;
     virtual bool ShouldProcessUndoCustomLinkAction() = 0;
     virtual bool ShouldProcessResetCustomLinks() = 0;
-    virtual bool ShouldProcessDoesUrlResolve() = 0;
     virtual bool ShouldProcessLogEvent() = 0;
     virtual bool ShouldProcessPasteIntoOmnibox(bool is_active_tab) = 0;
     virtual bool ShouldProcessChromeIdentityCheck() = 0;
@@ -152,6 +169,10 @@ class SearchIPCRouter : public content::WebContentsObserver,
     virtual bool ShouldProcessSetCustomBackgroundURL() = 0;
     virtual bool ShouldProcessSetCustomBackgroundURLWithAttributions() = 0;
     virtual bool ShouldProcessSelectLocalBackgroundImage() = 0;
+    virtual bool ShouldProcessBlocklistSearchSuggestion() = 0;
+    virtual bool ShouldProcessBlocklistSearchSuggestionWithHash() = 0;
+    virtual bool ShouldProcessSearchSuggestionSelected() = 0;
+    virtual bool ShouldProcessOptOutOfSearchSuggestions() = 0;
   };
 
   // Creates chrome::mojom::EmbeddedSearchClient connections on request.
@@ -209,14 +230,14 @@ class SearchIPCRouter : public content::WebContentsObserver,
                         const GURL& new_url,
                         const std::string& new_title,
                         UpdateCustomLinkCallback callback) override;
+  void ReorderCustomLink(int page_seq_no,
+                         const GURL& url,
+                         int new_pos) override;
   void DeleteCustomLink(int page_seq_no,
                         const GURL& url,
                         DeleteCustomLinkCallback callback) override;
   void UndoCustomLinkAction(int page_seq_no) override;
   void ResetCustomLinks(int page_seq_no) override;
-  void DoesUrlResolve(int page_seq_no,
-                      const GURL& url,
-                      DoesUrlResolveCallback callback) override;
   void LogEvent(int page_seq_no,
                 NTPLoggingEventType event,
                 base::TimeDelta time) override;
@@ -240,6 +261,16 @@ class SearchIPCRouter : public content::WebContentsObserver,
       const std::string& attribution_line_2,
       const GURL& action_url) override;
   void SelectLocalBackgroundImage() override;
+  void BlocklistSearchSuggestion(int32_t task_version,
+                                 int64_t task_id) override;
+  void BlocklistSearchSuggestionWithHash(
+      int32_t task_version,
+      int64_t task_id,
+      const std::vector<uint8_t>& hash) override;
+  void SearchSuggestionSelected(int32_t task_version,
+                                int64_t task_id,
+                                const std::vector<uint8_t>& hash) override;
+  void OptOutOfSearchSuggestions() override;
   void set_embedded_search_client_factory_for_testing(
       std::unique_ptr<EmbeddedSearchClientFactory> factory) {
     embedded_search_client_factory_ = std::move(factory);

@@ -11,6 +11,8 @@
 
 #if defined(SK_VULKAN)
 
+#include "vk/GrVkVulkan.h"
+
 #include "GrBackendSurface.h"
 #include "GrContextPriv.h"
 #include "GrContextFactory.h"
@@ -40,7 +42,8 @@ void wrap_tex_test(skiatest::Reporter* reporter, GrContext* context) {
     GrVkImageInfo imageInfo;
     SkAssertResult(origBackendTex.getVkImageInfo(&imageInfo));
 
-    sk_sp<GrTexture> tex = gpu->wrapBackendTexture(origBackendTex, kBorrow_GrWrapOwnership);
+    sk_sp<GrTexture> tex =
+            gpu->wrapBackendTexture(origBackendTex, kBorrow_GrWrapOwnership, kRead_GrIOType, false);
     REPORTER_ASSERT(reporter, tex);
 
     // image is null
@@ -49,9 +52,9 @@ void wrap_tex_test(skiatest::Reporter* reporter, GrContext* context) {
         backendCopy.fImage = VK_NULL_HANDLE;
         GrBackendTexture backendTex = GrBackendTexture(kW, kH, backendCopy);
         backendTex.setPixelConfig(kPixelConfig);
-        tex = gpu->wrapBackendTexture(backendTex, kBorrow_GrWrapOwnership);
+        tex = gpu->wrapBackendTexture(backendTex, kBorrow_GrWrapOwnership, kRead_GrIOType, false);
         REPORTER_ASSERT(reporter, !tex);
-        tex = gpu->wrapBackendTexture(backendTex, kAdopt_GrWrapOwnership);
+        tex = gpu->wrapBackendTexture(backendTex, kAdopt_GrWrapOwnership, kRead_GrIOType, false);
         REPORTER_ASSERT(reporter, !tex);
     }
 
@@ -61,9 +64,9 @@ void wrap_tex_test(skiatest::Reporter* reporter, GrContext* context) {
         backendCopy.fAlloc = GrVkAlloc();
         GrBackendTexture backendTex = GrBackendTexture(kW, kH, backendCopy);
         backendTex.setPixelConfig(kPixelConfig);
-        tex = gpu->wrapBackendTexture(backendTex, kBorrow_GrWrapOwnership);
+        tex = gpu->wrapBackendTexture(backendTex, kBorrow_GrWrapOwnership, kRead_GrIOType, false);
         REPORTER_ASSERT(reporter, !tex);
-        tex = gpu->wrapBackendTexture(backendTex, kAdopt_GrWrapOwnership);
+        tex = gpu->wrapBackendTexture(backendTex, kAdopt_GrWrapOwnership, kRead_GrIOType, false);
         REPORTER_ASSERT(reporter, !tex);
     }
 
@@ -72,7 +75,7 @@ void wrap_tex_test(skiatest::Reporter* reporter, GrContext* context) {
         GrVkImageInfo backendCopy = imageInfo;
         GrBackendTexture backendTex = GrBackendTexture(kW, kH, backendCopy);
         backendTex.setPixelConfig(kPixelConfig);
-        tex = gpu->wrapBackendTexture(backendTex, kAdopt_GrWrapOwnership);
+        tex = gpu->wrapBackendTexture(backendTex, kAdopt_GrWrapOwnership, kRead_GrIOType, false);
 
         REPORTER_ASSERT(reporter, tex);
     }

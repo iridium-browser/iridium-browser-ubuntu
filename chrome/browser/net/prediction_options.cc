@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "chrome/browser/profiles/profile_io_data.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -23,12 +24,13 @@ NetworkPredictionStatus CanPrefetchAndPrerender(
   switch (network_prediction_options) {
     case NETWORK_PREDICTION_ALWAYS:
     case NETWORK_PREDICTION_WIFI_ONLY:
-      if (net::NetworkChangeNotifier::IsConnectionCellular(
-                 net::NetworkChangeNotifier::GetConnectionType())) {
-        return NetworkPredictionStatus::DISABLED_DUE_TO_NETWORK;
-      } else {
+      if (base::FeatureList::IsEnabled(
+              features::kPredictivePrefetchingAllowedOnAllConnectionTypes) ||
+          !net::NetworkChangeNotifier::IsConnectionCellular(
+              net::NetworkChangeNotifier::GetConnectionType())) {
         return NetworkPredictionStatus::ENABLED;
       }
+      return NetworkPredictionStatus::DISABLED_DUE_TO_NETWORK;
     default:
       return NetworkPredictionStatus::DISABLED_ALWAYS;
   }

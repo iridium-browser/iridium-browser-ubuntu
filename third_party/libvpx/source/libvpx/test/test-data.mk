@@ -3,6 +3,8 @@ LIBVPX_TEST_SRCS-yes += test-data.mk
 # Encoder test source
 LIBVPX_TEST_DATA-$(CONFIG_ENCODERS) += hantro_collage_w352h288.yuv
 LIBVPX_TEST_DATA-$(CONFIG_ENCODERS) += hantro_odd.yuv
+LIBVPX_TEST_DATA-$(CONFIG_ENCODERS) += desktop_office1.1280_720-020.yuv
+LIBVPX_TEST_DATA-$(CONFIG_ENCODERS) += slides_code_term_web_plot.1920_1080.yuv
 
 LIBVPX_TEST_DATA-$(CONFIG_ENCODERS) += park_joy_90p_10_420.y4m
 LIBVPX_TEST_DATA-$(CONFIG_ENCODERS) += park_joy_90p_10_422.y4m
@@ -787,6 +789,10 @@ LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-2-07-frame_parallel-2.web
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-2-07-frame_parallel-3.webm
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-629481.webm
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-629481.webm.res
+LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-1558.ivf
+LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-1558.ivf.res
+LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-1562.ivf
+LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-1562.ivf.res
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-667044.webm
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-667044.webm.res
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += crbug-1539.rawfile

@@ -16,6 +16,7 @@
 #include "SkRegion.h"
 #include "SkShader.h"
 #include "SkString.h"
+#include "SkTextUtils.h"
 #include "SkTime.h"
 #include "SkUTF.h"
 
@@ -79,27 +80,21 @@ protected:
                     x = SkScalarRoundToScalar(x);
                     y = SkScalarRoundToScalar(y);
                     canvas->drawBitmap(fBitmaps[i], x, y, &paint);
+                    SkFont font;
+                    font.setSize(SkIntToScalar(18));
                     if (i == 0) {
-                        SkPaint p;
-                        p.setAntiAlias(true);
-                        p.setTextAlign(SkPaint::kCenter_Align);
-                        p.setTextSize(SkIntToScalar(18));
                         SkString s("dither=");
                         s.appendS32(paint.isDither());
                         s.append(" filter=");
                         s.appendS32(paint.getFilterQuality() != kNone_SkFilterQuality);
-                        canvas->drawString(s, x + W/2,
-                                         y - p.getTextSize(), p);
+                        SkTextUtils::DrawString(canvas, s.c_str(), x + W/2, y - font.getSize(), font, SkPaint(),
+                                                SkTextUtils::kCenter_Align);
                     }
                     if (k+j == 2) {
-                        SkPaint p;
-                        p.setAntiAlias(true);
-                        p.setTextSize(SkIntToScalar(18));
                         SkString s;
                         s.append(" depth=");
                         s.appendS32(fBitmaps[i].colorType() == kRGB_565_SkColorType ? 16 : 32);
-                        canvas->drawString(s, x + W + SkIntToScalar(4),
-                                         y + H/2, p);
+                        SkTextUtils::DrawString(canvas, s.c_str(), x + W + SkIntToScalar(4), y + H/2, font, SkPaint());
                     }
                 }
             }

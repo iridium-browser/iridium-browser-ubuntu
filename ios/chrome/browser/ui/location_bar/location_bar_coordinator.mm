@@ -17,6 +17,8 @@
 #include "components/variations/net/variations_http_headers.h"
 #include "ios/chrome/browser/autocomplete/autocomplete_scheme_classifier_impl.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/geolocation/omnibox_geolocation_controller.h"
+#import "ios/chrome/browser/ntp/new_tab_page_tab_helper.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #include "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
@@ -37,6 +39,7 @@
 #import "ios/chrome/browser/ui/toolbar/toolbar_coordinator_delegate.h"
 #import "ios/chrome/browser/ui/url_loader.h"
 #import "ios/chrome/browser/ui/util/pasteboard_util.h"
+#import "ios/chrome/browser/url_loading/url_loading_util.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/public/provider/chrome/browser/voice/voice_search_provider.h"
@@ -74,6 +77,11 @@ const int kLocationAuthorizationStatusCount = 4;
 @property(nonatomic, strong) OmniboxCoordinator* omniboxCoordinator;
 @property(nonatomic, strong) LocationBarMediator* mediator;
 @property(nonatomic, strong) LocationBarViewController* viewController;
+
+// Tracks calls in progress to -cancelOmniboxEdit to avoid calling it from
+// itself when -resignFirstResponder causes -textFieldWillResignFirstResponder
+// delegate call.
+@property(nonatomic, assign) BOOL isCancellingOmniboxEdit;
 
 @end
 
@@ -146,8 +154,8 @@ const int kLocationAuthorizationStatusCount = 4;
   self.omniboxPopupCoordinator.webStateList = self.webStateList;
   [self.omniboxPopupCoordinator start];
 
-  self.mediator =
-      [[LocationBarMediator alloc] initWithToolbarModel:[self toolbarModel]];
+  self.mediator = [[LocationBarMediator alloc]
+      initWithLocationBarModel:[self locationBarModel]];
   self.mediator.webStateList = self.webStateList;
   self.mediator.consumer = self;
 
@@ -218,15 +226,15 @@ const int kLocationAuthorizationStatusCount = 4;
 #pragma mark - LocationBarURLLoader
 
 - (void)loadGURLFromLocationBar:(const GURL&)url
-                     transition:(ui::PageTransition)transition {
+                     transition:(ui::PageTransition)transition
+                    disposition:(WindowOpenDisposition)disposition {
   if (url.SchemeIs(url::kJavaScriptScheme)) {
-    // Evaluate the URL as JavaScript if its scheme is JavaScript.
-    NSString* jsToEval = [base::SysUTF8ToNSString(url.GetContent())
-        stringByRemovingPercentEncoding];
-    [self.URLLoader loadJavaScriptFromLocationBar:jsToEval];
+    LoadJavaScriptURL(url, self.browserState,
+                      self.webStateList->GetActiveWebState());
   } else {
-    // When opening a URL, force the omnibox to resign first responder.  This
-    // will also close the popup.
+    // When opening a URL, warn the omnibox geolocation in case it needs to stop
+    // the service.
+    [[OmniboxGeolocationController sharedInstance] locationBarDidSubmitURL];
 
     // TODO(crbug.com/785244): Is it ok to call |cancelOmniboxEdit| after
     // |loadURL|?  It doesn't seem to be causing major problems.  If we call
@@ -235,7 +243,9 @@ const int kLocationAuthorizationStatusCount = 4;
     web::NavigationManager::WebLoadParams params(url);
     params.transition_type = transition;
     params.extra_headers = [self variationHeadersForURL:url];
-    [self.URLLoader loadURLWithParams:params];
+    ChromeLoadParams chromeParams(params);
+    chromeParams.disposition = disposition;
+    [self.URLLoader loadURLWithParams:chromeParams];
 
     if (google_util::IsGoogleSearchUrl(url)) {
       UMA_HISTOGRAM_ENUMERATION(
@@ -250,6 +260,13 @@ const int kLocationAuthorizationStatusCount = 4;
 #pragma mark - OmniboxFocuser
 
 - (void)focusOmniboxFromSearchButton {
+  // TODO(crbug.com/931284): Temporary workaround for intermediate broken state
+  // in the NTP.  Remove this once crbug.com/899827 is fixed.
+  NewTabPageTabHelper* NTPHelper =
+      NewTabPageTabHelper::FromWebState(self.webState);
+  if (NTPHelper && NTPHelper->IsActive() && NTPHelper->IgnoreLoadRequests()) {
+    return;
+  }
   [self.omniboxCoordinator setNextFocusSourceAsSearchButton];
   [self focusOmnibox];
 }
@@ -259,9 +276,19 @@ const int kLocationAuthorizationStatusCount = 4;
 }
 
 - (void)focusOmnibox {
+  // TODO(crbug.com/931284): Temporary workaround for intermediate broken state
+  // in the NTP.  Remove this once crbug.com/899827 is fixed.
+  NewTabPageTabHelper* NTPHelper =
+      NewTabPageTabHelper::FromWebState(self.webState);
+  if (NTPHelper && NTPHelper->IsActive() && NTPHelper->IgnoreLoadRequests()) {
+    return;
+  }
+  // Dismiss the edit menu.
+  [[UIMenuController sharedMenuController] setMenuVisible:NO animated:NO];
+
   // When the NTP and fakebox are visible, make the fakebox animates into place
-  // before focusing the omnibox.
-  if (IsVisibleUrlNewTabPage([self webState]) &&
+  // before focusing the omnibox.webState
+  if (IsVisibleURLNewTabPage([self webState]) &&
       !self.browserState->IsOffTheRecord()) {
     [self.viewController.dispatcher focusFakebox];
   } else {
@@ -271,8 +298,13 @@ const int kLocationAuthorizationStatusCount = 4;
 }
 
 - (void)cancelOmniboxEdit {
+  if (self.isCancellingOmniboxEdit) {
+    return;
+  }
+  self.isCancellingOmniboxEdit = YES;
   [self.omniboxCoordinator endEditing];
   [self.omniboxPopupCoordinator closePopup];
+  self.isCancellingOmniboxEdit = NO;
 }
 
 #pragma mark - LocationBarDelegate
@@ -293,8 +325,8 @@ const int kLocationAuthorizationStatusCount = 4;
   return self.webStateList->GetActiveWebState();
 }
 
-- (ToolbarModel*)toolbarModel {
-  return [self.delegate toolbarModel];
+- (LocationBarModel*)locationBarModel {
+  return [self.delegate locationBarModel];
 }
 
 #pragma mark - LocationBarViewControllerDelegate
@@ -370,7 +402,8 @@ const int kLocationAuthorizationStatusCount = 4;
     web::NavigationManager::WebLoadParams params(searchURL);
     params.transition_type = ui::PageTransitionFromInt(
         ui::PAGE_TRANSITION_LINK | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
-    [self.URLLoader loadURLWithParams:params];
+    ChromeLoadParams chromeParams(params);
+    [self.URLLoader loadURLWithParams:chromeParams];
   }
 }
 

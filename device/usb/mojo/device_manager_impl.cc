@@ -21,6 +21,12 @@
 #include "device/usb/usb_device.h"
 #include "device/usb/usb_service.h"
 
+#if defined(OS_CHROMEOS)
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/permission_broker_client.h"
+#include "device/usb/usb_device_linux.h"
+#endif  // defined(OS_CHROMEOS)
+
 namespace device {
 namespace usb {
 
@@ -37,11 +43,19 @@ void DeviceManagerImpl::AddBinding(mojom::UsbDeviceManagerRequest request) {
     bindings_.AddBinding(this, std::move(request));
 }
 
+void DeviceManagerImpl::EnumerateDevicesAndSetClient(
+    mojom::UsbDeviceManagerClientAssociatedPtrInfo client,
+    EnumerateDevicesAndSetClientCallback callback) {
+  usb_service_->GetDevices(base::Bind(
+      &DeviceManagerImpl::OnGetDevices, weak_factory_.GetWeakPtr(),
+      /*options=*/nullptr, base::Passed(&client), base::Passed(&callback)));
+}
+
 void DeviceManagerImpl::GetDevices(mojom::UsbEnumerationOptionsPtr options,
                                    GetDevicesCallback callback) {
-  usb_service_->GetDevices(
-      base::Bind(&DeviceManagerImpl::OnGetDevices, weak_factory_.GetWeakPtr(),
-                 base::Passed(&options), base::Passed(&callback)));
+  usb_service_->GetDevices(base::Bind(
+      &DeviceManagerImpl::OnGetDevices, weak_factory_.GetWeakPtr(),
+      base::Passed(&options), /*client=*/nullptr, base::Passed(&callback)));
 }
 
 void DeviceManagerImpl::GetDevice(const std::string& guid,
@@ -55,6 +69,58 @@ void DeviceManagerImpl::GetDevice(const std::string& guid,
                      std::move(device_client));
 }
 
+#if defined(OS_CHROMEOS)
+void DeviceManagerImpl::CheckAccess(const std::string& guid,
+                                    CheckAccessCallback callback) {
+  scoped_refptr<UsbDevice> device = usb_service_->GetDevice(guid);
+  if (device) {
+    device->CheckUsbAccess(std::move(callback));
+  } else {
+    LOG(ERROR) << "Was asked to check access to non-existent USB device: "
+               << guid;
+    std::move(callback).Run(false);
+  }
+}
+
+void DeviceManagerImpl::OpenFileDescriptor(
+    const std::string& guid,
+    OpenFileDescriptorCallback callback) {
+  auto* client =
+      chromeos::DBusThreadManager::Get()->GetPermissionBrokerClient();
+  scoped_refptr<UsbDevice> device = usb_service_->GetDevice(guid);
+  if (!device) {
+    LOG(ERROR) << "Was asked to open non-existent USB device: " << guid;
+    std::move(callback).Run(base::File());
+  } else {
+    auto copyable_callback =
+        base::AdaptCallbackForRepeating(std::move(callback));
+    auto devpath =
+        static_cast<device::UsbDeviceLinux*>(device.get())->device_path();
+    client->OpenPath(
+        devpath,
+        base::BindRepeating(&DeviceManagerImpl::OnOpenFileDescriptor,
+                            weak_factory_.GetWeakPtr(), copyable_callback),
+        base::BindRepeating(&DeviceManagerImpl::OnOpenFileDescriptorError,
+                            weak_factory_.GetWeakPtr(), copyable_callback));
+  }
+}
+
+void DeviceManagerImpl::OnOpenFileDescriptor(
+    OpenFileDescriptorCallback callback,
+    base::ScopedFD fd) {
+  std::move(callback).Run(base::File(fd.release()));
+}
+
+void DeviceManagerImpl::OnOpenFileDescriptorError(
+    OpenFileDescriptorCallback callback,
+    const std::string& error_name,
+    const std::string& message) {
+  LOG(ERROR) << "Failed to open USB device file: " << error_name << " "
+             << message;
+  std::move(callback).Run(base::File());
+}
+#endif  // defined(OS_CHROMEOS)
+
 void DeviceManagerImpl::SetClient(
     mojom::UsbDeviceManagerClientAssociatedPtrInfo client) {
   DCHECK(client);
@@ -65,6 +131,7 @@ void DeviceManagerImpl::SetClient(
 
 void DeviceManagerImpl::OnGetDevices(
     mojom::UsbEnumerationOptionsPtr options,
+    mojom::UsbDeviceManagerClientAssociatedPtrInfo client,
     GetDevicesCallback callback,
     const std::vector<scoped_refptr<UsbDevice>>& devices) {
   std::vector<mojom::UsbDeviceFilterPtr> filters;
@@ -79,6 +146,9 @@ void DeviceManagerImpl::OnGetDevices(
   }
 
   std::move(callback).Run(std::move(device_infos));
+
+  if (client)
+    SetClient(std::move(client));
 }
 
 void DeviceManagerImpl::OnDeviceAdded(scoped_refptr<UsbDevice> device) {

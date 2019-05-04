@@ -94,31 +94,27 @@ static void setup_vertex_input_state(const GrPrimitiveProcessor& primProc,
     int vaCount = primProc.numVertexAttributes();
     int attribIndex = 0;
     size_t vertexAttributeOffset = 0;
-    for (; attribIndex < vaCount; attribIndex++) {
-        const GrGeometryProcessor::Attribute& attrib = primProc.vertexAttribute(attribIndex);
+    for (const auto& attrib : primProc.vertexAttributes()) {
         VkVertexInputAttributeDescription& vkAttrib = attributeDesc[attribIndex];
-        vkAttrib.location = attribIndex;  // for now assume location = attribIndex
+        vkAttrib.location = attribIndex++;  // for now assume location = attribIndex
         vkAttrib.binding = vertexBinding;
         vkAttrib.format = attrib_type_to_vkformat(attrib.cpuType());
         vkAttrib.offset = vertexAttributeOffset;
-        SkASSERT(vkAttrib.offset == primProc.debugOnly_vertexAttributeOffset(attribIndex));
         vertexAttributeOffset += attrib.sizeAlign4();
     }
-    SkASSERT(vertexAttributeOffset == primProc.debugOnly_vertexStride());
+    SkASSERT(vertexAttributeOffset == primProc.vertexStride());
 
     int iaCount = primProc.numInstanceAttributes();
     size_t instanceAttributeOffset = 0;
-    for (int iaIndex = 0; iaIndex < iaCount; ++iaIndex, ++attribIndex) {
-        const GrGeometryProcessor::Attribute& attrib = primProc.instanceAttribute(iaIndex);
+    for (const auto& attrib : primProc.instanceAttributes()) {
         VkVertexInputAttributeDescription& vkAttrib = attributeDesc[attribIndex];
-        vkAttrib.location = attribIndex;  // for now assume location = attribIndex
+        vkAttrib.location = attribIndex++;  // for now assume location = attribIndex
         vkAttrib.binding = instanceBinding;
         vkAttrib.format = attrib_type_to_vkformat(attrib.cpuType());
         vkAttrib.offset = instanceAttributeOffset;
-        SkASSERT(vkAttrib.offset == primProc.debugOnly_instanceAttributeOffset(iaIndex));
         instanceAttributeOffset += attrib.sizeAlign4();
     }
-    SkASSERT(instanceAttributeOffset == primProc.debugOnly_instanceStride());
+    SkASSERT(instanceAttributeOffset == primProc.instanceStride());
 
     if (primProc.hasVertexAttributes()) {
         bindingDescs->push_back() = {
@@ -291,10 +287,8 @@ static void setup_multisample_state(const GrPrimitiveProcessor& primProc,
     int numSamples = pipeline.proxy()->numColorSamples();
     SkAssertResult(GrSampleCountToVkSampleCount(numSamples,
                    &multisampleInfo->rasterizationSamples));
-    float sampleShading = primProc.getSampleShading();
-    SkASSERT(sampleShading == 0.0f || caps->sampleShadingSupport());
-    multisampleInfo->sampleShadingEnable = sampleShading > 0.0f;
-    multisampleInfo->minSampleShading = sampleShading;
+    multisampleInfo->sampleShadingEnable = VK_FALSE;
+    multisampleInfo->minSampleShading = 0.0f;
     multisampleInfo->pSampleMask = nullptr;
     multisampleInfo->alphaToCoverageEnable = VK_FALSE;
     multisampleInfo->alphaToOneEnable = VK_FALSE;
@@ -320,7 +314,7 @@ static VkBlendFactor blend_coeff_to_vk_blend(GrBlendCoeff coeff) {
         VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR,      // kIS2C_GrBlendCoeff
         VK_BLEND_FACTOR_SRC1_ALPHA,                // kS2A_GrBlendCoeff
         VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA,      // kIS2A_GrBlendCoeff
-
+        VK_BLEND_FACTOR_ZERO,                      // kIllegal_GrBlendCoeff
     };
     GR_STATIC_ASSERT(SK_ARRAY_COUNT(gTable) == kGrBlendCoeffCnt);
     GR_STATIC_ASSERT(0 == kZero_GrBlendCoeff);
@@ -369,7 +363,10 @@ static VkBlendOp blend_equation_to_vk_blend_op(GrBlendEquation equation) {
         VK_BLEND_OP_HSL_HUE_EXT,
         VK_BLEND_OP_HSL_SATURATION_EXT,
         VK_BLEND_OP_HSL_COLOR_EXT,
-        VK_BLEND_OP_HSL_LUMINOSITY_EXT
+        VK_BLEND_OP_HSL_LUMINOSITY_EXT,
+
+        // Illegal.
+        VK_BLEND_OP_ADD,
     };
     GR_STATIC_ASSERT(0 == kAdd_GrBlendEquation);
     GR_STATIC_ASSERT(1 == kSubtract_GrBlendEquation);
@@ -416,6 +413,9 @@ static bool blend_coeff_refs_constant(GrBlendCoeff coeff) {
         false,
         false,
         false,
+        false,
+
+        // Illegal
         false,
     };
     return gCoeffReferencesBlendConst[coeff];
@@ -569,7 +569,7 @@ GrVkPipeline* GrVkPipeline::Create(GrVkGpu* gpu, const GrPrimitiveProcessor& pri
     return new GrVkPipeline(vkPipeline);
 }
 
-void GrVkPipeline::freeGPUData(const GrVkGpu* gpu) const {
+void GrVkPipeline::freeGPUData(GrVkGpu* gpu) const {
     GR_VK_CALL(gpu->vkInterface(), DestroyPipeline(gpu->device(), fPipeline, nullptr));
 }
 
@@ -624,8 +624,11 @@ void GrVkPipeline::SetDynamicBlendConstantState(GrVkGpu* gpu,
     if (blend_coeff_refs_constant(srcCoeff) || blend_coeff_refs_constant(dstCoeff)) {
         // Swizzle the blend to match what the shader will output.
         const GrSwizzle& swizzle = gpu->caps()->shaderCaps()->configOutputSwizzle(pixelConfig);
-        GrColor blendConst = swizzle.applyTo(blendInfo.fBlendConstant);
-        GrColorToRGBAFloat(blendConst, floatColors);
+        SkPMColor4f blendConst = swizzle.applyTo(blendInfo.fBlendConstant);
+        floatColors[0] = blendConst.fR;
+        floatColors[1] = blendConst.fG;
+        floatColors[2] = blendConst.fB;
+        floatColors[3] = blendConst.fA;
     } else {
         memset(floatColors, 0, 4 * sizeof(float));
     }

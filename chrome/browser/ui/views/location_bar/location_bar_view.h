@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/views/dropdown_bar_host_delegate.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "chrome/browser/ui/views/location_bar/content_setting_image_view.h"
+#include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_view.h"
 #include "components/prefs/pref_member.h"
@@ -42,7 +43,6 @@ class GURL;
 class IntentPickerView;
 class KeywordHintView;
 class LocationIconView;
-class ManagePasswordsIconViews;
 enum class OmniboxPart;
 class OmniboxPopupView;
 enum class OmniboxTint;
@@ -50,7 +50,6 @@ class PageActionIconContainerView;
 class Profile;
 class SelectedKeywordView;
 class StarView;
-class TranslateIconView;
 
 namespace autofill {
 class LocalCardMigrationIconView;
@@ -78,6 +77,7 @@ class LocationBarView : public LocationBar,
                         public ChromeOmniboxEditController,
                         public DropdownBarHostDelegate,
                         public views::ButtonListener,
+                        public LocationIconView::Delegate,
                         public ContentSettingImageView::Delegate,
                         public PageActionIconView::Delegate,
                         public ui::MaterialDesignControllerObserver {
@@ -87,8 +87,8 @@ class LocationBarView : public LocationBar,
     // Should return the current web contents.
     virtual content::WebContents* GetWebContents() = 0;
 
-    virtual ToolbarModel* GetToolbarModel() = 0;
-    virtual const ToolbarModel* GetToolbarModel() const = 0;
+    virtual LocationBarModel* GetLocationBarModel() = 0;
+    virtual const LocationBarModel* GetLocationBarModel() const = 0;
 
     // Returns ContentSettingBubbleModelDelegate.
     virtual ContentSettingBubbleModelDelegate*
@@ -109,14 +109,8 @@ class LocationBarView : public LocationBar,
 
   ~LocationBarView() override;
 
-  // Returns the location bar border thickness in DIPs.
-  static int GetBorderThicknessDip();
-
-  // Whether the location bar is a pill shape.
-  static bool IsRounded();
-
   // Returns the location bar border radius in DIPs.
-  float GetBorderRadius() const;
+  int GetBorderRadius() const;
 
   // Initializes the LocationBarView.
   void Init();
@@ -132,24 +126,19 @@ class LocationBarView : public LocationBar,
   // It's guaranteed to be opaque.
   SkColor GetOpaqueBorderColor(bool incognito) const;
 
-  // Returns the color to be used for the security chip in the context of
-  // |security_level|.
-  SkColor GetSecurityChipColor(
-      security_state::SecurityLevel security_level) const;
-
-  // Returns the color to use for icon ink highlights.
-  SkColor GetIconInkDropColor() const;
-
   // Returns the cached theme color tint for the location bar and results.
   OmniboxTint tint() const { return tint_; }
 
+  // Returns a background that paints an (optionally stroked) rounded rect with
+  // the given color.
+  std::unique_ptr<views::Background> CreateRoundRectBackground(
+      SkColor background_color,
+      SkColor stroke_color,
+      SkBlendMode blend_mode = SkBlendMode::kSrcOver,
+      bool antialias = true) const;
+
   // Returns the delegate.
   Delegate* delegate() const { return delegate_; }
-
-  // The passwords icon. It may not be visible.
-  ManagePasswordsIconViews* manage_passwords_icon_view() {
-    return manage_passwords_icon_view_;
-  }
 
   // Toggles the star on or off.
   void SetStarToggled(bool on);
@@ -173,9 +162,6 @@ class LocationBarView : public LocationBar,
     return local_card_migration_icon_view_;
   }
 
-  // The translate icon. It may not be visible.
-  TranslateIconView* translate_icon_view() { return translate_icon_view_; }
-
   PageActionIconContainerView* page_action_icon_container_view() {
     return page_action_icon_container_view_;
   }
@@ -189,11 +175,6 @@ class LocationBarView : public LocationBar,
   // comments on |ime_inline_autocomplete_view_|.
   void SetImeInlineAutocompletion(const base::string16& text);
 
-  // Paints a custom focus ring on platforms that normally do not show focus
-  // rings if |full_keyboard_accessibility_mode| is set to true.
-  // TODO(tommycli): Remove this after after Material Refresh is launched.
-  void SetFullKeyboardAcessibilityMode(bool full_keyboard_accessibility_mode);
-
   // Select all of the text. Needed when the user tabs through controls
   // in the toolbar in full keyboard accessibility mode.
   virtual void SelectAll();
@@ -203,10 +184,6 @@ class LocationBarView : public LocationBar,
   SelectedKeywordView* selected_keyword_view() {
     return selected_keyword_view_;
   }
-
-  // Show a page info dialog for |web_contents|.
-  // Returns true if a dialog was shown, false otherwise.
-  bool ShowPageInfoDialog(content::WebContents* web_contents);
 
   OmniboxViewViews* omnibox_view() { return omnibox_view_; }
   const OmniboxViewViews* omnibox_view() const { return omnibox_view_; }
@@ -223,7 +200,7 @@ class LocationBarView : public LocationBar,
   bool ActivateFirstInactiveBubbleForAccessibility();
 
   // LocationBar:
-  void FocusLocation(bool select_all) override;
+  void FocusLocation() override;
   void Revert() override;
   OmniboxView* GetOmniboxView() override;
 
@@ -238,7 +215,7 @@ class LocationBarView : public LocationBar,
 
   // ChromeOmniboxEditController:
   void UpdateWithoutTabRestore() override;
-  ToolbarModel* GetToolbarModel() override;
+  LocationBarModel* GetLocationBarModel() override;
   content::WebContents* GetWebContents() override;
 
   // ContentSettingImageView::Delegate:
@@ -265,6 +242,19 @@ class LocationBarView : public LocationBar,
   // |is_hovering| should be true when mouse is in omnibox; false when exited.
   void OnOmniboxHovered(bool is_hovering);
 
+  Browser* browser() { return browser_; }
+
+  // LocationIconView::Delegate
+  bool IsEditingOrEmpty() override;
+  void OnLocationIconPressed(const ui::MouseEvent& event) override;
+  void OnLocationIconDragged(const ui::MouseEvent& event) override;
+  bool ShowPageInfoDialog() override;
+  SkColor GetSecurityChipColor(
+      security_state::SecurityLevel security_level) const override;
+  gfx::ImageSkia GetLocationIcon(LocationIconView::Delegate::IconFetchedCallback
+                                     on_icon_fetched) const override;
+  SkColor GetLocationIconInkDropColor() const override;
+
  private:
   FRIEND_TEST_ALL_PREFIXES(SecurityIndicatorTest, CheckIndicatorText);
   FRIEND_TEST_ALL_PREFIXES(TouchLocationBarViewBrowserTest,
@@ -285,17 +275,8 @@ class LocationBarView : public LocationBar,
   // this method would return a gfx::Rect with 46dip width.
   gfx::Rect GetLocalBoundsWithoutEndcaps() const;
 
-  // Returns the thickness of any visible edge, in pixels.
-  int GetHorizontalEdgeThickness() const;
-
   // Updates the background on a theme change, or dropdown state change.
   void RefreshBackground();
-
-  // Updates |location_icon_view_| based on the current state and theme.
-  void RefreshLocationIcon();
-
-  // Handles the arrival of an asynchronously fetched location bar icon.
-  void OnLocationIconFetched(const gfx::Image& image);
 
   // Updates the visibility state of the Content Blocked icons to reflect what
   // is actually blocked on the current page. Returns true if the visibility
@@ -312,24 +293,8 @@ class LocationBarView : public LocationBar,
   // Updates the focus ring.
   void RefreshFocusRing();
 
-  // Returns text to be placed in the location icon view.
-  // - For secure/insecure pages, returns text describing the URL's security
-  // level.
-  // - For extension URLs, returns the extension name.
-  // - For chrome:// URLs, returns the short product name (e.g. Chrome).
-  // - For file:// URLs, returns the text "File".
-  base::string16 GetLocationIconText() const;
-
   // Returns true if a keyword is selected in the model.
   bool ShouldShowKeywordBubble() const;
-
-  // Returns true if any of the following is true:
-  // - the current page is explicitly secure or insecure.
-  // - the current page URL is a chrome-extension:// URL.
-  bool ShouldShowLocationIconText() const;
-
-  // Returns true if the location icon text should be animated.
-  bool ShouldAnimateLocationIconTextVisibilityChange() const;
 
   // Gets the OmniboxPopupView associated with the model in |omnibox_view_|.
   OmniboxPopupView* GetOmniboxPopupView();
@@ -346,11 +311,9 @@ class LocationBarView : public LocationBar,
   void AcceptInput(base::TimeTicks match_selection_timestamp) override;
   void FocusSearch() override;
   void UpdateContentSettingsIcons() override;
-  void UpdateManagePasswordsIconAndBubble() override;
   void UpdateSaveCreditCardIcon() override;
   void UpdateLocalCardMigrationIcon() override;
   void UpdateBookmarkStarVisibility() override;
-  void UpdateLocationBarVisibility(bool visible, bool animation) override;
   void SaveStateToContents(content::WebContents* contents) override;
   const OmniboxView* GetOmniboxView() const override;
   LocationBarTesting* GetLocationBarForTesting() override;
@@ -363,8 +326,9 @@ class LocationBarView : public LocationBar,
   // views::View:
   const char* GetClassName() const override;
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+  bool GetNeedsNotificationWhenVisibleBoundsChange() const override;
+  void OnVisibleBoundsChanged() override;
   void OnFocus() override;
-  void OnPaint(gfx::Canvas* canvas) override;
   void OnPaintBorder(gfx::Canvas* canvas) override;
 
   // views::DragController:
@@ -388,17 +352,13 @@ class LocationBarView : public LocationBar,
   // ChromeOmniboxEditController:
   void OnChanged() override;
   void OnPopupVisibilityChanged() override;
-  const ToolbarModel* GetToolbarModel() const override;
+  const LocationBarModel* GetLocationBarModel() const override;
 
   // DropdownBarHostDelegate:
-  void SetFocusAndSelection(bool select_all) override;
+  void FocusAndSelectAll() override;
 
   // ui::MaterialDesignControllerObserver:
-  void OnMdModeChanged() override;
-
-  // Returns the total amount of space reserved above or below the content,
-  // which is the vertical edge thickness plus the padding next to it.
-  static int GetTotalVerticalPadding();
+  void OnTouchUiChanged() override;
 
   // The Browser this LocationBarView is in.  Note that at least
   // chromeos::SimpleWebViewDialog uses a LocationBarView outside any browser
@@ -438,18 +398,12 @@ class LocationBarView : public LocationBar,
   // The page action icons.
   PageActionIconContainerView* page_action_icon_container_view_ = nullptr;
 
-  // The manage passwords icon.
-  ManagePasswordsIconViews* manage_passwords_icon_view_ = nullptr;
-
   // The save credit card icon.  It will be null when |browser_| is null.
   autofill::SaveCardIconView* save_credit_card_icon_view_ = nullptr;
 
   // The icon for the local card migration prompt.
   autofill::LocalCardMigrationIconView* local_card_migration_icon_view_ =
       nullptr;
-
-  // The icon for Translate.
-  TranslateIconView* translate_icon_view_ = nullptr;
 
 #if defined(OS_CHROMEOS)
   // The intent picker for accessing ARC's apps.  It will be null when
@@ -464,9 +418,6 @@ class LocationBarView : public LocationBar,
   // user to clear all text.
   views::ImageButton* clear_all_button_ = nullptr;
 
-  // Animation to control showing / hiding the location bar.
-  gfx::SlideAnimation size_animation_{this};
-
   // Animation to change whole location bar background color on hover.
   gfx::SlideAnimation hover_animation_{this};
 
@@ -477,23 +428,12 @@ class LocationBarView : public LocationBar,
   // The theme tint. Updated based on the profile and theme settings.
   OmniboxTint tint_;
 
-  // True if we are in full keyboard accessibility mode. This causes us to show
-  // an internally drawn focus ring on platforms that normally don't display any
-  // focus rings. This custom ring is only drawn if |focus_ring_| is nullptr.
-  // TODO(tommycli): Remove this after after Material Refresh is launched.
-  bool full_keyboard_accessibility_mode_ = false;
-
   // Tracks this preference to determine whether bookmark editing is allowed.
   BooleanPrefMember edit_bookmarks_enabled_;
 
   // A list of all page action icons that haven't yet migrated into the
   // PageActionIconContainerView (https://crbug.com/788051), ordered by focus.
   std::vector<PageActionIconView*> page_action_icons_;
-
-  // The security level when the location bar was last updated. Used to decide
-  // whether to animate security level transitions.
-  security_state::SecurityLevel last_update_security_level_ =
-      security_state::NONE;
 
   // The focus ring, if one is in use.
   std::unique_ptr<views::FocusRing> focus_ring_;

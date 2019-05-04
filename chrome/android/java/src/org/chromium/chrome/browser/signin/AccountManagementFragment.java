@@ -11,7 +11,6 @@ import android.app.Dialog;
 import android.app.DialogFragment;
 import android.app.ProgressDialog;
 import android.content.Context;
-import android.content.Intent;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -50,6 +49,8 @@ import org.chromium.chrome.browser.sync.ui.SyncCustomizationFragment;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.ChromeSigninController;
 
+import java.util.List;
+
 /**
  * The settings screen with information and settings related to the user's accounts.
  *
@@ -68,8 +69,7 @@ public class AccountManagementFragment extends PreferenceFragment
     private static final String CLEAR_DATA_PROGRESS_DIALOG_TAG = "clear_data_progress";
 
     /**
-     * The key for an integer value in
-     * {@link Preferences#EXTRA_SHOW_FRAGMENT_ARGUMENTS} bundle to
+     * The key for an integer value in arguments bundle to
      * specify the correct GAIA service that has triggered the dialog.
      * If the argument is not set, GAIA_SERVICE_TYPE_NONE is used as the origin of the dialog.
      */
@@ -100,16 +100,16 @@ public class AccountManagementFragment extends PreferenceFragment
     private Profile mProfile;
     private String mSignedInAccountName;
     private ProfileDataCache mProfileDataCache;
+    private @Nullable ProfileSyncService.SyncSetupInProgressHandle mSyncSetupInProgressHandle;
 
     @Override
     public void onCreate(Bundle savedState) {
         super.onCreate(savedState);
 
-        // Prevent sync from starting if it hasn't already to give the user a chance to change
-        // their sync settings.
         ProfileSyncService syncService = ProfileSyncService.get();
         if (syncService != null) {
-            syncService.setSetupInProgress(true);
+            // Prevent sync settings changes from taking effect until the user leaves this screen.
+            mSyncSetupInProgressHandle = syncService.getSetupInProgressHandle();
         }
 
         mGaiaServiceType = AccountManagementScreenHelper.GAIA_SERVICE_TYPE_NONE;
@@ -147,6 +147,14 @@ public class AccountManagementFragment extends PreferenceFragment
     }
 
     @Override
+    public void onDestroy() {
+        super.onDestroy();
+        if (mSyncSetupInProgressHandle != null) {
+            mSyncSetupInProgressHandle.close();
+        }
+    }
+
+    @Override
     public void onResume() {
         super.onResume();
         SigninManager.get().addSignInStateObserver(this);
@@ -168,17 +176,6 @@ public class AccountManagementFragment extends PreferenceFragment
         ProfileSyncService syncService = ProfileSyncService.get();
         if (syncService != null) {
             syncService.removeSyncStateChangedListener(this);
-        }
-    }
-
-    @Override
-    public void onDestroy() {
-        super.onDestroy();
-
-        // Allow sync to begin syncing if it hasn't yet.
-        ProfileSyncService syncService = ProfileSyncService.get();
-        if (syncService != null) {
-            syncService.setSetupInProgress(false);
         }
     }
 
@@ -360,8 +357,9 @@ public class AccountManagementFragment extends PreferenceFragment
 
         accountsCategory.removeAll();
 
-        Account[] accounts = AccountManagerFacade.get().tryGetGoogleAccounts();
-        for (final Account account : accounts) {
+        List<Account> accounts = AccountManagerFacade.get().tryGetGoogleAccounts();
+        for (int i = 0; i < accounts.size(); i++) {
+            Account account = accounts.get(i);
             Preference pref = new Preference(getActivity());
             pref.setLayoutResource(R.layout.account_management_account_row);
             pref.setTitle(account.name);
@@ -510,12 +508,10 @@ public class AccountManagementFragment extends PreferenceFragment
      * @param serviceType A signin::GAIAServiceType that triggered the dialog.
      */
     public static void openAccountManagementScreen(int serviceType) {
-        Intent intent = PreferencesLauncher.createIntentForSettingsPage(
-                ContextUtils.getApplicationContext(), AccountManagementFragment.class.getName());
         Bundle arguments = new Bundle();
         arguments.putInt(SHOW_GAIA_SERVICE_TYPE_EXTRA, serviceType);
-        intent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, arguments);
-        ContextUtils.getApplicationContext().startActivity(intent);
+        PreferencesLauncher.launchSettingsPage(
+                ContextUtils.getApplicationContext(), AccountManagementFragment.class, arguments);
     }
 
     /**

@@ -34,16 +34,32 @@
 namespace sh
 {
 
+class TIntermSwizzle;
 enum class SSBOMethod
 {
     LOAD,
-    STORE
+    STORE,
+    LENGTH,
+    ATOMIC_ADD,
+    ATOMIC_MIN,
+    ATOMIC_MAX,
+    ATOMIC_AND,
+    ATOMIC_OR,
+    ATOMIC_XOR,
+    ATOMIC_EXCHANGE,
+    ATOMIC_COMPSWAP
 };
 
 class ShaderStorageBlockFunctionHLSL final : angle::NonCopyable
 {
   public:
-    TString registerShaderStorageBlockFunction(const TType &type, SSBOMethod method);
+    TString registerShaderStorageBlockFunction(const TType &type,
+                                               SSBOMethod method,
+                                               TLayoutBlockStorage storage,
+                                               bool rowMajor,
+                                               int matrixStride,
+                                               int unsizedArrayStride,
+                                               TIntermSwizzle *node);
 
     void shaderStorageBlockFunctionHeader(TInfoSinkBase &out);
 
@@ -55,12 +71,20 @@ class ShaderStorageBlockFunctionHLSL final : angle::NonCopyable
         TString typeString;
         SSBOMethod method;
         TType type;
+        bool rowMajor;
+        int matrixStride;
+        int unsizedArrayStride;
+        TVector<int> swizzleOffsets;
+        bool isDefaultSwizzle;
     };
 
     static void OutputSSBOLoadFunctionBody(TInfoSinkBase &out,
-                                           const ShaderStorageBlockFunction &imageFunction);
+                                           const ShaderStorageBlockFunction &ssboFunction);
     static void OutputSSBOStoreFunctionBody(TInfoSinkBase &out,
-                                            const ShaderStorageBlockFunction &imageFunction);
+                                            const ShaderStorageBlockFunction &ssboFunction);
+    static void OutputSSBOLengthFunctionBody(TInfoSinkBase &out, int unsizedArrayStride);
+    static void OutputSSBOAtomicMemoryFunctionBody(TInfoSinkBase &out,
+                                                   const ShaderStorageBlockFunction &ssboFunction);
     using ShaderStorageBlockFunctionSet = std::set<ShaderStorageBlockFunction>;
     ShaderStorageBlockFunctionSet mRegisteredShaderStorageBlockFunctions;
 };

@@ -13,7 +13,6 @@
 #include "build/build_config.h"
 #include "chrome/common/chrome_content_client.h"
 #include "content/public/app/content_main_delegate.h"
-#include "ui/base/resource/data_pack.h"
 
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
 #include "chrome/browser/metrics/chrome_feature_list_creator.h"
@@ -62,19 +61,18 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
           delegates) override;
   void ZygoteForked() override;
 #endif
-  bool ShouldEnableProfilerRecording() override;
   service_manager::ProcessType OverrideProcessType() override;
   void PreCreateMainMessageLoop() override;
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
-  void PostEarlyInitialization() override;
+  void PostEarlyInitialization(bool is_running_tests) override;
   bool ShouldCreateFeatureList() override;
 #endif
+  void PostFieldTrialInitialization() override;
 
   content::ContentBrowserClient* CreateContentBrowserClient() override;
   content::ContentGpuClient* CreateContentGpuClient() override;
   content::ContentRendererClient* CreateContentRendererClient() override;
   content::ContentUtilityClient* CreateContentUtilityClient() override;
-  ui::DataPack* LoadServiceManifestDataPack() override;
 
 #if defined(OS_MACOSX)
   void InitMacCrashReporter(const base::CommandLine& command_line,
@@ -85,10 +83,6 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
   ChromeContentClient chrome_content_client_;
 
   std::unique_ptr<ChromeContentBrowserClient> chrome_content_browser_client_;
-
-  // This field is loaded by LoadServiceManifestDataPack() and passed to
-  // ContentBrowserClient in CreateContentBrowserClient()
-  std::unique_ptr<ui::DataPack> service_manifest_data_pack_;
 
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
   std::unique_ptr<ChromeFeatureListCreator> chrome_feature_list_creator_;

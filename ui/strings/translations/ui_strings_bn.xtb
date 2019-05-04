@@ -5,6 +5,7 @@
 <translation id="1127811143501539442">{DAYS,plural, =1{১ দিন পূর্বে}one{# দিন পূর্বে}other{# দিন পূর্বে}}</translation>
 <translation id="1156623771253174079">{SECONDS,plural, =1{১ মিনিট আগে}one{# মিনিট আগে}other{# মিনিট আগে}}</translation>
 <translation id="1169783199079129864">{MINUTES,plural, =1{১ মিনিট}one{# মিনিট}other{# মিনিট}}</translation>
+<translation id="1181037720776840403">সরান</translation>
 <translation id="1243314992276662751">আপলোড</translation>
 <translation id="1269641567813814718">Win</translation>
 <translation id="1293699935367580298">Esc</translation>
@@ -30,16 +31,19 @@
 <translation id="1871244248791675517">Ins</translation>
 <translation id="1884435127456172652"><ph name="NUMBER" /> %</translation>
 <translation id="1901303067676059328">&amp;সকল বেছে নিন</translation>
+<translation id="1938451708255335766">উইন্ডো স্ক্রিনের রেজোলিউশন অ্যাডজাস্ট করতে অ্যাপটি রিস্টার্ট করুন।</translation>
 <translation id="2141853158323869627">{DAYS,plural, =1{১ দিন}one{# দিন}other{# দিন}}</translation>
 <translation id="2148716181193084225">আজ</translation>
 <translation id="2168039046890040389">পৃষ্ঠা নিচে</translation>
 <translation id="2190355936436201913">(খালি)</translation>
+<translation id="2192232475740621500">কম রেজোলিউশন ব্যবহার করুন</translation>
 <translation id="219905428774326614">লঞ্চার, সমস্ত অ্যাপ</translation>
 <translation id="2267918077332197517">এই সাইটের সমস্ত বিজ্ঞপ্তি ব্লক করুন</translation>
 <translation id="2289052229480071835">আপনার স্ক্রীনে স্পর্শ লক্ষ্যগুলি আলতা চাপুন।</translation>
 <translation id="2295140143284145483">সমীক্ষা</translation>
 <translation id="2297836609126180313"><ph name="QUANTITY" /> TB/s</translation>
 <translation id="24452542372838207">বিজ্ঞপ্তি প্রসারিত করুন</translation>
+<translation id="2445449901874883781">উচ্চ রেজোলিউশন ব্যবহার করুন</translation>
 <translation id="2482878487686419369">বিজ্ঞপ্তিগুলি</translation>
 <translation id="2497284189126895209">সকল ফাইল</translation>
 <translation id="2515586267016047495">Alt</translation>
@@ -60,7 +64,10 @@
 <translation id="3234408098842461169">Down Arrow</translation>
 <translation id="3291688615589870984">{DAYS,plural, =1{১ দিন}one{# দিন}other{# দিন}}</translation>
 <translation id="335581015389089642">স্পিচ</translation>
+<translation id="3462241349431650993">এই সাজেশনটি লুকালে সমস্ত ডিভাইস জুড়ে আপনার অ্যাকাউন্টে আর দেখা যাবে না।</translation>
+<translation id="3479552764303398839">এখনই নয়</translation>
 <translation id="3600566671520689681">{DAYS,plural, =1{১ দিন বাকি}one{# দিন বাকি}other{# দিন বাকি}}</translation>
+<translation id="3608915363409716668"><ph name="MAXIMUM_VALUE" />+</translation>
 <translation id="3618849550573277856">“<ph name="LOOKUP_STRING" />” খুঁজে দেখুন</translation>
 <translation id="364720409959344976">আপলোড করার জন্য ফোল্ডার বেছে নিন</translation>
 <translation id="3660179305079774227">Up Arrow</translation>
@@ -99,6 +106,7 @@
 <translation id="5613020302032141669">Left Arrow</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{১ মিনিট}one{# মিনিট}other{# মিনিট}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{১ দিন এবং }one{# দিন এবং }other{# দিন এবং }}</translation>
+<translation id="5895138241574237353">পুনর্সূচনা</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{১ সেকেন্ড বাকি}one{# সেকেন্ড বাকি}other{# সেকেন্ড বাকি}}</translation>
 <translation id="5941711191222866238">ছোট করুন</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{১ ঘণ্টা}one{# ঘণ্টা}other{# ঘণ্টা}}</translation>
@@ -120,6 +128,7 @@
 <translation id="6483402905448010557">{SECONDS,plural, =1{১ সেকেন্ড আগে}one{# সেকেন্ড আগে}other{# সেকেন্ড আগে}}</translation>
 <translation id="654149438358937226">সমস্ত বিজ্ঞপ্তি ব্লক করুন</translation>
 <translation id="6567071839949112727">এটি সম্পর্কিত একটি পুরানো আইটেমে ক্লিক করুন</translation>
+<translation id="6578407462441924264">নামবিহীন</translation>
 <translation id="6612467943526193239">ক্রমাঙ্কন থেকে বেরিয়ে যেতে Esc টিপুন।</translation>
 <translation id="6620110761915583480">ফাইল সেভ করুন</translation>
 <translation id="6699343763173986273">মিডিয়া পরবর্তী ট্র্যাক</translation>
@@ -154,6 +163,7 @@
 <translation id="8087772101393322318"><ph name="KEY_MODIFIER_NAME" />+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{১ ঘণ্টা পূর্বে}one{# ঘণ্টা পূর্বে}other{# ঘণ্টা পূর্বে}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{১ সেকেন্ড বাকি}one{# সেকেন্ড বাকি}other{# সেকেন্ড বাকি}}</translation>
+<translation id="8152264887680882389"><ph name="TEXT" />, নিজে থেকে সম্পূর্ন করা</translation>
 <translation id="815598010540052116">নিচে স্ক্রোল করুন</translation>
 <translation id="8179976553408161302">Enter</translation>
 <translation id="8210608804940886430">পৃষ্ঠা উপরে</translation>
@@ -165,6 +175,7 @@
 <translation id="838869780401515933">চেক করুন</translation>
 <translation id="8393700583063109961">বার্তা পাঠান</translation>
 <translation id="8394908167088220973">মিডিয়া প্লে করুন/বিরতি</translation>
+<translation id="8420205633584771378">সাজেশনটি সরাতে চান?</translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{১ বছর}one{# বছর}other{# বছর}}</translation>
 <translation id="8602707065186045623"><ph name="SAVEAS_EXTENSION_TYPE" /> ফাইল (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KB/s</translation>
@@ -177,7 +188,6 @@
 <translation id="8841375032071747811">ফিরে যাওয়ার বোতাম</translation>
 <translation id="8901569739625249689"><ph name="QUANTITY" /> KB</translation>
 <translation id="9002566407876343676">খুলুন</translation>
-<translation id="9038489124413477075">নামবিহীন ফোল্ডার</translation>
 <translation id="9044832324875206639">{SECONDS,plural, =1{১ সেকেন্ড}one{# সেকেন্ড}other{# সেকেন্ড}}</translation>
 <translation id="9059834730836941392">বিজ্ঞপ্তি সঙ্কুচিত করুন</translation>
 <translation id="9150735707954472829">ট্যাব</translation>

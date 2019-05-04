@@ -1,7 +1,7 @@
 // Copyright (c) 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
+
 // A base class for the toy client, which connects to a specified port and sends
 // QUIC request to that endpoint.
 
@@ -124,7 +124,7 @@ class QuicClientBase {
   // This should only be set before the initial Connect()
   void set_server_id(const QuicServerId& server_id) { server_id_ = server_id; }
 
-  void SetUserAgentID(const std::string& user_agent_id) {
+  void SetUserAgentID(const QuicString& user_agent_id) {
     crypto_config_.set_user_agent_id(user_agent_id);
   }
 
@@ -134,17 +134,6 @@ class QuicClientBase {
   // |source|.
   void SetChannelIDSource(ChannelIDSource* source) {
     crypto_config_.SetChannelIDSource(source);
-  }
-
-  // UseTokenBinding enables token binding negotiation in the client.  This
-  // should only be called before the initial Connect().  The client will still
-  // need to check that token binding is negotiated with the server, and add
-  // token binding headers to requests if so.  server, and add token binding
-  // headers to requests if so.  The negotiated token binding parameters can be
-  // found on the QuicCryptoNegotiatedParameters object in
-  // token_binding_key_param.
-  void UseTokenBinding() {
-    crypto_config_.tb_key_params = QuicTagVector{kTB10};
   }
 
   const ParsedQuicVersionVector& supported_versions() const {
@@ -267,6 +256,7 @@ class QuicClientBase {
   // TODO(rch): Change the connection parameter to take in a
   // std::unique_ptr<QuicConnection> instead.
   virtual std::unique_ptr<QuicSession> CreateQuicClientSession(
+      const ParsedQuicVersionVector& supported_versions,
       QuicConnection* connection) = 0;
 
   // Generates the next ConnectionId for |server_id_|.  By default, if the
@@ -290,6 +280,10 @@ class QuicClientBase {
   void ResetSession() { session_.reset(); }
 
  private:
+  // Returns true and set |version| if client can reconnect with a different
+  // version.
+  bool CanReconnectWithDifferentVersion(ParsedQuicVersion* version) const;
+
   // |server_id_| is a tuple (hostname, port, is_https) of the server.
   QuicServerId server_id_;
 

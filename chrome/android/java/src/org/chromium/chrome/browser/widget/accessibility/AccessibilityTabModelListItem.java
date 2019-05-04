@@ -14,8 +14,6 @@ import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.os.Handler;
 import android.support.v7.content.res.AppCompatResources;
-import android.support.v7.widget.AppCompatImageButton;
-import android.support.v7.widget.AppCompatImageView;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.GestureDetector;
@@ -26,6 +24,8 @@ import android.view.ViewGroup;
 import android.widget.AbsListView;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -72,8 +72,8 @@ public class AccessibilityTabModelListItem extends FrameLayout implements OnClic
     private LinearLayout mTabContents;
     private TextView mTitleView;
     private TextView mDescriptionView;
-    private AppCompatImageView mFaviconView;
-    private AppCompatImageButton mCloseButton;
+    private ImageView mFaviconView;
+    private ImageButton mCloseButton;
 
     // The children on the undo view.
     private LinearLayout mUndoContents;
@@ -309,14 +309,16 @@ public class AccessibilityTabModelListItem extends FrameLayout implements OnClic
         if (mTab.isIncognito()) {
             setBackgroundResource(R.color.incognito_modern_primary_color);
             mFaviconView.getBackground().setLevel(mIncognitoLevel);
-            ApiCompatibilityUtils.setTextAppearance(mTitleView, R.style.WhiteTitle1);
-            ApiCompatibilityUtils.setTextAppearance(mDescriptionView, R.style.WhiteBody);
+            ApiCompatibilityUtils.setTextAppearance(mTitleView, R.style.TextAppearance_WhiteTitle1);
+            ApiCompatibilityUtils.setTextAppearance(
+                    mDescriptionView, R.style.TextAppearance_WhiteBody);
             ApiCompatibilityUtils.setImageTintList(mCloseButton, mLightCloseIconColor);
         } else {
             setBackgroundResource(R.color.modern_primary_color);
             mFaviconView.getBackground().setLevel(mDefaultLevel);
-            ApiCompatibilityUtils.setTextAppearance(mTitleView, R.style.BlackTitle1);
-            ApiCompatibilityUtils.setTextAppearance(mDescriptionView, R.style.BlackBody);
+            ApiCompatibilityUtils.setTextAppearance(mTitleView, R.style.TextAppearance_BlackTitle1);
+            ApiCompatibilityUtils.setTextAppearance(
+                    mDescriptionView, R.style.TextAppearance_BlackBody);
             ApiCompatibilityUtils.setImageTintList(mCloseButton, mDarkCloseIconColor);
         }
 

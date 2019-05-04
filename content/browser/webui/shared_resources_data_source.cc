@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include "base/containers/hash_tables.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
@@ -44,7 +43,7 @@ struct IdrGzipped {
   int idr;
   bool gzipped;
 };
-using ResourcesMap = base::hash_map<std::string, IdrGzipped>;
+using ResourcesMap = std::unordered_map<std::string, IdrGzipped>;
 
 const std::map<std::string, std::string> CreatePathPrefixAliasesMap() {
   // TODO(rkc): Once we have a separate source for apps, remove '*/apps/'
@@ -72,6 +71,7 @@ const std::map<std::string, std::string> CreatePathPrefixAliasesMap() {
 const std::map<int, std::string> CreateMojoResourceIdToAliasMap() {
   return std::map<int, std::string> {
     {IDR_MOJO_MOJO_BINDINGS_JS, "js/mojo_bindings.js"},
+        {IDR_MOJO_MOJO_BINDINGS_LITE_JS, "js/mojo_bindings_lite.js"},
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
         {IDR_MOJO_TIME_MOJOM_JS, "js/time.mojom.js"},
 #endif  // defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
@@ -87,6 +87,8 @@ const std::map<int, std::string> CreateChromeosMojoResourceIdToAliasMap() {
        "js/chromeos/multidevice_setup.mojom.js"},
       {IDR_MULTIDEVICE_MULTIDEVICE_SETUP_CONSTANTS_MOJOM_JS,
        "js/chromeos/multidevice_setup_constants.mojom.js"},
+      {IDR_MULTIDEVICE_MULTIDEVICE_TYPES_MOJOM_JS,
+       "js/chromeos/multidevice_types.mojom.js"},
   };
 }
 #endif  // !defined(OS_CHROMEOS)
@@ -269,6 +271,10 @@ std::string SharedResourcesDataSource::GetMimeType(
 
   NOTREACHED() << path;
   return "text/plain";
+}
+
+bool SharedResourcesDataSource::ShouldServeMimeTypeAsContentTypeHeader() const {
+  return true;
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>

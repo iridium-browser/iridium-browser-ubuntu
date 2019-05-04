@@ -5,18 +5,18 @@
 #include "ash/wm/window_util.h"
 
 #include <memory>
-#include <vector>
 
 #include "ash/public/cpp/ash_constants.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/root_window_controller.h"
+#include "ash/scoped_animation_disabler.h"
 #include "ash/session/session_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
+#include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/widget_finder.h"
 #include "ash/wm/window_positioning_utils.h"
-#include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/wm_event.h"
 #include "ash/ws/window_service_owner.h"
@@ -30,6 +30,7 @@
 #include "ui/aura/window_targeter.h"
 #include "ui/base/hit_test.h"
 #include "ui/compositor/dip_util.h"
+#include "ui/compositor/layer_tree_owner.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/rect.h"
@@ -38,6 +39,7 @@
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/easy_resize_window_targeter.h"
+#include "ui/wm/core/window_animations.h"
 #include "ui/wm/core/window_properties.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
@@ -96,12 +98,6 @@ class InteriorResizeHandleTargeter : public aura::WindowTargeter {
   }
 
   bool ShouldUseExtendedBounds(const aura::Window* target) const override {
-    // Fullscreen/maximized windows can't be drag-resized.
-    if (GetWindowState(window())->IsMaximizedOrFullscreenOrPinned() ||
-        !wm::GetWindowState(target)->CanResize()) {
-      return false;
-    }
-
     // The shrunken hit region only applies to children of |window()|.
     return target->parent() == window();
   }
@@ -163,7 +159,7 @@ void GetBlockingContainersForRoot(aura::Window* root_window,
 }
 
 bool IsWindowUserPositionable(aura::Window* window) {
-  return GetWindowState(window)->IsUserPositionable();
+  return window->type() == aura::client::WINDOW_TYPE_NORMAL;
 }
 
 void PinWindow(aura::Window* window, bool trusted) {
@@ -251,10 +247,93 @@ void CloseWidgetForWindow(aura::Window* window) {
 
 void InstallResizeHandleWindowTargeterForWindow(aura::Window* window) {
   window->SetEventTargeter(std::make_unique<InteriorResizeHandleTargeter>());
+  // For Mash, ServerWindows will override the event targeter with a
+  // ServerWindowTargeter, so make sure it knows about the resize insets.
+  window->SetProperty(aura::client::kResizeHandleInset,
+                      kResizeInsideBoundsSize);
 }
 
 bool IsDraggingTabs(const aura::Window* window) {
   return window->GetProperty(ash::kIsDraggingTabsKey);
+}
+
+bool ShouldExcludeForBothCycleListAndOverview(const aura::Window* window) {
+  // Exclude windows:
+  // - non user positionable windows, such as extension popups.
+  // - windows being dragged
+  // - pip windows
+  const wm::WindowState* state = wm::GetWindowState(window);
+  if (!state->IsUserPositionable() || state->is_dragged() || state->IsPip())
+    return true;
+
+  return window->GetProperty(kHideInOverviewKey);
+}
+
+bool ShouldExcludeForCycleList(const aura::Window* window) {
+  // Exclude the AppList window, which will hide as soon as cycling starts
+  // anyway. It doesn't make sense to count it as a "switchable" window, yet
+  // a lot of code relies on the MRU list returning the app window. If we
+  // don't manually remove it, the window cycling UI won't crash or misbehave,
+  // but there will be a flicker as the target window changes. Also exclude
+  // unselectable windows such as extension popups.
+  // TODO(sammiequon): Investigate if this is needed.
+  for (auto* parent = window->parent(); parent; parent = parent->parent()) {
+    if (parent->id() == kShellWindowId_AppListContainer)
+      return true;
+  }
+
+  return ShouldExcludeForBothCycleListAndOverview(window);
+}
+
+bool ShouldExcludeForOverview(const aura::Window* window) {
+  // Remove the default snapped window from the window list. The default
+  // snapped window occupies one side of the screen, while the other windows
+  // occupy the other side of the screen in overview mode. The default snap
+  // position is the position where the window was first snapped. See
+  // |default_snap_position_| in SplitViewController for more detail.
+  if (Shell::Get()->IsSplitViewModeActive() &&
+      window ==
+          Shell::Get()->split_view_controller()->GetDefaultSnappedWindow()) {
+    return true;
+  }
+
+  return ShouldExcludeForBothCycleListAndOverview(window);
+}
+
+void RemoveTransientDescendants(std::vector<aura::Window*>* out_window_list) {
+  for (auto it = out_window_list->begin(); it != out_window_list->end();) {
+    aura::Window* transient_root = ::wm::GetTransientRoot(*it);
+    if (*it != transient_root &&
+        base::ContainsValue(*out_window_list, transient_root)) {
+      it = out_window_list->erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+void HideAndMaybeMinimizeWithoutAnimation(std::vector<aura::Window*> windows,
+                                          bool minimize) {
+  for (auto* window : windows) {
+    ScopedAnimationDisabler disable(window);
+
+    // ARC windows are minimized asynchronously, so hide here now.
+    // TODO(oshima): Investigate better way to handle ARC apps immediately.
+    window->Hide();
+
+    if (minimize)
+      wm::GetWindowState(window)->Minimize();
+  }
+  if (windows.size()) {
+    // Disable the animations using |disable|. However, doing so will skip
+    // detaching the resources associated with the layer. So we have to trick
+    // the compositor into releasing the resources.
+    // crbug.com/924802.
+    auto* compositor = windows[0]->layer()->GetCompositor();
+    bool was_visible = compositor->IsVisible();
+    compositor->SetVisible(false);
+    compositor->SetVisible(was_visible);
+  }
 }
 
 }  // namespace wm

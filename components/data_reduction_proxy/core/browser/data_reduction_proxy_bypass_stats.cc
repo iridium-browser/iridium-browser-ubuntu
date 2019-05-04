@@ -9,9 +9,11 @@
 #include "base/metrics/histogram_macros.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_util.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_bypass_protocol.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_type_info.h"
+#include "components/data_reduction_proxy/core/common/uma_util.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/proxy_server.h"
@@ -45,51 +47,6 @@ void RecordDataReductionProxyBypassOnNetworkError(
 }
 
 }  // namespace
-
-// static
-void DataReductionProxyBypassStats::RecordDataReductionProxyBypassInfo(
-    bool is_primary,
-    bool bypass_all,
-    const net::ProxyServer& proxy_server,
-    DataReductionProxyBypassType bypass_type) {
-  if (bypass_all) {
-    if (is_primary) {
-      UMA_HISTOGRAM_ENUMERATION("DataReductionProxy.BlockTypePrimary",
-                                bypass_type, BYPASS_EVENT_TYPE_MAX);
-    } else {
-      UMA_HISTOGRAM_ENUMERATION("DataReductionProxy.BlockTypeFallback",
-                                bypass_type, BYPASS_EVENT_TYPE_MAX);
-    }
-  } else {
-    if (is_primary) {
-      UMA_HISTOGRAM_ENUMERATION("DataReductionProxy.BypassTypePrimary",
-                                bypass_type, BYPASS_EVENT_TYPE_MAX);
-    } else {
-      UMA_HISTOGRAM_ENUMERATION("DataReductionProxy.BypassTypeFallback",
-                                bypass_type, BYPASS_EVENT_TYPE_MAX);
-    }
-  }
-}
-
-// static
-void DataReductionProxyBypassStats::DetectAndRecordMissingViaHeaderResponseCode(
-    bool is_primary,
-    const net::HttpResponseHeaders& headers) {
-  if (HasDataReductionProxyViaHeader(headers, nullptr)) {
-    // The data reduction proxy via header is present, so don't record anything.
-    return;
-  }
-
-  if (is_primary) {
-    base::UmaHistogramSparse(
-        "DataReductionProxy.MissingViaHeader.ResponseCode.Primary",
-        headers.response_code());
-  } else {
-    base::UmaHistogramSparse(
-        "DataReductionProxy.MissingViaHeader.ResponseCode.Fallback",
-        headers.response_code());
-  }
-}
 
 DataReductionProxyBypassStats::DataReductionProxyBypassStats(
     DataReductionProxyConfig* config,
@@ -138,23 +95,9 @@ void DataReductionProxyBypassStats::OnUrlRequestCompleted(
   successful_requests_through_proxy_count_++;
   NotifyUnavailabilityIfChanged();
 
-  // Report the success counts.
-  UMA_HISTOGRAM_COUNTS_100(
-      "DataReductionProxy.SuccessfulRequestCompletionCounts",
-      proxy_info->proxy_index);
-
-  // It is possible that the scheme of request->proxy_server() is different
-  // from the scheme of proxy_info.proxy_servers.front(). The former may be set
-  // to QUIC by the network stack, while the latter may be set to HTTPS.
-  UMA_HISTOGRAM_ENUMERATION("DataReductionProxy.ProxySchemeUsed",
-                            util::ConvertNetProxySchemeToProxyScheme(
-                                request->proxy_server().scheme()),
-                            PROXY_SCHEME_MAX);
-  if (request->load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED) {
-    UMA_HISTOGRAM_COUNTS_100(
-        "DataReductionProxy.SuccessfulRequestCompletionCounts.MainFrame",
-        proxy_info->proxy_index);
-  }
+  LogSuccessfulProxyUMAs(
+      proxy_info.value(), request->proxy_server(),
+      request->load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED);
 }
 
 void DataReductionProxyBypassStats::SetBypassType(
@@ -197,7 +140,7 @@ void DataReductionProxyBypassStats::OnProxyFallback(
   }
 
   const bool is_first_proxy = proxy_type_info->proxy_index == 0U;
-  RecordDataReductionProxyBypassInfo(is_first_proxy, false, bypassed_proxy,
+  RecordDataReductionProxyBypassInfo(is_first_proxy, false,
                                      BYPASS_EVENT_TYPE_NETWORK_ERROR);
   RecordDataReductionProxyBypassOnNetworkError(is_first_proxy, bypassed_proxy,
                                                net_error);

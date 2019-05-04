@@ -147,28 +147,4 @@ TEST(ApmHelpersTest, NsStatus_EnableDisable) {
   EXPECT_EQ(NoiseSuppression::kHigh, ns->level());
   EXPECT_FALSE(ns->is_enabled());
 }
-
-TEST(ApmHelpersTest, TypingDetectionStatus_DefaultMode) {
-  TestHelper helper;
-  VoiceDetection* vd = helper.apm()->voice_detection();
-  EXPECT_FALSE(vd->is_enabled());
-}
-
-TEST(ApmHelpersTest, TypingDetectionStatus_EnableDisable) {
-  TestHelper helper;
-  VoiceDetection* vd = helper.apm()->voice_detection();
-  apm_helpers::SetTypingDetectionStatus(helper.apm(), true);
-  EXPECT_EQ(VoiceDetection::kVeryLowLikelihood, vd->likelihood());
-  EXPECT_TRUE(vd->is_enabled());
-  apm_helpers::SetTypingDetectionStatus(helper.apm(), false);
-  EXPECT_EQ(VoiceDetection::kVeryLowLikelihood, vd->likelihood());
-  EXPECT_FALSE(vd->is_enabled());
-}
-
-// TODO(solenberg): Move this test to a better place - added here for the sake
-// of duplicating all relevant tests from audio_processing_test.cc.
-TEST(ApmHelpersTest, HighPassFilter_DefaultMode) {
-  TestHelper helper;
-  EXPECT_FALSE(helper.apm()->high_pass_filter()->is_enabled());
-}
 }  // namespace webrtc

@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 
+#include "base/component_export.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
@@ -45,15 +46,14 @@ class CopyOrMoveOperationDelegate
 
   // Helper to copy a file by reader and writer streams.
   // Export for testing.
-  class STORAGE_EXPORT StreamCopyHelper {
+  class COMPONENT_EXPORT(STORAGE_BROWSER) StreamCopyHelper {
    public:
     StreamCopyHelper(
         std::unique_ptr<storage::FileStreamReader> reader,
         std::unique_ptr<FileStreamWriter> writer,
         FlushPolicy flush_policy,
         int buffer_size,
-        const FileSystemOperation::CopyFileProgressCallback&
-            file_progress_callback,
+        FileSystemOperation::CopyFileProgressCallback file_progress_callback,
         const base::TimeDelta& min_progress_callback_invocation_span);
     ~StreamCopyHelper();
 
@@ -65,24 +65,22 @@ class CopyOrMoveOperationDelegate
 
    private:
     // Reads the content from the |reader_|.
-    void Read(StatusCallback callback);
-    void DidRead(StatusCallback callback, int result);
+    void Read();
+    void DidRead(int result);
 
     // Writes the content in |buffer| to |writer_|.
-    void Write(StatusCallback callback,
-               scoped_refptr<net::DrainableIOBuffer> buffer);
-    void DidWrite(StatusCallback callback,
-                  scoped_refptr<net::DrainableIOBuffer> buffer,
-                  int result);
+    void Write(scoped_refptr<net::DrainableIOBuffer> buffer);
+    void DidWrite(scoped_refptr<net::DrainableIOBuffer> buffer, int result);
 
     // Flushes the written content in |writer_|.
-    void Flush(StatusCallback callback, bool is_eof);
-    void DidFlush(StatusCallback callback, bool is_eof, int result);
+    void Flush(bool is_eof);
+    void DidFlush(bool is_eof, int result);
 
     std::unique_ptr<storage::FileStreamReader> reader_;
     std::unique_ptr<FileStreamWriter> writer_;
     const FlushPolicy flush_policy_;
     FileSystemOperation::CopyFileProgressCallback file_progress_callback_;
+    StatusCallback completion_callback_;
     scoped_refptr<net::IOBufferWithSize> io_buffer_;
     int64_t num_copied_bytes_;
     int64_t previous_flush_offset_;

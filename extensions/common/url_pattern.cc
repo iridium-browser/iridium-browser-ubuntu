@@ -8,7 +8,6 @@
 
 #include <ostream>
 
-#include "base/macros.h"
 #include "base/stl_util.h"
 #include "base/strings/pattern.h"
 #include "base/strings/strcat.h"
@@ -45,7 +44,7 @@ const int kValidSchemeMasks[] = {
     URLPattern::SCHEME_WSS,        URLPattern::SCHEME_DATA,
 };
 
-static_assert(arraysize(kValidSchemes) == arraysize(kValidSchemeMasks),
+static_assert(base::size(kValidSchemes) == base::size(kValidSchemeMasks),
               "must keep these arrays in sync");
 
 const char kParseSuccess[] = "Success.";
@@ -126,7 +125,7 @@ base::StringPiece CanonicalizeHostForMatching(base::StringPiece host_piece) {
 
 // static
 bool URLPattern::IsValidSchemeForExtensions(base::StringPiece scheme) {
-  for (size_t i = 0; i < arraysize(kValidSchemes); ++i) {
+  for (size_t i = 0; i < base::size(kValidSchemes); ++i) {
     if (scheme == kValidSchemes[i])
       return true;
   }
@@ -136,7 +135,7 @@ bool URLPattern::IsValidSchemeForExtensions(base::StringPiece scheme) {
 // static
 int URLPattern::GetValidSchemeMaskForExtensions() {
   int result = 0;
-  for (size_t i = 0; i < arraysize(kValidSchemeMasks); ++i)
+  for (size_t i = 0; i < base::size(kValidSchemeMasks); ++i)
     result |= kValidSchemeMasks[i];
   return result;
 }
@@ -353,6 +352,10 @@ URLPattern::ParseResult URLPattern::Parse(base::StringPiece pattern,
 }
 
 void URLPattern::SetValidSchemes(int valid_schemes) {
+  // TODO(devlin): Should we check that valid_schemes agrees with |scheme_|
+  // here? Otherwise, valid_schemes_ and schemes_ may stop agreeing with each
+  // other (e.g., in the case of `*://*/*`, where the scheme should only be
+  // http or https).
   spec_.clear();
   valid_schemes_ = valid_schemes;
 }
@@ -399,7 +402,7 @@ bool URLPattern::IsValidScheme(base::StringPiece scheme) const {
   if (valid_schemes_ == SCHEME_ALL)
     return true;
 
-  for (size_t i = 0; i < arraysize(kValidSchemes); ++i) {
+  for (size_t i = 0; i < base::size(kValidSchemes); ++i) {
     if (scheme == kValidSchemes[i] && (valid_schemes_ & kValidSchemeMasks[i]))
       return true;
   }
@@ -434,6 +437,8 @@ bool URLPattern::MatchesURL(const GURL& test) const {
     test_url = test.inner_url();
   }
 
+  // Ensure the scheme matches first, since <all_urls> may not match this URL if
+  // the scheme is excluded.
   if (!MatchesScheme(test_url->scheme_piece()))
     return false;
 
@@ -633,8 +638,14 @@ bool URLPattern::OverlapsWith(const URLPattern& other) const {
 }
 
 bool URLPattern::Contains(const URLPattern& other) const {
-  if (match_all_urls())
+  // Important: it's not enough to just check match_all_urls(); we also need to
+  // make sure that the schemes in this pattern are a superset of those in
+  // |other|.
+  if (match_all_urls() &&
+      (valid_schemes_ & other.valid_schemes_) == other.valid_schemes_) {
     return true;
+  }
+
   return MatchesAllSchemes(other.GetExplicitSchemes()) &&
          MatchesHost(other.host()) &&
          (!other.match_subdomains_ || match_subdomains_) &&
@@ -789,7 +800,7 @@ std::vector<std::string> URLPattern::GetExplicitSchemes() const {
     return result;
   }
 
-  for (size_t i = 0; i < arraysize(kValidSchemes); ++i) {
+  for (size_t i = 0; i < base::size(kValidSchemes); ++i) {
     if (MatchesScheme(kValidSchemes[i])) {
       result.push_back(kValidSchemes[i]);
     }

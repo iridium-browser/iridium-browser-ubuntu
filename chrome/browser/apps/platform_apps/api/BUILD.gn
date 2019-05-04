@@ -10,7 +10,7 @@ import("//tools/json_schema_compiler/json_schema_api.gni")
 assert(enable_extensions)
 
 function_registration("api_registration") {
-  sources = chrome_apps_api_schema_files
+  sources = chrome_apps_api_schema_files + chrome_apps_uncompiled_schema_files
   impl_dir = "//chrome/browser/apps/platform_apps/api"
   configs = [ "//build/config:precompiled_headers" ]
   bundle_name = "ChromeApps"
@@ -61,20 +61,19 @@ source_set("api") {
 
   if (is_chromeos) {
     sources += [
-      "easy_unlock_private/easy_unlock_private_api.cc",
-      "easy_unlock_private/easy_unlock_private_api.h",
-      "easy_unlock_private/easy_unlock_private_connection.cc",
-      "easy_unlock_private/easy_unlock_private_connection.h",
-      "easy_unlock_private/easy_unlock_private_connection_manager.cc",
-      "easy_unlock_private/easy_unlock_private_connection_manager.h",
+      "arc_apps_private/arc_apps_private_api.cc",
+      "arc_apps_private/arc_apps_private_api.h",
+      "webstore_widget_private/app_installer.cc",
+      "webstore_widget_private/app_installer.h",
+      "webstore_widget_private/webstore_widget_private_api.cc",
+      "webstore_widget_private/webstore_widget_private_api.h",
     ]
 
     deps += [
       "//chrome:strings",
+      "//chromeos/components/multidevice/logging",
       "//chromeos/components/proximity_auth",
-      "//chromeos/components/proximity_auth/logging",
       "//components/account_id",
-      "//components/cryptauth",
       "//components/strings:components_strings_grit",
       "//components/user_manager",
       "//device/bluetooth",

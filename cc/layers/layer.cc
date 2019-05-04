@@ -53,6 +53,7 @@ Layer::Inputs::Inputs(int layer_id)
       sorting_context_id(0),
       use_parent_backface_visibility(false),
       background_color(0),
+      backdrop_filter_quality(1.0f),
       scrollable(false),
       is_scrollbar(false),
       user_scrollable_horizontal(true),
@@ -76,6 +77,7 @@ scoped_refptr<Layer> Layer::Create() {
 
 Layer::Layer()
     : ignore_set_needs_commit_(false),
+      paint_count_(0),
       parent_(nullptr),
       layer_tree_host_(nullptr),
       // Layer IDs start from 1.
@@ -95,9 +97,10 @@ Layer::Layer()
       may_contain_video_(false),
       needs_show_scrollbars_(false),
       has_transform_node_(false),
-      is_rounded_corner_mask_(false),
       subtree_has_copy_request_(false),
-      safe_opaque_background_color_(0) {}
+      safe_opaque_background_color_(0),
+      compositing_reasons_(0),
+      owner_node_id_(0) {}
 
 Layer::~Layer() {
   // Our parent should be holding a reference to us so there should be no
@@ -123,9 +126,12 @@ void Layer::SetLayerTreeHost(LayerTreeHost* host) {
 
   bool property_tree_indices_invalid = false;
   if (layer_tree_host_) {
+    bool should_register_element =
+        inputs_.element_id &&
+        (!layer_tree_host_->IsUsingLayerLists() || inputs_.scrollable);
     layer_tree_host_->property_trees()->needs_rebuild = true;
     layer_tree_host_->UnregisterLayer(this);
-    if (inputs_.element_id) {
+    if (should_register_element) {
       layer_tree_host_->UnregisterElement(inputs_.element_id,
                                           ElementListType::ACTIVE);
     }
@@ -133,9 +139,12 @@ void Layer::SetLayerTreeHost(LayerTreeHost* host) {
       property_tree_indices_invalid = true;
   }
   if (host) {
+    bool should_register_element =
+        inputs_.element_id &&
+        (!host->IsUsingLayerLists() || inputs_.scrollable);
     host->property_trees()->needs_rebuild = true;
     host->RegisterLayer(this);
-    if (inputs_.element_id)
+    if (should_register_element)
       host->RegisterElement(inputs_.element_id, ElementListType::ACTIVE, this);
     if (!host->IsUsingLayerLists())
       property_tree_indices_invalid = true;
@@ -508,7 +517,7 @@ void Layer::SetMaskLayer(PictureLayer* mask_layer) {
     inputs_.mask_layer->RemoveFromParent();
     DCHECK(!inputs_.mask_layer->parent());
     inputs_.mask_layer->SetParent(this);
-    if (inputs_.filters.IsEmpty() && inputs_.background_filters.IsEmpty() &&
+    if (inputs_.filters.IsEmpty() && inputs_.backdrop_filters.IsEmpty() &&
         (!layer_tree_host_ ||
          layer_tree_host_->GetSettings().enable_mask_tiling)) {
       inputs_.mask_layer->SetLayerMaskType(
@@ -536,11 +545,11 @@ void Layer::SetFilters(const FilterOperations& filters) {
   SetNeedsCommit();
 }
 
-void Layer::SetBackgroundFilters(const FilterOperations& filters) {
+void Layer::SetBackdropFilters(const FilterOperations& filters) {
   DCHECK(IsPropertyChangeAllowed());
-  if (inputs_.background_filters == filters)
+  if (inputs_.backdrop_filters == filters)
     return;
-  inputs_.background_filters = filters;
+  inputs_.backdrop_filters = filters;
 
   // We will not set the mask type to MULTI_TEXTURE_MASK if the mask layer's
   // filters are removed, because we do not want to reraster if the filters are
@@ -552,6 +561,14 @@ void Layer::SetBackgroundFilters(const FilterOperations& filters) {
   SetSubtreePropertyChanged();
   SetPropertyTreesNeedRebuild();
   SetNeedsCommit();
+}
+
+void Layer::SetBackdropFilterBounds(const gfx::RectF& backdrop_filter_bounds) {
+  inputs_.backdrop_filter_bounds = backdrop_filter_bounds;
+}
+
+void Layer::SetBackdropFilterQuality(const float quality) {
+  inputs_.backdrop_filter_quality = quality;
 }
 
 void Layer::SetFiltersOrigin(const gfx::PointF& filters_origin) {
@@ -907,6 +924,12 @@ void Layer::SetScrollable(const gfx::Size& bounds) {
   if (!layer_tree_host_)
     return;
 
+  if (layer_tree_host_->IsUsingLayerLists() && !was_scrollable &&
+      inputs_.element_id) {
+    layer_tree_host_->RegisterElement(inputs_.element_id,
+                                      ElementListType::ACTIVE, this);
+  }
+
   if (!layer_tree_host_->IsUsingLayerLists()) {
     auto& scroll_tree = layer_tree_host_->property_trees()->scroll_tree;
     auto* scroll_node = scroll_tree.Node(scroll_tree_index_);
@@ -950,10 +973,50 @@ void Layer::SetUserScrollable(bool horizontal, bool vertical) {
   SetNeedsCommit();
 }
 
+bool Layer::GetUserScrollableHorizontal() const {
+  // When using layer lists, horizontal scrollability is stored in scroll nodes.
+  if (layer_tree_host() && layer_tree_host()->IsUsingLayerLists()) {
+    auto& scroll_tree = layer_tree_host()->property_trees()->scroll_tree;
+    if (auto* scroll_node = scroll_tree.Node(scroll_tree_index_))
+      return scroll_node->user_scrollable_horizontal;
+    return false;
+  }
+  return inputs_.user_scrollable_horizontal;
+}
+
+bool Layer::GetUserScrollableVertical() const {
+  // When using layer lists, vertical scrollability is stored in scroll nodes.
+  if (layer_tree_host() && layer_tree_host()->IsUsingLayerLists()) {
+    auto& scroll_tree = layer_tree_host()->property_trees()->scroll_tree;
+    if (auto* scroll_node = scroll_tree.Node(scroll_tree_index_))
+      return scroll_node->user_scrollable_vertical;
+    return false;
+  }
+  return inputs_.user_scrollable_vertical;
+}
+
+uint32_t Layer::GetMainThreadScrollingReasons() const {
+  // When using layer lists, main thread scrolling reasons are stored in scroll
+  // nodes.
+  if (layer_tree_host() && layer_tree_host()->IsUsingLayerLists()) {
+    auto& scroll_tree = layer_tree_host()->property_trees()->scroll_tree;
+    if (auto* scroll_node = scroll_tree.Node(scroll_tree_index_))
+      return scroll_node->main_thread_scrolling_reasons;
+    return MainThreadScrollingReason::kNotScrollingOnMain;
+  }
+  return inputs_.main_thread_scrolling_reasons;
+}
+
 void Layer::AddMainThreadScrollingReasons(
     uint32_t main_thread_scrolling_reasons) {
   DCHECK(IsPropertyChangeAllowed());
   DCHECK(main_thread_scrolling_reasons);
+
+  // When layer lists are used, the main thread scrolling reasons should be set
+  // on property tree nodes directly.
+  // TODO(pdr): Uncomment this check when https://crbug.com/919969 is fixed.
+  // DCHECK(!layer_tree_host() || !layer_tree_host()->IsUsingLayerLists());
+
   // Layer should only see non-transient scrolling reasons. Transient scrolling
   // reasons are computed per hit test.
   DCHECK(MainThreadScrollingReason::MainThreadCanSetScrollReasons(
@@ -1136,6 +1199,24 @@ void Layer::SetShouldFlattenTransform(bool should_flatten) {
   SetSubtreePropertyChanged();
 }
 
+std::string Layer::ToString() const {
+  return base::StringPrintf(
+      "layer_id: %d\n"
+      "  Bounds: %s\n"
+      "  ElementId: %s\n"
+      "  OffsetToTransformParent: %s\n"
+      "  Position: %s\n"
+      "  scrollable: %d\n"
+      "  clip_tree_index: %d\n"
+      "  effect_tree_index: %d\n"
+      "  scroll_tree_index: %d\n"
+      "  transform_tree_index: %d\n",
+      id(), bounds().ToString().c_str(), element_id().ToString().c_str(),
+      offset_to_transform_parent().ToString().c_str(),
+      position().ToString().c_str(), scrollable(), clip_tree_index(),
+      effect_tree_index(), scroll_tree_index(), transform_tree_index());
+}
+
 void Layer::SetUseParentBackfaceVisibility(bool use) {
   DCHECK(IsPropertyChangeAllowed());
   if (inputs_.use_parent_backface_visibility == use)
@@ -1257,7 +1338,6 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
   // deprecated. http://crbug.com/709137
   layer->SetElementId(inputs_.element_id);
   layer->SetHasTransformNode(has_transform_node_);
-  layer->set_is_rounded_corner_mask(is_rounded_corner_mask_);
   layer->SetBackgroundColor(inputs_.background_color);
   layer->SetSafeOpaqueBackgroundColor(safe_opaque_background_color_);
   layer->SetBounds(inputs_.bounds);
@@ -1276,8 +1356,6 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
     layer->NoteLayerPropertyChanged();
   layer->set_may_contain_video(may_contain_video_);
   layer->SetMasksToBounds(inputs_.masks_to_bounds);
-  layer->set_main_thread_scrolling_reasons(
-      inputs_.main_thread_scrolling_reasons);
   layer->SetNonFastScrollableRegion(inputs_.non_fast_scrollable_region);
   layer->SetTouchActionRegion(inputs_.touch_action_region);
   // TODO(sunxd): Pass the correct region for wheel event handlers, see
@@ -1292,7 +1370,6 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
     layer->SetWheelEventHandlerRegion(Region());
   }
   layer->SetContentsOpaque(inputs_.contents_opaque);
-  layer->SetPosition(inputs_.position);
   layer->SetShouldFlattenScreenSpaceTransformFromPropertyTree(
       should_flatten_screen_space_transform_from_property_tree_);
   layer->SetUseParentBackfaceVisibility(inputs_.use_parent_backface_visibility);
@@ -1504,14 +1581,17 @@ void Layer::SetElementId(ElementId id) {
     return;
   TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("cc.debug"), "Layer::SetElementId",
                "element", id.AsValue().release());
-  if (inputs_.element_id && layer_tree_host()) {
+  bool should_register_element =
+      layer_tree_host() &&
+      (!layer_tree_host()->IsUsingLayerLists() || inputs_.scrollable);
+  if (should_register_element && inputs_.element_id) {
     layer_tree_host_->UnregisterElement(inputs_.element_id,
                                         ElementListType::ACTIVE);
   }
 
   inputs_.element_id = id;
 
-  if (inputs_.element_id && layer_tree_host()) {
+  if (should_register_element && inputs_.element_id) {
     layer_tree_host_->RegisterElement(inputs_.element_id,
                                       ElementListType::ACTIVE, this);
   }

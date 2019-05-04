@@ -100,6 +100,13 @@ class CONTENT_EXPORT FindRequestManager {
                              const gfx::RectF& active_rect);
 #endif
 
+  const std::unordered_set<RenderFrameHost*>
+  render_frame_hosts_pending_initial_reply_for_testing() const {
+    return pending_initial_replies_;
+  }
+
+  gfx::Rect GetSelectionRectForTesting() { return selection_rect_; }
+
  private:
   // An invalid ID. This value is invalid for any render process ID, render
   // frame ID, find request ID, or find match rects version number.

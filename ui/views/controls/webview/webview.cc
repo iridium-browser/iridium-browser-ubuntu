@@ -11,6 +11,7 @@
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -129,6 +130,10 @@ void WebView::SetCrashedOverlayView(View* crashed_overlay_view) {
 
   if (crashed_overlay_view_) {
     RemoveChildView(crashed_overlay_view_);
+    // Show the hosted web contents view iff the crashed
+    // overlay is NOT showing, to ensure hit testing is
+    // correct on Mac. See https://crbug.com/896508
+    holder_->SetVisible(true);
     if (!crashed_overlay_view_->owned_by_client())
       delete crashed_overlay_view_;
   }
@@ -136,6 +141,7 @@ void WebView::SetCrashedOverlayView(View* crashed_overlay_view) {
   crashed_overlay_view_ = crashed_overlay_view;
   if (crashed_overlay_view_) {
     AddChildView(crashed_overlay_view_);
+    holder_->SetVisible(false);
     crashed_overlay_view_->SetBoundsRect(gfx::Rect(size()));
   }
 
@@ -248,7 +254,7 @@ void WebView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->SetNameExplicitlyEmpty();
   if (child_ax_tree_id_ != ui::AXTreeIDUnknown()) {
     node_data->AddStringAttribute(ax::mojom::StringAttribute::kChildTreeId,
-                                  child_ax_tree_id_);
+                                  child_ax_tree_id_.ToString());
   }
 }
 
@@ -360,6 +366,10 @@ void WebView::AttachWebContents() {
 
   holder_->Attach(view_to_attach);
 
+  // We set the parent accessible of the native view to be our parent.
+  if (parent())
+    holder_->SetParentAccessible(parent()->GetNativeViewAccessible());
+
   // The WebContents is not focused automatically when attached, so we need to
   // tell the WebContents it has focus if this has focus.
   if (HasFocus())
@@ -369,8 +379,9 @@ void WebView::AttachWebContents() {
 }
 
 void WebView::DetachWebContents() {
-  if (web_contents())
+  if (web_contents()) {
     holder_->Detach();
+  }
 }
 
 void WebView::ReattachForFullscreenChange(bool enter_fullscreen) {
@@ -409,10 +420,7 @@ void WebView::UpdateCrashedOverlayView() {
 void WebView::NotifyAccessibilityWebContentsChanged() {
   content::RenderFrameHost* rfh =
       web_contents() ? web_contents()->GetMainFrame() : nullptr;
-  if (rfh)
-    child_ax_tree_id_ = rfh->GetAXTreeID();
-  else
-    child_ax_tree_id_ = ui::AXTreeIDUnknown();
+  child_ax_tree_id_ = rfh ? rfh->GetAXTreeID() : ui::AXTreeIDUnknown();
   NotifyAccessibilityEvent(ax::mojom::Event::kChildrenChanged, false);
 }
 

@@ -33,7 +33,7 @@ CPDF_String::CPDF_String(WeakPtr<ByteStringPool> pPool, const WideString& str)
 CPDF_String::~CPDF_String() {}
 
 CPDF_Object::Type CPDF_String::GetType() const {
-  return STRING;
+  return kString;
 }
 
 std::unique_ptr<CPDF_Object> CPDF_String::Clone() const {
@@ -64,7 +64,7 @@ const CPDF_String* CPDF_String::AsString() const {
 }
 
 WideString CPDF_String::GetUnicodeText() const {
-  return PDF_DecodeText(m_String);
+  return PDF_DecodeText(m_String.AsRawSpan());
 }
 
 bool CPDF_String::WriteTo(IFX_ArchiveStream* archive,

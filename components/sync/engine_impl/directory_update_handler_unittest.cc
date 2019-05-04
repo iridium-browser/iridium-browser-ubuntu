@@ -11,7 +11,8 @@
 #include <utility>
 
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
+#include "base/stl_util.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/sync/engine_impl/cycle/directory_type_debug_info_emitter.h"
 #include "components/sync/engine_impl/cycle/status_controller.h"
 #include "components/sync/engine_impl/syncer_proto_util.h"
@@ -87,7 +88,8 @@ class DirectoryUpdateHandlerProcessUpdateTest : public ::testing::Test {
   base::ObserverList<TypeDebugInfoObserver>::Unchecked type_observers_;
 
  private:
-  base::MessageLoop loop_;  // Needed to initialize the directory.
+  // Needed to initialize the directory.
+  base::test::ScopedTaskEnvironment task_environment_;
   TestDirectorySetterUpper dir_maker_;
   scoped_refptr<FakeModelWorker> ui_worker_;
 };
@@ -111,7 +113,9 @@ void DirectoryUpdateHandlerProcessUpdateTest::UpdateSyncEntities(
     const SyncEntityList& applicable_updates,
     StatusController* status) {
   syncable::ModelNeutralWriteTransaction trans(FROM_HERE, UNITTEST, dir());
-  handler->UpdateSyncEntities(&trans, applicable_updates, status);
+  // We pick is_initial_sync arbitrarily as it has only impact on counters.
+  handler->UpdateSyncEntities(&trans, applicable_updates,
+                              /*is_initial_sync=*/true, status);
 }
 
 void DirectoryUpdateHandlerProcessUpdateTest::UpdateProgressMarkers(
@@ -135,7 +139,7 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, NewBookmarkTag) {
   std::unique_ptr<sync_pb::SyncEntity> e =
       CreateUpdate(SyncableIdToProto(server_id), root, BOOKMARKS);
   e->set_originator_cache_guid(
-      std::string(kCacheGuid, arraysize(kCacheGuid) - 1));
+      std::string(kCacheGuid, base::size(kCacheGuid) - 1));
   Id client_id = Id::CreateFromClientString("-2");
   e->set_originator_client_item_id(client_id.GetServerId());
   e->set_position_in_parent(0);
@@ -279,8 +283,10 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, GarbageCollectionByVersion) {
   updates.push_back(e2.get());
 
   // Process and apply updates.
-  EXPECT_EQ(SYNCER_OK, handler.ProcessGetUpdatesResponse(progress, context,
-                                                         updates, &status));
+  EXPECT_EQ(
+      SyncerError::SYNCER_OK,
+      handler.ProcessGetUpdatesResponse(progress, context, updates, &status)
+          .value());
   handler.ApplyUpdates(&status);
 
   // Verify none is deleted because they are unapplied during GC.
@@ -290,8 +296,11 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, GarbageCollectionByVersion) {
 
   // Process and apply again. Old entry is deleted but not root.
   progress.mutable_gc_directive()->set_version_watermark(kDefaultVersion + 20);
-  EXPECT_EQ(SYNCER_OK, handler.ProcessGetUpdatesResponse(
-                           progress, context, SyncEntityList(), &status));
+  EXPECT_EQ(SyncerError::SYNCER_OK,
+            handler
+                .ProcessGetUpdatesResponse(progress, context, SyncEntityList(),
+                                           &status)
+                .value());
   handler.ApplyUpdates(&status);
   EXPECT_FALSE(EntryExists(e1->id_string()));
   EXPECT_TRUE(EntryExists(e2->id_string()));
@@ -335,8 +344,10 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, GarbageCollectionByAge) {
   updates.push_back(e2.get());
 
   // Process and apply updates.
-  EXPECT_EQ(SYNCER_OK, handler.ProcessGetUpdatesResponse(progress, context,
-                                                         updates, &status));
+  EXPECT_EQ(
+      SyncerError::SYNCER_OK,
+      handler.ProcessGetUpdatesResponse(progress, context, updates, &status)
+          .value());
   handler.ApplyUpdates(&status);
 
   // Verify none is deleted because they are unapplied during GC.
@@ -347,8 +358,11 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, GarbageCollectionByAge) {
   // Process and apply again. 15-days-old entry is deleted but not 5-days-old
   // entry.
   progress.mutable_gc_directive()->set_age_watermark_in_days(10);
-  EXPECT_EQ(SYNCER_OK, handler.ProcessGetUpdatesResponse(
-                           progress, context, SyncEntityList(), &status));
+  EXPECT_EQ(SyncerError::SYNCER_OK,
+            handler
+                .ProcessGetUpdatesResponse(progress, context, SyncEntityList(),
+                                           &status)
+                .value());
   handler.ApplyUpdates(&status);
   EXPECT_FALSE(EntryExists(e1->id_string()));
   EXPECT_TRUE(EntryExists(e2->id_string()));
@@ -400,8 +414,10 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, GarbageCollectionByItemLimit) {
   updates.push_back(e3.get());
 
   // Process and apply updates.
-  EXPECT_EQ(SYNCER_OK, handler.ProcessGetUpdatesResponse(progress, context,
-                                                         updates, &status));
+  EXPECT_EQ(
+      SyncerError::SYNCER_OK,
+      handler.ProcessGetUpdatesResponse(progress, context, updates, &status)
+          .value());
   handler.ApplyUpdates(&status);
 
   // Verify none is deleted because they are unapplied during GC.
@@ -411,8 +427,11 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, GarbageCollectionByItemLimit) {
 
   // Process and apply again. 15-days-old entry is deleted.
   progress.mutable_gc_directive()->set_max_number_of_items(2);
-  EXPECT_EQ(SYNCER_OK, handler.ProcessGetUpdatesResponse(
-                           progress, context, SyncEntityList(), &status));
+  EXPECT_EQ(SyncerError::SYNCER_OK,
+            handler
+                .ProcessGetUpdatesResponse(progress, context, SyncEntityList(),
+                                           &status)
+                .value());
   handler.ApplyUpdates(&status);
   EXPECT_FALSE(EntryExists(e1->id_string()));
   EXPECT_TRUE(EntryExists(e2->id_string()));
@@ -444,8 +463,10 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, ContextVersion) {
   updates.push_back(e1.get());
 
   // The first response should be processed fine.
-  EXPECT_EQ(SYNCER_OK, handler.ProcessGetUpdatesResponse(progress, old_context,
-                                                         updates, &status));
+  EXPECT_EQ(
+      SyncerError::SYNCER_OK,
+      handler.ProcessGetUpdatesResponse(progress, old_context, updates, &status)
+          .value());
   handler.ApplyUpdates(&status);
 
   // The PREFERENCES root should be auto-created.
@@ -474,9 +495,10 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, ContextVersion) {
 
   // The second response, with an old context version, should result in an
   // error and the updates should be dropped.
-  EXPECT_EQ(DATATYPE_TRIGGERED_RETRY,
-            handler.ProcessGetUpdatesResponse(progress, new_context, updates,
-                                              &status));
+  EXPECT_EQ(
+      SyncerError::DATATYPE_TRIGGERED_RETRY,
+      handler.ProcessGetUpdatesResponse(progress, new_context, updates, &status)
+          .value());
   handler.ApplyUpdates(&status);
 
   EXPECT_FALSE(EntryExists(e2->id_string()));
@@ -586,7 +608,8 @@ class DirectoryUpdateHandlerApplyUpdateTest : public ::testing::Test {
   syncable::Directory* directory() { return dir_maker_.directory(); }
 
  private:
-  base::MessageLoop loop_;  // Needed to initialize the directory.
+  // Needed to initialize the directory.
+  base::test::ScopedTaskEnvironment task_environment_;
   TestDirectorySetterUpper dir_maker_;
   std::unique_ptr<TestEntryFactory> entry_factory_;
 

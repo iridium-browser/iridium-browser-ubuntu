@@ -35,8 +35,8 @@
 #import "ios/chrome/browser/ui/settings/cells/clear_browsing_data_item.h"
 #import "ios/chrome/browser/ui/settings/clear_browsing_data_manager.h"
 #import "ios/chrome/browser/ui/settings/time_range_selector_collection_view_controller.h"
-#include "ios/chrome/browser/ui/ui_util.h"
-#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
@@ -124,8 +124,8 @@ void BrowsingDataRemoverObserverWrapper::OnBrowsingDataRemoved(
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
   DCHECK(browserState);
   UICollectionViewLayout* layout = [[MDCCollectionViewFlowLayout alloc] init];
-  self =
-      [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
+  self = [super initWithLayout:layout
+                         style:CollectionViewControllerStyleDefault];
   if (self) {
     self.accessibilityTraits |= UIAccessibilityTraitButton;
 

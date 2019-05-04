@@ -20,37 +20,29 @@ const char kCommonScript[] = "Zyyy";
   static_assert(static_cast<int>(a) == static_cast<int>(b), \
                 "mismatching enums: " #a)
 
-STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_MAC, WebSettings::kEditingBehaviorMac);
-STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_WIN, WebSettings::kEditingBehaviorWin);
-STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_UNIX, WebSettings::kEditingBehaviorUnix);
+STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_MAC, WebSettings::EditingBehavior::kMac);
+STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_WIN, WebSettings::EditingBehavior::kWin);
+STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_UNIX, WebSettings::EditingBehavior::kUnix);
 STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_ANDROID,
-                   WebSettings::kEditingBehaviorAndroid);
+                   WebSettings::EditingBehavior::kAndroid);
 
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_DEFAULT,
-                   WebSettings::kV8CacheOptionsDefault);
-STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_NONE, WebSettings::kV8CacheOptionsNone);
-STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_CODE, WebSettings::kV8CacheOptionsCode);
+                   WebSettings::V8CacheOptions::kDefault);
+STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_NONE, WebSettings::V8CacheOptions::kNone);
+STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_CODE, WebSettings::V8CacheOptions::kCode);
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_CODE_WITHOUT_HEAT_CHECK,
-                   WebSettings::kV8CacheOptionsCodeWithoutHeatCheck);
+                   WebSettings::V8CacheOptions::kCodeWithoutHeatCheck);
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_FULLCODE_WITHOUT_HEAT_CHECK,
-                   WebSettings::kV8CacheOptionsFullCodeWithoutHeatCheck);
+                   WebSettings::V8CacheOptions::kFullCodeWithoutHeatCheck);
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_LAST,
-                   WebSettings::kV8CacheOptionsFullCodeWithoutHeatCheck);
-
-STATIC_ASSERT_ENUM(SavePreviousDocumentResources::NEVER,
-                   WebSettings::SavePreviousDocumentResources::kNever);
-STATIC_ASSERT_ENUM(
-    SavePreviousDocumentResources::UNTIL_ON_DOM_CONTENT_LOADED,
-    WebSettings::SavePreviousDocumentResources::kUntilOnDOMContentLoaded);
-STATIC_ASSERT_ENUM(SavePreviousDocumentResources::UNTIL_ON_LOAD,
-                   WebSettings::SavePreviousDocumentResources::kUntilOnLoad);
+                   WebSettings::V8CacheOptions::kFullCodeWithoutHeatCheck);
 
 STATIC_ASSERT_ENUM(IMAGE_ANIMATION_POLICY_ALLOWED,
-                   WebSettings::kImageAnimationPolicyAllowed);
+                   WebSettings::ImageAnimationPolicy::kAllowed);
 STATIC_ASSERT_ENUM(IMAGE_ANIMATION_POLICY_ANIMATION_ONCE,
-                   WebSettings::kImageAnimationPolicyAnimateOnce);
+                   WebSettings::ImageAnimationPolicy::kAnimateOnce);
 STATIC_ASSERT_ENUM(IMAGE_ANIMATION_POLICY_NO_ANIMATION,
-                   WebSettings::kImageAnimationPolicyNoAnimation);
+                   WebSettings::ImageAnimationPolicy::kNoAnimation);
 
 STATIC_ASSERT_ENUM(ui::POINTER_TYPE_NONE, blink::kPointerTypeNone);
 STATIC_ASSERT_ENUM(ui::POINTER_TYPE_COARSE, blink::kPointerTypeCoarse);
@@ -91,13 +83,12 @@ WebPreferences::WebPreferences()
       dns_prefetching_enabled(true),
       data_saver_enabled(false),
       data_saver_holdback_web_api_enabled(false),
-      data_saver_holdback_media_api_enabled(false),
       local_storage_enabled(false),
       databases_enabled(false),
       application_cache_enabled(false),
       tabs_to_links(true),
       history_entry_requires_user_gesture(false),
-      disable_pushstate_throttle(false),
+      disable_ipc_flooding_protection(false),
       hyperlink_auditing_enabled(true),
       allow_universal_access_from_file_urls(false),
       allow_file_access_from_file_urls(false),
@@ -130,6 +121,7 @@ WebPreferences::WebPreferences()
       should_print_backgrounds(false),
       should_clear_document_background(true),
       enable_scroll_animator(false),
+      prefers_reduced_motion(false),
       touch_event_feature_detection_enabled(false),
       touch_adjustment_enabled(true),
       pointer_events_max_touch_points(0),
@@ -158,9 +150,7 @@ WebPreferences::WebPreferences()
       shrinks_viewport_contents_to_fit(true),
       viewport_style(ViewportStyle::MOBILE),
       always_show_context_menu_on_touch(false),
-      // TODO(sunyunjia): Re-enable smooth scroll for find on Android.
-      // https://crbug.com/845500
-      smooth_scroll_for_find_enabled(false),
+      smooth_scroll_for_find_enabled(true),
 #else
       viewport_meta_enabled(false),
       shrinks_viewport_contents_to_fit(false),
@@ -180,7 +170,6 @@ WebPreferences::WebPreferences()
       navigate_on_drag_drop(true),
       v8_cache_options(V8_CACHE_OPTIONS_DEFAULT),
       record_whole_document(false),
-      save_previous_document_resources(SavePreviousDocumentResources::NEVER),
       cookie_enabled(true),
       accelerated_video_decode_enabled(false),
       animation_policy(IMAGE_ANIMATION_POLICY_ALLOWED),

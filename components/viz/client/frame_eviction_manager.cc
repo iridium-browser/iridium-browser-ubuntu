@@ -12,7 +12,7 @@
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/memory/shared_memory.h"
 #include "base/stl_util.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "build/build_config.h"
 
 namespace viz {
@@ -96,8 +96,8 @@ size_t FrameEvictionManager::GetMaxNumberOfSavedFrames() const {
 
 FrameEvictionManager::FrameEvictionManager()
     : memory_pressure_listener_(new base::MemoryPressureListener(
-          base::Bind(&FrameEvictionManager::OnMemoryPressure,
-                     base::Unretained(this)))) {
+          base::BindRepeating(&FrameEvictionManager::OnMemoryPressure,
+                              base::Unretained(this)))) {
   max_number_of_saved_frames_ =
 #if defined(OS_ANDROID)
       // If the amount of memory on the device is >= 3.5 GB, save up to 5

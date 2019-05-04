@@ -68,6 +68,14 @@ MockMediaSource::MockMediaSource(const std::string& filename,
   CHECK_LE(initial_append_size_, file_data_->data_size());
 }
 
+MockMediaSource::MockMediaSource(const std::string& filename,
+                                 size_t initial_append_size,
+                                 bool initial_sequence_mode)
+    : MockMediaSource(filename,
+                      GetMimeTypeForFile(filename),
+                      initial_append_size,
+                      initial_sequence_mode) {}
+
 MockMediaSource::MockMediaSource(scoped_refptr<DecoderBuffer> data,
                                  const std::string& mimetype,
                                  size_t initial_append_size,
@@ -138,7 +146,7 @@ void MockMediaSource::AppendData(size_t size) {
       append_window_start_, append_window_end_, &last_timestamp_offset_);
   current_position_ += size;
 
-  ASSERT_EQ(expect_append_success_, success);
+  VerifyExpectedAppendResult(success);
 
   if (do_eos_after_next_append_) {
     do_eos_after_next_append_ = false;
@@ -165,8 +173,7 @@ void MockMediaSource::AppendAtTimeWithWindow(
     const uint8_t* pData,
     int size) {
   CHECK(!chunk_demuxer_->IsParsingMediaSegment(kSourceId));
-  ASSERT_EQ(
-      expect_append_success_,
+  VerifyExpectedAppendResult(
       chunk_demuxer_->AppendData(kSourceId, pData, size, append_window_start,
                                  append_window_end, &timestamp_offset));
   last_timestamp_offset_ = timestamp_offset;
@@ -265,6 +272,14 @@ void MockMediaSource::InitSegmentReceived(std::unique_ptr<MediaTracks> tracks) {
     track_ids.insert(track->id());
   }
   InitSegmentReceivedMock(tracks);
+}
+
+void MockMediaSource::VerifyExpectedAppendResult(bool append_result) {
+  if (expected_append_result_ == ExpectedAppendResult::kSuccessOrFailure)
+    return;  // |append_result| is ignored in this case.
+
+  ASSERT_EQ(expected_append_result_ == ExpectedAppendResult::kSuccess,
+            append_result);
 }
 
 }  // namespace media

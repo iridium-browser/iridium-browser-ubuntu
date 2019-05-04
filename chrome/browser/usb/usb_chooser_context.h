@@ -12,12 +12,12 @@
 #include <utility>
 #include <vector>
 
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/values.h"
 #include "chrome/browser/permissions/chooser_context_base.h"
 #include "chrome/browser/usb/usb_policy_allowed_devices.h"
-#include "device/usb/mojo/device_manager_impl.h"
 #include "device/usb/public/mojom/device_manager.mojom.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 
@@ -27,16 +27,21 @@ class UsbChooserContext : public ChooserContextBase,
   explicit UsbChooserContext(Profile* profile);
   ~UsbChooserContext() override;
 
-  class Observer : public base::CheckedObserver {
+  // This observer can be used to be notified of changes to USB devices that are
+  // connected.
+  class DeviceObserver : public base::CheckedObserver {
    public:
     virtual void OnDeviceAdded(const device::mojom::UsbDeviceInfo&);
     virtual void OnDeviceRemoved(const device::mojom::UsbDeviceInfo&);
     virtual void OnDeviceManagerConnectionError();
   };
 
+  static std::unique_ptr<base::DictionaryValue> DeviceInfoToDictValue(
+      const device::mojom::UsbDeviceInfo& device_info);
+
   // These methods from ChooserContextBase are overridden in order to expose
   // ephemeral devices through the public interface.
-  std::vector<std::unique_ptr<base::DictionaryValue>> GetGrantedObjects(
+  std::vector<std::unique_ptr<ChooserContextBase::Object>> GetGrantedObjects(
       const GURL& requesting_origin,
       const GURL& embedding_origin) override;
   std::vector<std::unique_ptr<ChooserContextBase::Object>>
@@ -56,8 +61,8 @@ class UsbChooserContext : public ChooserContextBase,
                            const GURL& embedding_origin,
                            const device::mojom::UsbDeviceInfo& device_info);
 
-  void AddObserver(Observer* observer);
-  void RemoveObserver(Observer* observer);
+  void AddObserver(DeviceObserver* observer);
+  void RemoveObserver(DeviceObserver* observer);
 
   // Forward UsbDeviceManager methods.
   void GetDevices(device::mojom::UsbDeviceManager::GetDevicesCallback callback);
@@ -65,16 +70,21 @@ class UsbChooserContext : public ChooserContextBase,
                  device::mojom::UsbDeviceRequest device_request,
                  device::mojom::UsbDeviceClientPtr device_client);
 
+  // This method should only be called when you are sure that |devices_| has
+  // been initialized. It will return nullptr if the guid cannot be found.
+  const device::mojom::UsbDeviceInfo* GetDeviceInfo(const std::string& guid);
+
   base::WeakPtr<UsbChooserContext> AsWeakPtr();
 
   void SetDeviceManagerForTesting(
       device::mojom::UsbDeviceManagerPtr fake_device_manager);
 
- private:
   // ChooserContextBase implementation.
   bool IsValidObject(const base::DictionaryValue& object) override;
   std::string GetObjectName(const base::DictionaryValue& object) override;
+  void InitDeviceList(std::vector<::device::mojom::UsbDeviceInfoPtr> devices);
 
+ private:
   // device::mojom::UsbDeviceManagerClient implementation.
   void OnDeviceAdded(device::mojom::UsbDeviceInfoPtr device_info) override;
   void OnDeviceRemoved(device::mojom::UsbDeviceInfoPtr device_info) override;
@@ -84,8 +94,12 @@ class UsbChooserContext : public ChooserContextBase,
   void SetUpDeviceManagerConnection();
 
   bool is_incognito_;
+  bool is_initialized_ = false;
+  base::queue<device::mojom::UsbDeviceManager::GetDevicesCallback>
+      pending_get_devices_requests_;
+
   std::map<std::pair<GURL, GURL>, std::set<std::string>> ephemeral_devices_;
-  std::map<std::string, base::DictionaryValue> ephemeral_dicts_;
+  std::map<std::string, device::mojom::UsbDeviceInfoPtr> devices_;
 
   std::unique_ptr<UsbPolicyAllowedDevices> usb_policy_allowed_devices_;
 
@@ -93,7 +107,7 @@ class UsbChooserContext : public ChooserContextBase,
   device::mojom::UsbDeviceManagerPtr device_manager_;
   mojo::AssociatedBinding<device::mojom::UsbDeviceManagerClient>
       client_binding_;
-  base::ObserverList<Observer> observer_list_;
+  base::ObserverList<DeviceObserver> device_observer_list_;
 
   base::WeakPtrFactory<UsbChooserContext> weak_factory_;
 

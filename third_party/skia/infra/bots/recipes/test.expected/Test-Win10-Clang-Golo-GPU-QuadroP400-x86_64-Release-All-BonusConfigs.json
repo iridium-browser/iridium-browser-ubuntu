@@ -256,6 +256,7 @@
       "gbr-gl",
       "glbetex",
       "glbert",
+      "glenarrow",
       "--src",
       "tests",
       "gm",
@@ -315,6 +316,10 @@
       "image",
       "gen_platf",
       "rle4-height-negative.bmp",
+      "_",
+      "image",
+      "gen_platf",
+      "error",
       "_",
       "image",
       "_",
@@ -418,8 +423,7 @@
     "name": "dm"
   },
   {
-    "name": "$result",
-    "recipe_result": null,
-    "status_code": 0
+    "jsonResult": null,
+    "name": "$result"
   }
 ]

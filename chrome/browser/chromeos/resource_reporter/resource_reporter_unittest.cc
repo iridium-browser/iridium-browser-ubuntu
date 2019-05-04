@@ -10,11 +10,11 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/fake_memory_pressure_monitor.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/timer/mock_timer.h"
 #include "chrome/browser/chromeos/resource_reporter/resource_reporter.h"
 #include "chrome/browser/task_manager/test_task_manager.h"
@@ -55,7 +55,7 @@ const ResourceReporter::TaskRecord kTestTasks[] = {
     {12, "12", 87.0, 30 * k1KB, false},
 };
 
-constexpr size_t kTasksSize = arraysize(kTestTasks);
+constexpr size_t kTasksSize = base::size(kTestTasks);
 
 // A test implementation of the task manager that can be used to collect CPU and
 // memory usage so that they can be tested with the resource reporter.

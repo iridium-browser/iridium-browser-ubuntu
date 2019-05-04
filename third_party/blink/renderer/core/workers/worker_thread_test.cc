@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_cache_options.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/inspector/inspector_task_runner.h"
+#include "third_party/blink/renderer/core/inspector/worker_devtools_params.h"
 #include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
@@ -29,44 +30,19 @@ using ExitCode = WorkerThread::ExitCode;
 
 namespace {
 
-class MockWorkerReportingProxy final : public WorkerReportingProxy {
- public:
-  MockWorkerReportingProxy() = default;
-  ~MockWorkerReportingProxy() override = default;
-
-  MOCK_METHOD1(DidCreateWorkerGlobalScope, void(WorkerOrWorkletGlobalScope*));
-  MOCK_METHOD0(DidInitializeWorkerContext, void());
-  MOCK_METHOD2(WillEvaluateClassicScriptMock,
-               void(size_t scriptSize, size_t cachedMetadataSize));
-  MOCK_METHOD1(DidEvaluateClassicScript, void(bool success));
-  MOCK_METHOD0(DidCloseWorkerGlobalScope, void());
-  MOCK_METHOD0(WillDestroyWorkerGlobalScope, void());
-  MOCK_METHOD0(DidTerminateWorkerThread, void());
-
-  void WillEvaluateClassicScript(size_t script_size,
-                                 size_t cached_metadata_size) override {
-    script_evaluation_event_.Signal();
-    WillEvaluateClassicScriptMock(script_size, cached_metadata_size);
-  }
-
-  void WaitUntilScriptEvaluation() { script_evaluation_event_.Wait(); }
-
- private:
-  WaitableEvent script_evaluation_event_;
-};
-
 // Used as a debugger task. Waits for a signal from the main thread.
 void WaitForSignalTask(WorkerThread* worker_thread,
                        WaitableEvent* waitable_event) {
   EXPECT_TRUE(worker_thread->IsCurrentThread());
 
+  worker_thread->DebuggerTaskStarted();
   // Notify the main thread that the debugger task is waiting for the signal.
   PostCrossThreadTask(
       *worker_thread->GetParentExecutionContextTaskRunners()->Get(
           TaskType::kInternalTest),
       FROM_HERE, CrossThreadBind(&test::ExitRunLoop));
-  WorkerThread::ScopedDebuggerTask debugger_task(worker_thread);
   waitable_event->Wait();
+  worker_thread->DebuggerTaskFinished();
 }
 
 void TerminateParentOfNestedWorker(WorkerThread* parent_thread,
@@ -387,8 +363,10 @@ TEST_F(WorkerThreadTest, Terminate_WhileDebuggerTaskIsRunningOnInitialization) {
 
   auto global_scope_creation_params =
       std::make_unique<GlobalScopeCreationParams>(
-          KURL("http://fake.url/"), ScriptType::kClassic, "fake user agent",
-          headers, kReferrerPolicyDefault, security_origin_.get(),
+          KURL("http://fake.url/"), mojom::ScriptType::kClassic,
+          OffMainThreadWorkerScriptFetchOption::kDisabled, "fake user agent",
+          nullptr /* web_worker_fetch_context */, headers,
+          network::mojom::ReferrerPolicy::kDefault, security_origin_.get(),
           false /* starter_secure_context */,
           CalculateHttpsState(security_origin_.get()), WorkerClients::Create(),
           mojom::IPAddressSpace::kLocal, nullptr /* originTrialToken */,
@@ -396,11 +374,14 @@ TEST_F(WorkerThreadTest, Terminate_WhileDebuggerTaskIsRunningOnInitialization) {
           std::make_unique<WorkerSettings>(Settings::Create().get()),
           kV8CacheOptionsDefault, nullptr /* worklet_module_responses_map */);
 
-  // Specify PauseOnWorkerStart::kPause so that the worker thread can pause
+  // Set wait_for_debugger so that the worker thread can pause
   // on initialization to run debugger tasks.
+  auto devtools_params = std::make_unique<WorkerDevToolsParams>();
+  devtools_params->wait_for_debugger = true;
+
   worker_thread_->Start(std::move(global_scope_creation_params),
                         WorkerBackingThreadStartupData::CreateDefault(),
-                        WorkerInspectorProxy::PauseOnWorkerStart::kPause,
+                        std::move(devtools_params),
                         ParentExecutionContextTaskRunners::Create());
 
   // Used to wait for worker thread termination in a debugger task on the

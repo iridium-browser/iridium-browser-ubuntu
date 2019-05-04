@@ -61,7 +61,7 @@ bool VulkanInstance::Initialize(
   VkApplicationInfo app_info = {};
   app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   app_info.pApplicationName = "Chromium";
-  app_info.apiVersion = VK_MAKE_VERSION(1, 0, 2);
+  app_info.apiVersion = VK_MAKE_VERSION(1, 1, 0);
 
   std::vector<const char*> enabled_extensions;
   enabled_extensions.insert(std::end(enabled_extensions),
@@ -163,6 +163,7 @@ bool VulkanInstance::Initialize(
     result = vkCreateDebugReportCallbackEXT(vk_instance_, &cb_create_info,
                                             nullptr, &error_callback_);
     if (VK_SUCCESS != result) {
+      error_callback_ = VK_NULL_HANDLE;
       DLOG(ERROR) << "vkCreateDebugReportCallbackEXT(ERROR) failed: " << result;
       return false;
     }
@@ -173,6 +174,7 @@ bool VulkanInstance::Initialize(
     result = vkCreateDebugReportCallbackEXT(vk_instance_, &cb_create_info,
                                             nullptr, &warning_callback_);
     if (VK_SUCCESS != result) {
+      warning_callback_ = VK_NULL_HANDLE;
       DLOG(ERROR) << "vkCreateDebugReportCallbackEXT(WARN) failed: " << result;
       return false;
     }
@@ -219,25 +221,32 @@ bool VulkanInstance::Initialize(
 
 void VulkanInstance::Destroy() {
 #if DCHECK_IS_ON()
-  if (debug_report_enabled_) {
+  if (debug_report_enabled_ && (error_callback_ != VK_NULL_HANDLE ||
+                                warning_callback_ != VK_NULL_HANDLE)) {
     PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallbackEXT =
         reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(
             vkGetInstanceProcAddr(vk_instance_,
                                   "vkDestroyDebugReportCallbackEXT"));
     DCHECK(vkDestroyDebugReportCallbackEXT);
-    vkDestroyDebugReportCallbackEXT(vk_instance_, error_callback_, nullptr);
-    vkDestroyDebugReportCallbackEXT(vk_instance_, warning_callback_, nullptr);
+    if (error_callback_ != VK_NULL_HANDLE) {
+      vkDestroyDebugReportCallbackEXT(vk_instance_, error_callback_, nullptr);
+      error_callback_ = VK_NULL_HANDLE;
+    }
+    if (warning_callback_ != VK_NULL_HANDLE) {
+      vkDestroyDebugReportCallbackEXT(vk_instance_, warning_callback_, nullptr);
+      warning_callback_ = VK_NULL_HANDLE;
+    }
   }
 #endif
   if (vk_instance_ != VK_NULL_HANDLE) {
     vkDestroyInstance(vk_instance_, nullptr);
+    vk_instance_ = VK_NULL_HANDLE;
   }
   VulkanFunctionPointers* vulkan_function_pointers =
       gpu::GetVulkanFunctionPointers();
   if (vulkan_function_pointers->vulkan_loader_library_)
     base::UnloadNativeLibrary(vulkan_function_pointers->vulkan_loader_library_);
   vulkan_function_pointers->vulkan_loader_library_ = nullptr;
-  vk_instance_ = VK_NULL_HANDLE;
 }
 
 }  // namespace gpu

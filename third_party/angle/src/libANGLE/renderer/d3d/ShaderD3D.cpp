@@ -58,9 +58,7 @@ ShaderD3D::ShaderD3D(const gl::ShaderState &data,
     }
 }
 
-ShaderD3D::~ShaderD3D()
-{
-}
+ShaderD3D::~ShaderD3D() {}
 
 std::string ShaderD3D::getDebugInfo() const
 {
@@ -79,19 +77,19 @@ void ShaderD3D::uncompile()
     // set by compileToHLSL
     mCompilerOutputType = SH_ESSL_OUTPUT;
 
-    mUsesMultipleRenderTargets = false;
-    mUsesFragColor = false;
-    mUsesFragData = false;
-    mUsesFragCoord = false;
-    mUsesFrontFacing = false;
-    mUsesPointSize = false;
-    mUsesPointCoord = false;
-    mUsesDepthRange = false;
-    mUsesFragDepth = false;
+    mUsesMultipleRenderTargets   = false;
+    mUsesFragColor               = false;
+    mUsesFragData                = false;
+    mUsesFragCoord               = false;
+    mUsesFrontFacing             = false;
+    mUsesPointSize               = false;
+    mUsesPointCoord              = false;
+    mUsesDepthRange              = false;
+    mUsesFragDepth               = false;
     mHasANGLEMultiviewEnabled    = false;
     mUsesViewID                  = false;
-    mUsesDiscardRewriting = false;
-    mUsesNestedBreak = false;
+    mUsesDiscardRewriting        = false;
+    mUsesNestedBreak             = false;
     mRequiresIEEEStrictCompiling = false;
 
     mDebugInfo.clear();
@@ -102,14 +100,17 @@ void ShaderD3D::generateWorkarounds(angle::CompilerWorkaroundsD3D *workarounds) 
     if (mUsesDiscardRewriting)
     {
         // ANGLE issue 486:
-        // Work-around a D3D9 compiler bug that presents itself when using conditional discard, by disabling optimization
+        // Work-around a D3D9 compiler bug that presents itself when using conditional discard, by
+        // disabling optimization
         workarounds->skipOptimization = true;
     }
     else if (mUsesNestedBreak)
     {
         // ANGLE issue 603:
-        // Work-around a D3D9 compiler bug that presents itself when using break in a nested loop, by maximizing optimization
-        // We want to keep the use of ANGLE_D3D_WORKAROUND_MAX_OPTIMIZATION minimal to prevent hangs, so usesDiscard takes precedence
+        // Work-around a D3D9 compiler bug that presents itself when using break in a nested loop,
+        // by maximizing optimization We want to keep the use of
+        // ANGLE_D3D_WORKAROUND_MAX_OPTIMIZATION minimal to prevent hangs, so usesDiscard takes
+        // precedence
         workarounds->useMaxOptimization = true;
     }
 
@@ -141,6 +142,16 @@ unsigned int ShaderD3D::getShaderStorageBlockRegister(const std::string &blockNa
 ShShaderOutput ShaderD3D::getCompilerOutputType() const
 {
     return mCompilerOutputType;
+}
+
+bool ShaderD3D::useImage2DFunction(const std::string &functionName) const
+{
+    if (mUsedImage2DFunctionNames.empty())
+    {
+        return false;
+    }
+
+    return mUsedImage2DFunctionNames.find(functionName) != mUsedImage2DFunctionNames.end();
 }
 
 ShCompileOptions ShaderD3D::prepareSourceAndReturnOptions(const gl::Context *context,
@@ -180,6 +191,13 @@ const std::map<std::string, unsigned int> &GetUniformRegisterMap(
     return *uniformRegisterMap;
 }
 
+const std::set<std::string> &GetUsedImage2DFunctionNames(
+    const std::set<std::string> *usedImage2DFunctionNames)
+{
+    ASSERT(usedImage2DFunctionNames);
+    return *usedImage2DFunctionNames;
+}
+
 bool ShaderD3D::postTranslateCompile(gl::ShCompilerInstance *compiler, std::string *infoLog)
 {
     // TODO(jmadill): We shouldn't need to cache this.
@@ -201,13 +219,17 @@ bool ShaderD3D::postTranslateCompile(gl::ShCompilerInstance *compiler, std::stri
     mUsesViewID = translatedSource.find("GL_USES_VIEW_ID") != std::string::npos;
     mUsesDiscardRewriting =
         translatedSource.find("ANGLE_USES_DISCARD_REWRITING") != std::string::npos;
-    mUsesNestedBreak  = translatedSource.find("ANGLE_USES_NESTED_BREAK") != std::string::npos;
+    mUsesNestedBreak = translatedSource.find("ANGLE_USES_NESTED_BREAK") != std::string::npos;
     mRequiresIEEEStrictCompiling =
         translatedSource.find("ANGLE_REQUIRES_IEEE_STRICT_COMPILING") != std::string::npos;
 
     ShHandle compilerHandle = compiler->getHandle();
 
     mUniformRegisterMap = GetUniformRegisterMap(sh::GetUniformRegisterMap(compilerHandle));
+    mReadonlyImage2DRegisterIndex = sh::GetReadonlyImage2DRegisterIndex(compilerHandle);
+    mImage2DRegisterIndex         = sh::GetImage2DRegisterIndex(compilerHandle);
+    mUsedImage2DFunctionNames =
+        GetUsedImage2DFunctionNames(sh::GetUsedImage2DFunctionNames(compilerHandle));
 
     for (const sh::InterfaceBlock &interfaceBlock : mData.getUniformBlocks())
     {

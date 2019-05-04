@@ -8,11 +8,11 @@
 #include <map>
 
 #include "base/strings/string16.h"
+#include "base/win/scoped_handle.h"
 #include "chrome/credential_provider/gaiacp/os_process_manager.h"
 #include "chrome/credential_provider/gaiacp/os_user_manager.h"
 #include "chrome/credential_provider/gaiacp/scoped_lsa_policy.h"
 #include "chrome/credential_provider/gaiacp/scoped_user_profile.h"
-#include "chrome/credential_provider/gaiacp/win_http_url_fetcher.h"
 
 namespace credential_provider {
 
@@ -24,9 +24,6 @@ class FakeOSProcessManager : public OSProcessManager {
   ~FakeOSProcessManager() override;
 
   // OSProcessManager
-  HRESULT CreateLogonToken(const wchar_t* username,
-                           const wchar_t* password,
-                           base::win::ScopedHandle* token) override;
   HRESULT GetTokenLogonSID(const base::win::ScopedHandle& token,
                            PSID* sid) override;
   HRESULT SetupPermissionsForLogonSid(PSID sid) override;
@@ -57,11 +54,20 @@ class FakeOSUserManager : public OSUserManager {
                   bool add_to_users_group,
                   BSTR* sid,
                   DWORD* error) override;
-  HRESULT SetUserPassword(const wchar_t* username,
-                          const wchar_t* password,
-                          DWORD* error) override;
+  HRESULT ChangeUserPassword(const wchar_t* username,
+                             const wchar_t* password,
+                             const wchar_t* old_password) override;
+  HRESULT IsWindowsPasswordValid(const wchar_t* username,
+                                 const wchar_t* password) override;
+
+  HRESULT CreateLogonToken(const wchar_t* username,
+                           const wchar_t* password,
+                           bool interactive,
+                           base::win::ScopedHandle* token) override;
   HRESULT GetUserSID(const wchar_t* username, PSID* sid) override;
-  HRESULT FindUserBySID(const wchar_t* sid) override;
+  HRESULT FindUserBySID(const wchar_t* sid,
+                        wchar_t* username,
+                        DWORD length) override;
   HRESULT RemoveUser(const wchar_t* username, const wchar_t* password) override;
 
   struct UserInfo {
@@ -164,48 +170,6 @@ class FakeScopedUserProfile : public ScopedUserProfile {
                         const base::string16& username,
                         const base::string16& password);
   ~FakeScopedUserProfile() override;
-};
-
-///////////////////////////////////////////////////////////////////////////////
-
-// A scoped FakeWinHttpUrlFetcher factory.  Installs itself when constructed
-// and removes itself when deleted.
-class FakeWinHttpUrlFetcherFactory {
- public:
-  FakeWinHttpUrlFetcherFactory();
-  ~FakeWinHttpUrlFetcherFactory();
-
-  void SetFakeResponse(const GURL& url,
-                       const WinHttpUrlFetcher::Headers& headers,
-                       const std::string& response);
-
- private:
-  std::unique_ptr<WinHttpUrlFetcher> Create(const GURL& url);
-
-  WinHttpUrlFetcher::CreatorCallback original_creator_;
-  using Response = std::pair<WinHttpUrlFetcher::Headers, std::string>;
-  std::map<GURL, Response> fake_responses_;
-};
-
-class FakeWinHttpUrlFetcher : public WinHttpUrlFetcher {
- public:
-  explicit FakeWinHttpUrlFetcher(const GURL& url);
-  ~FakeWinHttpUrlFetcher() override;
-
-  using WinHttpUrlFetcher::Headers;
-
-  const Headers& response_headers() { return response_headers_; }
-
-  // WinHttpUrlFetcher
-  bool IsValid() const override;
-  HRESULT Fetch(std::string* response) override;
-  HRESULT Close() override;
-
- private:
-  friend FakeWinHttpUrlFetcherFactory;
-
-  Headers response_headers_;
-  std::string response_;
 };
 
 }  // namespace credential_provider

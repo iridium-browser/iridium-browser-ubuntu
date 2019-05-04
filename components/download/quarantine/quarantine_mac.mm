@@ -23,34 +23,6 @@
 
 namespace {
 
-// Once Chrome no longer supports macOS 10.9, this code will no longer be
-// necessary. Note that LSCopyItemAttribute was deprecated in macOS 10.8, but
-// the replacement to kLSItemQuarantineProperties did not exist until macOS
-// 10.10.
-#if !defined(MAC_OS_X_VERSION_10_10) || \
-    MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_10
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-bool SetQuarantinePropertiesDeprecated(const base::FilePath& file,
-                                       NSDictionary* properties) {
-  const UInt8* path = reinterpret_cast<const UInt8*>(file.value().c_str());
-  FSRef file_ref;
-  if (FSPathMakeRef(path, &file_ref, nullptr) != noErr)
-    return false;
-
-  OSStatus os_error = LSSetItemAttribute(
-      &file_ref, kLSRolesAll, kLSItemQuarantineProperties, properties);
-  if (os_error != noErr) {
-    OSSTATUS_LOG(WARNING, os_error)
-        << "Unable to set quarantine attributes on file " << file.value();
-    return false;
-  }
-  return true;
-}
-#pragma clang diagnostic pop
-#endif
-
-API_AVAILABLE(macos(10.10))
 bool SetQuarantineProperties(const base::FilePath& file,
                              NSDictionary* properties) {
   base::scoped_nsobject<NSURL> file_url([[NSURL alloc]
@@ -128,7 +100,7 @@ bool AddOriginMetadataToFile(const base::FilePath& file,
   if (!md_item_set_attribute_func)
     return false;
 
-  NSString* file_path = [NSString stringWithUTF8String:file.value().c_str()];
+  NSString* file_path = base::mac::FilePathToNSString(file);
   if (!file_path)
     return false;
 
@@ -144,11 +116,10 @@ bool AddOriginMetadataToFile(const base::FilePath& file,
 
   // Follow Safari's lead: the first item in the list is the source URL of
   // the downloaded file. If the referrer is known, store that, too.
-  NSString* origin_url = [NSString stringWithUTF8String:source.spec().c_str()];
+  NSString* origin_url = base::SysUTF8ToNSString(source.spec());
   if (origin_url)
     [list addObject:origin_url];
-  NSString* referrer_url =
-      [NSString stringWithUTF8String:referrer.spec().c_str()];
+  NSString* referrer_url = base::SysUTF8ToNSString(referrer.spec());
   if (referrer_url)
     [list addObject:referrer_url];
 
@@ -171,12 +142,7 @@ bool AddQuarantineMetadataToFile(const base::FilePath& file,
                                  const GURL& referrer) {
   base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   base::scoped_nsobject<NSMutableDictionary> properties;
-  bool success = false;
-  if (@available(macos 10.10, *)) {
-    success = GetQuarantineProperties(file, &properties);
-  } else {
-    success = GetQuarantinePropertiesDeprecated(file, &properties);
-  }
+  bool success = GetQuarantineProperties(file, &properties);
 
   if (!success)
     return false;
@@ -203,24 +169,18 @@ bool AddQuarantineMetadataToFile(const base::FilePath& file,
 
   if (![properties valueForKey:(NSString*)kLSQuarantineOriginURLKey] &&
       referrer.is_valid()) {
-    NSString* referrer_url =
-        [NSString stringWithUTF8String:referrer.spec().c_str()];
+    NSString* referrer_url = base::SysUTF8ToNSString(referrer.spec());
     [properties setValue:referrer_url
                   forKey:(NSString*)kLSQuarantineOriginURLKey];
   }
 
   if (![properties valueForKey:(NSString*)kLSQuarantineDataURLKey] &&
       source.is_valid()) {
-    NSString* origin_url =
-        [NSString stringWithUTF8String:source.spec().c_str()];
+    NSString* origin_url = base::SysUTF8ToNSString(source.spec());
     [properties setValue:origin_url forKey:(NSString*)kLSQuarantineDataURLKey];
   }
 
-  if (@available(macos 10.10, *)) {
-    return SetQuarantineProperties(file, properties);
-  } else {
-    return SetQuarantinePropertiesDeprecated(file, properties);
-  }
+  return SetQuarantineProperties(file, properties);
 }
 
 }  // namespace

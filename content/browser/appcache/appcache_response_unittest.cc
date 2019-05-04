@@ -14,10 +14,10 @@
 #include "base/compiler_specific.h"
 #include "base/containers/stack.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/pickle.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
@@ -171,7 +171,7 @@ class AppCacheResponseTest : public testing::Test {
     static const char kHttpBody[] = "Hello";
     scoped_refptr<IOBuffer> body =
         base::MakeRefCounted<WrappedIOBuffer>(kHttpBody);
-    std::string raw_headers(kHttpHeaders, arraysize(kHttpHeaders));
+    std::string raw_headers(kHttpHeaders, base::size(kHttpHeaders));
     WriteResponse(
         MakeHttpResponseInfo(raw_headers), body.get(), strlen(kHttpBody));
   }
@@ -214,8 +214,8 @@ class AppCacheResponseTest : public testing::Test {
     expected_write_result_ = buf_len;
     metadata_writer_->WriteMetadata(
         write_buffer_.get(), buf_len,
-        base::Bind(&AppCacheResponseTest::OnMetadataWriteComplete,
-                   base::Unretained(this)));
+        base::BindOnce(&AppCacheResponseTest::OnMetadataWriteComplete,
+                       base::Unretained(this)));
   }
 
   void ReadResponseBody(scoped_refptr<IOBuffer> io_buffer, int buf_len) {
@@ -495,7 +495,7 @@ class AppCacheResponseTest : public testing::Test {
 
   void AmountWritten() {
     static const char kHttpHeaders[] = "HTTP/1.0 200 OK\0\0";
-    std::string raw_headers(kHttpHeaders, arraysize(kHttpHeaders));
+    std::string raw_headers(kHttpHeaders, base::size(kHttpHeaders));
     std::unique_ptr<net::HttpResponseInfo> head =
         MakeHttpResponseInfo(raw_headers);
     int expected_amount_written =

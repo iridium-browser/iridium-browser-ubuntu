@@ -3,13 +3,16 @@ include_rules = [
   "+cc/paint",
   "+chrome/app",
   "+chrome/chrome_watcher",
+  "+chrome/credential_provider/common",
   "+chrome/grit",
   "+chrome/install_static",
   "+chrome/installer/util",
   "+chrome/notification_helper/notification_helper_constants.h",
-  "+chrome/services/cups_ipp_validator/public",
+  "+chrome/services/cups_ipp_parser/public",
+  "+chrome/services/diagnosticsd/public",
   "+chrome/services/file_util/public",
   "+chrome/services/media_gallery_util/public",
+  "+chrome/services/noop/public",
   "+chrome/services/printing/public",
   "+chrome/services/removable_storage_writer/public",
   "+chrome/services/util_win/public",
@@ -19,6 +22,13 @@ include_rules = [
   "+chrome_elf/dll_hash",
   "+chromeos",
   "+components",
+  # Use identity_manager.h instead of the below files;
+  # see https://groups.google.com/a/chromium.org/d/msg/chromium-dev/dgFLuxqZt1o/iEqkyoQQBwAJ for help and info.
+  "!components/signin/core/browser/fake_profile_oauth2_token_service.h",
+  "!components/signin/core/browser/profile_oauth2_token_service.h",
+  "!components/signin/core/browser/fake_signin_manager.h",
+  "!components/signin/core/browser/signin_manager.h",
+  "!components/signin/core/browser/signin_manager_base.h",
   "+content/public/browser",
   "+content/public/common",
   "+courgette",
@@ -49,6 +59,7 @@ include_rules = [
   "+media/midi",  # For midi switches
   "+media/mojo",  # For mojo media services.
   "+media/renderers",
+  "+media/webrtc",  # For webrtc media switches.
   "+ppapi/c",  # For various types.
   "+ppapi/host",
   "+ppapi/proxy",
@@ -63,6 +74,8 @@ include_rules = [
   "+services/media_session/public",
   "+services/metrics/metrics_mojo_service.h",
   "+services/metrics/public",
+  "+services/network/cert_verifier_with_trust_anchors.h",
+  "+services/network/cert_verify_proc_chromeos.h",
   "+services/network/ignore_errors_cert_verifier.h",
   "+services/network/network_service.h",
   "+services/network/public",
@@ -79,6 +92,7 @@ include_rules = [
   "+services/shape_detection/public/mojom",
   "+services/video_capture/public",
   "+services/viz/privileged",
+  "+services/viz/public/interfaces",
   "+services/ws/common",
   "+services/ws/public",
   "+skia/ext",
@@ -101,6 +115,12 @@ include_rules = [
   # The message center may not exist, or may run out of process (in mash).
   "-ui/message_center",
   "+ui/message_center/public",
+
+  # KeyboardController and related classes are part of Ash.
+  "-ui/keyboard",
+  "+ui/keyboard/grit",
+  "+ui/keyboard/public",
+  "+ui/keyboard/resources",
 
   # chrome only needs switches from cc. All usage of the compositor is from
   # content. Definitely don't include generic stuff from cc/base here, if this
@@ -156,7 +176,6 @@ include_rules = [
   "+third_party/blink/public/platform/web_mouse_event.h",
   "+third_party/blink/public/platform/web_mouse_wheel_event.h",
   "+third_party/blink/public/platform/web_touch_event.h",
-  "+third_party/blink/public/platform/web_referrer_policy.h",
   "+third_party/blink/public/platform/web_security_style.h",
   "+third_party/blink/public/platform/web_speech_synthesis_constants.h",
   "+third_party/blink/public/platform/web_sudden_termination_disabler_type.h",
@@ -177,7 +196,6 @@ include_rules = [
   "+third_party/blink/public/platform/autoplay.mojom.h",
   "+third_party/blink/public/platform/web_feature.mojom.h",
   "+third_party/blink/public/platform/modules/app_banner/app_banner.mojom.h",
-  "+third_party/blink/public/platform/modules/background_fetch/background_fetch.mojom.h",
   "+third_party/blink/public/platform/modules/budget_service/budget_service.mojom.h",
   "+third_party/blink/public/platform/modules/insecure_input/insecure_input_service.mojom.h",
   "+third_party/blink/public/platform/modules/installation/installation.mojom.h",
@@ -241,5 +259,9 @@ specific_include_rules = {
   # should be the responsibility of code in chrome/browser/notifications/
   "browser_process_impl.cc": [
     "+ui/message_center/message_center.h",
+  ],
+  # To share values of UMA enums between product code and tests.
+  "translate_manager_browsertest.cc": [
+    "+services/network/initiator_lock_compatibility.h",
   ],
 }

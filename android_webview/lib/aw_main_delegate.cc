@@ -22,19 +22,21 @@
 #include "android_webview/utility/aw_content_utility_client.h"
 #include "base/android/apk_assets.h"
 #include "base/android/build_info.h"
+#include "base/android/locale_utils.h"
 #include "base/command_line.h"
 #include "base/cpu.h"
 #include "base/i18n/icu_util.h"
+#include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "cc/base/switches.h"
 #include "components/autofill/core/common/autofill_features.h"
-#include "components/crash/content/app/breakpad_linux.h"
 #include "components/crash/core/common/crash_key.h"
 #include "components/safe_browsing/android/safe_browsing_api_handler_bridge.h"
-#include "components/services/heap_profiling/public/cpp/allocator_shim.h"
+#include "components/services/heap_profiling/public/cpp/sampling_profiler_wrapper.h"
 #include "components/spellcheck/spellcheck_buildflags.h"
 #include "components/viz/common/features.h"
 #include "content/public/browser/android/browser_media_player_manager_register.h"
@@ -51,6 +53,9 @@
 #include "media/base/media_switches.h"
 #include "media/media_buildflags.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/resource/resource_bundle_android.h"
+#include "ui/base/ui_base_paths.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
@@ -95,8 +100,9 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // WebView does not yet support screen orientation locking.
   cl->AppendSwitch(switches::kDisableScreenOrientationLock);
 
-  // WebView does not currently support Web Speech API (crbug.com/487255)
-  cl->AppendSwitch(switches::kDisableSpeechAPI);
+  // WebView does not currently support Web Speech Synthesis API,
+  // but it does support Web Speech Recognition API (crbug.com/487255).
+  cl->AppendSwitch(switches::kDisableSpeechSynthesisAPI);
 
   // WebView does not currently support the Permissions API (crbug.com/490120)
   cl->AppendSwitch(switches::kDisablePermissionsAPI);
@@ -225,9 +231,15 @@ void AwMainDelegate::PreSandboxStartup() {
 
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
+
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
-  int crash_signal_fd = -1;
+  const bool is_browser_process = process_type.empty();
+  if (!is_browser_process) {
+    base::i18n::SetICUDefaultLocale(
+        command_line.GetSwitchValueASCII(switches::kLang));
+  }
+
   if (process_type == switches::kRendererProcess) {
     auto* global_descriptors = base::GlobalDescriptors::GetInstance();
     int pak_fd = global_descriptors->Get(kAndroidWebViewLocalePakDescriptor);
@@ -246,19 +258,9 @@ void AwMainDelegate::PreSandboxStartup() {
       ui::ResourceBundle::GetSharedInstance().AddDataPackFromFileRegion(
           base::File(pak_fd), pak_region, pak_info.second);
     }
-
-    crash_signal_fd =
-        global_descriptors->Get(kAndroidWebViewCrashSignalDescriptor);
-  }
-  if (process_type.empty()) {
-    if (command_line.HasSwitch(switches::kWebViewSandboxedRenderer)) {
-      process_type = breakpad::kBrowserProcessType;
-    } else {
-      process_type = breakpad::kWebViewSingleProcessType;
-    }
   }
 
-  crash_reporter::EnableCrashReporter(process_type, crash_signal_fd);
+  crash_reporter::EnableCrashReporter(process_type);
 
   base::android::BuildInfo* android_build_info =
       base::android::BuildInfo::GetInstance();
@@ -280,15 +282,9 @@ int AwMainDelegate::RunProcess(
     const std::string& process_type,
     const content::MainFunctionParams& main_function_params) {
   if (process_type.empty()) {
-    browser_runner_.reset(content::BrowserMainRunner::Create());
+    browser_runner_ = content::BrowserMainRunner::Create();
     int exit_code = browser_runner_->Initialize(main_function_params);
     DCHECK_LT(exit_code, 0);
-
-    // At this point the content client has received the GPU info required
-    // to create a GPU fingerpring, and we can pass it to the microdump
-    // crash handler on the same thread as the crash handler was initialized.
-    crash_reporter::AddGpuFingerprintToMicrodumpCrashHandler(
-        content_client_.gpu_fingerprint());
 
     // Return 0 so that we do NOT trigger the default behavior. On Android, the
     // UI message loop is managed by the Java application.
@@ -311,8 +307,33 @@ bool AwMainDelegate::ShouldCreateFeatureList() {
   return false;
 }
 
+// This function is called only on the browser process.
+void AwMainDelegate::PostEarlyInitialization(bool is_running_tests) {
+  ui::SetLocalePaksStoredInApk(true);
+  std::string locale = ui::ResourceBundle::InitSharedInstanceWithLocale(
+      base::android::GetDefaultLocaleString(), NULL,
+      ui::ResourceBundle::LOAD_COMMON_RESOURCES);
+  if (locale.empty()) {
+    LOG(WARNING) << "Failed to load locale .pak from the apk. "
+                    "Bringing up WebView without any locale";
+  }
+  base::i18n::SetICUDefaultLocale(locale);
+
+  // Try to directly mmap the resources.pak from the apk. Fall back to load
+  // from file, using PATH_SERVICE, otherwise.
+  base::FilePath pak_file_path;
+  base::PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &pak_file_path);
+  pak_file_path = pak_file_path.AppendASCII("resources.pak");
+  ui::LoadMainAndroidPackFile("assets/resources.pak", pak_file_path);
+
+  aw_feature_list_creator_->CreateFeatureListAndFieldTrials();
+}
+
 content::ContentBrowserClient* AwMainDelegate::CreateContentBrowserClient() {
-  content_browser_client_.reset(new AwContentBrowserClient());
+  DCHECK(!aw_feature_list_creator_);
+  aw_feature_list_creator_ = std::make_unique<AwFeatureListCreator>();
+  content_browser_client_.reset(
+      new AwContentBrowserClient(aw_feature_list_creator_.get()));
   return content_browser_client_.get();
 }
 

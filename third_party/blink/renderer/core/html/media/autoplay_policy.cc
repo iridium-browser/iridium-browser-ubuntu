@@ -7,6 +7,7 @@
 #include "build/build_config.h"
 #include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 #include "third_party/blink/public/platform/autoplay.mojom-blink.h"
+#include "third_party/blink/public/platform/web_content_settings_client.h"
 #include "third_party/blink/public/platform/web_media_player.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
@@ -14,7 +15,6 @@
 #include "third_party/blink/public/web/web_user_media_client.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_visibility_observer.h"
-#include "third_party/blink/renderer/core/frame/content_settings_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/media/autoplay_uma_helper.h"
@@ -41,20 +41,6 @@ const char kErrorAutoplayFuncMobile[] =
 bool IsDocumentCrossOrigin(const Document& document) {
   const LocalFrame* frame = document.GetFrame();
   return frame && frame->IsCrossOriginSubframe();
-}
-
-// Returns whether |document| is whitelisted for autoplay. If true, the user
-// gesture lock will be initilized as false, indicating that the element is
-// allowed to autoplay unmuted without user gesture.
-bool IsDocumentWhitelisted(const Document& document) {
-  DCHECK(document.GetSettings());
-
-  const String& whitelist_scope =
-      document.GetSettings()->GetMediaPlaybackGestureWhitelistScope();
-  if (whitelist_scope.IsNull() || whitelist_scope.IsEmpty())
-    return false;
-
-  return document.Url().GetString().StartsWith(whitelist_scope);
 }
 
 // Return true if and only if the document settings specifies media playback
@@ -86,7 +72,7 @@ AutoplayPolicy::Type AutoplayPolicy::GetAutoplayPolicyForDocument(
   if (!document.GetSettings())
     return Type::kNoUserGestureRequired;
 
-  if (IsDocumentWhitelisted(document))
+  if (document.IsInWebAppScope())
     return Type::kNoUserGestureRequired;
 
   if (DocumentHasUserExceptionFlag(document))
@@ -171,7 +157,7 @@ bool AutoplayPolicy::DocumentIsCapturingUserMedia(const Document& document) {
   WebFrame* web_frame = WebFrame::FromFrame(document.GetFrame());
   if (!web_frame)
     return false;
-  
+
   WebLocalFrame* frame = web_frame->ToWebLocalFrame();
   if (!frame || !frame->Client())
     return false;
@@ -227,10 +213,11 @@ void AutoplayPolicy::StartAutoplayMutedWhenVisible() {
   if (autoplay_visibility_observer_)
     return;
 
-  autoplay_visibility_observer_ = new ElementVisibilityObserver(
-      element_,
-      WTF::BindRepeating(&AutoplayPolicy::OnVisibilityChangedForAutoplay,
-                         WrapWeakPersistent(this)));
+  autoplay_visibility_observer_ =
+      MakeGarbageCollected<ElementVisibilityObserver>(
+          element_,
+          WTF::BindRepeating(&AutoplayPolicy::OnVisibilityChangedForAutoplay,
+                             WrapWeakPersistent(this)));
   autoplay_visibility_observer_->Start();
 }
 
@@ -391,16 +378,10 @@ bool AutoplayPolicy::IsGestureNeededForPlaybackIfPendingUserGestureIsLocked()
     const {
   // We want to allow muted video to autoplay if:
   // - the flag is enabled;
-  // - Data Saver is not enabled;
   // - Preload was not disabled (low end devices);
   // - Autoplay is enabled in settings;
   if (element_->IsHTMLVideoElement() && element_->muted() &&
       DocumentShouldAutoplayMutedVideos(element_->GetDocument()) &&
-      !(element_->GetDocument().GetSettings() &&
-        GetNetworkStateNotifier().SaveDataEnabled() &&
-        !element_->GetDocument()
-             .GetSettings()
-             ->GetDataSaverHoldbackMediaApi()) &&
       !(element_->GetDocument().GetSettings() &&
         element_->GetDocument()
             .GetSettings()
@@ -423,7 +404,7 @@ void AutoplayPolicy::OnVisibilityChangedForAutoplay(bool is_visible) {
 
   if (ShouldAutoplay()) {
     element_->paused_ = false;
-    element_->ScheduleEvent(EventTypeNames::play);
+    element_->ScheduleEvent(event_type_names::kPlay);
     element_->ScheduleNotifyPlaying();
 
     element_->UpdatePlayState();
@@ -469,7 +450,9 @@ bool AutoplayPolicy::IsAutoplayAllowedPerSettings() const {
   LocalFrame* frame = element_->GetDocument().GetFrame();
   if (!frame)
     return false;
-  return frame->GetContentSettingsClient()->AllowAutoplay(true);
+  if (auto* settings_client = frame->GetContentSettingsClient())
+    return settings_client->AllowAutoplay(true /* default_value */);
+  return true;
 }
 
 bool AutoplayPolicy::ShouldAutoplay() {
@@ -478,7 +461,7 @@ bool AutoplayPolicy::ShouldAutoplay() {
   return element_->can_autoplay_ && element_->paused_ && element_->Autoplay();
 }
 
-void AutoplayPolicy::Trace(blink::Visitor* visitor) {
+void AutoplayPolicy::Trace(Visitor* visitor) {
   visitor->Trace(element_);
   visitor->Trace(autoplay_visibility_observer_);
   visitor->Trace(autoplay_uma_helper_);

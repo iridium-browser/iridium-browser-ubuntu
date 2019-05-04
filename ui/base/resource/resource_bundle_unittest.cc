@@ -14,8 +14,8 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -87,12 +87,11 @@ class MockResourceBundleDelegate : public ui::ResourceBundle::Delegate {
 // Returns |bitmap_data| with |custom_chunk| inserted after the IHDR chunk.
 void AddCustomChunk(const base::StringPiece& custom_chunk,
                     std::vector<unsigned char>* bitmap_data) {
-  EXPECT_LT(arraysize(kPngMagic) + kPngChunkMetadataSize, bitmap_data->size());
-  EXPECT_TRUE(std::equal(
-      bitmap_data->begin(),
-      bitmap_data->begin() + arraysize(kPngMagic),
-      kPngMagic));
-  auto ihdr_start = bitmap_data->begin() + arraysize(kPngMagic);
+  EXPECT_LT(base::size(kPngMagic) + kPngChunkMetadataSize, bitmap_data->size());
+  EXPECT_TRUE(std::equal(bitmap_data->begin(),
+                         bitmap_data->begin() + base::size(kPngMagic),
+                         kPngMagic));
+  auto ihdr_start = bitmap_data->begin() + base::size(kPngMagic);
   char ihdr_length_data[sizeof(uint32_t)];
   for (size_t i = 0; i < sizeof(uint32_t); ++i)
     ihdr_length_data[i] = *(ihdr_start + i);
@@ -175,34 +174,32 @@ TEST_F(ResourceBundleTest, DelegateGetPathForResourcePack) {
   resource_bundle->AddDataPackFromPath(pack_path, pack_scale_factor);
 }
 
-#if defined(OS_LINUX)
-// Fails consistently on Linux: crbug.com/161902
-#define MAYBE_DelegateGetPathForLocalePack DISABLED_DelegateGetPathForLocalePack
-#else
-#define MAYBE_DelegateGetPathForLocalePack DelegateGetPathForLocalePack
-#endif
-TEST_F(ResourceBundleTest, MAYBE_DelegateGetPathForLocalePack) {
+TEST_F(ResourceBundleTest, DelegateGetPathForLocalePack) {
+  ResourceBundle::CleanupSharedInstance();
+
   MockResourceBundleDelegate delegate;
-  ResourceBundle* resource_bundle = CreateResourceBundle(&delegate);
+  ResourceBundle::InitSharedInstance(&delegate);
 
   std::string locale = "en-US";
 
   // Cancel the load.
-  EXPECT_CALL(delegate, GetPathForLocalePack(_, locale))
-      .Times(2)
+  EXPECT_CALL(delegate, GetPathForLocalePack(_, _))
       .WillRepeatedly(Return(base::FilePath()))
       .RetiresOnSaturation();
 
-  EXPECT_FALSE(resource_bundle->LocaleDataPakExists(locale));
-  EXPECT_EQ("", resource_bundle->LoadLocaleResources(locale));
+  EXPECT_FALSE(ResourceBundle::LocaleDataPakExists(locale));
+  EXPECT_EQ("",
+            ResourceBundle::GetSharedInstance().LoadLocaleResources(locale));
 
   // Allow the load to proceed.
-  EXPECT_CALL(delegate, GetPathForLocalePack(_, locale))
-      .Times(2)
+  EXPECT_CALL(delegate, GetPathForLocalePack(_, _))
       .WillRepeatedly(ReturnArg<0>());
 
-  EXPECT_TRUE(resource_bundle->LocaleDataPakExists(locale));
-  EXPECT_EQ(locale, resource_bundle->LoadLocaleResources(locale));
+  EXPECT_TRUE(ResourceBundle::LocaleDataPakExists(locale));
+  EXPECT_EQ(locale,
+            ResourceBundle::GetSharedInstance().LoadLocaleResources(locale));
+
+  ResourceBundle::CleanupSharedInstance();
 }
 
 TEST_F(ResourceBundleTest, DelegateGetImageNamed) {
@@ -342,11 +339,9 @@ TEST_F(ResourceBundleTest, DelegateGetLocalizedStringWithOverride) {
 }
 
 TEST_F(ResourceBundleTest, LocaleDataPakExists) {
-  ResourceBundle* resource_bundle = CreateResourceBundle(nullptr);
-
   // Check that ResourceBundle::LocaleDataPakExists returns the correct results.
-  EXPECT_TRUE(resource_bundle->LocaleDataPakExists("en-US"));
-  EXPECT_FALSE(resource_bundle->LocaleDataPakExists("not_a_real_locale"));
+  EXPECT_TRUE(ResourceBundle::LocaleDataPakExists("en-US"));
+  EXPECT_FALSE(ResourceBundle::LocaleDataPakExists("not_a_real_locale"));
 }
 
 class ResourceBundleImageTest : public ResourceBundleTest {
@@ -520,9 +515,10 @@ TEST_F(ResourceBundleImageTest, GetImageNamedFallback1x) {
   CreateDataPackWithSingleBitmap(data_path, 10, base::StringPiece());
   // 2x data pack bitmap has custom chunk to indicate that the 2x bitmap is not
   // available and that GRIT fell back to 1x.
-  CreateDataPackWithSingleBitmap(data_2x_path, 10, base::StringPiece(
-      reinterpret_cast<const char*>(kPngScaleChunk),
-      arraysize(kPngScaleChunk)));
+  CreateDataPackWithSingleBitmap(
+      data_2x_path, 10,
+      base::StringPiece(reinterpret_cast<const char*>(kPngScaleChunk),
+                        base::size(kPngScaleChunk)));
 
   // Load the regular and 2x pak files.
   ResourceBundle* resource_bundle = CreateResourceBundleWithEmptyLocalePak();
@@ -558,12 +554,14 @@ TEST_F(ResourceBundleImageTest, GetImageNamedFallback1xRounding) {
 
   CreateDataPackWithSingleBitmap(data_path, 8, base::StringPiece());
   // Mark 140% and 180% images as requiring 1x fallback.
-  CreateDataPackWithSingleBitmap(data_140P_path, 8, base::StringPiece(
-    reinterpret_cast<const char*>(kPngScaleChunk),
-    arraysize(kPngScaleChunk)));
-  CreateDataPackWithSingleBitmap(data_180P_path, 8, base::StringPiece(
-    reinterpret_cast<const char*>(kPngScaleChunk),
-    arraysize(kPngScaleChunk)));
+  CreateDataPackWithSingleBitmap(
+      data_140P_path, 8,
+      base::StringPiece(reinterpret_cast<const char*>(kPngScaleChunk),
+                        base::size(kPngScaleChunk)));
+  CreateDataPackWithSingleBitmap(
+      data_180P_path, 8,
+      base::StringPiece(reinterpret_cast<const char*>(kPngScaleChunk),
+                        base::size(kPngScaleChunk)));
 
   ResourceBundle* resource_bundle = CreateResourceBundleWithEmptyLocalePak();
   resource_bundle->AddDataPackFromPath(data_path, SCALE_FACTOR_100P);
@@ -582,13 +580,16 @@ TEST_F(ResourceBundleImageTest, GetImageNamedFallback1xRounding) {
 }
 #endif
 
-#if defined(OS_IOS)
-// Fails on devices that have non-100P scaling. See crbug.com/298406
-#define MAYBE_FallbackToNone DISABLED_FallbackToNone
-#else
-#define MAYBE_FallbackToNone FallbackToNone
-#endif
-TEST_F(ResourceBundleImageTest, MAYBE_FallbackToNone) {
+TEST_F(ResourceBundleImageTest, FallbackToNone) {
+  std::vector<ScaleFactor> supported_factors;
+  supported_factors.push_back(SCALE_FACTOR_100P);
+  supported_factors.push_back(SCALE_FACTOR_200P);
+  supported_factors.push_back(SCALE_FACTOR_300P);
+
+  // Presents a consistent set of supported scale factors for all platforms.
+  // iOS does not include SCALE_FACTOR_100P, which breaks the test below.
+  test::ScopedSetSupportedScaleFactors scoped_supported(supported_factors);
+
   base::FilePath data_default_path = dir_path().AppendASCII("sample.pak");
 
   // Create the pak files.

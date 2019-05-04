@@ -8,15 +8,32 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "chromeos/components/drivefs/drivefs_bootstrap.h"
 #include "chromeos/components/drivefs/drivefs_host.h"
 #include "chromeos/components/drivefs/mojom/drivefs.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
 namespace drivefs {
+
+class FakeDriveFsBootstrapListener : public DriveFsBootstrapListener {
+ public:
+  explicit FakeDriveFsBootstrapListener(
+      drivefs::mojom::DriveFsBootstrapPtrInfo bootstrap);
+  ~FakeDriveFsBootstrapListener() override;
+
+ private:
+  void SendInvitationOverPipe(base::ScopedFD) override;
+  mojom::DriveFsBootstrapPtr bootstrap() override;
+
+  drivefs::mojom::DriveFsBootstrapPtrInfo bootstrap_;
+
+  DISALLOW_COPY_AND_ASSIGN(FakeDriveFsBootstrapListener);
+};
 
 class FakeDriveFs : public drivefs::mojom::DriveFs,
                     public drivefs::mojom::DriveFsBootstrap {
@@ -27,15 +44,15 @@ class FakeDriveFs : public drivefs::mojom::DriveFs,
   void RegisterMountingForAccountId(
       base::RepeatingCallback<std::string()> account_id_getter);
 
-  std::unique_ptr<drivefs::DriveFsHost::MojoConnectionDelegate>
-  CreateConnectionDelegate();
+  std::unique_ptr<drivefs::DriveFsBootstrapListener> CreateMojoListener();
 
   void SetMetadata(const base::FilePath& path,
                    const std::string& mime_type,
                    const std::string& original_name,
                    bool pinned,
                    bool shared,
-                   const mojom::Capabilities& capabilities);
+                   const mojom::Capabilities& capabilities,
+                   const mojom::FolderFeature& folder_feature);
 
   const base::FilePath& mount_path() { return mount_path_; }
 
@@ -71,6 +88,11 @@ class FakeDriveFs : public drivefs::mojom::DriveFs,
   void StartSearchQuery(
       drivefs::mojom::SearchQueryRequest query,
       drivefs::mojom::QueryParametersPtr query_params) override;
+
+  void FetchAllChangeLogs() override;
+
+  void FetchChangeLog(
+      std::vector<mojom::FetchChangeLogOptionsPtr> options) override;
 
   const base::FilePath mount_path_;
 

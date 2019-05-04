@@ -45,11 +45,10 @@ class LocalFrameView;
 class Node;
 
 class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
- protected:
-  AXLayoutObject(LayoutObject*, AXObjectCacheImpl&);
-
  public:
   static AXLayoutObject* Create(LayoutObject*, AXObjectCacheImpl&);
+
+  AXLayoutObject(LayoutObject*, AXObjectCacheImpl&);
   ~AXLayoutObject() override;
 
   // Public, overridden from AXObject.
@@ -81,6 +80,7 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
 
   // Check object role or purpose.
   bool IsAutofillAvailable() override { return is_autofill_available_; }
+  bool IsDefault() const override;
   bool IsEditable() const override;
   bool IsRichlyEditable() const override;
   bool IsLinked() const override;
@@ -110,7 +110,7 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   ax::mojom::TextDirection GetTextDirection() const final;
   ax::mojom::TextPosition GetTextPosition() const final;
   int TextLength() const override;
-  TextStyle GetTextStyle() const final;
+  int32_t GetTextStyle() const final;
   KURL Url() const override;
 
   // Inline text boxes.
@@ -207,6 +207,10 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   // For a table row or column.
   AXObject* HeaderObject() const override;
 
+  // The aria-errormessage object or native object from a validationMessage
+  // alert.
+  AXObject* ErrorMessage() const override;
+
  private:
   bool IsTabItemSelected() const;
   bool IsValidSelectionBound(const AXObject*) const;
@@ -224,6 +228,7 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   void AddRemoteSVGChildren();
   void AddTableChildren();
   void AddInlineTextBoxChildren(bool force);
+  void AddValidationMessageChild();
   ax::mojom::Role DetermineTableCellRole() const;
   ax::mojom::Role DetermineTableRowRole() const;
   bool FindAllTableCellsWithRole(ax::mojom::Role, AXObjectVector&) const;

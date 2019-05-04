@@ -26,10 +26,6 @@ int ContentMainDelegate::RunProcess(
   return -1;
 }
 
-ui::DataPack* ContentMainDelegate::LoadServiceManifestDataPack() {
-  return nullptr;
-}
-
 #if defined(OS_MACOSX)
 
 bool ContentMainDelegate::ProcessRegistersWithSystemProcess(
@@ -57,10 +53,6 @@ void ContentMainDelegate::ZygoteStarting(
 int ContentMainDelegate::TerminateForFatalInitializationError() {
   CHECK(false);
   return 0;
-}
-
-bool ContentMainDelegate::ShouldEnableProfilerRecording() {
-  return false;
 }
 
 service_manager::ProcessType ContentMainDelegate::OverrideProcessType() {

@@ -99,8 +99,8 @@ void PrefModelAssociator::InitPrefAndAssociate(
     std::unique_ptr<base::Value> sync_value(
         reader.ReadToValue(preference.value()));
     if (!sync_value.get()) {
-      LOG(ERROR) << "Failed to deserialize preference value: "
-                 << reader.GetErrorMessage();
+      LOG(ERROR) << "Failed to deserialize value of preference '" << pref_name
+                 << "': " << reader.GetErrorMessage();
       return;
     }
 
@@ -244,6 +244,10 @@ std::unique_ptr<base::Value> PrefModelAssociator::MergePreference(
       return std::make_unique<base::Value>(
           MergeDictionaryValues(local_value, server_value));
     }
+    std::unique_ptr<base::Value> merged_value =
+        client_->MaybeMergePreferenceValues(name, local_value, server_value);
+    if (merged_value)
+      return merged_value;
   }
 
   // If this is not a specially handled preference, server wins.

@@ -24,7 +24,7 @@ void JNI_AwPdfExporter_GetPageRanges(JNIEnv* env,
                                      const JavaRef<jintArray>& int_arr,
                                      printing::PageRanges* range_vector) {
   std::vector<int> pages;
-  base::android::JavaIntArrayToIntVector(env, int_arr.obj(), &pages);
+  base::android::JavaIntArrayToIntVector(env, int_arr, &pages);
   for (int page : pages) {
     printing::PageRange range;
     range.from = page;
@@ -64,7 +64,7 @@ void AwPdfExporter::ExportToPdf(JNIEnv* env,
   JNI_AwPdfExporter_GetPageRanges(env, pages, &page_ranges);
   InitPdfSettings(env, obj, page_ranges, print_settings);
   AwPrintManager* print_manager = AwPrintManager::CreateForWebContents(
-      web_contents_, print_settings, base::FileDescriptor(fd, false),
+      web_contents_, print_settings, fd,
       base::Bind(&AwPdfExporter::DidExportPdf, base::Unretained(this)));
 
   if (!print_manager->PrintNow())

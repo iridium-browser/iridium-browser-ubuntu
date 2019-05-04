@@ -11,31 +11,36 @@
 #include "GrMockGpuCommandBuffer.h"
 #include "GrMockStencilAttachment.h"
 #include "GrMockTexture.h"
+#include <atomic>
 
 int GrMockGpu::NextInternalTextureID() {
-    static int gID = 0;
-    return sk_atomic_inc(&gID) + 1;
+    static std::atomic<int> nextID{1};
+    int id;
+    do {
+        id = nextID.fetch_add(1);
+    } while (0 == id);  // Reserve 0 for an invalid ID.
+    return id;
 }
 
 int GrMockGpu::NextExternalTextureID() {
     // We use negative ints for the "testing only external textures" so they can easily be
     // identified when debugging.
-    static int gID = 0;
-    return sk_atomic_dec(&gID) - 1;
+    static std::atomic<int> nextID{-1};
+    return nextID--;
 }
 
 int GrMockGpu::NextInternalRenderTargetID() {
-    // We start off with large numbers to differentiate from texture IDs, even though their
+    // We start off with large numbers to differentiate from texture IDs, even though they're
     // technically in a different space.
-    static int gID = SK_MaxS32;
-    return sk_atomic_dec(&gID);
+    static std::atomic<int> nextID{SK_MaxS32};
+    return nextID--;
 }
 
 int GrMockGpu::NextExternalRenderTargetID() {
     // We use large negative ints for the "testing only external render targets" so they can easily
     // be identified when debugging.
-    static int gID = SK_MinS32;
-    return sk_atomic_inc(&gID);
+    static std::atomic<int> nextID{SK_MinS32};
+    return nextID++;
 }
 
 sk_sp<GrGpu> GrMockGpu::Make(const GrMockOptions* mockOptions,
@@ -48,7 +53,7 @@ sk_sp<GrGpu> GrMockGpu::Make(const GrMockOptions* mockOptions,
 }
 
 GrGpuRTCommandBuffer* GrMockGpu::getCommandBuffer(
-                                GrRenderTarget* rt, GrSurfaceOrigin origin,
+                                GrRenderTarget* rt, GrSurfaceOrigin origin, const SkRect& bounds,
                                 const GrGpuRTCommandBuffer::LoadAndStoreInfo&,
                                 const GrGpuRTCommandBuffer::StencilLoadAndStoreInfo&) {
     return new GrMockGpuRTCommandBuffer(this, rt, origin);
@@ -102,7 +107,8 @@ sk_sp<GrTexture> GrMockGpu::onCreateTexture(const GrSurfaceDesc& desc, SkBudgete
 }
 
 sk_sp<GrTexture> GrMockGpu::onWrapBackendTexture(const GrBackendTexture& tex,
-                                                 GrWrapOwnership ownership) {
+                                                 GrWrapOwnership ownership, GrIOType ioType,
+                                                 bool purgeImmediately) {
     GrSurfaceDesc desc;
     desc.fWidth = tex.width();
     desc.fHeight = tex.height();
@@ -115,7 +121,7 @@ sk_sp<GrTexture> GrMockGpu::onWrapBackendTexture(const GrBackendTexture& tex,
                                                      : GrMipMapsStatus::kNotAllocated;
 
     return sk_sp<GrTexture>(new GrMockTexture(this, GrMockTexture::kWrapped, desc, mipMapsStatus,
-                                              info));
+                                              info, ioType, purgeImmediately));
 }
 
 sk_sp<GrTexture> GrMockGpu::onWrapRenderableBackendTexture(const GrBackendTexture& tex,
@@ -209,7 +215,7 @@ GrBackendTexture GrMockGpu::createTestingOnlyBackendTexture(const void* pixels, 
 }
 
 bool GrMockGpu::isTestingOnlyBackendTexture(const GrBackendTexture& tex) const {
-    SkASSERT(kMock_GrBackend == tex.backend());
+    SkASSERT(GrBackendApi::kMock == tex.backend());
 
     GrMockTextureInfo info;
     if (!tex.getMockTextureInfo(&info)) {
@@ -220,7 +226,7 @@ bool GrMockGpu::isTestingOnlyBackendTexture(const GrBackendTexture& tex) const {
 }
 
 void GrMockGpu::deleteTestingOnlyBackendTexture(const GrBackendTexture& tex) {
-    SkASSERT(kMock_GrBackend == tex.backend());
+    SkASSERT(GrBackendApi::kMock == tex.backend());
 
     GrMockTextureInfo info;
     if (tex.getMockTextureInfo(&info)) {

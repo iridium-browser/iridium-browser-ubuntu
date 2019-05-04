@@ -139,9 +139,6 @@ void DispatchObserverTimingCallbacks(
   if (new_timing.paint_timing->first_paint &&
       !last_timing.paint_timing->first_paint)
     observer->OnFirstPaintInPage(new_timing, extra_info);
-  if (new_timing.paint_timing->first_text_paint &&
-      !last_timing.paint_timing->first_text_paint)
-    observer->OnFirstTextPaintInPage(new_timing, extra_info);
   if (new_timing.paint_timing->first_image_paint &&
       !last_timing.paint_timing->first_image_paint)
     observer->OnFirstImagePaintInPage(new_timing, extra_info);
@@ -386,8 +383,9 @@ void PageLoadTracker::Redirect(content::NavigationHandle* navigation_handle) {
 
 void PageLoadTracker::OnInputEvent(const blink::WebInputEvent& event) {
   input_tracker_.OnInputEvent(event);
+  const PageLoadExtraInfo info = ComputePageLoadExtraInfo();
   for (const auto& observer : observers_) {
-    observer->OnUserInput(event);
+    observer->OnUserInput(event, metrics_update_dispatcher_.timing(), info);
   }
 }
 
@@ -423,6 +421,13 @@ void PageLoadTracker::OnLoadedResource(
     const ExtraRequestCompleteInfo& extra_request_complete_info) {
   for (const auto& observer : observers_) {
     observer->OnLoadedResource(extra_request_complete_info);
+  }
+}
+
+void PageLoadTracker::FrameReceivedFirstUserActivation(
+    content::RenderFrameHost* rfh) {
+  for (const auto& observer : observers_) {
+    observer->FrameReceivedFirstUserActivation(rfh);
   }
 }
 
@@ -496,7 +501,8 @@ PageLoadExtraInfo PageLoadTracker::ComputePageLoadExtraInfo() const {
       started_in_foreground_, user_initiated_info_, url(), start_url_,
       did_commit_, page_end_reason_, page_end_user_initiated_info_,
       page_end_time, metrics_update_dispatcher_.main_frame_metadata(),
-      metrics_update_dispatcher_.subframe_metadata(), source_id_);
+      metrics_update_dispatcher_.subframe_metadata(),
+      metrics_update_dispatcher_.main_frame_render_data(), source_id_);
 }
 
 bool PageLoadTracker::HasMatchingNavigationRequestID(
@@ -643,17 +649,19 @@ void PageLoadTracker::BroadcastEventToObservers(const void* const event_key) {
 }
 
 void PageLoadTracker::UpdateFeaturesUsage(
+    content::RenderFrameHost* rfh,
     const mojom::PageLoadFeatures& new_features) {
   PageLoadExtraInfo extra_info(ComputePageLoadExtraInfo());
   for (const auto& observer : observers_) {
-    observer->OnFeaturesUsageObserved(new_features, extra_info);
+    observer->OnFeaturesUsageObserved(rfh, new_features, extra_info);
   }
 }
 
 void PageLoadTracker::UpdateResourceDataUse(
+    int frame_tree_node_id,
     const std::vector<mojom::ResourceDataUpdatePtr>& resources) {
   for (const auto& observer : observers_) {
-    observer->OnResourceDataUseObserved(resources);
+    observer->OnResourceDataUseObserved(frame_tree_node_id, resources);
   }
 }
 

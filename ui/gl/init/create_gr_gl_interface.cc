@@ -125,6 +125,7 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   functions->fBindFragDataLocation = gl->glBindFragDataLocationFn;
   functions->fBindUniformLocation = gl->glBindUniformLocationCHROMIUMFn;
   functions->fBeginQuery = gl->glBeginQueryFn;
+  functions->fBindSampler = gl->glBindSamplerFn;
   functions->fBindTexture = gl->glBindTextureFn;
 
   functions->fBlendBarrier = gl->glBlendBarrierKHRFn;
@@ -159,6 +160,7 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   functions->fDeleteProgram =
       bind_slow(gl->glDeleteProgramFn, progress_reporter);
   functions->fDeleteQueries = gl->glDeleteQueriesFn;
+  functions->fDeleteSamplers = gl->glDeleteSamplersFn;
   functions->fDeleteShader = bind_slow(gl->glDeleteShaderFn, progress_reporter);
   functions->fDeleteTextures = gl->glDeleteTexturesFn;
   functions->fDepthMask = gl->glDepthMaskFn;
@@ -205,6 +207,7 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   functions->fGetShaderPrecisionFormat = gl->glGetShaderPrecisionFormatFn;
   functions->fGetTexLevelParameteriv = gl->glGetTexLevelParameterivFn;
   functions->fGenQueries = gl->glGenQueriesFn;
+  functions->fGenSamplers = gl->glGenSamplersFn;
   functions->fGenTextures = gl->glGenTexturesFn;
   functions->fGetUniformLocation = gl->glGetUniformLocationFn;
   functions->fIsTexture = gl->glIsTextureFn;
@@ -226,6 +229,8 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
 
   functions->fReadBuffer = gl->glReadBufferFn;
   functions->fReadPixels = gl->glReadPixelsFn;
+  functions->fSamplerParameteri = gl->glSamplerParameteriFn;
+  functions->fSamplerParameteriv = gl->glSamplerParameterivFn;
   functions->fScissor = gl->glScissorFn;
   functions->fShaderSource = gl->glShaderSourceFn;
   functions->fStencilFunc = gl->glStencilFuncFn;
@@ -237,6 +242,8 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   functions->fTexBuffer = gl->glTexBufferFn;
   functions->fTexBufferRange = gl->glTexBufferRangeFn;
   functions->fTexImage2D = bind_slow(gl->glTexImage2DFn, progress_reporter);
+  functions->fTexParameterf = gl->glTexParameterfFn;
+  functions->fTexParameterfv = gl->glTexParameterfvFn;
   functions->fTexParameteri = gl->glTexParameteriFn;
   functions->fTexParameteriv = gl->glTexParameterivFn;
   functions->fTexStorage2D = gl->glTexStorage2DEXTFn;
@@ -517,9 +524,6 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   // EGL_KHR_image / EGL_KHR_image_base
   // functions->fCreateImage = nullptr;
   // functions->fDestroyImage = nullptr;
-
-  // GL 4.0 or GL_ARB_sample_shading or ES+GL_OES_sample_shading
-  functions->fMinSampleShading = gl->glMinSampleShadingFn;
 
   functions->fFenceSync = gl->glFenceSyncFn;
   functions->fIsSync = gl->glIsSyncFn;

@@ -29,6 +29,7 @@
 #include "components/search_engines/template_url_service.h"
 #include "components/signin/core/browser/fake_gaia_cookie_manager_service.h"
 #include "content/public/test/test_utils.h"
+#include "services/network/test/test_url_loader_factory.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
@@ -62,14 +63,7 @@ std::unique_ptr<KeyedService> CreateAutocompleteClassifier(
 
 }  // namespace
 
-TestWithBrowserView::TestWithBrowserView() = default;
-
-TestWithBrowserView::TestWithBrowserView(Browser::Type browser_type,
-                                         bool hosted_app)
-    : BrowserWithTestWindowTest(browser_type, hosted_app) {}
-
-TestWithBrowserView::~TestWithBrowserView() {
-}
+TestWithBrowserView::~TestWithBrowserView() {}
 
 void TestWithBrowserView::SetUp() {
 #if defined(OS_CHROMEOS)
@@ -103,11 +97,11 @@ TestingProfile* TestWithBrowserView::CreateProfile() {
   // TemplateURLService is normally null during testing. Instant extended
   // needs this service so set a custom factory function.
   TemplateURLServiceFactory::GetInstance()->SetTestingFactory(
-      profile, &CreateTemplateURLService);
+      profile, base::BindRepeating(&CreateTemplateURLService));
   // TODO(jamescook): Eliminate this by introducing a mock toolbar or mock
   // location bar.
   AutocompleteClassifierFactory::GetInstance()->SetTestingFactory(
-      profile, &CreateAutocompleteClassifier);
+      profile, base::BindRepeating(&CreateAutocompleteClassifier));
 
   // Configure the GaiaCookieManagerService to return no accounts.
   FakeGaiaCookieManagerService* gcms =
@@ -125,5 +119,6 @@ BrowserWindow* TestWithBrowserView::CreateBrowserWindow() {
 
 TestingProfile::TestingFactories TestWithBrowserView::GetTestingFactories() {
   return {{GaiaCookieManagerServiceFactory::GetInstance(),
-           base::BindRepeating(&BuildFakeGaiaCookieManagerService)}};
+           base::BindRepeating(&BuildFakeGaiaCookieManagerServiceWithURLLoader,
+                               test_url_loader_factory())}};
 }

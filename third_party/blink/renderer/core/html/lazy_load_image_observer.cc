@@ -148,6 +148,7 @@ void LazyLoadImageObserver::StartMonitoringVisibility(
         WTF::BindRepeating(&LazyLoadImageObserver::OnVisibilityChanged,
                            WrapWeakPersistent(this)));
   }
+  visible_load_time_metrics.record_visibility_metrics = true;
   visibility_metrics_observer_->observe(image_element);
 }
 
@@ -156,10 +157,10 @@ void LazyLoadImageObserver::OnLoadFinished(HTMLImageElement* image_element) {
 
   VisibleLoadTimeMetrics& visible_load_time_metrics =
       image_element->EnsureVisibleLoadTimeMetrics();
-  if (visible_load_time_metrics.has_visibility_metrics_been_recorded)
+  if (!visible_load_time_metrics.record_visibility_metrics)
     return;
 
-  visible_load_time_metrics.has_visibility_metrics_been_recorded = true;
+  visible_load_time_metrics.record_visibility_metrics = false;
   visibility_metrics_observer_->unobserve(image_element);
 
   TimeDelta visible_load_delay;
@@ -244,6 +245,35 @@ void LazyLoadImageObserver::OnVisibilityChanged(
       if (entry->isIntersecting()) {
         DCHECK(visible_load_time_metrics.time_when_first_visible.is_null());
         visible_load_time_metrics.time_when_first_visible = CurrentTimeTicks();
+
+        if (visible_load_time_metrics.record_visibility_metrics &&
+            image_element->GetDocument().GetFrame()) {
+          // Since the visibility metrics are recorded when the image finishes
+          // loading, this means that the image became visible before it
+          // finished loading.
+
+          // Note: If the WebEffectiveConnectionType enum ever gets out of sync
+          // with net::EffectiveConnectionType, then both the AboveTheFold and
+          // BelowTheFold histograms here will have to be updated to record the
+          // sample in terms of net::EffectiveConnectionType instead of
+          // WebEffectiveConnectionType.
+          if (visible_load_time_metrics.is_initially_intersecting) {
+            UMA_HISTOGRAM_ENUMERATION(
+                "Blink.VisibleBeforeLoaded.LazyLoadImages.AboveTheFold",
+                image_element->GetDocument()
+                    .GetFrame()
+                    ->Client()
+                    ->GetEffectiveConnectionType());
+          } else {
+            UMA_HISTOGRAM_ENUMERATION(
+                "Blink.VisibleBeforeLoaded.LazyLoadImages.BelowTheFold",
+                image_element->GetDocument()
+                    .GetFrame()
+                    ->Client()
+                    ->GetEffectiveConnectionType());
+          }
+        }
+
         visibility_metrics_observer_->unobserve(image_element);
       }
     }

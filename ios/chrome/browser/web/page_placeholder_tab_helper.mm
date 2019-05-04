@@ -21,8 +21,6 @@ const double kPlaceholderMaxDisplayTimeInSeconds = 1.5;
 const NSTimeInterval kPlaceholderFadeOutAnimationLengthInSeconds = 0.5;
 }  // namespace
 
-DEFINE_WEB_STATE_USER_DATA_KEY(PagePlaceholderTabHelper);
-
 PagePlaceholderTabHelper::PagePlaceholderTabHelper(web::WebState* web_state)
     : web_state_(web_state), weak_factory_(this) {
   web_state_->AddObserver(this);
@@ -75,6 +73,7 @@ void PagePlaceholderTabHelper::AddPlaceholder() {
   // Lazily create the placeholder view.
   if (!placeholder_view_) {
     placeholder_view_ = [[UIImageView alloc] init];
+    placeholder_view_.backgroundColor = [UIColor whiteColor];
     placeholder_view_.contentMode = UIViewContentModeScaleAspectFit;
     placeholder_view_.autoresizingMask =
         UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;

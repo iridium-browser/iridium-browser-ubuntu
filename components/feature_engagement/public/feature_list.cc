@@ -4,6 +4,7 @@
 
 #include "components/feature_engagement/public/feature_list.h"
 
+#include "base/stl_util.h"
 #include "components/feature_engagement/buildflags.h"
 #include "components/feature_engagement/public/feature_constants.h"
 
@@ -37,6 +38,7 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHHomepageTileFeature,
     &kIPHNewTabPageButtonFeature,
     &kIPHPreviewsOmniboxUIFeature,
+    &kIPHTranslateMenuButtonFeature,
 #endif  // defined(OS_ANDROID)
 #if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
     &kIPHBookmarkFeature,
@@ -58,7 +60,7 @@ const char kIPHDemoModeFeatureChoiceParam[] = "chosen_feature";
 
 std::vector<const base::Feature*> GetAllFeatures() {
   return std::vector<const base::Feature*>(
-      kAllFeatures, kAllFeatures + arraysize(kAllFeatures));
+      kAllFeatures, kAllFeatures + base::size(kAllFeatures));
 }
 
 }  // namespace feature_engagement

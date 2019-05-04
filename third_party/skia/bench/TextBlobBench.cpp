@@ -8,6 +8,7 @@
 #include "Benchmark.h"
 #include "Resources.h"
 #include "SkCanvas.h"
+#include "SkFont.h"
 #include "SkPaint.h"
 #include "SkRandom.h"
 #include "SkStream.h"
@@ -26,33 +27,32 @@ public:
     SkTextBlobBench() {}
 
     void onDelayedSetup() override {
-        fPaint.setTypeface(sk_tool_utils::create_portable_typeface("serif", SkFontStyle()));
-        fPaint.setTextEncoding(SkPaint::kUTF8_TextEncoding);
+        fFont.setTypeface(sk_tool_utils::create_portable_typeface("serif", SkFontStyle()));
+        fFont.setSubpixel(true);
 
         // This text seems representative in both length and letter frequency.
         const char* text = "Keep your sentences short, but not overly so.";
 
-        fGlyphs.setCount(fPaint.textToGlyphs(text, strlen(text), nullptr));
-        fPaint.textToGlyphs(text, strlen(text), fGlyphs.begin());
+        fGlyphs.setCount(fFont.countText(text, strlen(text), kUTF8_SkTextEncoding));
+        fXPos.setCount(fGlyphs.count());
 
-        fPaint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
-        fPaint.setSubpixelText(true);
+        fFont.textToGlyphs(text, strlen(text), kUTF8_SkTextEncoding, fGlyphs.begin(), fGlyphs.count());
+        fFont.getXPos(&fGlyphs[0], fGlyphs.count(), fXPos.begin());
     }
 
     sk_sp<SkTextBlob> makeBlob() {
         const SkTextBlobBuilder::RunBuffer& run =
-            fBuilder.allocRunPosH(fPaint, fGlyphs.count(), 10, nullptr);
-        for (int i = 0; i < fGlyphs.count(); i++) {
-            run.glyphs[i] = fGlyphs[i];
-            run.   pos[i] = (i+1) * 10.125;
-        }
+            fBuilder.allocRunPosH(fFont, fGlyphs.count(), 10, nullptr);
+        memcpy(run.glyphs, &fGlyphs[0], fGlyphs.count() * sizeof(uint16_t));
+        memcpy(run.pos, &fXPos[0], fXPos.count() * sizeof(SkScalar));
         return fBuilder.make();
     }
 
 private:
-    SkTextBlobBuilder    fBuilder;
-    SkPaint              fPaint;
-    SkTDArray<uint16_t>  fGlyphs;
+    SkTextBlobBuilder   fBuilder;
+    SkFont              fFont;
+    SkTDArray<uint16_t> fGlyphs;
+    SkTDArray<SkScalar> fXPos;
 
     typedef Benchmark INHERITED;
 };
@@ -73,6 +73,7 @@ class TextBlobCachedBench : public SkTextBlobBench {
         }
     }
 };
+DEF_BENCH( return new TextBlobCachedBench(); )
 
 class TextBlobFirstTimeBench : public SkTextBlobBench {
     const char* onGetName() override {
@@ -88,6 +89,23 @@ class TextBlobFirstTimeBench : public SkTextBlobBench {
         }
     }
 };
-
-DEF_BENCH( return new TextBlobCachedBench(); )
 DEF_BENCH( return new TextBlobFirstTimeBench(); )
+
+class TextBlobMakeBench : public SkTextBlobBench {
+    const char* onGetName() override {
+        return "TextBlobMakeBench";
+    }
+
+    bool isSuitableFor(Backend backend) override {
+        return backend == kNonRendering_Backend;
+    }
+
+    void onDraw(int loops, SkCanvas*) override {
+        for (int i = 0; i < loops; i++) {
+            for (int inner = 0; inner < 1000; ++inner) {
+                this->makeBlob();
+            }
+        }
+    }
+};
+DEF_BENCH( return new TextBlobMakeBench(); )

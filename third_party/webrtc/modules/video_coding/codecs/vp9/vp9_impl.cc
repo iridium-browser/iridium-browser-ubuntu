@@ -9,6 +9,8 @@
  *
  */
 
+#ifdef RTC_ENABLE_VP9
+
 #include "modules/video_coding/codecs/vp9/vp9_impl.h"
 
 #include <algorithm>
@@ -28,9 +30,10 @@
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/video_coding/codecs/vp9/svc_rate_allocator.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/experiments/rate_control_settings.h"
 #include "rtc_base/keep_ref_until_done.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/timeutils.h"
+#include "rtc_base/time_utils.h"
 #include "rtc_base/trace_event.h"
 #include "system_wrappers/include/field_trial.h"
 
@@ -43,6 +46,9 @@ uint8_t kRefBufIdx[4] = {0, 0, 0, 1};
 uint8_t kUpdBufIdx[4] = {0, 0, 1, 0};
 
 int kMaxNumTiles4kVideo = 8;
+
+// Maximum allowed PID difference for variable frame-rate mode.
+const int kMaxAllowedPidDIff = 8;
 
 // Only positive speeds, range for real-time coding currently is: 5 - 8.
 // Lower means slower/better quality, higher means fastest/lower quality.
@@ -62,9 +68,9 @@ int GetCpuSpeed(int width, int height) {
 ColorSpace ExtractVP9ColorSpace(vpx_color_space_t space_t,
                                 vpx_color_range_t range_t,
                                 unsigned int bit_depth) {
-  ColorSpace::PrimaryID primaries = ColorSpace::PrimaryID::kInvalid;
-  ColorSpace::TransferID transfer = ColorSpace::TransferID::kInvalid;
-  ColorSpace::MatrixID matrix = ColorSpace::MatrixID::kInvalid;
+  ColorSpace::PrimaryID primaries = ColorSpace::PrimaryID::kUnspecified;
+  ColorSpace::TransferID transfer = ColorSpace::TransferID::kUnspecified;
+  ColorSpace::MatrixID matrix = ColorSpace::MatrixID::kUnspecified;
   switch (space_t) {
     case VPX_CS_BT_601:
     case VPX_CS_SMPTE_170:
@@ -119,24 +125,19 @@ ColorSpace ExtractVP9ColorSpace(vpx_color_space_t space_t,
   }
   return ColorSpace(primaries, transfer, matrix, range);
 }
+
+bool MoreLayersEnabled(const VideoBitrateAllocation& first,
+                       const VideoBitrateAllocation& second) {
+  for (size_t sl_idx = 0; sl_idx < kMaxSpatialLayers; ++sl_idx) {
+    if (first.GetSpatialLayerSum(sl_idx) > 0 &&
+        second.GetSpatialLayerSum(sl_idx) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
-
-std::vector<SdpVideoFormat> SupportedVP9Codecs() {
-  // TODO(emircan): Add Profile 2 support after fixing browser_tests.
-  std::vector<SdpVideoFormat> supported_formats{SdpVideoFormat(
-      cricket::kVp9CodecName,
-      {{kVP9FmtpProfileId, VP9ProfileToString(VP9Profile::kProfile0)}})};
-  return supported_formats;
-}
-
-std::unique_ptr<VP9Encoder> VP9Encoder::Create() {
-  return absl::make_unique<VP9EncoderImpl>(cricket::VideoCodec());
-}
-
-std::unique_ptr<VP9Encoder> VP9Encoder::Create(
-    const cricket::VideoCodec& codec) {
-  return absl::make_unique<VP9EncoderImpl>(codec);
-}
 
 void VP9EncoderImpl::EncoderOutputCodedPacketCallback(vpx_codec_cx_pkt* pkt,
                                                       void* user_data) {
@@ -162,12 +163,16 @@ VP9EncoderImpl::VP9EncoderImpl(const cricket::VideoCodec& codec)
       num_temporal_layers_(0),
       num_spatial_layers_(0),
       num_active_spatial_layers_(0),
-      layer_deactivation_requires_key_frame_(webrtc::field_trial::IsEnabled(
-          "WebRTC-Vp9IssueKeyFrameOnLayerDeactivation")),
+      layer_deactivation_requires_key_frame_(
+          field_trial::IsEnabled("WebRTC-Vp9IssueKeyFrameOnLayerDeactivation")),
       is_svc_(false),
       inter_layer_pred_(InterLayerPredMode::kOn),
-      external_ref_control_(
-          webrtc::field_trial::IsEnabled("WebRTC-Vp9ExternalRefCtrl")),
+      external_ref_control_(false),  // Set in InitEncode because of tests.
+      trusted_rate_controller_(RateControlSettings::ParseFromFieldTrials()
+                                   .LibvpxVp9TrustedRateController()),
+      full_superframe_drop_(true),
+      first_frame_in_picture_(true),
+      ss_info_needed_(false),
       is_flexible_mode_(false) {
   memset(&codec_, 0, sizeof(codec_));
   memset(&svc_params_, 0, sizeof(vpx_svc_extra_cfg_t));
@@ -180,9 +185,9 @@ VP9EncoderImpl::~VP9EncoderImpl() {
 int VP9EncoderImpl::Release() {
   int ret_val = WEBRTC_VIDEO_CODEC_OK;
 
-  if (encoded_image_._buffer != nullptr) {
-    delete[] encoded_image_._buffer;
-    encoded_image_._buffer = nullptr;
+  if (encoded_image_.data() != nullptr) {
+    delete[] encoded_image_.data();
+    encoded_image_.set_buffer(nullptr, 0);
   }
   if (encoder_ != nullptr) {
     if (inited_) {
@@ -322,14 +327,8 @@ int VP9EncoderImpl::SetRateAllocation(
 
   codec_.maxFramerate = frame_rate;
 
-  if (!SetSvcRates(bitrate_allocation)) {
-    return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
-  }
+  requested_bitrate_allocation_ = bitrate_allocation;
 
-  // Update encoder context
-  if (vpx_codec_enc_config_set(encoder_, config_)) {
-    return WEBRTC_VIDEO_CODEC_ERROR;
-  }
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
@@ -391,12 +390,12 @@ int VP9EncoderImpl::InitEncode(const VideoCodec* inst,
   is_svc_ = (num_spatial_layers_ > 1 || num_temporal_layers_ > 1);
 
   // Allocate memory for encoded image
-  if (encoded_image_._buffer != nullptr) {
-    delete[] encoded_image_._buffer;
+  if (encoded_image_.data() != nullptr) {
+    delete[] encoded_image_.data();
   }
-  encoded_image_._size =
+  size_t frame_capacity =
       CalcBufferSize(VideoType::kI420, codec_.width, codec_.height);
-  encoded_image_._buffer = new uint8_t[encoded_image_._size];
+  encoded_image_.set_buffer(new uint8_t[frame_capacity], frame_capacity);
   encoded_image_._completeFrame = true;
   // Populate encoder configuration with default values.
   if (vpx_codec_enc_config_default(vpx_codec_vp9_cx(), config_, 0)) {
@@ -451,15 +450,12 @@ int VP9EncoderImpl::InitEncode(const VideoCodec* inst,
   config_->rc_buf_sz = 1000;
   // Set the maximum target size of any key-frame.
   rc_max_intra_target_ = MaxIntraTarget(config_->rc_buf_optimal_sz);
-  if (inst->VP9().keyFrameInterval > 0) {
-    config_->kf_mode = VPX_KF_AUTO;
-    config_->kf_max_dist = inst->VP9().keyFrameInterval;
-    // Needs to be set (in svc mode) to get correct periodic key frame interval
-    // (will have no effect in non-svc).
-    config_->kf_min_dist = config_->kf_max_dist;
-  } else {
-    config_->kf_mode = VPX_KF_DISABLED;
-  }
+  // Key-frame interval is enforced manually by this wrapper.
+  config_->kf_mode = VPX_KF_DISABLED;
+  // TODO(webm:1592): work-around for libvpx issue, as it can still
+  // put some key-frames at will even in VPX_KF_DISABLED kf_mode.
+  config_->kf_max_dist = inst->VP9().keyFrameInterval;
+  config_->kf_min_dist = config_->kf_max_dist;
   config_->rc_resize_allowed = inst->VP9().automaticResizeOn ? 1 : 0;
   // Determine number of threads based on the image size and #cores.
   config_->g_threads =
@@ -468,6 +464,28 @@ int VP9EncoderImpl::InitEncode(const VideoCodec* inst,
   cpu_speed_ = GetCpuSpeed(config_->g_w, config_->g_h);
 
   is_flexible_mode_ = inst->VP9().flexibleMode;
+
+  inter_layer_pred_ = inst->VP9().interLayerPred;
+
+  different_framerates_used_ = false;
+  for (size_t sl_idx = 1; sl_idx < num_spatial_layers_; ++sl_idx) {
+    if (std::abs(codec_.spatialLayers[sl_idx].maxFramerate -
+                 codec_.spatialLayers[0].maxFramerate) > 1e-9) {
+      different_framerates_used_ = true;
+    }
+  }
+
+  if (different_framerates_used_ && !is_flexible_mode_) {
+    RTC_LOG(LS_ERROR) << "Flexible mode required for different framerates on "
+                         "different spatial layers";
+    return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
+  }
+
+  // External reference control is required for different frame rate on spatial
+  // layers because libvpx generates rtp incompatible references in this case.
+  external_ref_control_ = field_trial::IsEnabled("WebRTC-Vp9ExternalRefCtrl") ||
+                          different_framerates_used_ ||
+                          inter_layer_pred_ == InterLayerPredMode::kOn;
 
   if (num_temporal_layers_ == 1) {
     gof_.SetGofInfoVP9(kTemporalStructureMode1);
@@ -501,8 +519,14 @@ int VP9EncoderImpl::InitEncode(const VideoCodec* inst,
     return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
   }
 
-  inter_layer_pred_ = inst->VP9().interLayerPred;
-
+  if (external_ref_control_) {
+    config_->temporal_layering_mode = VP9E_TEMPORAL_LAYERING_MODE_BYPASS;
+    if (num_temporal_layers_ > 1 && different_framerates_used_) {
+      // External reference control for several temporal layers with different
+      // frame rates on spatial layers is not implemented yet.
+      return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
+    }
+  }
   ref_buf_.clear();
 
   return InitAndSetControlSettings(inst);
@@ -583,9 +607,9 @@ int VP9EncoderImpl::InitAndSetControlSettings(const VideoCodec* inst) {
   }
 
   SvcRateAllocator init_allocator(codec_);
-  VideoBitrateAllocation allocation = init_allocator.GetAllocation(
+  current_bitrate_allocation_ = init_allocator.GetAllocation(
       inst->startBitrate * 1000, inst->maxFramerate);
-  if (!SetSvcRates(allocation)) {
+  if (!SetSvcRates(current_bitrate_allocation_)) {
     return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
   }
 
@@ -603,6 +627,7 @@ int VP9EncoderImpl::InitAndSetControlSettings(const VideoCodec* inst) {
                     inst->VP9().adaptiveQpMode ? 3 : 0);
 
   vpx_codec_control(encoder_, VP9E_SET_FRAME_PARALLEL_DECODING, 0);
+  vpx_codec_control(encoder_, VP9E_SET_SVC_GF_TEMPORAL_REF, 0);
 
   if (is_svc_) {
     vpx_codec_control(encoder_, VP9E_SET_SVC, 1);
@@ -629,7 +654,8 @@ int VP9EncoderImpl::InitAndSetControlSettings(const VideoCodec* inst) {
     // quality flickering and is not compatible with RTP non-flexible mode.
     vpx_svc_frame_drop_t svc_drop_frame;
     memset(&svc_drop_frame, 0, sizeof(svc_drop_frame));
-    svc_drop_frame.framedrop_mode = FULL_SUPERFRAME_DROP;
+    svc_drop_frame.framedrop_mode =
+        full_superframe_drop_ ? FULL_SUPERFRAME_DROP : CONSTRAINED_LAYER_DROP;
     svc_drop_frame.max_consec_drop = std::numeric_limits<int>::max();
     for (size_t i = 0; i < num_spatial_layers_; ++i) {
       svc_drop_frame.framedrop_thresh[i] = config_->rc_dropframe_thresh;
@@ -695,6 +721,10 @@ int VP9EncoderImpl::Encode(const VideoFrame& input_image,
   if (encoded_complete_callback_ == nullptr) {
     return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
   }
+  if (num_active_spatial_layers_ == 0) {
+    // All spatial layers are disabled, return without encoding anything.
+    return WEBRTC_VIDEO_CODEC_OK;
+  }
 
   // We only support one stream at the moment.
   if (frame_types && !frame_types->empty()) {
@@ -703,21 +733,26 @@ int VP9EncoderImpl::Encode(const VideoFrame& input_image,
     }
   }
 
-  if (VideoCodecMode::kScreensharing == codec_.mode && !force_key_frame_) {
-    // Skip encoding spatial layer frames if their target frame rate is lower
-    // than actual input frame rate.
-    vpx_svc_layer_id_t layer_id = {0};
+  if (pics_since_key_ + 1 ==
+      static_cast<size_t>(codec_.VP9()->keyFrameInterval)) {
+    force_key_frame_ = true;
+  }
+
+  vpx_svc_layer_id_t layer_id = {0};
+  if (!force_key_frame_) {
     const size_t gof_idx = (pics_since_key_ + 1) % gof_.num_frames_in_gof;
     layer_id.temporal_layer_id = gof_.temporal_idx[gof_idx];
 
-    const uint32_t frame_timestamp_ms =
-        1000 * input_image.timestamp() / kVideoPayloadTypeFrequency;
+    if (VideoCodecMode::kScreensharing == codec_.mode) {
+      const uint32_t frame_timestamp_ms =
+          1000 * input_image.timestamp() / kVideoPayloadTypeFrequency;
 
-    for (uint8_t sl_idx = 0; sl_idx < num_active_spatial_layers_; ++sl_idx) {
-      if (framerate_controller_[sl_idx].DropFrame(frame_timestamp_ms)) {
-        ++layer_id.spatial_layer_id;
-      } else {
-        break;
+      for (uint8_t sl_idx = 0; sl_idx < num_active_spatial_layers_; ++sl_idx) {
+        if (framerate_controller_[sl_idx].DropFrame(frame_timestamp_ms)) {
+          ++layer_id.spatial_layer_id;
+        } else {
+          break;
+        }
       }
     }
 
@@ -726,8 +761,42 @@ int VP9EncoderImpl::Encode(const VideoFrame& input_image,
       // Drop entire picture.
       return WEBRTC_VIDEO_CODEC_OK;
     }
+  }
 
-    vpx_codec_control(encoder_, VP9E_SET_SVC_LAYER_ID, &layer_id);
+  for (int sl_idx = 0; sl_idx < num_active_spatial_layers_; ++sl_idx) {
+    layer_id.temporal_layer_id_per_spatial[sl_idx] = layer_id.temporal_layer_id;
+  }
+
+  vpx_codec_control(encoder_, VP9E_SET_SVC_LAYER_ID, &layer_id);
+
+  if (requested_bitrate_allocation_) {
+    bool more_layers_requested = MoreLayersEnabled(
+        *requested_bitrate_allocation_, current_bitrate_allocation_);
+    bool less_layers_requested = MoreLayersEnabled(
+        current_bitrate_allocation_, *requested_bitrate_allocation_);
+    // In SVC can enable new layers only if all lower layers are encoded and at
+    // the base temporal layer.
+    // This will delay rate allocation change until the next frame on the base
+    // spatial layer.
+    // In KSVC or simulcast modes KF will be generated for a new layer, so can
+    // update allocation any time.
+    bool can_upswitch =
+        inter_layer_pred_ != InterLayerPredMode::kOn ||
+        (layer_id.spatial_layer_id == 0 && layer_id.temporal_layer_id == 0);
+    if (!more_layers_requested || can_upswitch) {
+      current_bitrate_allocation_ = *requested_bitrate_allocation_;
+      requested_bitrate_allocation_ = absl::nullopt;
+      if (!SetSvcRates(current_bitrate_allocation_)) {
+        return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
+      }
+      if (less_layers_requested || more_layers_requested) {
+        ss_info_needed_ = true;
+      }
+    }
+  }
+
+  if (vpx_codec_enc_config_set(encoder_, config_)) {
+    return WEBRTC_VIDEO_CODEC_ERROR;
   }
 
   RTC_DCHECK_EQ(input_image.width(), raw_->d_w);
@@ -787,9 +856,20 @@ int VP9EncoderImpl::Encode(const VideoFrame& input_image,
   }
 
   if (external_ref_control_) {
-    vpx_svc_ref_frame_config_t ref_config = SetReferences(force_key_frame_);
+    vpx_svc_ref_frame_config_t ref_config =
+        SetReferences(force_key_frame_, layer_id.spatial_layer_id);
+
+    if (VideoCodecMode::kScreensharing == codec_.mode) {
+      for (uint8_t sl_idx = 0; sl_idx < num_active_spatial_layers_; ++sl_idx) {
+        ref_config.duration[sl_idx] = static_cast<int64_t>(
+            90000 / framerate_controller_[sl_idx].GetTargetRate());
+      }
+    }
+
     vpx_codec_control(encoder_, VP9E_SET_SVC_REF_FRAME_CONFIG, &ref_config);
   }
+
+  first_frame_in_picture_ = true;
 
   // TODO(ssilkin): Frame duration should be specified per spatial layer
   // since their frame rate can be different. For now calculate frame duration
@@ -816,8 +896,10 @@ int VP9EncoderImpl::Encode(const VideoFrame& input_image,
   }
   timestamp_ += duration;
 
-  const bool end_of_picture = true;
-  DeliverBufferedFrame(end_of_picture);
+  if (!full_superframe_drop_) {
+    const bool end_of_picture = true;
+    DeliverBufferedFrame(end_of_picture);
+  }
 
   return WEBRTC_VIDEO_CODEC_OK;
 }
@@ -825,20 +907,34 @@ int VP9EncoderImpl::Encode(const VideoFrame& input_image,
 void VP9EncoderImpl::PopulateCodecSpecific(CodecSpecificInfo* codec_specific,
                                            absl::optional<int>* spatial_idx,
                                            const vpx_codec_cx_pkt& pkt,
-                                           uint32_t timestamp,
-                                           bool first_frame_in_picture) {
+                                           uint32_t timestamp) {
   RTC_CHECK(codec_specific != nullptr);
   codec_specific->codecType = kVideoCodecVP9;
-  codec_specific->codec_name = ImplementationName();
   CodecSpecificInfoVP9* vp9_info = &(codec_specific->codecSpecific.VP9);
 
-  vp9_info->first_frame_in_picture = first_frame_in_picture;
+  vp9_info->first_frame_in_picture = first_frame_in_picture_;
   vp9_info->flexible_mode = is_flexible_mode_;
   vp9_info->ss_data_available =
       (pkt.data.frame.flags & VPX_FRAME_IS_KEY) ? true : false;
 
+  if (pkt.data.frame.flags & VPX_FRAME_IS_KEY) {
+    pics_since_key_ = 0;
+  } else if (first_frame_in_picture_) {
+    ++pics_since_key_;
+  }
+
   vpx_svc_layer_id_t layer_id = {0};
   vpx_codec_control(encoder_, VP9E_GET_SVC_LAYER_ID, &layer_id);
+
+  // Can't have keyframe with non-zero temporal layer.
+  RTC_DCHECK(pics_since_key_ != 0 || layer_id.temporal_layer_id == 0);
+
+  if (ss_info_needed_ && layer_id.temporal_layer_id == 0 &&
+      layer_id.spatial_layer_id == 0) {
+    // Force SS info after the layers configuration has changed.
+    vp9_info->ss_data_available = true;
+    ss_info_needed_ = false;
+  }
 
   RTC_CHECK_GT(num_temporal_layers_, 0);
   RTC_CHECK_GT(num_active_spatial_layers_, 0);
@@ -861,12 +957,6 @@ void VP9EncoderImpl::PopulateCodecSpecific(CodecSpecificInfo* codec_specific,
   // TODO(asapersson): this info has to be obtained from the encoder.
   vp9_info->temporal_up_switch = false;
 
-  if (pkt.data.frame.flags & VPX_FRAME_IS_KEY) {
-    pics_since_key_ = 0;
-  } else if (first_frame_in_picture) {
-    ++pics_since_key_;
-  }
-
   const bool is_key_pic = (pics_since_key_ == 0);
   const bool is_inter_layer_pred_allowed =
       (inter_layer_pred_ == InterLayerPredMode::kOn ||
@@ -879,7 +969,7 @@ void VP9EncoderImpl::PopulateCodecSpecific(CodecSpecificInfo* codec_specific,
   // if low layer frame is lost) then receiver won't be able to decode next high
   // layer frame which uses ILP.
   vp9_info->inter_layer_predicted =
-      first_frame_in_picture ? false : is_inter_layer_pred_allowed;
+      first_frame_in_picture_ ? false : is_inter_layer_pred_allowed;
 
   // Mark all low spatial layer frames as references (not just frames of
   // active low spatial layers) if inter-layer prediction is enabled since
@@ -894,17 +984,16 @@ void VP9EncoderImpl::PopulateCodecSpecific(CodecSpecificInfo* codec_specific,
   vp9_info->num_spatial_layers = num_active_spatial_layers_;
 
   vp9_info->num_ref_pics = 0;
+  FillReferenceIndices(pkt, pics_since_key_, vp9_info->inter_layer_predicted,
+                       vp9_info);
   if (vp9_info->flexible_mode) {
     vp9_info->gof_idx = kNoGofIdx;
-    FillReferenceIndices(pkt, pics_since_key_, vp9_info->inter_layer_predicted,
-                         vp9_info);
-    // TODO(webrtc:9794): Add fake reference to empty reference list to
-    // workaround the frame buffer issue on receiver.
   } else {
     vp9_info->gof_idx =
         static_cast<uint8_t>(pics_since_key_ % gof_.num_frames_in_gof);
     vp9_info->temporal_up_switch = gof_.temporal_up_switch[vp9_info->gof_idx];
-    vp9_info->num_ref_pics = gof_.num_ref_pics[vp9_info->gof_idx];
+    RTC_DCHECK(vp9_info->num_ref_pics == gof_.num_ref_pics[vp9_info->gof_idx] ||
+               vp9_info->num_ref_pics == 0);
   }
 
   vp9_info->inter_pic_predicted = (!is_key_pic && vp9_info->num_ref_pics > 0);
@@ -923,6 +1012,8 @@ void VP9EncoderImpl::PopulateCodecSpecific(CodecSpecificInfo* codec_specific,
       vp9_info->gof.CopyGofInfoVP9(gof_);
     }
   }
+
+  first_frame_in_picture_ = false;
 }
 
 void VP9EncoderImpl::FillReferenceIndices(const vpx_codec_cx_pkt& pkt,
@@ -980,6 +1071,8 @@ void VP9EncoderImpl::FillReferenceIndices(const vpx_codec_cx_pkt& pkt,
 
   size_t max_ref_temporal_layer_id = 0;
 
+  std::vector<size_t> ref_pid_list;
+
   vp9_info->num_ref_pics = 0;
   for (const RefFrameBuffer& ref_buf : ref_buf_list) {
     RTC_DCHECK_LE(ref_buf.pic_num, pic_num);
@@ -991,6 +1084,16 @@ void VP9EncoderImpl::FillReferenceIndices(const vpx_codec_cx_pkt& pkt,
         RTC_DCHECK_EQ(ref_buf.spatial_layer_id, layer_id.spatial_layer_id);
       }
       RTC_DCHECK_LE(ref_buf.temporal_layer_id, layer_id.temporal_layer_id);
+
+      // Encoder may reference several spatial layers on the same previous
+      // frame in case if some spatial layers are skipped on the current frame.
+      // We shouldn't put duplicate references as it may break some old
+      // clients and isn't RTP compatible.
+      if (std::find(ref_pid_list.begin(), ref_pid_list.end(),
+                    ref_buf.pic_num) != ref_pid_list.end()) {
+        continue;
+      }
+      ref_pid_list.push_back(ref_buf.pic_num);
 
       const size_t p_diff = pic_num - ref_buf.pic_num;
       RTC_DCHECK_LE(p_diff, 127UL);
@@ -1033,19 +1136,11 @@ void VP9EncoderImpl::UpdateReferenceBuffers(const vpx_codec_cx_pkt& pkt,
     vpx_svc_ref_frame_config_t enc_layer_conf = {{0}};
     vpx_codec_control(encoder_, VP9E_GET_SVC_REF_FRAME_CONFIG, &enc_layer_conf);
 
-    if (enc_layer_conf.update_last[layer_id.spatial_layer_id]) {
-      ref_buf_[enc_layer_conf.lst_fb_idx[layer_id.spatial_layer_id]] =
-          frame_buf;
-    }
-
-    if (enc_layer_conf.update_alt_ref[layer_id.spatial_layer_id]) {
-      ref_buf_[enc_layer_conf.alt_fb_idx[layer_id.spatial_layer_id]] =
-          frame_buf;
-    }
-
-    if (enc_layer_conf.update_golden[layer_id.spatial_layer_id]) {
-      ref_buf_[enc_layer_conf.gld_fb_idx[layer_id.spatial_layer_id]] =
-          frame_buf;
+    for (size_t i = 0; i < kNumVp9Buffers; ++i) {
+      if (enc_layer_conf.update_buffer_slot[layer_id.spatial_layer_id] &
+          (1 << i)) {
+        ref_buf_[i] = frame_buf;
+      }
     }
   } else {
     RTC_DCHECK_EQ(num_spatial_layers_, 1);
@@ -1056,7 +1151,9 @@ void VP9EncoderImpl::UpdateReferenceBuffers(const vpx_codec_cx_pkt& pkt,
   }
 }
 
-vpx_svc_ref_frame_config_t VP9EncoderImpl::SetReferences(bool is_key_pic) {
+vpx_svc_ref_frame_config_t VP9EncoderImpl::SetReferences(
+    bool is_key_pic,
+    size_t first_active_spatial_layer_id) {
   // kRefBufIdx, kUpdBufIdx need to be updated to support longer GOFs.
   RTC_DCHECK_LE(gof_.num_frames_in_gof, 4);
 
@@ -1078,8 +1175,10 @@ vpx_svc_ref_frame_config_t VP9EncoderImpl::SetReferences(bool is_key_pic) {
   // for temporal references plus 1 buffer for spatial reference. 7 buffers
   // in total.
 
-  for (size_t sl_idx = 0; sl_idx < num_active_spatial_layers_; ++sl_idx) {
-    const size_t gof_idx = pics_since_key_ % gof_.num_frames_in_gof;
+  for (size_t sl_idx = first_active_spatial_layer_id;
+       sl_idx < num_active_spatial_layers_; ++sl_idx) {
+    const size_t curr_pic_num = is_key_pic ? 0 : pics_since_key_ + 1;
+    const size_t gof_idx = curr_pic_num % gof_.num_frames_in_gof;
 
     if (!is_key_pic) {
       // Set up temporal reference.
@@ -1091,36 +1190,47 @@ vpx_svc_ref_frame_config_t VP9EncoderImpl::SetReferences(bool is_key_pic) {
 
       // Sanity check that reference picture number is smaller than current
       // picture number.
-      const size_t curr_pic_num = pics_since_key_ + 1;
       RTC_DCHECK_LT(ref_buf_[buf_idx].pic_num, curr_pic_num);
       const size_t pid_diff = curr_pic_num - ref_buf_[buf_idx].pic_num;
+      // Incorrect spatial layer may be in the buffer due to a key-frame.
+      const bool same_spatial_layer =
+          ref_buf_[buf_idx].spatial_layer_id == sl_idx;
+      bool correct_pid = false;
+      if (different_framerates_used_) {
+        correct_pid = pid_diff < kMaxAllowedPidDIff;
+      } else {
+        // Below code assumes single temporal referecence.
+        RTC_DCHECK_EQ(gof_.num_ref_pics[gof_idx], 1);
+        correct_pid = pid_diff == gof_.pid_diff[gof_idx][0];
+      }
 
-      // Below code assumes single temporal referecence.
-      RTC_DCHECK_EQ(gof_.num_ref_pics[gof_idx], 1);
-      if (pid_diff == gof_.pid_diff[gof_idx][0]) {
+      if (same_spatial_layer && correct_pid) {
         ref_config.lst_fb_idx[sl_idx] = buf_idx;
         ref_config.reference_last[sl_idx] = 1;
       } else {
         // This reference doesn't match with one specified by GOF. This can
         // only happen if spatial layer is enabled dynamically without key
         // frame. Spatial prediction is supposed to be enabled in this case.
-        RTC_DCHECK(is_inter_layer_pred_allowed);
+        RTC_DCHECK(is_inter_layer_pred_allowed &&
+                   sl_idx > first_active_spatial_layer_id);
       }
     }
 
-    if (is_inter_layer_pred_allowed && sl_idx > 0) {
+    if (is_inter_layer_pred_allowed && sl_idx > first_active_spatial_layer_id) {
       // Set up spatial reference.
       RTC_DCHECK(last_updated_buf_idx);
       ref_config.gld_fb_idx[sl_idx] = *last_updated_buf_idx;
       ref_config.reference_golden[sl_idx] = 1;
     } else {
-      RTC_DCHECK(ref_config.reference_last[sl_idx] != 0 || sl_idx == 0 ||
+      RTC_DCHECK(ref_config.reference_last[sl_idx] != 0 ||
+                 sl_idx == first_active_spatial_layer_id ||
                  inter_layer_pred_ == InterLayerPredMode::kOff);
     }
 
     last_updated_buf_idx.reset();
 
-    if (gof_.temporal_idx[gof_idx] <= num_temporal_layers_ - 1) {
+    if (gof_.temporal_idx[gof_idx] < num_temporal_layers_ - 1 ||
+        num_temporal_layers_ == 1) {
       last_updated_buf_idx = sl_idx * num_temporal_refs + kUpdBufIdx[gof_idx];
 
       // Ensure last frame buffer is not used for temporal prediction (it is
@@ -1149,20 +1259,19 @@ int VP9EncoderImpl::GetEncodedLayerFrame(const vpx_codec_cx_pkt* pkt) {
   vpx_svc_layer_id_t layer_id = {0};
   vpx_codec_control(encoder_, VP9E_GET_SVC_LAYER_ID, &layer_id);
 
-  const bool first_frame_in_picture = encoded_image_._length == 0;
-  // Ensure we don't buffer layers of previous picture (superframe).
-  RTC_DCHECK(first_frame_in_picture || layer_id.spatial_layer_id > 0);
-
-  const bool end_of_picture = false;
-  DeliverBufferedFrame(end_of_picture);
-
-  if (pkt->data.frame.sz > encoded_image_._size) {
-    delete[] encoded_image_._buffer;
-    encoded_image_._size = pkt->data.frame.sz;
-    encoded_image_._buffer = new uint8_t[encoded_image_._size];
+  if (!full_superframe_drop_) {
+    // Deliver buffered low spatial layer frame.
+    const bool end_of_picture = false;
+    DeliverBufferedFrame(end_of_picture);
   }
-  memcpy(encoded_image_._buffer, pkt->data.frame.buf, pkt->data.frame.sz);
-  encoded_image_._length = pkt->data.frame.sz;
+
+  if (pkt->data.frame.sz > encoded_image_.capacity()) {
+    delete[] encoded_image_.data();
+    encoded_image_.set_buffer(new uint8_t[pkt->data.frame.sz],
+                              pkt->data.frame.sz);
+  }
+  memcpy(encoded_image_.data(), pkt->data.frame.buf, pkt->data.frame.sz);
+  encoded_image_.set_size(pkt->data.frame.sz);
 
   const bool is_key_frame =
       (pkt->data.frame.flags & VPX_FRAME_IS_KEY) ? true : false;
@@ -1175,19 +1284,17 @@ int VP9EncoderImpl::GetEncodedLayerFrame(const vpx_codec_cx_pkt* pkt) {
     encoded_image_._frameType = kVideoFrameKey;
     force_key_frame_ = false;
   }
-  RTC_DCHECK_LE(encoded_image_._length, encoded_image_._size);
+  RTC_DCHECK_LE(encoded_image_.size(), encoded_image_.capacity());
 
   memset(&codec_specific_, 0, sizeof(codec_specific_));
   absl::optional<int> spatial_index;
   PopulateCodecSpecific(&codec_specific_, &spatial_index, *pkt,
-                        input_image_->timestamp(), first_frame_in_picture);
+                        input_image_->timestamp());
   encoded_image_.SetSpatialIndex(spatial_index);
 
-  if (is_flexible_mode_) {
-    UpdateReferenceBuffers(*pkt, pics_since_key_);
-  }
+  UpdateReferenceBuffers(*pkt, pics_since_key_);
 
-  TRACE_COUNTER1("webrtc", "EncodedFrameSize", encoded_image_._length);
+  TRACE_COUNTER1("webrtc", "EncodedFrameSize", encoded_image_.size());
   encoded_image_.SetTimestamp(input_image_->timestamp());
   encoded_image_.capture_time_ms_ = input_image_->render_time_ms();
   encoded_image_.rotation_ = input_image_->rotation();
@@ -1202,12 +1309,19 @@ int VP9EncoderImpl::GetEncodedLayerFrame(const vpx_codec_cx_pkt* pkt) {
   int qp = -1;
   vpx_codec_control(encoder_, VP8E_GET_LAST_QUANTIZER, &qp);
   encoded_image_.qp_ = qp;
+  encoded_image_.SetColorSpace(input_image_->color_space());
+
+  if (full_superframe_drop_) {
+    const bool end_of_picture = encoded_image_.SpatialIndex().value_or(0) + 1 ==
+                                num_active_spatial_layers_;
+    DeliverBufferedFrame(end_of_picture);
+  }
 
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
 void VP9EncoderImpl::DeliverBufferedFrame(bool end_of_picture) {
-  if (encoded_image_._length > 0) {
+  if (encoded_image_.size() > 0) {
     codec_specific_.codecSpecific.VP9.end_of_picture = end_of_picture;
 
     // No data partitioning in VP9, so 1 partition only.
@@ -1215,13 +1329,13 @@ void VP9EncoderImpl::DeliverBufferedFrame(bool end_of_picture) {
     RTPFragmentationHeader frag_info;
     frag_info.VerifyAndAllocateFragmentationHeader(1);
     frag_info.fragmentationOffset[part_idx] = 0;
-    frag_info.fragmentationLength[part_idx] = encoded_image_._length;
+    frag_info.fragmentationLength[part_idx] = encoded_image_.size();
     frag_info.fragmentationPlType[part_idx] = 0;
     frag_info.fragmentationTimeDiff[part_idx] = 0;
 
     encoded_complete_callback_->OnEncodedImage(encoded_image_, &codec_specific_,
                                                &frag_info);
-    encoded_image_._length = 0;
+    encoded_image_.set_size(0);
 
     if (codec_.mode == VideoCodecMode::kScreensharing) {
       const uint8_t spatial_idx = encoded_image_.SpatialIndex().value_or(0);
@@ -1232,22 +1346,37 @@ void VP9EncoderImpl::DeliverBufferedFrame(bool end_of_picture) {
   }
 }
 
-int VP9EncoderImpl::SetChannelParameters(uint32_t packet_loss, int64_t rtt) {
-  return WEBRTC_VIDEO_CODEC_OK;
-}
-
 int VP9EncoderImpl::RegisterEncodeCompleteCallback(
     EncodedImageCallback* callback) {
   encoded_complete_callback_ = callback;
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
-const char* VP9EncoderImpl::ImplementationName() const {
-  return "libvpx";
-}
-
-std::unique_ptr<VP9Decoder> VP9Decoder::Create() {
-  return absl::make_unique<VP9DecoderImpl>();
+VideoEncoder::EncoderInfo VP9EncoderImpl::GetEncoderInfo() const {
+  EncoderInfo info;
+  info.supports_native_handle = false;
+  info.implementation_name = "libvpx";
+  info.scaling_settings = VideoEncoder::ScalingSettings::kOff;
+  info.has_trusted_rate_controller = trusted_rate_controller_;
+  info.is_hardware_accelerated = false;
+  info.has_internal_source = false;
+  for (size_t si = 0; si < num_spatial_layers_; ++si) {
+    info.fps_allocation[si].clear();
+    if (!codec_.spatialLayers[si].active) {
+      continue;
+    }
+    // This spatial layer may already use a fraction of the total frame rate.
+    const float sl_fps_fraction =
+        codec_.spatialLayers[si].maxFramerate / codec_.maxFramerate;
+    for (size_t ti = 0; ti < num_temporal_layers_; ++ti) {
+      const uint32_t decimator =
+          num_temporal_layers_ <= 1 ? 1 : config_->ts_rate_decimator[ti];
+      RTC_DCHECK_GT(decimator, 0);
+      info.fps_allocation[si].push_back(rtc::saturated_cast<uint8_t>(
+          EncoderInfo::kMaxFramerateFraction * (sl_fps_fraction / decimator)));
+    }
+  }
+  return info;
 }
 
 VP9DecoderImpl::VP9DecoderImpl()
@@ -1324,14 +1453,14 @@ int VP9DecoderImpl::Decode(const EncodedImage& input_image,
   }
   vpx_codec_iter_t iter = nullptr;
   vpx_image_t* img;
-  uint8_t* buffer = input_image._buffer;
-  if (input_image._length == 0) {
+  const uint8_t* buffer = input_image.data();
+  if (input_image.size() == 0) {
     buffer = nullptr;  // Triggers full frame concealment.
   }
   // During decode libvpx may get and release buffers from |frame_buffer_pool_|.
   // In practice libvpx keeps a few (~3-4) buffers alive at a time.
   if (vpx_codec_decode(decoder_, buffer,
-                       static_cast<unsigned int>(input_image._length), 0,
+                       static_cast<unsigned int>(input_image.size()), 0,
                        VPX_DL_REALTIME)) {
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
@@ -1343,8 +1472,8 @@ int VP9DecoderImpl::Decode(const EncodedImage& input_image,
   vpx_codec_err_t vpx_ret =
       vpx_codec_control(decoder_, VPXD_GET_LAST_QUANTIZER, &qp);
   RTC_DCHECK_EQ(vpx_ret, VPX_CODEC_OK);
-  int ret =
-      ReturnFrame(img, input_image.Timestamp(), input_image.ntp_time_ms_, qp);
+  int ret = ReturnFrame(img, input_image.Timestamp(), input_image.ntp_time_ms_,
+                        qp, input_image.ColorSpace());
   if (ret != 0) {
     return ret;
   }
@@ -1354,7 +1483,8 @@ int VP9DecoderImpl::Decode(const EncodedImage& input_image,
 int VP9DecoderImpl::ReturnFrame(const vpx_image_t* img,
                                 uint32_t timestamp,
                                 int64_t ntp_time_ms,
-                                int qp) {
+                                int qp,
+                                const ColorSpace* explicit_color_space) {
   if (img == nullptr) {
     // Decoder OK and nullptr image => No show frame.
     return WEBRTC_VIDEO_CODEC_NO_OUTPUT;
@@ -1396,15 +1526,21 @@ int VP9DecoderImpl::ReturnFrame(const vpx_image_t* img,
       return WEBRTC_VIDEO_CODEC_NO_OUTPUT;
   }
 
-  VideoFrame decoded_image = VideoFrame::Builder()
-                                 .set_video_frame_buffer(img_wrapped_buffer)
-                                 .set_timestamp_ms(0)
-                                 .set_timestamp_rtp(timestamp)
-                                 .set_ntp_time_ms(ntp_time_ms)
-                                 .set_rotation(webrtc::kVideoRotation_0)
-                                 .set_color_space(ExtractVP9ColorSpace(
-                                     img->cs, img->range, img->bit_depth))
-                                 .build();
+  auto builder = VideoFrame::Builder()
+                     .set_video_frame_buffer(img_wrapped_buffer)
+                     .set_timestamp_ms(0)
+                     .set_timestamp_rtp(timestamp)
+                     .set_ntp_time_ms(ntp_time_ms)
+                     .set_rotation(webrtc::kVideoRotation_0);
+  if (explicit_color_space) {
+    builder.set_color_space(explicit_color_space);
+  } else {
+    builder.set_color_space(
+        ExtractVP9ColorSpace(img->cs, img->range, img->bit_depth));
+  }
+
+  VideoFrame decoded_image = builder.build();
+
   decode_complete_callback_->Decoded(decoded_image, absl::nullopt, qp);
   return WEBRTC_VIDEO_CODEC_OK;
 }
@@ -1442,3 +1578,5 @@ const char* VP9DecoderImpl::ImplementationName() const {
 }
 
 }  // namespace webrtc
+
+#endif  // RTC_ENABLE_VP9

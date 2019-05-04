@@ -116,17 +116,13 @@ static void set_good_speed_feature_framesize_dependent(VP9_COMP *cpi,
       sf->ml_partition_search_breakout_thresh[1] = -1.0f;
       sf->ml_partition_search_breakout_thresh[2] = -1.0f;
     }
-
 #if CONFIG_VP9_HIGHBITDEPTH
     if (cpi->Source->flags & YV12_FLAG_HIGHBITDEPTH) {
-      sf->use_square_only_thresh_high = BLOCK_4X4;
-      sf->use_square_only_thresh_low = BLOCK_SIZES;
-      if (is_720p_or_larger) {
-        sf->partition_search_breakout_thr.dist = (1 << 23);
-        sf->use_ml_partition_search_breakout = 0;
-      }
+      sf->ml_partition_search_breakout_thresh[0] -= 1.0f;
+      sf->ml_partition_search_breakout_thresh[1] -= 1.0f;
+      sf->ml_partition_search_breakout_thresh[2] -= 1.0f;
     }
-#endif
+#endif  // CONFIG_VP9_HIGHBITDEPTH
   }
 
   if (speed >= 2) {
@@ -241,15 +237,10 @@ static void set_good_speed_feature_framesize_independent(VP9_COMP *cpi,
   }
 
   if (speed >= 1) {
-    sf->enable_tpl_model = 0;
-    sf->ml_var_partition_pruning = 0;
+    sf->ml_var_partition_pruning = !boosted;
     sf->ml_prune_rect_partition_threhold[1] = 200;
     sf->ml_prune_rect_partition_threhold[2] = 200;
     sf->ml_prune_rect_partition_threhold[3] = 200;
-#if CONFIG_VP9_HIGHBITDEPTH
-    if (cpi->Source->flags & YV12_FLAG_HIGHBITDEPTH)
-      sf->prune_ref_frame_for_rect_partitions = 0;
-#endif  // CONFIG_VP9_HIGHBITDEPTH
 
     if (oxcf->pass == 2) {
       TWO_PASS *const twopass = &cpi->twopass;
@@ -288,9 +279,11 @@ static void set_good_speed_feature_framesize_independent(VP9_COMP *cpi,
     sf->exhaustive_searches_thresh =
         (cpi->twopass.fr_content_type == FC_GRAPHICS_ANIMATION) ? (1 << 23)
                                                                 : INT_MAX;
+    sf->use_accurate_subpel_search = USE_4_TAPS;
   }
 
   if (speed >= 2) {
+    sf->ml_var_partition_pruning = 0;
     if (oxcf->vbr_corpus_complexity)
       sf->recode_loop = ALLOW_RECODE_FIRST;
     else
@@ -328,6 +321,8 @@ static void set_good_speed_feature_framesize_independent(VP9_COMP *cpi,
             good_quality_mesh_patterns[mesh_density_level][i].interval;
       }
     }
+
+    sf->use_accurate_subpel_search = USE_2_TAPS;
   }
 
   if (speed >= 3) {
@@ -429,6 +424,7 @@ static void set_rt_speed_feature_framesize_dependent(VP9_COMP *cpi,
 static void set_rt_speed_feature_framesize_independent(
     VP9_COMP *cpi, SPEED_FEATURES *sf, int speed, vp9e_tune_content content) {
   VP9_COMMON *const cm = &cpi->common;
+  SVC *const svc = &cpi->svc;
   const int is_keyframe = cm->frame_type == KEY_FRAME;
   const int frames_since_key = is_keyframe ? 0 : cpi->rc.frames_since_key;
   sf->static_segmentation = 0;
@@ -450,6 +446,7 @@ static void set_rt_speed_feature_framesize_independent(
   sf->disable_golden_ref = 0;
   sf->enable_tpl_model = 0;
   sf->enhanced_full_pixel_motion_search = 0;
+  sf->use_accurate_subpel_search = USE_2_TAPS;
 
   if (speed >= 1) {
     sf->allow_txfm_domain_distortion = 1;
@@ -483,7 +480,7 @@ static void set_rt_speed_feature_framesize_independent(
     // Reference masking only enabled for 1 spatial layer, and if none of the
     // references have been scaled. The latter condition needs to be checked
     // for external or internal dynamic resize.
-    sf->reference_masking = (cpi->svc.number_spatial_layers == 1);
+    sf->reference_masking = (svc->number_spatial_layers == 1);
     if (sf->reference_masking == 1 &&
         (cpi->external_resize == 1 ||
          cpi->oxcf.resize_mode == RESIZE_DYNAMIC)) {
@@ -536,7 +533,7 @@ static void set_rt_speed_feature_framesize_independent(
     sf->adjust_partitioning_from_last_frame =
         cm->last_frame_type != cm->frame_type ||
         (0 == (frames_since_key + 1) % sf->last_partitioning_redo_frequency);
-    sf->mv.subpel_force_stop = 1;
+    sf->mv.subpel_force_stop = QUARTER_PEL;
     for (i = 0; i < TX_SIZES; i++) {
       sf->intra_y_mode_mask[i] = INTRA_DC_H_V;
       sf->intra_uv_mode_mask[i] = INTRA_DC;
@@ -565,6 +562,16 @@ static void set_rt_speed_feature_framesize_independent(
         (frames_since_key % (sf->last_partitioning_redo_frequency << 1) == 1);
     sf->max_delta_qindex = is_keyframe ? 20 : 15;
     sf->partition_search_type = REFERENCE_PARTITION;
+#if CONFIG_ML_VAR_PARTITION
+    if (!frame_is_intra_only(cm) && cm->width >= 360 && cm->height >= 360)
+      sf->partition_search_type = ML_BASED_PARTITION;
+    else
+      sf->partition_search_type = REFERENCE_PARTITION;
+#if CONFIG_VP9_HIGHBITDEPTH
+    if (cpi->Source->flags & YV12_FLAG_HIGHBITDEPTH)
+      sf->partition_search_type = REFERENCE_PARTITION;
+#endif  // CONFIG_VP9_HIGHBITDEPTH
+#endif  // CONFIG_ML_VAR_PARTITION
     if (cpi->oxcf.rc_mode == VPX_VBR && cpi->oxcf.lag_in_frames > 0 &&
         cpi->rc.is_src_frame_alt_ref) {
       sf->partition_search_type = VAR_BASED_PARTITION;
@@ -609,7 +616,7 @@ static void set_rt_speed_feature_framesize_independent(
     }
     // Keep nonrd_keyframe = 1 for non-base spatial layers to prevent
     // increase in encoding time.
-    if (cpi->use_svc && cpi->svc.spatial_layer_id > 0) sf->nonrd_keyframe = 1;
+    if (cpi->use_svc && svc->spatial_layer_id > 0) sf->nonrd_keyframe = 1;
     if (cm->frame_type != KEY_FRAME && cpi->resize_state == ORIG &&
         cpi->oxcf.rc_mode == VPX_CBR)
       sf->overshoot_detection_cbr_rt = FAST_DETECTION_MAXQ;
@@ -626,9 +633,7 @@ static void set_rt_speed_feature_framesize_independent(
       sf->use_compound_nonrd_pickmode = 1;
     }
 #if CONFIG_ML_VAR_PARTITION
-    if (!frame_is_intra_only(cm) && cm->width >= 360 && cm->height >= 360)
-      sf->partition_search_type = ML_BASED_PARTITION;
-    else
+    if (frame_is_intra_only(cm) || cm->width < 360 || cm->height < 360)
       sf->partition_search_type = VAR_BASED_PARTITION;
 #if CONFIG_VP9_HIGHBITDEPTH
     if (cpi->Source->flags & YV12_FLAG_HIGHBITDEPTH)
@@ -649,7 +654,7 @@ static void set_rt_speed_feature_framesize_independent(
           (cm->width * cm->height <= 640 * 360) ? 40000 : 60000;
       if (cpi->content_state_sb_fd == NULL &&
           (!cpi->use_svc ||
-           cpi->svc.spatial_layer_id == cpi->svc.number_spatial_layers - 1)) {
+           svc->spatial_layer_id == svc->number_spatial_layers - 1)) {
         cpi->content_state_sb_fd = (uint8_t *)vpx_calloc(
             (cm->mi_stride >> 3) * ((cm->mi_rows >> 3) + 1), sizeof(uint8_t));
       }
@@ -658,7 +663,7 @@ static void set_rt_speed_feature_framesize_independent(
       // Enable short circuit for low temporal variance.
       sf->short_circuit_low_temp_var = 1;
     }
-    if (cpi->svc.temporal_layer_id > 0) {
+    if (svc->temporal_layer_id > 0) {
       sf->adaptive_rd_thresh = 4;
       sf->limit_newmv_early_exit = 0;
       sf->base_mv_aggressive = 1;
@@ -672,16 +677,15 @@ static void set_rt_speed_feature_framesize_independent(
     sf->mv.fullpel_search_step_param = 10;
     // For SVC: use better mv search on base temporal layer, and only
     // on base spatial layer if highest resolution is above 640x360.
-    if (cpi->svc.number_temporal_layers > 2 &&
-        cpi->svc.temporal_layer_id == 0 &&
-        (cpi->svc.spatial_layer_id == 0 ||
+    if (svc->number_temporal_layers > 2 && svc->temporal_layer_id == 0 &&
+        (svc->spatial_layer_id == 0 ||
          cpi->oxcf.width * cpi->oxcf.height <= 640 * 360)) {
       sf->mv.search_method = NSTEP;
       sf->mv.fullpel_search_step_param = 6;
     }
-    if (cpi->svc.temporal_layer_id > 0 || cpi->svc.spatial_layer_id > 1) {
+    if (svc->temporal_layer_id > 0 || svc->spatial_layer_id > 1) {
       sf->use_simple_block_yrd = 1;
-      if (cpi->svc.non_reference_frame)
+      if (svc->non_reference_frame)
         sf->mv.subpel_search_method = SUBPEL_TREE_PRUNED_EVENMORE;
     }
     if (cpi->use_svc && cpi->row_mt && cpi->oxcf.max_threads > 1)
@@ -692,28 +696,28 @@ static void set_rt_speed_feature_framesize_independent(
     if (!cpi->last_frame_dropped && cpi->resize_state == ORIG &&
         !cpi->external_resize &&
         (!cpi->use_svc ||
-         (cpi->svc.spatial_layer_id == cpi->svc.number_spatial_layers - 1 &&
-          !cpi->svc.last_layer_dropped[cpi->svc.number_spatial_layers - 1]))) {
+         (svc->spatial_layer_id == svc->number_spatial_layers - 1 &&
+          !svc->last_layer_dropped[svc->number_spatial_layers - 1]))) {
       sf->copy_partition_flag = 1;
       cpi->max_copied_frame = 2;
       // The top temporal enhancement layer (for number of temporal layers > 1)
       // are non-reference frames, so use large/max value for max_copied_frame.
-      if (cpi->svc.number_temporal_layers > 1 &&
-          cpi->svc.temporal_layer_id == cpi->svc.number_temporal_layers - 1)
+      if (svc->number_temporal_layers > 1 &&
+          svc->temporal_layer_id == svc->number_temporal_layers - 1)
         cpi->max_copied_frame = 255;
     }
     // For SVC: enable use of lower resolution partition for higher resolution,
     // only for 3 spatial layers and when config/top resolution is above VGA.
     // Enable only for non-base temporal layer frames.
-    if (cpi->use_svc && cpi->svc.use_partition_reuse &&
-        cpi->svc.number_spatial_layers == 3 && cpi->svc.temporal_layer_id > 0 &&
+    if (cpi->use_svc && svc->use_partition_reuse &&
+        svc->number_spatial_layers == 3 && svc->temporal_layer_id > 0 &&
         cpi->oxcf.width * cpi->oxcf.height > 640 * 480)
       sf->svc_use_lowres_part = 1;
     // For SVC when golden is used as second temporal reference: to avoid
     // encode time increase only use this feature on base temporal layer.
     // (i.e remove golden flag from frame_flags for temporal_layer_id > 0).
-    if (cpi->use_svc && cpi->svc.use_gf_temporal_ref_current_layer &&
-        cpi->svc.temporal_layer_id > 0)
+    if (cpi->use_svc && svc->use_gf_temporal_ref_current_layer &&
+        svc->temporal_layer_id > 0)
       cpi->ref_frame_flags &= (~VP9_GOLD_FLAG);
   }
 
@@ -725,7 +729,7 @@ static void set_rt_speed_feature_framesize_independent(
     if (cpi->row_mt && cpi->oxcf.max_threads > 1)
       sf->adaptive_rd_thresh_row_mt = 1;
 
-    if (content == VP9E_CONTENT_SCREEN) sf->mv.subpel_force_stop = 3;
+    if (content == VP9E_CONTENT_SCREEN) sf->mv.subpel_force_stop = FULL_PEL;
     if (content == VP9E_CONTENT_SCREEN) sf->lpf_pick = LPF_PICK_MINIMAL_LPF;
     // Only keep INTRA_DC mode for speed 8.
     if (!is_keyframe) {
@@ -761,8 +765,8 @@ static void set_rt_speed_feature_framesize_independent(
     sf->mv.adapt_subpel_force_stop.mv_thresh = 2;
     if (cpi->rc.avg_frame_low_motion < 40)
       sf->mv.adapt_subpel_force_stop.mv_thresh = 1;
-    sf->mv.adapt_subpel_force_stop.force_stop_below = 1;
-    sf->mv.adapt_subpel_force_stop.force_stop_above = 2;
+    sf->mv.adapt_subpel_force_stop.force_stop_below = QUARTER_PEL;
+    sf->mv.adapt_subpel_force_stop.force_stop_above = HALF_PEL;
     // Disable partition blocks below 16x16, except for low-resolutions.
     if (cm->frame_type != KEY_FRAME && cm->width >= 320 && cm->height >= 240)
       sf->disable_16x16part_nonkey = 1;
@@ -785,9 +789,18 @@ static void set_rt_speed_feature_framesize_independent(
           (uint8_t *)vpx_calloc((cm->mi_stride >> 3) * ((cm->mi_rows >> 3) + 1),
                                 sizeof(*cpi->count_lastgolden_frame_usage));
   }
-  if (cpi->svc.previous_frame_is_intra_only) {
+  if (svc->previous_frame_is_intra_only) {
     sf->partition_search_type = FIXED_PARTITION;
     sf->always_this_block_size = BLOCK_64X64;
+  }
+  // Special case for screen content: increase motion search on base spatial
+  // layer when high motion is detected or previous SL0 frame was dropped.
+  if (cpi->oxcf.content == VP9E_CONTENT_SCREEN && cpi->oxcf.speed >= 5 &&
+      (svc->high_num_blocks_with_motion || svc->last_layer_dropped[0])) {
+    sf->mv.search_method = NSTEP;
+    // TODO(marpan/jianj): Tune this setting for screensharing. For now use
+    // small step_param for all spatial layers.
+    sf->mv.fullpel_search_step_param = 2;
   }
 }
 
@@ -834,12 +847,6 @@ void vp9_set_speed_features_framesize_dependent(VP9_COMP *cpi) {
   if (!sf->adaptive_rd_thresh_row_mt && cpi->row_mt_bit_exact &&
       oxcf->max_threads > 1)
     sf->adaptive_rd_thresh = 0;
-
-  // This is only used in motion vector unit test.
-  if (cpi->oxcf.motion_vector_unit_test == 1)
-    cpi->find_fractional_mv_step = vp9_return_max_sub_pixel_mv;
-  else if (cpi->oxcf.motion_vector_unit_test == 2)
-    cpi->find_fractional_mv_step = vp9_return_min_sub_pixel_mv;
 }
 
 void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
@@ -855,7 +862,7 @@ void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
   sf->recode_loop = ALLOW_RECODE_FIRST;
   sf->mv.subpel_search_method = SUBPEL_TREE;
   sf->mv.subpel_search_level = 2;
-  sf->mv.subpel_force_stop = 0;
+  sf->mv.subpel_force_stop = EIGHTH_PEL;
   sf->optimize_coefficients = !is_lossless_requested(&cpi->oxcf);
   sf->mv.reduce_first_step_size = 0;
   sf->coeff_prob_appx_step = 1;
@@ -897,12 +904,7 @@ void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
   sf->allow_quant_coeff_opt = sf->optimize_coefficients;
   sf->quant_opt_thresh = 99.0;
   sf->allow_acl = 1;
-#if CONFIG_VP9_HIGHBITDEPTH
-  // TODO(jingning): Make the model support high bit-depth route.
-  sf->enable_tpl_model = !cm->use_highbitdepth && oxcf->enable_tpl_model;
-#else
   sf->enable_tpl_model = oxcf->enable_tpl_model;
-#endif
   sf->prune_ref_frame_for_rect_partitions = 0;
 
   for (i = 0; i < TX_SIZES; i++) {
@@ -942,6 +944,7 @@ void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
   sf->ml_prune_rect_partition_threhold[2] = -1;
   sf->ml_prune_rect_partition_threhold[3] = -1;
   sf->ml_var_partition_pruning = 0;
+  sf->use_accurate_subpel_search = USE_8_TAPS;
 
   // Some speed-up features even for best quality as minimal impact on quality.
   sf->adaptive_rd_thresh = 1;
@@ -976,7 +979,7 @@ void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
     sf->optimize_coefficients = 0;
   }
 
-  if (sf->mv.subpel_force_stop == 3) {
+  if (sf->mv.subpel_force_stop == FULL_PEL) {
     // Whole pel only
     cpi->find_fractional_mv_step = vp9_skip_sub_pixel_tree;
   } else if (sf->mv.subpel_search_method == SUBPEL_TREE) {
@@ -988,6 +991,12 @@ void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
   } else if (sf->mv.subpel_search_method == SUBPEL_TREE_PRUNED_EVENMORE) {
     cpi->find_fractional_mv_step = vp9_find_best_sub_pixel_tree_pruned_evenmore;
   }
+
+  // This is only used in motion vector unit test.
+  if (cpi->oxcf.motion_vector_unit_test == 1)
+    cpi->find_fractional_mv_step = vp9_return_max_sub_pixel_mv;
+  else if (cpi->oxcf.motion_vector_unit_test == 2)
+    cpi->find_fractional_mv_step = vp9_return_min_sub_pixel_mv;
 
   x->optimize = sf->optimize_coefficients == 1 && oxcf->pass != 1;
 
@@ -1006,10 +1015,4 @@ void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
   if (!sf->adaptive_rd_thresh_row_mt && cpi->row_mt_bit_exact &&
       oxcf->max_threads > 1)
     sf->adaptive_rd_thresh = 0;
-
-  // This is only used in motion vector unit test.
-  if (cpi->oxcf.motion_vector_unit_test == 1)
-    cpi->find_fractional_mv_step = vp9_return_max_sub_pixel_mv;
-  else if (cpi->oxcf.motion_vector_unit_test == 2)
-    cpi->find_fractional_mv_step = vp9_return_min_sub_pixel_mv;
 }

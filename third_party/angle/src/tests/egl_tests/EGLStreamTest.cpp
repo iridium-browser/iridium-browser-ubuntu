@@ -11,10 +11,11 @@
 
 #include <vector>
 
-#include "OSWindow.h"
 #include "media/yuvtest.inl"
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
+#include "util/EGLWindow.h"
+#include "util/OSWindow.h"
 
 using namespace angle;
 
@@ -100,7 +101,9 @@ TEST_P(EGLStreamTest, StreamValidationTest)
     ASSERT_EQ(EGL_NO_STREAM_KHR, stream);
 
     const EGLint streamAttributes[] = {
-        EGL_CONSUMER_LATENCY_USEC_KHR, 0, EGL_NONE,
+        EGL_CONSUMER_LATENCY_USEC_KHR,
+        0,
+        EGL_NONE,
     };
 
     stream = eglCreateStreamKHR(EGL_NO_DISPLAY, streamAttributes);
@@ -647,8 +650,8 @@ TEST_P(D3D11TextureStreamSamplingTest, NV12)
 // ensures they are correct
 TEST_P(EGLStreamTest, StreamProducerTextureNV12End2End)
 {
-    EGLWindow *window            = getEGLWindow();
-    EGLDisplay display           = window->getDisplay();
+    EGLWindow *window  = getEGLWindow();
+    EGLDisplay display = window->getDisplay();
     ANGLE_SKIP_TEST_IF(
         !eglDisplayExtensionEnabled(display, "EGL_ANGLE_stream_producer_d3d_texture"));
 
@@ -656,7 +659,8 @@ TEST_P(EGLStreamTest, StreamProducerTextureNV12End2End)
         getClientMajorVersion() >= 3 && extensionEnabled("GL_OES_EGL_image_external_essl3");
 
     // yuv to rgb conversion shader using Microsoft's given conversion formulas
-    std::string yuvVS, yuvPS;
+    const char *yuvVS = nullptr;
+    const char *yuvPS = nullptr;
     if (useESSL3Shaders)
     {
         yuvVS =
@@ -719,8 +723,7 @@ TEST_P(EGLStreamTest, StreamProducerTextureNV12End2End)
             "}\n";
     }
 
-    GLuint program = CompileProgram(yuvVS, yuvPS);
-    ASSERT_NE(0u, program);
+    ANGLE_GL_PROGRAM(program, yuvVS, yuvPS);
     GLuint yUniform  = glGetUniformLocation(program, "y");
     GLuint uvUniform = glGetUniformLocation(program, "uv");
 
@@ -801,7 +804,9 @@ TEST_P(EGLStreamTest, StreamProducerTextureNV12End2End)
 
     // Insert the frame
     EGLAttrib frameAttributes[] = {
-        EGL_D3D_TEXTURE_SUBRESOURCE_ID_ANGLE, 0, EGL_NONE,
+        EGL_D3D_TEXTURE_SUBRESOURCE_ID_ANGLE,
+        0,
+        EGL_NONE,
     };
     result = eglStreamPostD3DTextureANGLE(display, stream, (void *)texture, frameAttributes);
     ASSERT_EGL_TRUE(result);
@@ -833,6 +838,7 @@ ANGLE_INSTANTIATE_TEST(EGLStreamTest,
                        ES2_D3D11(),
                        ES3_D3D11(),
                        ES2_OPENGL(),
-                       ES3_OPENGL());
+                       ES3_OPENGL(),
+                       ES2_VULKAN());
 ANGLE_INSTANTIATE_TEST(D3D11TextureStreamSamplingTest, ES2_D3D11(), ES3_D3D11());
 }  // anonymous namespace

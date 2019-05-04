@@ -16,7 +16,7 @@
 #include "content/browser/background_fetch/background_fetch_test_base.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/modules/background_fetch/background_fetch.mojom.h"
+#include "third_party/blink/public/mojom/background_fetch/background_fetch.mojom.h"
 
 namespace content {
 namespace {
@@ -49,8 +49,8 @@ TEST_F(BackgroundFetchEventDispatcherTest, DispatchInvalidRegistration) {
       invalid_registration_id.developer_id(),
       invalid_registration_id.unique_id(),
       blink::mojom::BackgroundFetchResult::FAILURE,
-      blink::mojom::BackgroundFetchFailureReason::QUOTA_EXCEEDED);
-  event_dispatcher_.DispatchBackgroundFetchAbortEvent(
+      blink::mojom::BackgroundFetchFailureReason::CANCELLED_BY_DEVELOPER);
+  event_dispatcher_.DispatchBackgroundFetchCompletionEvent(
       invalid_registration_id, std::move(registration), run_loop.QuitClosure());
 
   run_loop.Run();
@@ -68,8 +68,11 @@ TEST_F(BackgroundFetchEventDispatcherTest, DispatchAbortEvent) {
   ASSERT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
             service_worker_registration_id);
 
-  std::vector<BackgroundFetchSettledFetch> fetches;
-  fetches.push_back(BackgroundFetchSettledFetch());
+  std::vector<blink::mojom::BackgroundFetchSettledFetchPtr> fetches;
+  auto fetch = blink::mojom::BackgroundFetchSettledFetch::New();
+  fetch->request = blink::mojom::FetchAPIRequest::New();
+  fetch->response = blink::mojom::FetchAPIResponse::New();
+  fetches.push_back(std::move(fetch));
 
   BackgroundFetchRegistrationId registration_id(service_worker_registration_id,
                                                 origin(), kExampleDeveloperId,
@@ -81,13 +84,13 @@ TEST_F(BackgroundFetchEventDispatcherTest, DispatchAbortEvent) {
         kExampleDeveloperId, kExampleUniqueId,
         blink::mojom::BackgroundFetchResult::FAILURE,
         blink::mojom::BackgroundFetchFailureReason::CANCELLED_FROM_UI);
-    event_dispatcher_.DispatchBackgroundFetchAbortEvent(
+    event_dispatcher_.DispatchBackgroundFetchCompletionEvent(
         registration_id, std::move(registration), run_loop.QuitClosure());
 
     run_loop.Run();
   }
 
-  ASSERT_TRUE(embedded_worker_test_helper()->last_registration().has_value());
+  ASSERT_TRUE(embedded_worker_test_helper()->last_registration());
   EXPECT_EQ(kExampleDeveloperId,
             embedded_worker_test_helper()->last_registration()->developer_id);
   EXPECT_EQ(kExampleUniqueId,
@@ -110,15 +113,15 @@ TEST_F(BackgroundFetchEventDispatcherTest, DispatchAbortEvent) {
     auto registration = CreateBackgroundFetchRegistration(
         kExampleDeveloperId2, kExampleUniqueId2,
         blink::mojom::BackgroundFetchResult::FAILURE,
-        blink::mojom::BackgroundFetchFailureReason::QUOTA_EXCEEDED);
-    event_dispatcher_.DispatchBackgroundFetchAbortEvent(second_registration_id,
-                                                        std::move(registration),
-                                                        run_loop.QuitClosure());
+        blink::mojom::BackgroundFetchFailureReason::CANCELLED_BY_DEVELOPER);
+    event_dispatcher_.DispatchBackgroundFetchCompletionEvent(
+        second_registration_id, std::move(registration),
+        run_loop.QuitClosure());
 
     run_loop.Run();
   }
 
-  ASSERT_TRUE(embedded_worker_test_helper()->last_registration().has_value());
+  ASSERT_TRUE(embedded_worker_test_helper()->last_registration());
   EXPECT_EQ(kExampleDeveloperId2,
             embedded_worker_test_helper()->last_registration()->developer_id);
   EXPECT_EQ(kExampleUniqueId2,
@@ -156,7 +159,7 @@ TEST_F(BackgroundFetchEventDispatcherTest, DispatchClickEvent) {
     run_loop.Run();
   }
 
-  ASSERT_TRUE(embedded_worker_test_helper()->last_registration().has_value());
+  ASSERT_TRUE(embedded_worker_test_helper()->last_registration());
   EXPECT_EQ(kExampleDeveloperId,
             embedded_worker_test_helper()->last_registration()->developer_id);
   EXPECT_EQ(blink::mojom::BackgroundFetchResult::UNSET,
@@ -185,7 +188,7 @@ TEST_F(BackgroundFetchEventDispatcherTest, DispatchClickEvent) {
     run_loop.Run();
   }
 
-  ASSERT_TRUE(embedded_worker_test_helper()->last_registration().has_value());
+  ASSERT_TRUE(embedded_worker_test_helper()->last_registration());
   EXPECT_EQ(kExampleDeveloperId2,
             embedded_worker_test_helper()->last_registration()->developer_id);
   EXPECT_EQ(blink::mojom::BackgroundFetchResult::FAILURE,
@@ -217,13 +220,13 @@ TEST_F(BackgroundFetchEventDispatcherTest, DispatchFailEvent) {
         kExampleDeveloperId, kExampleUniqueId,
         blink::mojom::BackgroundFetchResult::FAILURE,
         blink::mojom::BackgroundFetchFailureReason::QUOTA_EXCEEDED);
-    event_dispatcher_.DispatchBackgroundFetchFailEvent(
+    event_dispatcher_.DispatchBackgroundFetchCompletionEvent(
         registration_id, std::move(registration), run_loop.QuitClosure());
 
     run_loop.Run();
   }
 
-  ASSERT_TRUE(embedded_worker_test_helper()->last_registration().has_value());
+  ASSERT_TRUE(embedded_worker_test_helper()->last_registration());
   EXPECT_EQ(kExampleDeveloperId,
             embedded_worker_test_helper()->last_registration()->developer_id);
 
@@ -243,13 +246,13 @@ TEST_F(BackgroundFetchEventDispatcherTest, DispatchFailEvent) {
         kExampleDeveloperId2, kExampleUniqueId2,
         blink::mojom::BackgroundFetchResult::FAILURE,
         blink::mojom::BackgroundFetchFailureReason::QUOTA_EXCEEDED);
-    event_dispatcher_.DispatchBackgroundFetchFailEvent(second_registration_id,
-                                                       std::move(registration),
-                                                       run_loop.QuitClosure());
+    event_dispatcher_.DispatchBackgroundFetchCompletionEvent(
+        second_registration_id, std::move(registration),
+        run_loop.QuitClosure());
     run_loop.Run();
   }
 
-  ASSERT_TRUE(embedded_worker_test_helper()->last_registration().has_value());
+  ASSERT_TRUE(embedded_worker_test_helper()->last_registration());
   EXPECT_EQ(kExampleDeveloperId2,
             embedded_worker_test_helper()->last_registration()->developer_id);
 
@@ -279,13 +282,13 @@ TEST_F(BackgroundFetchEventDispatcherTest, DispatchFetchSuccessEvent) {
         kExampleDeveloperId, kExampleUniqueId,
         blink::mojom::BackgroundFetchResult::SUCCESS,
         blink::mojom::BackgroundFetchFailureReason::NONE);
-    event_dispatcher_.DispatchBackgroundFetchSuccessEvent(
+    event_dispatcher_.DispatchBackgroundFetchCompletionEvent(
         registration_id, std::move(registration), run_loop.QuitClosure());
 
     run_loop.Run();
   }
 
-  ASSERT_TRUE(embedded_worker_test_helper()->last_registration().has_value());
+  ASSERT_TRUE(embedded_worker_test_helper()->last_registration());
   EXPECT_EQ(kExampleDeveloperId,
             embedded_worker_test_helper()->last_registration()->developer_id);
 
@@ -308,14 +311,14 @@ TEST_F(BackgroundFetchEventDispatcherTest, DispatchFetchSuccessEvent) {
         kExampleDeveloperId2, kExampleUniqueId2,
         blink::mojom::BackgroundFetchResult::SUCCESS,
         blink::mojom::BackgroundFetchFailureReason::NONE);
-    event_dispatcher_.DispatchBackgroundFetchSuccessEvent(
+    event_dispatcher_.DispatchBackgroundFetchCompletionEvent(
         second_registration_id, std::move(registration),
         run_loop.QuitClosure());
 
     run_loop.Run();
   }
 
-  ASSERT_TRUE(embedded_worker_test_helper()->last_registration().has_value());
+  ASSERT_TRUE(embedded_worker_test_helper()->last_registration());
   EXPECT_EQ(kExampleDeveloperId2,
             embedded_worker_test_helper()->last_registration()->developer_id);
   EXPECT_EQ(kExampleUniqueId2,

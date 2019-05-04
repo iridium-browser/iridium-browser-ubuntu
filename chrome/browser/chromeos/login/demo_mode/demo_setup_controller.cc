@@ -7,13 +7,16 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/browser/chromeos/login/demo_mode/demo_resources.h"
 #include "chrome/browser/chromeos/login/enrollment/auto_enrollment_controller.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -21,50 +24,31 @@
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
-#include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
 #include "chrome/common/pref_names.h"
-#include "chromeos/chromeos_switches.h"
+#include "chrome/grit/generated_resources.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/system/statistics_provider.h"
+#include "chromeos/tpm/install_attributes.h"
 #include "components/arc/arc_util.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
 
 namespace {
 
+using ErrorCode = DemoSetupController::DemoSetupError::ErrorCode;
+using RecoveryMethod = DemoSetupController::DemoSetupError::RecoveryMethod;
+
 constexpr char kDemoRequisition[] = "cros-demo-mode";
+constexpr char kOfflinePolicyDirectoryName[] = "policy";
 constexpr char kOfflineDevicePolicyFileName[] = "device_policy";
 constexpr char kOfflineDeviceLocalAccountPolicyFileName[] =
     "local_account_policy";
-
-// The policy blob data for offline demo-mode is embedded into the filesystem.
-// TODO(mukai, agawronska): fix this when switching to dm-verity image.
-constexpr const base::FilePath::CharType kOfflineDemoModeDir[] =
-    FILE_PATH_LITERAL("/usr/share/demo_mode_resources/policy");
-
-bool CheckOfflinePolicyFilesExist(const base::FilePath& policy_dir,
-                                  std::string* message) {
-  base::FilePath device_policy_path =
-      policy_dir.AppendASCII(kOfflineDevicePolicyFileName);
-  if (!base::PathExists(device_policy_path)) {
-    *message = base::StringPrintf("Path %s does not exist",
-                                  device_policy_path.AsUTF8Unsafe().c_str());
-    return false;
-  }
-  base::FilePath local_account_policy_path =
-      policy_dir.AppendASCII(kOfflineDeviceLocalAccountPolicyFileName);
-  if (!base::PathExists(local_account_policy_path)) {
-    *message =
-        base::StringPrintf("Path %s does not exist",
-                           local_account_policy_path.AsUTF8Unsafe().c_str());
-    return false;
-  }
-
-  return true;
-}
 
 // Get the DeviceLocalAccountPolicyStore for the account_id.
 policy::CloudPolicyStore* GetDeviceLocalAccountPolicyStore(
@@ -89,7 +73,7 @@ policy::CloudPolicyStore* GetDeviceLocalAccountPolicyStore(
   return broker->core()->store();
 }
 
-// A utility funciton of base::ReadFileToString which returns an optional
+// A utility function of base::ReadFileToString which returns an optional
 // string.
 // TODO(mukai): move this to base/files.
 base::Optional<std::string> ReadFileToOptionalString(
@@ -124,10 +108,326 @@ bool IsOnlineFreCheckRequired() {
   return block_dev_mode_value == "1";
 }
 
+DemoSetupController::DemoSetupError CreateFromClientStatus(
+    policy::DeviceManagementStatus status,
+    const std::string& debug_message) {
+  switch (status) {
+    case policy::DM_STATUS_SUCCESS:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kUnexpectedError, RecoveryMethod::kUnknown, debug_message);
+    case policy::DM_STATUS_REQUEST_INVALID:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kInvalidRequest, RecoveryMethod::kUnknown, debug_message);
+    case policy::DM_STATUS_REQUEST_FAILED:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kRequestNetworkError, RecoveryMethod::kCheckNetwork,
+          debug_message);
+    case policy::DM_STATUS_TEMPORARY_UNAVAILABLE:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kTemporaryUnavailable, RecoveryMethod::kRetry,
+          debug_message);
+    case policy::DM_STATUS_HTTP_STATUS_ERROR:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kResponseError, RecoveryMethod::kUnknown, debug_message);
+    case policy::DM_STATUS_RESPONSE_DECODING_ERROR:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kResponseDecodingError, RecoveryMethod::kUnknown,
+          debug_message);
+    case policy::DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED:
+    case policy::DM_STATUS_SERVICE_CONSUMER_ACCOUNT_WITH_PACKAGED_LICENSE:
+    case policy::DM_STATUS_SERVICE_ACTIVATION_PENDING:
+      return DemoSetupController::DemoSetupError(ErrorCode::kDemoAccountError,
+                                                 RecoveryMethod::kUnknown,
+                                                 debug_message);
+    case policy::DM_STATUS_SERVICE_DEVICE_NOT_FOUND:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kDeviceNotFound, RecoveryMethod::kUnknown, debug_message);
+    case policy::DM_STATUS_SERVICE_MANAGEMENT_TOKEN_INVALID:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kInvalidDMToken, RecoveryMethod::kUnknown, debug_message);
+    case policy::DM_STATUS_SERVICE_INVALID_SERIAL_NUMBER:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kInvalidSerialNumber, RecoveryMethod::kUnknown,
+          debug_message);
+    case policy::DM_STATUS_SERVICE_DEVICE_ID_CONFLICT:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kDeviceIdError, RecoveryMethod::kUnknown, debug_message);
+    case policy::DM_STATUS_SERVICE_MISSING_LICENSES:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kLicenseError, RecoveryMethod::kUnknown, debug_message);
+    case policy::DM_STATUS_SERVICE_DEPROVISIONED:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kDeviceDeprovisioned, RecoveryMethod::kUnknown,
+          debug_message);
+    case policy::DM_STATUS_SERVICE_DOMAIN_MISMATCH:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kDomainMismatch, RecoveryMethod::kUnknown, debug_message);
+    case policy::DM_STATUS_CANNOT_SIGN_REQUEST:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kSigningError, RecoveryMethod::kPowerwash, debug_message);
+    case policy::DM_STATUS_SERVICE_POLICY_NOT_FOUND:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kPolicyNotFound, RecoveryMethod::kUnknown, debug_message);
+    case policy::DM_STATUS_SERVICE_ARC_DISABLED:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kArcError, RecoveryMethod::kUnknown, debug_message);
+  }
+  NOTREACHED() << "Demo mode setup received unsupported client status";
+  return DemoSetupController::DemoSetupError(
+      ErrorCode::kUnexpectedError, RecoveryMethod::kUnknown, debug_message);
+}
+
+DemoSetupController::DemoSetupError CreateFromLockStatus(
+    InstallAttributes::LockResult status,
+    const std::string& debug_message) {
+  switch (status) {
+    case InstallAttributes::LOCK_SUCCESS:
+    case InstallAttributes::LOCK_NOT_READY:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kUnexpectedError, RecoveryMethod::kUnknown, debug_message);
+    case InstallAttributes::LOCK_TIMEOUT:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kLockTimeout, RecoveryMethod::kReboot, debug_message);
+    case InstallAttributes::LOCK_BACKEND_INVALID:
+    case InstallAttributes::LOCK_SET_ERROR:
+    case InstallAttributes::LOCK_FINALIZE_ERROR:
+    case InstallAttributes::LOCK_READBACK_ERROR:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kLockError, RecoveryMethod::kPowerwash, debug_message);
+    case InstallAttributes::LOCK_ALREADY_LOCKED:
+    case InstallAttributes::LOCK_WRONG_DOMAIN:
+    case InstallAttributes::LOCK_WRONG_MODE:
+      return DemoSetupController::DemoSetupError(
+          ErrorCode::kAlreadyLocked, RecoveryMethod::kPowerwash, debug_message);
+  }
+  NOTREACHED() << "Demo mode setup received unsupported lock status";
+  return DemoSetupController::DemoSetupError(
+      ErrorCode::kUnexpectedError, RecoveryMethod::kUnknown, debug_message);
+}
+
 }  //  namespace
 
 // static
 constexpr char DemoSetupController::kDemoModeDomain[];
+
+// static
+DemoSetupController::DemoSetupError
+DemoSetupController::DemoSetupError::CreateFromEnrollmentStatus(
+    const policy::EnrollmentStatus& status) {
+  const std::string debug_message = base::StringPrintf(
+      "EnrollmentError: (status: %d, client_status: %d, store_status: %d, "
+      "validation_status: %d, lock_status: %d)",
+      status.status(), status.client_status(), status.store_status(),
+      status.validation_status(), status.lock_status());
+
+  switch (status.status()) {
+    case policy::EnrollmentStatus::SUCCESS:
+      return DemoSetupError(ErrorCode::kUnexpectedError,
+                            RecoveryMethod::kUnknown, debug_message);
+    case policy::EnrollmentStatus::NO_STATE_KEYS:
+      return DemoSetupError(ErrorCode::kNoStateKeys, RecoveryMethod::kReboot,
+                            debug_message);
+    case policy::EnrollmentStatus::REGISTRATION_FAILED:
+      return CreateFromClientStatus(status.client_status(), debug_message);
+    case policy::EnrollmentStatus::ROBOT_AUTH_FETCH_FAILED:
+    case policy::EnrollmentStatus::ROBOT_REFRESH_FETCH_FAILED:
+      return DemoSetupError(ErrorCode::kRobotFetchError,
+                            RecoveryMethod::kCheckNetwork, debug_message);
+    case policy::EnrollmentStatus::ROBOT_REFRESH_STORE_FAILED:
+      return DemoSetupError(ErrorCode::kRobotStoreError,
+                            RecoveryMethod::kReboot, debug_message);
+    case policy::EnrollmentStatus::REGISTRATION_BAD_MODE:
+      return DemoSetupError(ErrorCode::kBadMode, RecoveryMethod::kRetry,
+                            debug_message);
+    case policy::EnrollmentStatus::REGISTRATION_CERT_FETCH_FAILED:
+      return DemoSetupError(ErrorCode::kCertFetchError, RecoveryMethod::kRetry,
+                            debug_message);
+    case policy::EnrollmentStatus::POLICY_FETCH_FAILED:
+      return DemoSetupError(ErrorCode::kPolicyFetchError,
+                            RecoveryMethod::kRetry, debug_message);
+    case policy::EnrollmentStatus::VALIDATION_FAILED:
+      return DemoSetupError(ErrorCode::kPolicyValidationError,
+                            RecoveryMethod::kRetry, debug_message);
+    case policy::EnrollmentStatus::LOCK_ERROR:
+      return CreateFromLockStatus(status.lock_status(), debug_message);
+    case policy::EnrollmentStatus::STORE_ERROR:
+      return DemoSetupError(ErrorCode::kOnlineStoreError,
+                            RecoveryMethod::kRetry, debug_message);
+    case policy::EnrollmentStatus::ATTRIBUTE_UPDATE_FAILED:
+      return DemoSetupError(ErrorCode::kUnexpectedError,
+                            RecoveryMethod::kUnknown, debug_message);
+    case policy::EnrollmentStatus::NO_MACHINE_IDENTIFICATION:
+      return DemoSetupError(ErrorCode::kMachineIdentificationError,
+                            RecoveryMethod::kUnknown, debug_message);
+    case policy::EnrollmentStatus::ACTIVE_DIRECTORY_POLICY_FETCH_FAILED:
+      return DemoSetupError(ErrorCode::kUnexpectedError,
+                            RecoveryMethod::kReboot, debug_message);
+    case policy::EnrollmentStatus::DM_TOKEN_STORE_FAILED:
+      return DemoSetupError(ErrorCode::kDMTokenStoreError,
+                            RecoveryMethod::kUnknown, debug_message);
+    case policy::EnrollmentStatus::LICENSE_REQUEST_FAILED:
+      return DemoSetupError(ErrorCode::kLicenseError, RecoveryMethod::kUnknown,
+                            debug_message);
+    case policy::EnrollmentStatus::OFFLINE_POLICY_LOAD_FAILED:
+    case policy::EnrollmentStatus::OFFLINE_POLICY_DECODING_FAILED:
+      return DemoSetupError(ErrorCode::kOfflinePolicyError,
+                            RecoveryMethod::kOnlineOnly, debug_message);
+  }
+  NOTREACHED() << "Demo mode setup received unsupported enrollment status";
+  return DemoSetupError(ErrorCode::kUnexpectedError, RecoveryMethod::kUnknown,
+                        debug_message);
+}
+
+// static
+DemoSetupController::DemoSetupError
+DemoSetupController::DemoSetupError::CreateFromOtherEnrollmentError(
+    EnterpriseEnrollmentHelper::OtherError error) {
+  const std::string debug_message =
+      base::StringPrintf("Other error: %d", error);
+  switch (error) {
+    case EnterpriseEnrollmentHelper::OTHER_ERROR_DOMAIN_MISMATCH:
+      return DemoSetupError(ErrorCode::kAlreadyLocked,
+                            RecoveryMethod::kPowerwash, debug_message);
+    case EnterpriseEnrollmentHelper::OTHER_ERROR_FATAL:
+      return DemoSetupError(ErrorCode::kUnexpectedError,
+                            RecoveryMethod::kUnknown, debug_message);
+  }
+  NOTREACHED() << "Demo mode setup received unsupported enrollment error";
+  return DemoSetupError(ErrorCode::kUnexpectedError, RecoveryMethod::kUnknown,
+                        debug_message);
+}
+
+// static
+DemoSetupController::DemoSetupError
+DemoSetupController::DemoSetupError::CreateFromComponentError(
+    component_updater::CrOSComponentManager::Error error) {
+  const std::string debug_message =
+      "Failed to load demo resources CrOS component with error: " +
+      std::to_string(static_cast<int>(error));
+  return DemoSetupError(ErrorCode::kOnlineComponentError,
+                        RecoveryMethod::kCheckNetwork, debug_message);
+}
+
+DemoSetupController::DemoSetupError::DemoSetupError(
+    DemoSetupError::ErrorCode error_code,
+    DemoSetupError::RecoveryMethod recovery_method)
+    : error_code_(error_code), recovery_method_(recovery_method) {}
+
+DemoSetupController::DemoSetupError::DemoSetupError(
+    DemoSetupError::ErrorCode error_code,
+    DemoSetupError::RecoveryMethod recovery_method,
+    const std::string& debug_message)
+    : error_code_(error_code),
+      recovery_method_(recovery_method),
+      debug_message_(debug_message) {}
+
+DemoSetupController::DemoSetupError::~DemoSetupError() = default;
+
+base::string16 DemoSetupController::DemoSetupError::GetLocalizedErrorMessage()
+    const {
+  switch (error_code_) {
+    case ErrorCode::kOfflinePolicyError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_OFFLINE_POLICY_ERROR);
+    case ErrorCode::kOfflinePolicyStoreError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_OFFLINE_STORE_ERROR);
+    case ErrorCode::kOnlineFRECheckRequired:
+      return l10n_util::GetStringUTF16(
+          IDS_DEMO_SETUP_OFFLINE_UNAVAILABLE_ERROR);
+    case ErrorCode::kOnlineComponentError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_COMPONENT_ERROR);
+    case ErrorCode::kNoStateKeys:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_NO_STATE_KEYS_ERROR);
+    case ErrorCode::kInvalidRequest:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_INVALID_REQUEST_ERROR);
+    case ErrorCode::kRequestNetworkError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_NETWORK_ERROR);
+    case ErrorCode::kTemporaryUnavailable:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_TEMPORARY_ERROR);
+    case ErrorCode::kResponseError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_RESPONSE_ERROR);
+    case ErrorCode::kResponseDecodingError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_RESPONSE_DECODING_ERROR);
+    case ErrorCode::kDemoAccountError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_ACCOUNT_ERROR);
+    case ErrorCode::kDeviceNotFound:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_DEVICE_NOT_FOUND_ERROR);
+    case ErrorCode::kInvalidDMToken:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_INVALID_DM_TOKEN_ERROR);
+    case ErrorCode::kInvalidSerialNumber:
+      return l10n_util::GetStringUTF16(
+          IDS_DEMO_SETUP_INVALID_SERIAL_NUMBER_ERROR);
+    case ErrorCode::kDeviceIdError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_DEVICE_ID_ERROR);
+    case ErrorCode::kLicenseError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_LICENSE_ERROR);
+    case ErrorCode::kDeviceDeprovisioned:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_DEPROVISIONED_ERROR);
+    case ErrorCode::kDomainMismatch:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_DOMAIN_MISMATCH_ERROR);
+    case ErrorCode::kSigningError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_SIGNING_ERROR);
+    case ErrorCode::kPolicyNotFound:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_POLICY_NOT_FOUND_ERROR);
+    case ErrorCode::kArcError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_ARC_ERROR);
+    case ErrorCode::kRobotFetchError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_ROBOT_ERROR);
+    case ErrorCode::kRobotStoreError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_ROBOT_STORE_ERROR);
+    case ErrorCode::kBadMode:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_BAD_MODE_ERROR);
+    case ErrorCode::kCertFetchError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_CERT_FETCH_ERROR);
+    case ErrorCode::kPolicyFetchError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_POLICY_FETCH_ERROR);
+    case ErrorCode::kPolicyValidationError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_POLICY_VALIDATION_ERROR);
+    case ErrorCode::kLockTimeout:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_LOCK_TIMEOUT_ERROR);
+    case ErrorCode::kLockError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_LOCK_ERROR);
+    case ErrorCode::kAlreadyLocked:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_ALREADY_LOCKED_ERROR);
+    case ErrorCode::kOnlineStoreError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_ONLINE_STORE_ERROR);
+    case ErrorCode::kMachineIdentificationError:
+      return l10n_util::GetStringUTF16(
+          IDS_DEMO_SETUP_NO_MACHINE_IDENTIFICATION_ERROR);
+    case ErrorCode::kDMTokenStoreError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_DM_TOKEN_STORE_ERROR);
+    case ErrorCode::kUnexpectedError:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_UNEXPECTED_ERROR);
+  }
+  NOTREACHED() << "No localized error message available for demo setup error.";
+  return base::string16();
+}
+
+base::string16
+DemoSetupController::DemoSetupError::GetLocalizedRecoveryMessage() const {
+  switch (recovery_method_) {
+    case RecoveryMethod::kRetry:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_RECOVERY_RETRY);
+    case RecoveryMethod::kReboot:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_RECOVERY_REBOOT);
+    case RecoveryMethod::kPowerwash:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_RECOVERY_POWERWASH);
+    case RecoveryMethod::kCheckNetwork:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_RECOVERY_CHECK_NETWORK);
+    case RecoveryMethod::kOnlineOnly:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_RECOVERY_OFFLINE_FATAL);
+    case RecoveryMethod::kUnknown:
+      return l10n_util::GetStringUTF16(IDS_DEMO_SETUP_RECOVERY_FATAL);
+  }
+  NOTREACHED()
+      << "No localized error message available for demo setup recovery method.";
+  return base::string16();
+}
+
+std::string DemoSetupController::DemoSetupError::GetDebugDescription() const {
+  return base::StringPrintf("DemoSetupError (code: %d, recovery: %d) : %s",
+                            error_code_, recovery_method_,
+                            debug_message_.c_str());
+}
 
 void DemoSetupController::RegisterLocalStatePrefs(
     PrefRegistrySimple* registry) {
@@ -151,13 +451,6 @@ bool DemoSetupController::IsDemoModeAllowed() {
 }
 
 // static
-bool DemoSetupController::IsOfflineDemoModeAllowed() {
-  // Offline demo mode can be only enabled when demo mode feature is enabled.
-  return IsDemoModeAllowed() &&
-         base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kEnableOfflineDemoMode);
-}
-
 // static
 bool DemoSetupController::IsOobeDemoSetupFlowInProgress() {
   const WizardController* const wizard_controller =
@@ -186,7 +479,7 @@ void DemoSetupController::Enroll(OnSetupSuccess on_setup_success,
   on_setup_success_ = std::move(on_setup_success);
   on_setup_error_ = std::move(on_setup_error);
 
-  VLOG(1) << "Starting demo mode enrollment "
+  VLOG(1) << "Starting demo setup "
           << DemoSession::DemoConfigToString(demo_config_);
 
   switch (demo_config_) {
@@ -194,10 +487,7 @@ void DemoSetupController::Enroll(OnSetupSuccess on_setup_success,
       LoadDemoResourcesCrOSComponent();
       return;
     case DemoSession::DemoModeConfig::kOffline: {
-      const base::FilePath offline_data_dir =
-          policy_dir_for_tests_.empty() ? base::FilePath(kOfflineDemoModeDir)
-                                        : policy_dir_for_tests_;
-      EnrollOffline(offline_data_dir);
+      EnrollOffline();
       return;
     }
     case DemoSession::DemoModeConfig::kNone:
@@ -205,39 +495,62 @@ void DemoSetupController::Enroll(OnSetupSuccess on_setup_success,
   }
 }
 
+void DemoSetupController::TryMountPreinstalledDemoResources(
+    HasPreinstalledDemoResourcesCallback callback) {
+  if (!preinstalled_demo_resources_) {
+    preinstalled_demo_resources_ =
+        std::make_unique<DemoResources>(DemoSession::DemoModeConfig::kOffline);
+  }
+
+  if (DBusThreadManager::Get()->IsUsingFakes()) {
+    preinstalled_demo_resources_
+        ->SetPreinstalledOfflineResourcesLoadedForTesting(
+            preinstalled_offline_resources_path_for_tests_);
+  }
+  preinstalled_demo_resources_->EnsureLoaded(
+      base::BindOnce(&DemoSetupController::OnPreinstalledDemoResourcesLoaded,
+                     base::Unretained(this), std::move(callback)));
+}
+
+base::FilePath DemoSetupController::GetPreinstalledDemoResourcesPath(
+    const base::FilePath& relative_path) {
+  if (preinstalled_demo_resources_)
+    return preinstalled_demo_resources_->GetAbsolutePath(relative_path);
+  return base::FilePath();
+}
+
 void DemoSetupController::LoadDemoResourcesCrOSComponent() {
-  component_updater::CrOSComponentManager* cros_component_manager =
-      g_browser_process->platform_part()->cros_component_manager();
-  // In tests, use the desired error code.
-  if (!cros_component_manager || DBusThreadManager::Get()->IsUsingFakes()) {
+  VLOG(1) << "Loading demo resources component";
+  if (!demo_resources_)
+    demo_resources_ = std::make_unique<DemoResources>(demo_config_);
+
+  if (DBusThreadManager::Get()->IsUsingFakes()) {
+    demo_resources_->SetCrOSComponentLoadedForTesting(
+        base::FilePath(), component_error_for_tests_);
+
     base::SequencedTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(&DemoSetupController::OnDemoResourcesCrOSComponentLoaded,
-                       weak_ptr_factory_.GetWeakPtr(),
-                       component_error_for_tests_, base::FilePath()));
+                       weak_ptr_factory_.GetWeakPtr()));
     return;
   }
 
-  cros_component_manager->Load(
-      DemoSession::kDemoModeResourcesComponentName,
-      component_updater::CrOSComponentManager::MountPolicy::kMount,
-      component_updater::CrOSComponentManager::UpdatePolicy::kDontForce,
+  demo_resources_->EnsureLoaded(
       base::BindOnce(&DemoSetupController::OnDemoResourcesCrOSComponentLoaded,
                      weak_ptr_factory_.GetWeakPtr()));
 }
 
-void DemoSetupController::OnDemoResourcesCrOSComponentLoaded(
-    component_updater::CrOSComponentManager::Error error,
-    const base::FilePath& path) {
+void DemoSetupController::OnDemoResourcesCrOSComponentLoaded() {
   DCHECK_EQ(demo_config_, DemoSession::DemoModeConfig::kOnline);
 
-  if (error != component_updater::CrOSComponentManager::Error::NONE) {
-    SetupFailed("Failed to load demo resources CrOS component with error: " +
-                    std::to_string(static_cast<int>(error)),
-                DemoSetupError::kRecoverable);
+  if (demo_resources_->component_error().value() !=
+      component_updater::CrOSComponentManager::Error::NONE) {
+    SetupFailed(DemoSetupError::CreateFromComponentError(
+        demo_resources_->component_error().value()));
     return;
   }
 
+  VLOG(1) << "Starting online enrollment";
   policy::DeviceCloudPolicyManagerChromeOS* policy_manager =
       g_browser_process->platform_part()
           ->browser_policy_connector_chromeos()
@@ -253,43 +566,34 @@ void DemoSetupController::OnDemoResourcesCrOSComponentLoaded(
   enrollment_helper_->EnrollUsingAttestation();
 }
 
-void DemoSetupController::EnrollOffline(const base::FilePath& policy_dir) {
+void DemoSetupController::OnPreinstalledDemoResourcesLoaded(
+    HasPreinstalledDemoResourcesCallback callback) {
+  std::move(callback).Run(!preinstalled_demo_resources_->path().empty());
+}
+
+void DemoSetupController::EnrollOffline() {
   DCHECK_EQ(demo_config_, DemoSession::DemoModeConfig::kOffline);
-  DCHECK(policy_dir_.empty());
-  policy_dir_ = policy_dir;
+  DCHECK(!preinstalled_demo_resources_->path().empty());
+
+  const base::FilePath policy_dir =
+      preinstalled_demo_resources_->GetAbsolutePath(
+          base::FilePath(kOfflinePolicyDirectoryName));
 
   if (IsOnlineFreCheckRequired()) {
     SetupFailed(
-        "Cannot do offline demo mode setup, because online FRE check is "
-        "required.",
-        DemoSetupError::kFatal);
+        DemoSetupError(DemoSetupError::ErrorCode::kOnlineFRECheckRequired,
+                       DemoSetupError::RecoveryMethod::kOnlineOnly,
+                       "Cannot do offline demo mode setup, because online "
+                       "FRE check is required."));
     return;
   }
 
-  std::string* message = new std::string();
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE,
-      {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
-      base::BindOnce(&CheckOfflinePolicyFilesExist, policy_dir_, message),
-      base::BindOnce(&DemoSetupController::OnOfflinePolicyFilesExisted,
-                     weak_ptr_factory_.GetWeakPtr(), base::Owned(message)));
-}
-
-void DemoSetupController::OnOfflinePolicyFilesExisted(std::string* message,
-                                                      bool ok) {
-  DCHECK_EQ(demo_config_, DemoSession::DemoModeConfig::kOffline);
-  DCHECK(!policy_dir_.empty());
-
-  if (!ok) {
-    SetupFailed(*message, DemoSetupError::kRecoverable);
-    return;
-  }
-
+  VLOG(1) << "Starting offline enrollment";
   policy::EnrollmentConfig config;
   config.mode = policy::EnrollmentConfig::MODE_OFFLINE_DEMO;
   config.management_domain = DemoSetupController::kDemoModeDomain;
   config.offline_policy_path =
-      policy_dir_.AppendASCII(kOfflineDevicePolicyFileName);
+      policy_dir.AppendASCII(kOfflineDevicePolicyFileName);
   enrollment_helper_ = EnterpriseEnrollmentHelper::Create(
       this, nullptr /* ad_join_delegate */, config,
       DemoSetupController::kDemoModeDomain);
@@ -301,31 +605,26 @@ void DemoSetupController::OnAuthError(const GoogleServiceAuthError& error) {
 }
 
 void DemoSetupController::OnEnrollmentError(policy::EnrollmentStatus status) {
-  // TODO(mukai): improve the message details.
-  SetupFailed(
-      base::StringPrintf(
-          "EnrollmentError: status: %d client_status: %d store_status: %d "
-          "validation_status: %d lock_status: %d",
-          status.status(), status.client_status(), status.store_status(),
-          status.validation_status(), status.lock_status()),
-      DemoSetupError::kRecoverable);
+  SetupFailed(DemoSetupError::CreateFromEnrollmentStatus(status));
 }
 
 void DemoSetupController::OnOtherError(
     EnterpriseEnrollmentHelper::OtherError error) {
-  SetupFailed(base::StringPrintf("Other error: %d", error),
-              DemoSetupError::kRecoverable);
+  SetupFailed(DemoSetupError::CreateFromOtherEnrollmentError(error));
 }
 
-void DemoSetupController::OnDeviceEnrolled(
-    const std::string& additional_token) {
+void DemoSetupController::OnDeviceEnrolled() {
   DCHECK_NE(demo_config_, DemoSession::DemoModeConfig::kNone);
 
   // Try to load the policy for the device local account.
   if (demo_config_ == DemoSession::DemoModeConfig::kOffline) {
-    DCHECK(!policy_dir_.empty());
+    VLOG(1) << "Loading offline policy";
+    DCHECK(!preinstalled_demo_resources_->path().empty());
+
     const base::FilePath file_path =
-        policy_dir_.AppendASCII(kOfflineDeviceLocalAccountPolicyFileName);
+        preinstalled_demo_resources_->GetAbsolutePath(
+            base::FilePath(kOfflinePolicyDirectoryName)
+                .AppendASCII(kOfflineDeviceLocalAccountPolicyFileName));
     base::PostTaskWithTraitsAndReplyWithResult(
         FROM_HERE,
         {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
@@ -334,7 +633,7 @@ void DemoSetupController::OnDeviceEnrolled(
                        weak_ptr_factory_.GetWeakPtr()));
     return;
   }
-
+  VLOG(1) << "Marking device registered";
   StartupUtils::MarkDeviceRegistered(
       base::BindOnce(&DemoSetupController::OnDeviceRegistered,
                      weak_ptr_factory_.GetWeakPtr()));
@@ -353,9 +652,18 @@ void DemoSetupController::OnDeviceAttributeUpdatePermission(bool granted) {
   NOTREACHED();
 }
 
+void DemoSetupController::OnRestoreAfterRollbackCompleted() {
+  NOTREACHED();
+}
+
 void DemoSetupController::SetCrOSComponentLoadErrorForTest(
     component_updater::CrOSComponentManager::Error error) {
   component_error_for_tests_ = error;
+}
+
+void DemoSetupController::SetPreinstalledOfflineResourcesPathForTesting(
+    const base::FilePath& path) {
+  preinstalled_offline_resources_path_for_tests_ = path;
 }
 
 void DemoSetupController::SetDeviceLocalAccountPolicyStoreForTest(
@@ -363,25 +671,23 @@ void DemoSetupController::SetDeviceLocalAccountPolicyStoreForTest(
   device_local_account_policy_store_ = store;
 }
 
-void DemoSetupController::SetOfflineDataDirForTest(
-    const base::FilePath& offline_dir) {
-  policy_dir_for_tests_ = offline_dir;
-}
-
 void DemoSetupController::OnDeviceLocalAccountPolicyLoaded(
     base::Optional<std::string> blob) {
   if (!blob.has_value()) {
     // This is very unlikely to happen since the file existence is already
     // checked as CheckOfflinePolicyFilesExist.
-    SetupFailed("Policy file for the device local account not found",
-                DemoSetupError::kFatal);
+    SetupFailed(
+        DemoSetupError(DemoSetupError::ErrorCode::kOfflinePolicyError,
+                       DemoSetupError::RecoveryMethod::kPowerwash,
+                       "Policy file for the device local account not found"));
     return;
   }
 
   enterprise_management::PolicyFetchResponse policy;
   if (!policy.ParseFromString(blob.value())) {
-    SetupFailed("Error parsing local account policy blob.",
-                DemoSetupError::kFatal);
+    SetupFailed(DemoSetupError(DemoSetupError::ErrorCode::kOfflinePolicyError,
+                               DemoSetupError::RecoveryMethod::kPowerwash,
+                               "Error parsing local account policy blob."));
     return;
   }
 
@@ -389,11 +695,13 @@ void DemoSetupController::OnDeviceLocalAccountPolicyLoaded(
   enterprise_management::PolicyData policy_data;
   if (policy.policy_data().empty() ||
       !policy_data.ParseFromString(policy.policy_data())) {
-    SetupFailed("Error parsing local account policy data.",
-                DemoSetupError::kFatal);
+    SetupFailed(DemoSetupError(DemoSetupError::ErrorCode::kOfflinePolicyError,
+                               DemoSetupError::RecoveryMethod::kPowerwash,
+                               "Error parsing local account policy data."));
     return;
   }
 
+  VLOG(1) << "Storing offline policy";
   // On the unittest, the device_local_account_policy_store_ is already
   // initialized. Otherwise attempts to get the store.
   if (!device_local_account_policy_store_) {
@@ -402,8 +710,10 @@ void DemoSetupController::OnDeviceLocalAccountPolicyLoaded(
   }
 
   if (!device_local_account_policy_store_) {
-    SetupFailed("Can't find the store for the local account policy.",
-                DemoSetupError::kFatal);
+    SetupFailed(
+        DemoSetupError(DemoSetupError::ErrorCode::kOfflinePolicyStoreError,
+                       DemoSetupError::RecoveryMethod::kPowerwash,
+                       "Can't find the store for the local account policy."));
     return;
   }
   device_local_account_policy_store_->AddObserver(this);
@@ -420,22 +730,18 @@ void DemoSetupController::OnDeviceRegistered() {
     std::move(on_setup_success_).Run();
 }
 
-void DemoSetupController::SetupFailed(const std::string& message,
-                                      DemoSetupError error) {
+void DemoSetupController::SetupFailed(const DemoSetupError& error) {
   Reset();
-  LOG(ERROR) << message << " fatal=" << (error == DemoSetupError::kFatal);
+  LOG(ERROR) << error.GetDebugDescription();
   if (!on_setup_error_.is_null())
     std::move(on_setup_error_).Run(error);
 }
 
 void DemoSetupController::Reset() {
   DCHECK_NE(demo_config_, DemoSession::DemoModeConfig::kNone);
-  DCHECK_NE(demo_config_ == DemoSession::DemoModeConfig::kOffline,
-            policy_dir_.empty());
 
   // |demo_config_| is not reset here, because it is needed for retrying setup.
   enrollment_helper_.reset();
-  policy_dir_.clear();
   if (device_local_account_policy_store_) {
     device_local_account_policy_store_->RemoveObserver(this);
     device_local_account_policy_store_ = nullptr;
@@ -449,6 +755,7 @@ void DemoSetupController::Reset() {
 
 void DemoSetupController::OnStoreLoaded(policy::CloudPolicyStore* store) {
   DCHECK_EQ(store, device_local_account_policy_store_);
+  VLOG(1) << "Marking device registered";
   StartupUtils::MarkDeviceRegistered(
       base::BindOnce(&DemoSetupController::OnDeviceRegistered,
                      weak_ptr_factory_.GetWeakPtr()));
@@ -456,8 +763,10 @@ void DemoSetupController::OnStoreLoaded(policy::CloudPolicyStore* store) {
 
 void DemoSetupController::OnStoreError(policy::CloudPolicyStore* store) {
   DCHECK_EQ(store, device_local_account_policy_store_);
-  SetupFailed("Failed to store the local account policy",
-              DemoSetupError::kFatal);
+  SetupFailed(
+      DemoSetupError(DemoSetupError::ErrorCode::kOfflinePolicyStoreError,
+                     DemoSetupError::RecoveryMethod::kPowerwash,
+                     "Failed to store the local account policy"));
 }
 
 }  //  namespace chromeos

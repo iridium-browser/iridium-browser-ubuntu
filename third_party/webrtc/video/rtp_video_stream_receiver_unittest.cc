@@ -13,7 +13,7 @@
 
 #include "absl/memory/memory.h"
 #include "common_video/h264/h264_common.h"
-#include "media/base/mediaconstants.h"
+#include "media/base/media_constants.h"
 #include "modules/pacing/packet_router.h"
 #include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor.h"
 #include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor_extension.h"
@@ -23,7 +23,7 @@
 #include "modules/video_coding/include/video_coding_defines.h"
 #include "modules/video_coding/packet.h"
 #include "modules/video_coding/rtp_frame_reference_finder.h"
-#include "rtc_base/bytebuffer.h"
+#include "rtc_base/byte_buffer.h"
 #include "rtc_base/logging.h"
 #include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/field_trial.h"
@@ -80,9 +80,8 @@ class MockOnCompleteFrameCallback
       DoOnCompleteFrameFailLength(frame.get());
       return;
     }
-    std::vector<uint8_t> actual_data(frame->size());
-    frame->GetBitstream(actual_data.data());
-    if (memcmp(buffer_.Data(), actual_data.data(), buffer_.Length()) != 0) {
+    if (frame->size() != buffer_.Length() ||
+        memcmp(buffer_.Data(), frame->data(), buffer_.Length()) != 0) {
       DoOnCompleteFrameFailBitstream(frame.get());
       return;
     }
@@ -133,7 +132,7 @@ class RtpVideoStreamReceiverTest : public testing::Test {
         &mock_transport_, nullptr, &packet_router_, &config_,
         rtp_receive_statistics_.get(), nullptr, process_thread_.get(),
         &mock_nack_sender_, &mock_key_frame_request_sender_,
-        &mock_on_complete_frame_callback_);
+        &mock_on_complete_frame_callback_, nullptr);
   }
 
   WebRtcRTPHeader GetDefaultPacket() {
@@ -518,8 +517,6 @@ TEST_F(RtpVideoStreamReceiverTest, ParseGenericDescriptorOnePacket) {
   RtpGenericFrameDescriptor generic_descriptor;
   generic_descriptor.SetFirstPacketInSubFrame(true);
   generic_descriptor.SetLastPacketInSubFrame(true);
-  generic_descriptor.SetFirstSubFrameInFrame(true);
-  generic_descriptor.SetLastSubFrameInFrame(true);
   generic_descriptor.SetFrameId(100);
   generic_descriptor.SetSpatialLayersBitmask(1 << kSpatialIndex);
   generic_descriptor.AddFrameDependencyDiff(90);
@@ -565,13 +562,9 @@ TEST_F(RtpVideoStreamReceiverTest, ParseGenericDescriptorTwoPackets) {
   RtpGenericFrameDescriptor first_packet_descriptor;
   first_packet_descriptor.SetFirstPacketInSubFrame(true);
   first_packet_descriptor.SetLastPacketInSubFrame(false);
-  first_packet_descriptor.SetFirstSubFrameInFrame(true);
-  first_packet_descriptor.SetLastSubFrameInFrame(true);
   first_packet_descriptor.SetFrameId(100);
-  first_packet_descriptor.SetTemporalLayer(1);
   first_packet_descriptor.SetSpatialLayersBitmask(1 << kSpatialIndex);
-  first_packet_descriptor.AddFrameDependencyDiff(90);
-  first_packet_descriptor.AddFrameDependencyDiff(80);
+  first_packet_descriptor.SetResolution(480, 360);
   EXPECT_TRUE(first_packet.SetExtension<RtpGenericFrameDescriptorExtension>(
       first_packet_descriptor));
 
@@ -589,8 +582,6 @@ TEST_F(RtpVideoStreamReceiverTest, ParseGenericDescriptorTwoPackets) {
   RtpGenericFrameDescriptor second_packet_descriptor;
   second_packet_descriptor.SetFirstPacketInSubFrame(false);
   second_packet_descriptor.SetLastPacketInSubFrame(true);
-  second_packet_descriptor.SetFirstSubFrameInFrame(true);
-  second_packet_descriptor.SetLastSubFrameInFrame(true);
   EXPECT_TRUE(second_packet.SetExtension<RtpGenericFrameDescriptorExtension>(
       second_packet_descriptor));
 
@@ -606,10 +597,10 @@ TEST_F(RtpVideoStreamReceiverTest, ParseGenericDescriptorTwoPackets) {
 
   EXPECT_CALL(mock_on_complete_frame_callback_, DoOnCompleteFrame)
       .WillOnce(Invoke([kSpatialIndex](video_coding::EncodedFrame* frame) {
-        EXPECT_EQ(frame->num_references, 2U);
-        EXPECT_EQ(frame->references[0], frame->id.picture_id - 90);
-        EXPECT_EQ(frame->references[1], frame->id.picture_id - 80);
+        EXPECT_EQ(frame->num_references, 0U);
         EXPECT_EQ(frame->id.spatial_layer, kSpatialIndex);
+        EXPECT_EQ(frame->EncodedImage()._encodedWidth, 480u);
+        EXPECT_EQ(frame->EncodedImage()._encodedHeight, 360u);
       }));
 
   rtp_video_stream_receiver_->OnRtpPacket(second_packet);
@@ -627,5 +618,14 @@ TEST_F(RtpVideoStreamReceiverTest, RepeatedSecondarySinkDisallowed) {
   rtp_video_stream_receiver_->RemoveSecondarySink(&secondary_sink);
 }
 #endif
+
+// Initialization of WebRtcRTPHeader is a bit convoluted, with some fields
+// zero-initialized. RtpVideoStreamReceiver depends on proper default values for
+// the playout delay.
+TEST(WebRtcRTPHeader, DefaultPlayoutDelayIsUnspecified) {
+  WebRtcRTPHeader webrtc_rtp_header = {};
+  EXPECT_EQ(webrtc_rtp_header.video_header().playout_delay.min_ms, -1);
+  EXPECT_EQ(webrtc_rtp_header.video_header().playout_delay.max_ms, -1);
+}
 
 }  // namespace webrtc

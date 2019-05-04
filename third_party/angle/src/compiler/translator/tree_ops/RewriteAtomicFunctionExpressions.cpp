@@ -11,6 +11,7 @@
 #include "compiler/translator/tree_util/IntermNodePatternMatcher.h"
 #include "compiler/translator/tree_util/IntermNode_util.h"
 #include "compiler/translator/tree_util/IntermTraverse.h"
+#include "compiler/translator/util.h"
 
 namespace sh
 {
@@ -65,8 +66,7 @@ RewriteAtomicFunctionExpressionsTraverser::RewriteAtomicFunctionExpressionsTrave
     TSymbolTable *symbolTable,
     int shaderVersion)
     : TIntermTraverser(false, false, true, symbolTable), mShaderVersion(shaderVersion)
-{
-}
+{}
 
 void RewriteAtomicFunctionExpressionsTraverser::rewriteAtomicFunctionCallNode(
     TIntermAggregate *oldAtomicFunctionNode)
@@ -139,6 +139,12 @@ bool RewriteAtomicFunctionExpressionsTraverser::IsAtomicFunctionInsideExpression
 bool RewriteAtomicFunctionExpressionsTraverser::visitAggregate(Visit visit, TIntermAggregate *node)
 {
     ASSERT(visit == PostVisit);
+    // Skip atomic memory functions for SSBO. They will be processed in the OutputHLSL traverser.
+    if (IsAtomicFunction(node->getOp()) &&
+        IsInShaderStorageBlock((*node->getSequence())[0]->getAsTyped()))
+    {
+        return false;
+    }
 
     TIntermNode *parentNode = getParentNode();
     if (IsAtomicExchangeOrCompSwapNoReturnValue(node, parentNode) ||

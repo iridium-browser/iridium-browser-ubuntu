@@ -4,7 +4,12 @@
 
 #include "chrome/browser/browser_switcher/browser_switcher_sitelist.h"
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "base/bind.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_switcher/browser_switcher_prefs.h"
@@ -94,33 +99,27 @@ bool StringSizeCompare(const base::StringPiece& a, const base::StringPiece& b) {
 
 }  // namespace
 
-BrowserSwitcherSitelistImpl::RuleSet::RuleSet() = default;
-BrowserSwitcherSitelistImpl::RuleSet::~RuleSet() = default;
-
 BrowserSwitcherSitelist::~BrowserSwitcherSitelist() = default;
 
-BrowserSwitcherSitelistImpl::BrowserSwitcherSitelistImpl(PrefService* prefs)
-    : prefs_(prefs) {
-  DCHECK(prefs_);
-  change_registrar_.Init(prefs);
-  change_registrar_.Add(
-      prefs::kUrlList,
-      base::BindRepeating(&BrowserSwitcherSitelistImpl::OnUrlListChanged,
-                          base::Unretained(this)));
-  change_registrar_.Add(
-      prefs::kUrlGreylist,
-      base::BindRepeating(&BrowserSwitcherSitelistImpl::OnGreylistChanged,
-                          base::Unretained(this)));
-  // Ensure |chrome_policies_| is initialized.
-  OnUrlListChanged();
-  OnGreylistChanged();
-}
+BrowserSwitcherSitelistImpl::BrowserSwitcherSitelistImpl(
+    const BrowserSwitcherPrefs* prefs)
+    : prefs_(prefs) {}
 
-BrowserSwitcherSitelistImpl::~BrowserSwitcherSitelistImpl() {}
+BrowserSwitcherSitelistImpl::~BrowserSwitcherSitelistImpl() = default;
 
 bool BrowserSwitcherSitelistImpl::ShouldSwitch(const GURL& url) const {
-  // Translated from the LBS extension:
-  // https://github.com/LegacyBrowserSupport/legacy-browser-support/blob/8caa623692b94dc0154074ce904de8f60ee8a404/chrome_extension/js/extension_logic.js#L205
+  // Don't record metrics for LBS non-users.
+  if (!IsActive())
+    return false;
+
+  bool should_switch = ShouldSwitchImpl(url);
+  UMA_HISTOGRAM_BOOLEAN("BrowserSwitcher.Decision", should_switch);
+  return should_switch;
+}
+
+bool BrowserSwitcherSitelistImpl::ShouldSwitchImpl(const GURL& url) const {
+  SCOPED_UMA_HISTOGRAM_TIMER("BrowserSwitcher.DecisionTime");
+
   if (!url.SchemeIsHTTPOrHTTPS() && !url.SchemeIsFile()) {
     return false;
   }
@@ -130,7 +129,7 @@ bool BrowserSwitcherSitelistImpl::ShouldSwitch(const GURL& url) const {
 
   base::StringPiece reason_to_go = std::max(
       {
-          MatchUrlToList(no_copy_url, chrome_policies_.sitelist, true),
+          MatchUrlToList(no_copy_url, prefs_->GetRules().sitelist, true),
           MatchUrlToList(no_copy_url, ieem_sitelist_.sitelist, true),
           MatchUrlToList(no_copy_url, external_sitelist_.sitelist, true),
       },
@@ -143,7 +142,7 @@ bool BrowserSwitcherSitelistImpl::ShouldSwitch(const GURL& url) const {
 
   base::StringPiece reason_to_stay = std::max(
       {
-          MatchUrlToList(no_copy_url, chrome_policies_.greylist, false),
+          MatchUrlToList(no_copy_url, prefs_->GetRules().greylist, false),
           MatchUrlToList(no_copy_url, ieem_sitelist_.greylist, false),
           MatchUrlToList(no_copy_url, external_sitelist_.greylist, false),
       },
@@ -151,31 +150,42 @@ bool BrowserSwitcherSitelistImpl::ShouldSwitch(const GURL& url) const {
 
   if (reason_to_go == "*" && !reason_to_stay.empty())
     return false;
+
   return reason_to_go.size() >= reason_to_stay.size();
 }
 
 void BrowserSwitcherSitelistImpl::SetIeemSitelist(ParsedXml&& parsed_xml) {
   DCHECK(!parsed_xml.error);
+
+  UMA_HISTOGRAM_COUNTS_100000(
+      "BrowserSwitcher.IeemSitelistSize",
+      parsed_xml.sitelist.size() + parsed_xml.greylist.size());
+
   ieem_sitelist_.sitelist = std::move(parsed_xml.sitelist);
   ieem_sitelist_.greylist = std::move(parsed_xml.greylist);
 }
 
 void BrowserSwitcherSitelistImpl::SetExternalSitelist(ParsedXml&& parsed_xml) {
   DCHECK(!parsed_xml.error);
+
+  UMA_HISTOGRAM_COUNTS_100000("BrowserSwitcher.ExternalSitelistSize",
+                              parsed_xml.sitelist.size());
+
   external_sitelist_.sitelist = std::move(parsed_xml.sitelist);
   external_sitelist_.greylist = std::move(parsed_xml.greylist);
 }
 
-void BrowserSwitcherSitelistImpl::OnUrlListChanged() {
-  chrome_policies_.sitelist.clear();
-  for (const auto& url : *prefs_->GetList(prefs::kUrlList))
-    chrome_policies_.sitelist.push_back(url.GetString());
-}
+bool BrowserSwitcherSitelistImpl::IsActive() const {
+  if (!prefs_->IsEnabled())
+    return false;
 
-void BrowserSwitcherSitelistImpl::OnGreylistChanged() {
-  chrome_policies_.greylist.clear();
-  for (const auto& url : *prefs_->GetList(prefs::kUrlGreylist))
-    chrome_policies_.greylist.push_back(url.GetString());
+  const RuleSet* rulesets[] = {&prefs_->GetRules(), &ieem_sitelist_,
+                               &external_sitelist_};
+  for (const RuleSet* rules : rulesets) {
+    if (!rules->sitelist.empty() || !rules->greylist.empty())
+      return true;
+  }
+  return false;
 }
 
 }  // namespace browser_switcher

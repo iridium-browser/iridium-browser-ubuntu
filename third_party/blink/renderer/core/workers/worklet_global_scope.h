@@ -17,6 +17,7 @@
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -156,6 +157,8 @@ class CORE_EXPORT WorkletGlobalScope
 
   void BindContentSecurityPolicyToExecutionContext() override;
 
+  mojom::RequestContextType GetDestinationForMainScript() override;
+
   // The |url_| and |user_agent_| are inherited from the parent Document.
   const KURL url_;
   const String user_agent_;
@@ -180,11 +183,12 @@ class CORE_EXPORT WorkletGlobalScope
   WorkerThread* worker_thread_;
 };
 
-DEFINE_TYPE_CASTS(WorkletGlobalScope,
-                  ExecutionContext,
-                  context,
-                  context->IsWorkletGlobalScope(),
-                  context.IsWorkletGlobalScope());
+template <>
+struct DowncastTraits<WorkletGlobalScope> {
+  static bool AllowFrom(const ExecutionContext& context) {
+    return context.IsWorkletGlobalScope();
+  }
+};
 
 }  // namespace blink
 

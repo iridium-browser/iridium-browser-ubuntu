@@ -1,6 +1,6 @@
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
-// // Use of this source code is governed by a BSD-style license that can be
-// // found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef NET_THIRD_PARTY_QUIC_TOOLS_QUIC_SIMPLE_SERVER_STREAM_H_
 #define NET_THIRD_PARTY_QUIC_TOOLS_QUIC_SIMPLE_SERVER_STREAM_H_
@@ -11,7 +11,7 @@
 #include "net/third_party/quic/platform/api/quic_string_piece.h"
 #include "net/third_party/quic/tools/quic_backend_response.h"
 #include "net/third_party/quic/tools/quic_simple_server_backend.h"
-#include "net/third_party/spdy/core/spdy_framer.h"
+#include "net/third_party/quiche/src/spdy/core/spdy_framer.h"
 
 namespace quic {
 
@@ -25,6 +25,10 @@ class QuicSimpleServerStream : public QuicSpdyServerStreamBase,
                                public QuicSimpleServerBackend::RequestHandler {
  public:
   QuicSimpleServerStream(QuicStreamId id,
+                         QuicSpdySession* session,
+                         StreamType type,
+                         QuicSimpleServerBackend* quic_simple_server_backend);
+  QuicSimpleServerStream(PendingStream pending,
                          QuicSpdySession* session,
                          StreamType type,
                          QuicSimpleServerBackend* quic_simple_server_backend);
@@ -42,7 +46,7 @@ class QuicSimpleServerStream : public QuicSpdyServerStreamBase,
 
   // QuicStream implementation called by the sequencer when there is
   // data (or a FIN) to be read.
-  void OnDataAvailable() override;
+  void OnBodyAvailable() override;
 
   // Make this stream start from as if it just finished parsing an incoming
   // request whose headers are equivalent to |push_request_headers|.

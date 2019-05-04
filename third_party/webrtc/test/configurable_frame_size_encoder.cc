@@ -11,9 +11,14 @@
 #include "test/configurable_frame_size_encoder.h"
 
 #include <string.h>
+#include <cstdint>
+#include <type_traits>
+#include <utility>
 
 #include "api/video/encoded_image.h"
+#include "modules/include/module_common_types.h"
 #include "modules/video_coding/include/video_codec_interface.h"
+#include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/checks.h"
 
 namespace webrtc {
@@ -67,11 +72,6 @@ int32_t ConfigurableFrameSizeEncoder::RegisterEncodeCompleteCallback(
 }
 
 int32_t ConfigurableFrameSizeEncoder::Release() {
-  return WEBRTC_VIDEO_CODEC_OK;
-}
-
-int32_t ConfigurableFrameSizeEncoder::SetChannelParameters(uint32_t packet_loss,
-                                                           int64_t rtt) {
   return WEBRTC_VIDEO_CODEC_OK;
 }
 

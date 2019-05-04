@@ -5,15 +5,14 @@
 #ifndef ASH_ASSISTANT_ASSISTANT_INTERACTION_CONTROLLER_H_
 #define ASH_ASSISTANT_ASSISTANT_INTERACTION_CONTROLLER_H_
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "ash/assistant/assistant_controller_observer.h"
-#include "ash/assistant/assistant_response_processor.h"
 #include "ash/assistant/model/assistant_interaction_model.h"
 #include "ash/assistant/model/assistant_interaction_model_observer.h"
-#include "ash/assistant/model/assistant_response_observer.h"
 #include "ash/assistant/model/assistant_ui_model_observer.h"
 #include "ash/assistant/ui/dialog_plate/dialog_plate.h"
 #include "ash/highlighter/highlighter_controller.h"
@@ -26,13 +25,13 @@ namespace ash {
 
 class AssistantController;
 class AssistantInteractionModelObserver;
-class AssistantResponseProcessor;
+enum class AssistantButtonId;
+enum class AssistantQuerySource;
 
 class AssistantInteractionController
     : public chromeos::assistant::mojom::AssistantInteractionSubscriber,
       public AssistantControllerObserver,
       public AssistantInteractionModelObserver,
-      public AssistantResponseObserver,
       public AssistantUiModelObserver,
       public HighlighterController::Observer,
       public DialogPlateObserver {
@@ -68,15 +67,15 @@ class AssistantInteractionController
   void OnInteractionStateChanged(InteractionState interaction_state) override;
   void OnInputModalityChanged(InputModality input_modality) override;
   void OnMicStateChanged(MicState mic_state) override;
-
-  // AssistantResponseObserver:
-  void OnResponseDestroying(AssistantResponse& response) override;
+  void OnCommittedQueryChanged(const AssistantQuery& assistant_query) override;
 
   // AssistantUiModelObserver:
   void OnUiModeChanged(AssistantUiMode ui_mode) override;
-  void OnUiVisibilityChanged(AssistantVisibility new_visibility,
-                             AssistantVisibility old_visibility,
-                             AssistantSource source) override;
+  void OnUiVisibilityChanged(
+      AssistantVisibility new_visibility,
+      AssistantVisibility old_visibility,
+      base::Optional<AssistantEntryPoint> entry_point,
+      base::Optional<AssistantExitPoint> exit_point) override;
 
   // HighlighterController::Observer:
   void OnHighlighterEnabledChanged(HighlighterEnabledState state) override;
@@ -102,7 +101,7 @@ class AssistantInteractionController
   void OnTtsStarted(bool due_to_error) override;
 
   // DialogPlateObserver:
-  void OnDialogPlateButtonPressed(DialogPlateButtonId id) override;
+  void OnDialogPlateButtonPressed(AssistantButtonId id) override;
   void OnDialogPlateContentsCommitted(const std::string& text) override;
 
   // Invoked on suggestion chip pressed event.
@@ -114,11 +113,14 @@ class AssistantInteractionController
   void OnProcessPendingResponse();
   void OnPendingResponseProcessed(bool success);
 
-  void OnUiVisible(AssistantSource source);
+  void OnUiVisible(AssistantEntryPoint entry_point);
 
   void StartMetalayerInteraction(const gfx::Rect& region);
-  void StartScreenContextInteraction();
-  void StartTextInteraction(const std::string text);
+  void StartScreenContextInteraction(AssistantQuerySource query_source);
+  void StartTextInteraction(const std::string text,
+                            bool allow_tts,
+                            AssistantQuerySource query_source);
+
   void StartVoiceInteraction();
   void StopActiveInteraction(bool cancel_conversation);
 
@@ -132,9 +134,9 @@ class AssistantInteractionController
   mojo::Binding<chromeos::assistant::mojom::AssistantInteractionSubscriber>
       assistant_interaction_subscriber_binding_;
 
-  AssistantResponseProcessor assistant_response_processor_;
-
   AssistantInteractionModel model_;
+
+  bool should_attempt_warmer_welcome_ = true;
 
   base::WeakPtrFactory<AssistantInteractionController> weak_factory_;
 

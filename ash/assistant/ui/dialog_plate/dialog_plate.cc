@@ -4,16 +4,13 @@
 
 #include "ash/assistant/ui/dialog_plate/dialog_plate.h"
 
-#include "ash/assistant/assistant_controller.h"
-#include "ash/assistant/assistant_interaction_controller.h"
-#include "ash/assistant/assistant_ui_controller.h"
+#include "ash/assistant/model/assistant_ui_model.h"
 #include "ash/assistant/ui/assistant_ui_constants.h"
+#include "ash/assistant/ui/assistant_view_delegate.h"
+#include "ash/assistant/ui/base/assistant_button.h"
 #include "ash/assistant/util/animation_util.h"
-#include "ash/assistant/util/views_util.h"
 #include "ash/resources/vector_icons/vector_icons.h"
-#include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -49,38 +46,31 @@ constexpr base::TimeDelta kAnimationTransformInDuration =
     base::TimeDelta::FromMilliseconds(333);
 constexpr int kAnimationTranslationDip = 30;
 
-// Helpers ---------------------------------------------------------------------
-
-bool IsTabletMode() {
-  return Shell::Get()
-      ->tablet_mode_controller()
-      ->IsTabletModeWindowManagerEnabled();
-}
-
 }  // namespace
 
 // DialogPlate -----------------------------------------------------------------
 
-DialogPlate::DialogPlate(AssistantController* assistant_controller)
-    : assistant_controller_(assistant_controller),
+DialogPlate::DialogPlate(AssistantViewDelegate* delegate)
+    : delegate_(delegate),
       animation_observer_(std::make_unique<ui::CallbackLayerAnimationObserver>(
           /*start_animation_callback=*/base::BindRepeating(
               &DialogPlate::OnAnimationStarted,
               base::Unretained(this)),
           /*end_animation_callback=*/base::BindRepeating(
               &DialogPlate::OnAnimationEnded,
-              base::Unretained(this)))) {
+              base::Unretained(this)))),
+      query_history_iterator_(
+          delegate_->GetInteractionModel()->query_history().GetIterator()) {
   InitLayout();
 
-  // The Assistant controller indirectly owns the view hierarchy to which
-  // DialogPlate belongs so is guaranteed to outlive it.
-  assistant_controller_->interaction_controller()->AddModelObserver(this);
-  assistant_controller_->ui_controller()->AddModelObserver(this);
+  // The AssistantViewDelegate should outlive DialogPlate.
+  delegate_->AddInteractionModelObserver(this);
+  delegate_->AddUiModelObserver(this);
 }
 
 DialogPlate::~DialogPlate() {
-  assistant_controller_->ui_controller()->RemoveModelObserver(this);
-  assistant_controller_->interaction_controller()->RemoveModelObserver(this);
+  delegate_->RemoveUiModelObserver(this);
+  delegate_->RemoveInteractionModelObserver(this);
 }
 
 void DialogPlate::AddObserver(DialogPlateObserver* observer) {
@@ -104,35 +94,48 @@ int DialogPlate::GetHeightForWidth(int width) const {
 }
 
 void DialogPlate::ButtonPressed(views::Button* sender, const ui::Event& event) {
-  OnButtonPressed(static_cast<DialogPlateButtonId>(sender->id()));
+  OnButtonPressed(static_cast<AssistantButtonId>(sender->id()));
 }
 
 bool DialogPlate::HandleKeyEvent(views::Textfield* textfield,
                                  const ui::KeyEvent& key_event) {
-  if (key_event.key_code() != ui::KeyboardCode::VKEY_RETURN)
-    return false;
-
   if (key_event.type() != ui::EventType::ET_KEY_PRESSED)
     return false;
 
-  // In tablet mode the virtual keyboard should not be sticky, so we hide it
-  // when committing a query.
-  if (IsTabletMode())
-    textfield_->GetFocusManager()->ClearFocus();
+  switch (key_event.key_code()) {
+    case ui::KeyboardCode::VKEY_RETURN: {
+      // In tablet mode the virtual keyboard should not be sticky, so we hide it
+      // when committing a query.
+      if (delegate_->IsTabletMode())
+        textfield_->GetFocusManager()->ClearFocus();
 
-  const base::StringPiece16& trimmed_text =
-      base::TrimWhitespace(textfield_->text(), base::TrimPositions::TRIM_ALL);
+      const base::StringPiece16& trimmed_text = base::TrimWhitespace(
+          textfield_->text(), base::TrimPositions::TRIM_ALL);
 
-  // Only non-empty trimmed text is consider a valid contents commit. Anything
-  // else will simply result in the DialogPlate being cleared.
-  if (!trimmed_text.empty()) {
-    for (DialogPlateObserver& observer : observers_)
-      observer.OnDialogPlateContentsCommitted(base::UTF16ToUTF8(trimmed_text));
+      // Only non-empty trimmed text is consider a valid contents commit.
+      // Anything else will simply result in the DialogPlate being cleared.
+      if (!trimmed_text.empty()) {
+        for (DialogPlateObserver& observer : observers_)
+          observer.OnDialogPlateContentsCommitted(
+              base::UTF16ToUTF8(trimmed_text));
+      }
+
+      textfield_->SetText(base::string16());
+
+      return true;
+    }
+    case ui::KeyboardCode::VKEY_UP:
+    case ui::KeyboardCode::VKEY_DOWN: {
+      DCHECK(query_history_iterator_);
+      auto opt_query = key_event.key_code() == ui::KeyboardCode::VKEY_UP
+                           ? query_history_iterator_->Prev()
+                           : query_history_iterator_->Next();
+      textfield_->SetText(base::UTF8ToUTF16(opt_query.value_or("")));
+      return true;
+    }
+    default:
+      return false;
   }
-
-  textfield_->SetText(base::string16());
-
-  return true;
 }
 
 void DialogPlate::OnInputModalityChanged(InputModality input_modality) {
@@ -219,9 +222,17 @@ void DialogPlate::OnInputModalityChanged(InputModality input_modality) {
   }
 }
 
-void DialogPlate::OnUiVisibilityChanged(AssistantVisibility new_visibility,
-                                        AssistantVisibility old_visibility,
-                                        AssistantSource source) {
+void DialogPlate::OnCommittedQueryChanged(
+    const AssistantQuery& committed_query) {
+  DCHECK(query_history_iterator_);
+  query_history_iterator_->ResetToLast();
+}
+
+void DialogPlate::OnUiVisibilityChanged(
+    AssistantVisibility new_visibility,
+    AssistantVisibility old_visibility,
+    base::Optional<AssistantEntryPoint> entry_point,
+    base::Optional<AssistantExitPoint> exit_point) {
   // When the Assistant UI is no longer visible we need to clear the dialog
   // plate so that text does not persist across Assistant launches.
   if (old_visibility == AssistantVisibility::kVisible)
@@ -229,15 +240,12 @@ void DialogPlate::OnUiVisibilityChanged(AssistantVisibility new_visibility,
 }
 
 void DialogPlate::RequestFocus() {
-  SetFocus(assistant_controller_->interaction_controller()
-               ->model()
-               ->input_modality());
+  SetFocus(delegate_->GetInteractionModel()->input_modality());
 }
 
 views::View* DialogPlate::FindFirstFocusableView() {
-  InputModality input_modality = assistant_controller_->interaction_controller()
-                                     ->model()
-                                     ->input_modality();
+  InputModality input_modality =
+      delegate_->GetInteractionModel()->input_modality();
 
   // The first focusable view depends entirely on current input modality.
   switch (input_modality) {
@@ -277,16 +285,14 @@ void DialogPlate::InitLayout() {
   InitVoiceLayoutContainer();
 
   // Settings.
-  settings_button_ = assistant::util::CreateImageButton(
-      this, kSettingsIcon, kButtonSizeDip, kIconSizeDip,
-      IDS_ASH_ASSISTANT_DIALOG_PLATE_SETTINGS_ACCNAME, gfx::kGoogleGrey600);
-  settings_button_->set_id(static_cast<int>(DialogPlateButtonId::kSettings));
+  settings_button_ =
+      AssistantButton::Create(this, kSettingsIcon, kButtonSizeDip, kIconSizeDip,
+                              IDS_ASH_ASSISTANT_DIALOG_PLATE_SETTINGS_ACCNAME,
+                              AssistantButtonId::kSettings);
   AddChildView(settings_button_);
 
   // Artificially trigger event to set initial state.
-  OnInputModalityChanged(assistant_controller_->interaction_controller()
-                             ->model()
-                             ->input_modality());
+  OnInputModalityChanged(delegate_->GetInteractionModel()->input_modality());
 }
 
 void DialogPlate::InitKeyboardLayoutContainer() {
@@ -328,11 +334,10 @@ void DialogPlate::InitKeyboardLayoutContainer() {
   layout_manager->SetFlexForView(textfield_, 1);
 
   // Voice input toggle.
-  voice_input_toggle_ = assistant::util::CreateImageButton(
-      this, kMicIcon, kButtonSizeDip, kIconSizeDip,
-      IDS_ASH_ASSISTANT_DIALOG_PLATE_MIC_ACCNAME);
-  voice_input_toggle_->set_id(
-      static_cast<int>(DialogPlateButtonId::kVoiceInputToggle));
+  voice_input_toggle_ =
+      AssistantButton::Create(this, kMicIcon, kButtonSizeDip, kIconSizeDip,
+                              IDS_ASH_ASSISTANT_DIALOG_PLATE_MIC_ACCNAME,
+                              AssistantButtonId::kVoiceInputToggle);
   keyboard_layout_container_->AddChildView(voice_input_toggle_);
 
   input_modality_layout_container_->AddChildView(keyboard_layout_container_);
@@ -354,11 +359,10 @@ void DialogPlate::InitVoiceLayoutContainer() {
       views::BoxLayout::CrossAxisAlignment::CROSS_AXIS_ALIGNMENT_CENTER);
 
   // Keyboard input toggle.
-  keyboard_input_toggle_ = assistant::util::CreateImageButton(
-      this, kKeyboardIcon, kButtonSizeDip, kIconSizeDip,
-      IDS_ASH_ASSISTANT_DIALOG_PLATE_KEYBOARD_ACCNAME, gfx::kGoogleGrey600);
-  keyboard_input_toggle_->set_id(
-      static_cast<int>(DialogPlateButtonId::kKeyboardInputToggle));
+  keyboard_input_toggle_ =
+      AssistantButton::Create(this, kKeyboardIcon, kButtonSizeDip, kIconSizeDip,
+                              IDS_ASH_ASSISTANT_DIALOG_PLATE_KEYBOARD_ACCNAME,
+                              AssistantButtonId::kKeyboardInputToggle);
   voice_layout_container_->AddChildView(keyboard_input_toggle_);
 
   // Spacer.
@@ -368,9 +372,8 @@ void DialogPlate::InitVoiceLayoutContainer() {
   layout_manager->SetFlexForView(spacer, 1);
 
   // Animated voice input toggle.
-  animated_voice_input_toggle_ = new ActionView(this, assistant_controller_);
-  animated_voice_input_toggle_->set_id(
-      static_cast<int>(DialogPlateButtonId::kVoiceInputToggle));
+  animated_voice_input_toggle_ =
+      new ActionView(this, delegate_, AssistantButtonId::kVoiceInputToggle);
   animated_voice_input_toggle_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ASH_ASSISTANT_DIALOG_PLATE_MIC_ACCNAME));
   voice_layout_container_->AddChildView(animated_voice_input_toggle_);
@@ -384,7 +387,7 @@ void DialogPlate::InitVoiceLayoutContainer() {
   input_modality_layout_container_->AddChildView(voice_layout_container_);
 }
 
-void DialogPlate::OnButtonPressed(DialogPlateButtonId id) {
+void DialogPlate::OnButtonPressed(AssistantButtonId id) {
   for (DialogPlateObserver& observer : observers_)
     observer.OnDialogPlateButtonPressed(id);
 
@@ -399,9 +402,8 @@ void DialogPlate::OnAnimationStarted(
 
 bool DialogPlate::OnAnimationEnded(
     const ui::CallbackLayerAnimationObserver& observer) {
-  InputModality input_modality = assistant_controller_->interaction_controller()
-                                     ->model()
-                                     ->input_modality();
+  InputModality input_modality =
+      delegate_->GetInteractionModel()->input_modality();
 
   switch (input_modality) {
     case InputModality::kKeyboard:

@@ -19,7 +19,7 @@
 #include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
-#include "base/trace_event/trace_event_argument.h"
+#include "base/trace_event/traced_value.h"
 #include "components/subresource_filter/core/common/common_features.h"
 
 namespace subresource_filter {
@@ -236,7 +236,7 @@ const base::Feature kSafeBrowsingSubresourceFilterConsiderRedirects{
     "SubresourceFilterConsiderRedirects", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kFilterAdsOnAbusiveSites{"FilterAdsOnAbusiveSites",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Legacy name `activation_state` is used in variation parameters.
 const char kActivationLevelParameterName[] = "activation_state";
@@ -285,7 +285,7 @@ Configuration Configuration::MakePresetForLiveRunOnPhishingSites() {
 Configuration Configuration::MakePresetForPerformanceTestingDryRunOnAllSites() {
   Configuration config(mojom::ActivationLevel::kDryRun,
                        ActivationScope::ALL_SITES);
-  config.activation_options.performance_measurement_rate = 1.0;
+  config.activation_options.performance_measurement_rate = 0.01;
   config.activation_conditions.priority = 500;
   return config;
 }
@@ -342,7 +342,7 @@ std::unique_ptr<base::trace_event::TracedValue> Configuration::ToTracedValue()
     const {
   auto value = std::make_unique<base::trace_event::TracedValue>();
   auto traced_conditions = activation_conditions.ToTracedValue();
-  value->SetValue("activation_conditions", *traced_conditions);
+  value->SetValue("activation_conditions", traced_conditions.get());
   value->SetString("activation_level",
                    StreamToString(activation_options.activation_level));
   value->SetDouble("performance_measurement_rate",

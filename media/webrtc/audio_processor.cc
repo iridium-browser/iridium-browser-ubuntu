@@ -10,6 +10,8 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
@@ -30,6 +32,10 @@ webrtc::AudioProcessing::ChannelLayout MediaLayoutToWebRtcLayout(
     case CHANNEL_LAYOUT_MONO:
       return webrtc::AudioProcessing::kMono;
     case CHANNEL_LAYOUT_STEREO:
+    case CHANNEL_LAYOUT_DISCRETE:
+      // TODO(https://crbug.com/868026): currently mapping all discrete channel
+      // layouts to two channels assuming that any required channel remix takes
+      // place in the native audio layer.
       return webrtc::AudioProcessing::kStereo;
     case CHANNEL_LAYOUT_STEREO_AND_KEYBOARD_MIC:
       return webrtc::AudioProcessing::kStereoAndKeyboard;
@@ -216,16 +222,8 @@ void AudioProcessor::InitializeAPM() {
   // Echo cancellation is configured both before and after AudioProcessing
   // construction, but before Initialize.
   if (settings_.echo_cancellation == EchoCancellationType::kAec3) {
-    webrtc::EchoCanceller3Config aec3_config;
-    aec3_config.ep_strength.bounded_erl =
-        base::FeatureList::IsEnabled(features::kWebRtcAecBoundedErlSetup);
-    aec3_config.echo_removal_control.has_clock_drift =
-        base::FeatureList::IsEnabled(features::kWebRtcAecClockDriftSetup);
-    aec3_config.echo_audibility.use_stationary_properties =
-        base::FeatureList::IsEnabled(features::kWebRtcAecNoiseTransparency);
-
     ap_builder.SetEchoControlFactory(
-        std::make_unique<webrtc::EchoCanceller3Factory>(aec3_config));
+        std::make_unique<webrtc::EchoCanceller3Factory>());
   }
 
   // AGC setup part 1.
@@ -246,6 +244,8 @@ void AudioProcessor::InitializeAPM() {
         settings_.automatic_gain_control ==
         AutomaticGainControlType::kHybridExperimental;
     ap_config.Set<webrtc::ExperimentalAgc>(experimental_agc);
+  } else {
+    ap_config.Set<webrtc::ExperimentalAgc>(new webrtc::ExperimentalAgc(false));
   }
 
   // Noise suppression setup part 1.
@@ -263,18 +263,6 @@ void AudioProcessor::InitializeAPM() {
     DCHECK_EQ(err, 0);
   }
 
-  // Typing detection setup.
-  if (settings_.typing_detection) {
-    typing_detector_ = std::make_unique<webrtc::TypingDetection>();
-    int err = audio_processing_->voice_detection()->Enable(true);
-    err |= audio_processing_->voice_detection()->set_likelihood(
-        webrtc::VoiceDetection::kVeryLowLikelihood);
-    DCHECK_EQ(err, 0);
-
-    // Configure the update period to 1s (100 * 10ms) in the typing detector.
-    typing_detector_->SetParameters(0, 0, 0, 0, 0, 100);
-  }
-
   // AGC setup part 2.
   if (settings_.automatic_gain_control != AutomaticGainControlType::kDisabled) {
     int err = audio_processing_->gain_control()->set_mode(
@@ -282,14 +270,17 @@ void AudioProcessor::InitializeAPM() {
     err |= audio_processing_->gain_control()->Enable(true);
     DCHECK_EQ(err, 0);
   }
-  if (settings_.automatic_gain_control == AutomaticGainControlType::kDefault) {
-    int err = audio_processing_->gain_control()->set_mode(
-        webrtc::GainControl::kAdaptiveAnalog);
-    err |= audio_processing_->gain_control()->Enable(true);
-    DCHECK_EQ(err, 0);
-  }
 
   webrtc::AudioProcessing::Config apm_config = audio_processing_->GetConfig();
+
+  // Typing detection setup.
+  if (settings_.typing_detection) {
+    typing_detector_ = std::make_unique<webrtc::TypingDetection>();
+    // Configure the update period to 1s (100 * 10ms) in the typing detector.
+    typing_detector_->SetParameters(0, 0, 0, 0, 0, 100);
+
+    apm_config.voice_detection.enabled = true;
+  }
 
   // AEC setup part 2.
   apm_config.echo_canceller.enabled =
@@ -308,9 +299,22 @@ void AudioProcessor::InitializeAPM() {
     apm_config.gain_controller2.enabled =
         settings_.automatic_gain_control ==
         AutomaticGainControlType::kHybridExperimental;
-    apm_config.gain_controller2.fixed_gain_db = 0.f;
-  }
+    apm_config.gain_controller2.fixed_digital.gain_db = 0.f;
+    apm_config.gain_controller2.adaptive_digital.enabled = true;
+    const bool use_peaks_not_rms = base::GetFieldTrialParamByFeatureAsBool(
+        features::kWebRtcHybridAgc, "use_peaks_not_rms", false);
+    using Shortcut =
+        webrtc::AudioProcessing::Config::GainController2::LevelEstimator;
+    apm_config.gain_controller2.adaptive_digital.level_estimator =
+        use_peaks_not_rms ? Shortcut::kPeak : Shortcut::kRms;
 
+    const int saturation_margin = base::GetFieldTrialParamByFeatureAsInt(
+        features::kWebRtcHybridAgc, "saturation_margin", -1);
+    if (saturation_margin != -1) {
+      apm_config.gain_controller2.adaptive_digital.extra_saturation_margin_db =
+          saturation_margin;
+    }
+  }
   audio_processing_->ApplyConfig(apm_config);
 }
 
@@ -359,10 +363,12 @@ void AudioProcessor::FeedDataToAPM(const AudioBus& source) {
 
 void AudioProcessor::UpdateTypingDetected(bool key_pressed) {
   if (typing_detector_) {
-    webrtc::VoiceDetection* vad = audio_processing_->voice_detection();
-    DCHECK(vad->is_enabled());
-    typing_detected_ =
-        typing_detector_->Process(key_pressed, vad->stream_has_voice());
+    // Ignore remote tracks to avoid unnecessary stats computation.
+    auto voice_detected =
+        audio_processing_->GetStatistics(false /* has_remote_tracks */)
+            .voice_detected;
+    DCHECK(voice_detected.has_value());
+    typing_detected_ = typing_detector_->Process(key_pressed, *voice_detected);
   }
 }
 

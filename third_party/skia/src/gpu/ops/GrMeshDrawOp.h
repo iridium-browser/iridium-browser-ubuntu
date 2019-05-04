@@ -12,10 +12,11 @@
 #include "GrDrawOp.h"
 #include "GrGeometryProcessor.h"
 #include "GrMesh.h"
+#include <type_traits>
 
 class GrAtlasManager;
 class GrCaps;
-class GrGlyphCache;
+class GrStrikeCache;
 class GrOpFlushState;
 
 /**
@@ -70,7 +71,7 @@ protected:
 
 private:
     void onPrepare(GrOpFlushState* state) final;
-    void onExecute(GrOpFlushState* state) final;
+    void onExecute(GrOpFlushState* state, const SkRect& chainBounds) final;
     virtual void onPrepareDraws(Target*) = 0;
     typedef GrDrawOp INHERITED;
 };
@@ -189,7 +190,7 @@ public:
     virtual GrResourceProvider* resourceProvider() const = 0;
     uint32_t contextUniqueID() const { return this->resourceProvider()->contextUniqueID(); }
 
-    virtual GrGlyphCache* glyphCache() const = 0;
+    virtual GrStrikeCache* glyphCache() const = 0;
     virtual GrAtlasManager* atlasManager() const = 0;
 
     virtual const GrCaps& caps() const = 0;

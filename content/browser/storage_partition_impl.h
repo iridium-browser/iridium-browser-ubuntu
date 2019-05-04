@@ -22,14 +22,15 @@
 #include "content/browser/broadcast_channel/broadcast_channel_provider.h"
 #include "content/browser/cache_storage/cache_storage_context_impl.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
+#include "content/browser/idle/idle_manager.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
 #include "content/browser/locks/lock_manager.h"
 #include "content/browser/notifications/platform_notification_context_impl.h"
 #include "content/browser/payments/payment_app_context_impl.h"
 #include "content/browser/push_messaging/push_messaging_context.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
-#include "content/browser/shared_worker/shared_worker_service_impl.h"
 #include "content/browser/url_loader_factory_getter.h"
+#include "content/browser/worker_host/shared_worker_service_impl.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/storage_partition.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
@@ -49,7 +50,6 @@ class BackgroundFetchContext;
 class CookieStoreContext;
 class BlobRegistryWrapper;
 class PrefetchURLLoaderService;
-class WebPackageContextImpl;
 class GeneratedCodeCacheContext;
 
 class CONTENT_EXPORT StoragePartitionImpl
@@ -97,6 +97,7 @@ class CONTENT_EXPORT StoragePartitionImpl
   storage::FileSystemContext* GetFileSystemContext() override;
   storage::DatabaseTracker* GetDatabaseTracker() override;
   DOMStorageContextWrapper* GetDOMStorageContext() override;
+  IdleManager* GetIdleManager();
   LockManager* GetLockManager();  // override; TODO: Add to interface
   IndexedDBContextImpl* GetIndexedDBContext() override;
   CacheStorageContextImpl* GetCacheStorageContext() override;
@@ -109,14 +110,12 @@ class CONTENT_EXPORT StoragePartitionImpl
   ZoomLevelDelegate* GetZoomLevelDelegate() override;
 #endif  // !defined(OS_ANDROID)
   PlatformNotificationContextImpl* GetPlatformNotificationContext() override;
-  WebPackageContext* GetWebPackageContext() override;
   void ClearDataForOrigin(uint32_t remove_mask,
                           uint32_t quota_storage_remove_mask,
                           const GURL& storage_origin) override;
   void ClearData(uint32_t remove_mask,
                  uint32_t quota_storage_remove_mask,
                  const GURL& storage_origin,
-                 const OriginMatcherFunction& origin_matcher,
                  const base::Time begin,
                  const base::Time end,
                  base::OnceClosure callback) override;
@@ -124,6 +123,7 @@ class CONTENT_EXPORT StoragePartitionImpl
                  uint32_t quota_storage_remove_mask,
                  const OriginMatcherFunction& origin_matcher,
                  network::mojom::CookieDeletionFilterPtr cookie_deletion_filter,
+                 bool perform_storage_cleanup,
                  const base::Time begin,
                  const base::Time end,
                  base::OnceClosure callback) override;
@@ -132,6 +132,7 @@ class CONTENT_EXPORT StoragePartitionImpl
       const base::Time end,
       const base::Callback<bool(const GURL&)>& url_matcher,
       base::OnceClosure callback) override;
+  void ClearCodeCaches(base::OnceClosure callback) override;
   void Flush() override;
   void ResetURLLoaderFactories() override;
   void ClearBluetoothAllowedDevicesMapForTesting() override;
@@ -158,6 +159,9 @@ class CONTENT_EXPORT StoragePartitionImpl
   void OnCanSendReportingReports(
       const std::vector<url::Origin>& origins,
       OnCanSendReportingReportsCallback callback) override;
+  void OnCanSendDomainReliabilityUpload(
+      const GURL& origin,
+      OnCanSendDomainReliabilityUploadCallback callback) override;
 
   scoped_refptr<URLLoaderFactoryGetter> url_loader_factory_getter() {
     return url_loader_factory_getter_;
@@ -166,11 +170,14 @@ class CONTENT_EXPORT StoragePartitionImpl
   // Can return nullptr while |this| is being destroyed.
   BrowserContext* browser_context() const;
 
-  // Called by each renderer process once. Returns the id of the created
-  // binding.
+  // Called by each renderer process for each StoragePartitionService interface
+  // it binds in the renderer process. Returns the id of the created binding.
   mojo::BindingId Bind(
       int process_id,
       mojo::InterfaceRequest<blink::mojom::StoragePartitionService> request);
+
+  // Remove a binding created by a previous Bind() call.
+  void Unbind(mojo::BindingId binding_id);
 
   auto& bindings_for_testing() { return bindings_; }
 
@@ -257,6 +264,7 @@ class CONTENT_EXPORT StoragePartitionImpl
       const GURL& remove_origin,
       const OriginMatcherFunction& origin_matcher,
       network::mojom::CookieDeletionFilterPtr cookie_deletion_filter,
+      bool perform_storage_cleanup,
       const base::Time begin,
       const base::Time end,
       base::OnceClosure callback);
@@ -304,6 +312,7 @@ class CONTENT_EXPORT StoragePartitionImpl
   scoped_refptr<storage::FileSystemContext> filesystem_context_;
   scoped_refptr<storage::DatabaseTracker> database_tracker_;
   scoped_refptr<DOMStorageContextWrapper> dom_storage_context_;
+  std::unique_ptr<IdleManager> idle_manager_;
   scoped_refptr<LockManager> lock_manager_;
   scoped_refptr<IndexedDBContextImpl> indexed_db_context_;
   scoped_refptr<CacheStorageContextImpl> cache_storage_context_;
@@ -315,7 +324,6 @@ class CONTENT_EXPORT StoragePartitionImpl
   scoped_refptr<HostZoomLevelContext> host_zoom_level_context_;
 #endif  // !defined(OS_ANDROID)
   scoped_refptr<PlatformNotificationContextImpl> platform_notification_context_;
-  std::unique_ptr<WebPackageContextImpl> web_package_context_;
   scoped_refptr<BackgroundFetchContext> background_fetch_context_;
   scoped_refptr<BackgroundSyncContext> background_sync_context_;
   scoped_refptr<PaymentAppContextImpl> payment_app_context_;

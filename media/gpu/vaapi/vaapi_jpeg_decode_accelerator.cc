@@ -21,13 +21,11 @@
 #include "media/base/unaligned_shared_memory.h"
 #include "media/base/video_frame.h"
 #include "media/filters/jpeg_parser.h"
+#include "media/gpu/macros.h"
 #include "media/gpu/vaapi/vaapi_picture.h"
 #include "media/gpu/vaapi/vaapi_utils.h"
 #include "media/gpu/vaapi/vaapi_wrapper.h"
 #include "third_party/libyuv/include/libyuv.h"
-
-#define VLOGF(level) VLOG(level) << __func__ << "(): "
-#define DVLOGF(level) DVLOG(level) << __func__ << "(): "
 
 namespace media {
 
@@ -182,7 +180,7 @@ static void FillIQMatrix(const JpegQuantizationTable* q_table,
                          VAIQMatrixBufferJPEGBaseline* iq_matrix) {
   memset(iq_matrix, 0, sizeof(*iq_matrix));
   static_assert(kJpegMaxQuantizationTableNum ==
-                    base::size(decltype(iq_matrix->load_quantiser_table){}),
+                    std::extent<decltype(iq_matrix->load_quantiser_table)>(),
                 "max number of quantization table mismatched");
   static_assert(
       sizeof(iq_matrix->quantiser_table[0]) == sizeof(q_table[0].value),
@@ -214,7 +212,7 @@ static void FillHuffmanTable(const JpegHuffmanTable* dc_table,
   }
 
   static_assert(kJpegMaxHuffmanTableNumBaseline ==
-                    base::size(decltype(huffman_table->load_huffman_table){}),
+                    std::extent<decltype(huffman_table->load_huffman_table)>(),
                 "max number of huffman table mismatched");
   static_assert(sizeof(huffman_table->huffman_table[0].num_dc_codes) ==
                     sizeof(dc_table[0].code_length),
@@ -416,6 +414,7 @@ bool VaapiJpegDecodeAccelerator::OutputPicture(
     default:
       VLOGF(1) << "Can't convert image to I420: unsupported format 0x"
                << std::hex << va_image_format.fourcc;
+      return false;
   }
 
   task_runner_->PostTask(
@@ -455,13 +454,13 @@ void VaapiJpegDecodeAccelerator::DecodeTask(
                            parse_result.frame_header.coded_height);
   if (new_coded_size != coded_size_ || va_surface_id_ == VA_INVALID_SURFACE ||
       picture_va_rt_format != va_rt_format_) {
-    vaapi_wrapper_->DestroySurfaces();
+    vaapi_wrapper_->DestroyContextAndSurfaces();
     va_surface_id_ = VA_INVALID_SURFACE;
     va_rt_format_ = picture_va_rt_format;
 
     std::vector<VASurfaceID> va_surfaces;
-    if (!vaapi_wrapper_->CreateSurfaces(va_rt_format_, new_coded_size, 1,
-                                        &va_surfaces)) {
+    if (!vaapi_wrapper_->CreateContextAndSurfaces(va_rt_format_, new_coded_size,
+                                                  1, &va_surfaces)) {
       VLOGF(1) << "Create VA surface failed";
       NotifyError(bitstream_buffer_id, PLATFORM_FAILURE);
       return;

@@ -8,8 +8,7 @@
 #include "base/macros.h"
 
 #include "components/password_manager/core/browser/password_store_signin_notifier.h"
-#include "components/signin/core/browser/account_tracker_service.h"
-#include "components/signin/core/browser/signin_manager_base.h"
+#include "services/identity/public/cpp/identity_manager.h"
 
 class Profile;
 
@@ -17,9 +16,9 @@ namespace password_manager {
 
 // Responsible for subscribing to Chrome sign-in events and passing them to
 // PasswordStore.
-class PasswordStoreSigninNotifierImpl : public PasswordStoreSigninNotifier,
-                                        public SigninManagerBase::Observer,
-                                        public AccountTrackerService::Observer {
+class PasswordStoreSigninNotifierImpl
+    : public PasswordStoreSigninNotifier,
+      public identity::IdentityManager::Observer {
  public:
   explicit PasswordStoreSigninNotifierImpl(Profile* profile);
   ~PasswordStoreSigninNotifierImpl() override;
@@ -29,15 +28,12 @@ class PasswordStoreSigninNotifierImpl : public PasswordStoreSigninNotifier,
   void UnsubscribeFromSigninEvents() override;
 
   // SigninManagerBase::Observer implementations.
-  void GoogleSigninSucceededWithPassword(const std::string& account_id,
-                                         const std::string& username,
-                                         const std::string& password) override;
+  void OnPrimaryAccountSetWithPassword(const AccountInfo& account_info,
+                                       const std::string& password) override;
+  void OnPrimaryAccountCleared(const AccountInfo& account_info) override;
 
-  void GoogleSignedOut(const std::string& account_id,
-                       const std::string& username) override;
-
-  // AccountTrackerService::Observer implementations.
-  void OnAccountRemoved(const AccountInfo& info) override;
+  // IdentityManager::Observer implementations.
+  void OnAccountRemovedWithInfo(const AccountInfo& info) override;
 
  private:
   Profile* const profile_;

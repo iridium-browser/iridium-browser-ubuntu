@@ -166,7 +166,7 @@ void AdSamplerTrigger::DidFinishLoad(
 
 void AdSamplerTrigger::CreateAdSampleReport() {
   SBErrorOptions error_options =
-      TriggerManager::GetSBErrorDisplayOptions(*prefs_, *web_contents());
+      TriggerManager::GetSBErrorDisplayOptions(*prefs_, web_contents());
 
   security_interstitials::UnsafeResource resource;
   resource.threat_type = SB_THREAT_TYPE_AD_SAMPLE;
@@ -208,5 +208,7 @@ void AdSamplerTrigger::SetTaskRunnerForTest(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   task_runner_ = task_runner;
 }
+
+WEB_CONTENTS_USER_DATA_KEY_IMPL(AdSamplerTrigger)
 
 }  // namespace safe_browsing

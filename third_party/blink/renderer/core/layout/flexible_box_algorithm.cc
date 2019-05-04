@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/core/layout/flexible_box_algorithm.h"
 
 #include "third_party/blink/renderer/core/layout/layout_box.h"
+#include "third_party/blink/renderer/core/layout/layout_flexible_box.h"
 #include "third_party/blink/renderer/core/layout/min_max_size.h"
 
 namespace blink {
@@ -40,7 +41,9 @@ FlexItem::FlexItem(LayoutBox* box,
                    MinMaxSize min_max_sizes,
                    LayoutUnit main_axis_border_and_padding,
                    LayoutUnit main_axis_margin)
-    : box(box),
+    : algorithm(nullptr),
+      line_number(0),
+      box(box),
       flex_base_content_size(flex_base_content_size),
       min_max_sizes(min_max_sizes),
       hypothetical_main_content_size(
@@ -54,8 +57,8 @@ FlexItem::FlexItem(LayoutBox* box,
       << "Use LayoutUnit::Max() for no max size";
 }
 
-bool FlexItem::HasOrthogonalFlow() const {
-  return algorithm->IsHorizontalFlow() != box->IsHorizontalWritingMode();
+bool FlexItem::MainAxisIsInlineAxis() const {
+  return algorithm->IsHorizontalFlow() == box->IsHorizontalWritingMode();
 }
 
 LayoutUnit FlexItem::FlowAwareMarginStart() const {
@@ -103,10 +106,9 @@ LayoutUnit FlexItem::MarginBoxAscent() const {
   return ascent + FlowAwareMarginBefore();
 }
 
-LayoutUnit FlexItem::AvailableAlignmentSpace(
-    LayoutUnit line_cross_axis_extent) const {
+LayoutUnit FlexItem::AvailableAlignmentSpace() const {
   LayoutUnit cross_extent = CrossAxisMarginExtent() + cross_axis_size;
-  return line_cross_axis_extent - cross_extent;
+  return Line()->cross_axis_extent - cross_extent;
 }
 
 bool FlexItem::HasAutoMarginsInCrossAxis() const {
@@ -136,6 +138,32 @@ void FlexItem::UpdateAutoMarginsInMainAxis(LayoutUnit auto_margin_offset) {
       box->SetMarginTop(auto_margin_offset);
     if (box->StyleRef().MarginBottom().IsAuto())
       box->SetMarginBottom(auto_margin_offset);
+  }
+}
+
+void FlexItem::ComputeStretchedSize() {
+  // TODO(dgrogan): Pass resolved cross-axis MinMaxSize to FlexItem
+  // constructor. Then use cross_axis_min_max.ClampSizeToMinAndMax instead of
+  // relying on legacy in this method.
+  DCHECK_EQ(Alignment(), ItemPosition::kStretch);
+  if (MainAxisIsInlineAxis() && box->StyleRef().LogicalHeight().IsAuto()) {
+    LayoutUnit stretched_logical_height =
+        std::max(box->BorderAndPaddingLogicalHeight(),
+                 Line()->cross_axis_extent - CrossAxisMarginExtent());
+    cross_axis_size = box->ConstrainLogicalHeightByMinMax(
+        stretched_logical_height, box->IntrinsicContentLogicalHeight());
+  } else if (!MainAxisIsInlineAxis() &&
+             box->StyleRef().LogicalWidth().IsAuto()) {
+    // This doesn't work in NG because CrossAxisContentExtent() isn't yet
+    // implemented there.
+    if (box->Parent()->IsLayoutNGFlexibleBox())
+      return;
+    LayoutUnit child_width =
+        (Line()->cross_axis_extent - CrossAxisMarginExtent())
+            .ClampNegativeToZero();
+    LayoutFlexibleBox* flexbox = ToLayoutFlexibleBox(box->Parent());
+    cross_axis_size = box->ConstrainLogicalWidthByMinMax(
+        child_width, flexbox->CrossAxisContentExtent(), flexbox);
   }
 }
 
@@ -334,7 +362,8 @@ void FlexLine::ComputeLineItemsPosition(LayoutUnit main_axis_offset,
 
     LayoutUnit child_main_extent = flex_item.FlexedBorderBoxSize();
     // In an RTL column situation, this will apply the margin-right/margin-end
-    // on the left. This will be fixed later in flipForRightToLeftColumn.
+    // on the left. This will be fixed later in
+    // LayoutFlexibleBox::FlipForRightToLeftColumn.
     flex_item.desired_location = LayoutPoint(
         should_flip_main_axis
             ? container_logical_width - main_axis_offset - child_main_extent
@@ -377,7 +406,7 @@ FlexLine* FlexLayoutAlgorithm::ComputeNextFlexLine(
   wtf_size_t start_index = next_item_index_;
 
   for (; next_item_index_ < all_items_.size(); ++next_item_index_) {
-    const FlexItem& flex_item = all_items_[next_item_index_];
+    FlexItem& flex_item = all_items_[next_item_index_];
     DCHECK(!flex_item.box->IsOutOfFlowPositioned());
     if (IsMultiline() &&
         sum_hypothetical_main_size +
@@ -393,6 +422,7 @@ FlexLine* FlexLayoutAlgorithm::ComputeNextFlexLine(
     total_weighted_flex_shrink += flex_item.box->StyleRef().FlexShrink() *
                                   flex_item.flex_base_content_size;
     sum_hypothetical_main_size += flex_item.HypotheticalMainAxisMarginBoxSize();
+    flex_item.line_number = flex_lines_.size();
   }
 
   DCHECK(next_item_index_ > start_index ||
@@ -443,15 +473,21 @@ FlexLayoutAlgorithm::ContentAlignmentNormalBehavior() {
 
 bool FlexLayoutAlgorithm::ShouldApplyMinSizeAutoForChild(
     const LayoutBox& child) const {
-  // TODO(cbiesinger): For now, we do not handle min-height: auto for nested
-  // column flexboxes. See crbug.com/596743
   // css-flexbox section 4.5
+  const Length& min = IsHorizontalFlow() ? child.StyleRef().MinWidth()
+                                         : child.StyleRef().MinHeight();
+  if (!min.IsAuto())
+    return false;
 
-  Length min = IsHorizontalFlow() ? child.StyleRef().MinWidth()
-                                  : child.StyleRef().MinHeight();
-  return min.IsAuto() && !child.ShouldApplySizeContainment() &&
-         MainAxisOverflowForChild(child) == EOverflow::kVisible &&
-         !(IsColumnFlow() && child.IsFlexibleBox());
+  // TODO(crbug.com/927066): We calculate an incorrect intrinsic logical height
+  // when percentages are involved, so for now don't apply min-height: auto
+  // in such cases.
+  if (IsColumnFlow() && child.IsFlexibleBox() &&
+      ToLayoutBlock(child).HasPercentHeightDescendants())
+    return false;
+
+  return !child.ShouldApplySizeContainment() &&
+         MainAxisOverflowForChild(child) == EOverflow::kVisible;
 }
 
 TransformedWritingMode FlexLayoutAlgorithm::GetTransformedWritingMode() const {

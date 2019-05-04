@@ -21,6 +21,8 @@ namespace ukm {
 
 const base::Feature kUkmCheckAuthErrorFeature{"UkmCheckAuthError",
                                               base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kUkmCheckEnabledForDatatypes{
+    "UkmCheckEnabledForDatatypes", base::FEATURE_ENABLED_BY_DEFAULT};
 const base::Feature kUkmPurgingOnConnection{"UkmPurgingOnConnection",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -79,13 +81,37 @@ SyncDisableObserver::SyncState SyncDisableObserver::GetSyncState(
     UrlKeyedDataCollectionConsentHelper* consent_helper) {
   syncer::SyncTokenStatus status = sync_service->GetSyncTokenStatus();
   SyncState state;
-  state.history_enabled = sync_service->GetPreferredDataTypes().Has(
-      syncer::HISTORY_DELETE_DIRECTIVES);
-  state.extensions_enabled =
-      sync_service->GetPreferredDataTypes().Has(syncer::EXTENSIONS);
+
+  // For the following two settings, we want them to match the state of a user
+  // having history/extensions enabled in their Sync settings. Using it to track
+  // active connections here is undesirable as changes in these states trigger
+  // data purges.
+  if (base::FeatureList::IsEnabled(kUkmCheckEnabledForDatatypes)) {
+    state.history_enabled = sync_service->GetPreferredDataTypes().Has(
+                                syncer::HISTORY_DELETE_DIRECTIVES) &&
+                            sync_service->IsSyncFeatureEnabled();
+
+    state.extensions_enabled =
+        sync_service->GetPreferredDataTypes().Has(syncer::EXTENSIONS) &&
+        sync_service->IsSyncFeatureEnabled();
+  } else {
+    // If kUkmCheckEnabledForDatatypes is disabled, use legacy settings.
+    // TODO(rkaplow): Clean this up after crbug.com/906609.
+    state.history_enabled = sync_service->GetPreferredDataTypes().Has(
+        syncer::HISTORY_DELETE_DIRECTIVES);
+
+    state.extensions_enabled =
+        sync_service->GetPreferredDataTypes().Has(syncer::EXTENSIONS);
+  }
+
   state.initialized = sync_service->IsEngineInitialized();
+
+  // We use CONNECTION_OK here as an auth error can be used in the sync
+  // paused state. Therefore we need to be more direct and check CONNECTION_OK
+  // as opposed to using something like IsSyncFeatureActive().
   state.connected = !base::FeatureList::IsEnabled(kUkmCheckAuthErrorFeature) ||
                     status.connection_status == syncer::CONNECTION_OK;
+
   state.passphrase_protected =
       state.initialized && sync_service->IsUsingSecondaryPassphrase();
   if (consent_helper) {
@@ -217,17 +243,14 @@ void SyncDisableObserver::UpdateSyncState(
     must_purge = previous_state.AllowsUkm() && !state.AllowsUkm();
   } else {
     // Use the previous logic to investigate crbug.com/891777.
-    must_purge =
-        // Trigger a purge if history sync was disabled.
-        (previous_state.history_enabled && !state.history_enabled) ||
-        // Trigger a purge if engine has become disabled.
-        (previous_state.initialized && !state.initialized) ||
-        // Trigger a purge if the user added a passphrase.  Since we can't
-        // detect the use of a passphrase while the engine is not initialized,
-        // we may miss the transition if the user adds a passphrase in this
-        // state.
-        (previous_state.initialized && state.initialized &&
-         !previous_state.passphrase_protected && state.passphrase_protected);
+    bool previous_state_allowed_ukm = previous_state.history_enabled &&
+                                      previous_state.initialized &&
+                                      !previous_state.passphrase_protected;
+    bool current_state_allows_ukm = state.history_enabled &&
+                                    state.initialized &&
+                                    !state.passphrase_protected;
+    // Trigger a purge if UKM used to be allowed, but isn't anymore.
+    must_purge = previous_state_allowed_ukm && !current_state_allows_ukm;
   }
 
   UMA_HISTOGRAM_BOOLEAN("UKM.SyncDisable.Purge", must_purge);

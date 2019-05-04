@@ -6,7 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_FETCH_BACKGROUND_FETCH_REGISTRATION_H_
 
 #include "mojo/public/cpp/bindings/binding.h"
-#include "third_party/blink/public/platform/modules/background_fetch/background_fetch.mojom-blink.h"
+#include "third_party/blink/public/mojom/background_fetch/background_fetch.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -16,6 +17,7 @@
 
 namespace blink {
 
+class BackgroundFetchRecord;
 class CacheQueryOptions;
 class ScriptPromiseResolver;
 class ScriptState;
@@ -27,9 +29,11 @@ struct WebBackgroundFetchRegistration;
 // access to its properties, options, and enables them to abort the fetch.
 class BackgroundFetchRegistration final
     : public EventTargetWithInlineData,
+      public ActiveScriptWrappable<BackgroundFetchRegistration>,
       public blink::mojom::blink::BackgroundFetchRegistrationObserver {
   DEFINE_WRAPPERTYPEINFO();
   USING_PRE_FINALIZER(BackgroundFetchRegistration, Dispose);
+  USING_GARBAGE_COLLECTED_MIXIN(BackgroundFetchRegistration);
 
  public:
   BackgroundFetchRegistration(
@@ -62,18 +66,23 @@ class BackgroundFetchRegistration final
                   mojom::BackgroundFetchFailureReason failure_reason) override;
   void OnRecordsUnavailable() override;
 
+  // Called when the |request| is complete. |response| points to the response
+  // received, if any.
+  void OnRequestCompleted(mojom::blink::FetchAPIRequestPtr request,
+                          mojom::blink::FetchAPIResponsePtr response) override;
+
   // Web Exposed attribute defined in the IDL file. Corresponds to the
   // |developer_id| used elsewhere in the codebase.
   String id() const;
   ScriptPromise match(ScriptState* script_state,
                       const RequestOrUSVString& request,
-                      const CacheQueryOptions& options,
+                      const CacheQueryOptions* options,
                       ExceptionState& exception_state);
   ScriptPromise matchAll(ScriptState* scrip_state,
                          ExceptionState& exception_state);
   ScriptPromise matchAll(ScriptState* script_state,
                          const RequestOrUSVString& request,
-                         const CacheQueryOptions& options,
+                         const CacheQueryOptions* options,
                          ExceptionState& exception_state);
 
   unsigned long long uploadTotal() const;
@@ -86,7 +95,7 @@ class BackgroundFetchRegistration final
 
   const String& unique_id() const { return unique_id_; }
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(progress);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(progress, kProgress);
 
   ScriptPromise abort(ScriptState* script_state);
 
@@ -97,6 +106,9 @@ class BackgroundFetchRegistration final
   void Dispose();
 
   void Trace(blink::Visitor* visitor) override;
+
+  // Keeps the object alive until there are non-zero number of |observers_|.
+  bool HasPendingActivity() const final;
 
  private:
   void DidAbort(ScriptPromiseResolver* resolver,
@@ -110,6 +122,13 @@ class BackgroundFetchRegistration final
       ScriptPromiseResolver* resolver,
       bool return_all,
       Vector<mojom::blink::BackgroundFetchSettledFetchPtr> settled_fetches);
+
+  // Updates the |record| with a |response|, if one is available, else marks
+  // the |record|'s request as aborted or failed.
+  void UpdateRecord(BackgroundFetchRecord* record,
+                    mojom::blink::FetchAPIResponsePtr& response);
+
+  bool IsAborted();
 
   Member<ServiceWorkerRegistration> registration_;
 
@@ -129,6 +148,7 @@ class BackgroundFetchRegistration final
   bool records_available_ = true;
   mojom::BackgroundFetchResult result_;
   mojom::BackgroundFetchFailureReason failure_reason_;
+  HeapVector<Member<BackgroundFetchRecord>> observers_;
 
   mojo::Binding<blink::mojom::blink::BackgroundFetchRegistrationObserver>
       observer_binding_;

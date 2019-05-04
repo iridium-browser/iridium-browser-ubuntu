@@ -21,6 +21,7 @@ import org.chromium.base.StrictModeContext;
 import org.chromium.base.SysUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
@@ -38,6 +39,29 @@ import java.util.List;
 /**
  * A utility {@code class} meant to help determine whether or not certain features are supported by
  * this device.
+ *
+ * This utility class also contains support for cached feature flags that must take effect on
+ * startup before native is initialized but are set via native code. The caching is done in
+ * {@link android.content.SharedPreferences}, which is available in Java immediately.
+ *
+ * When adding a new cached flag, it is common practice to use a static Boolean in this file to
+ * track whether the feature is enabled. A static method that returns the static Boolean can
+ * then be added to this file allowing client code to query whether the feature is enabled. The
+ * first time the method is called, the static Boolean should be set to the corresponding shared
+ * preference. After native is initialized, the shared preference will be updated to reflect the
+ * native flag value (e.g. the actual experimental feature flag value).
+ *
+ * When using a cached flag, the static Boolean should be the source of truth for whether the
+ * feature is turned on for the current session. As such, always rely on the static Boolean
+ * when determining whether the corresponding experimental behavior should be enabled. When
+ * querying whether a cached feature is enabled from native, an @CalledByNative method can be
+ * exposed in this file to allow feature_utilities.cc to retrieve the cached value.
+ *
+ * For cached flags that are queried before native is initialized, when a new experiment
+ * configuration is received the metrics reporting system will record metrics as if the
+ * experiment is enabled despite the experimental behavior not yet taking effect. This will be
+ * remedied on the next process restart, when the static Boolean is reset to the newly cached
+ * value in shared preferences.
  */
 public class FeatureUtilities {
     private static final String TAG = "FeatureUtilities";
@@ -45,7 +69,6 @@ public class FeatureUtilities {
 
     private static Boolean sHasGoogleAccountAuthenticator;
     private static Boolean sHasRecognitionIntentHandler;
-    private static String sChromeHomeSwipeLogicType;
 
     private static Boolean sIsSoleEnabled;
     private static Boolean sIsHomePageButtonForceEnabled;
@@ -53,6 +76,9 @@ public class FeatureUtilities {
     private static Boolean sIsNewTabPageButtonEnabled;
     private static Boolean sIsBottomToolbarEnabled;
     private static Boolean sShouldInflateToolbarOnBackgroundThread;
+    private static Boolean sIsNightModeAvailable;
+
+    private static Boolean sDownloadAutoResumptionEnabledInNative;
 
     private static final String NTP_BUTTON_TRIAL_NAME = "NewTabPage";
     private static final String NTP_BUTTON_VARIANT_PARAM_NAME = "variation";
@@ -165,6 +191,8 @@ public class FeatureUtilities {
         cacheNewTabPageButtonEnabled();
         cacheBottomToolbarEnabled();
         cacheInflateToolbarOnBackgroundThread();
+        cacheNightModeAvailable();
+        cacheDownloadAutoResumptionEnabledInNative();
 
         // Propagate DONT_PREFETCH_LIBRARIES feature value to LibraryLoader. This can't
         // be done in LibraryLoader itself because it lives in //base and can't depend
@@ -243,6 +271,22 @@ public class FeatureUtilities {
     }
 
     /**
+     * @return Whether or not the download auto-resumptions should be enabled in native.
+     */
+    @CalledByNative
+    public static boolean isDownloadAutoResumptionEnabledInNative() {
+        if (sDownloadAutoResumptionEnabledInNative == null) {
+            ChromePreferenceManager prefManager = ChromePreferenceManager.getInstance();
+
+            try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+                sDownloadAutoResumptionEnabledInNative = prefManager.readBoolean(
+                        ChromePreferenceManager.DOWNLOAD_AUTO_RESUMPTION_IN_NATIVE_KEY, true);
+            }
+        }
+        return sDownloadAutoResumptionEnabledInNative;
+    }
+
+    /**
      * Cache whether or not the new tab page button is enabled so on next startup, the value can
      * be made available immediately.
      */
@@ -313,6 +357,16 @@ public class FeatureUtilities {
     }
 
     /**
+     * Cache whether or not download auto-resumptions are enabled in native so on next startup, the
+     * value can be made available immediately.
+     */
+    private static void cacheDownloadAutoResumptionEnabledInNative() {
+        ChromePreferenceManager.getInstance().writeBoolean(
+                ChromePreferenceManager.DOWNLOAD_AUTO_RESUMPTION_IN_NATIVE_KEY,
+                ChromeFeatureList.isEnabled(ChromeFeatureList.DOWNLOADS_AUTO_RESUMPTION_NATIVE));
+    }
+
+    /**
      * @return Whether or not the bottom toolbar is enabled.
      */
     public static boolean isBottomToolbarEnabled() {
@@ -320,14 +374,39 @@ public class FeatureUtilities {
             ChromePreferenceManager prefManager = ChromePreferenceManager.getInstance();
 
             try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
-                sIsBottomToolbarEnabled =
-                        prefManager.readBoolean(
-                                ChromePreferenceManager.BOTTOM_TOOLBAR_ENABLED_KEY, false)
-                        && !DeviceFormFactor.isNonMultiDisplayContextOnTablet(
-                                   ContextUtils.getApplicationContext());
+                sIsBottomToolbarEnabled = prefManager.readBoolean(
+                        ChromePreferenceManager.BOTTOM_TOOLBAR_ENABLED_KEY, false);
             }
         }
-        return sIsBottomToolbarEnabled;
+        return sIsBottomToolbarEnabled
+                && !DeviceFormFactor.isNonMultiDisplayContextOnTablet(
+                           ContextUtils.getApplicationContext());
+    }
+
+    /**
+     * Cache whether or not night mode is available (i.e. night mode experiment is enabled) so on
+     * next startup, the value can be made available immediately.
+     */
+    public static void cacheNightModeAvailable() {
+        ChromePreferenceManager.getInstance().writeBoolean(
+                ChromePreferenceManager.NIGHT_MODE_AVAILABLE_KEY,
+                ChromeFeatureList.isEnabled(ChromeFeatureList.ANDROID_NIGHT_MODE));
+    }
+
+    /**
+     * @return Whether or not night mode experiment is enabled (i.e. night mode experiment is
+     *         enabled).
+     */
+    public static boolean isNightModeAvailable() {
+        if (sIsNightModeAvailable == null) {
+            ChromePreferenceManager prefManager = ChromePreferenceManager.getInstance();
+
+            try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+                sIsNightModeAvailable = prefManager.readBoolean(
+                        ChromePreferenceManager.NIGHT_MODE_AVAILABLE_KEY, false);
+            }
+        }
+        return sIsNightModeAvailable;
     }
 
     /**
@@ -346,20 +425,6 @@ public class FeatureUtilities {
      */
     public static boolean isDownloadProgressInfoBarEnabled() {
         return ChromeFeatureList.isEnabled(ChromeFeatureList.DOWNLOAD_PROGRESS_INFOBAR);
-    }
-
-    /**
-     * @return The type of swipe logic used for opening the bottom sheet in Chrome Home. Null is
-     *         returned if the command line is not initialized or no experiment is specified.
-     */
-    public static String getChromeHomeSwipeLogicType() {
-        if (sChromeHomeSwipeLogicType == null) {
-            CommandLine instance = CommandLine.getInstance();
-            sChromeHomeSwipeLogicType =
-                    instance.getSwitchValue(ChromeSwitches.CHROME_HOME_SWIPE_LOGIC);
-        }
-
-        return sChromeHomeSwipeLogicType;
     }
 
     /**

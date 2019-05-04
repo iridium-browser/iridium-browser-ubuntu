@@ -8,39 +8,42 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/strings/string_util.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/dns/dns_protocol.h"
+#include "net/dns/public/dns_protocol.h"
 #include "net/dns/record_parsed.h"
 #include "net/dns/record_rdata.h"
 
 namespace net {
 
+namespace {
+HostCache::Entry ParseHostnameResult(const std::string& host, uint16_t port) {
+  // Filter out root domain. Depending on the type, it either means no-result
+  // or is simply not a result important to any expected Chrome usecases.
+  if (host.empty()) {
+    return HostCache::Entry(ERR_NAME_NOT_RESOLVED,
+                            HostCache::Entry::SOURCE_UNKNOWN);
+  }
+  return HostCache::Entry(OK,
+                          std::vector<HostPortPair>({HostPortPair(host, port)}),
+                          HostCache::Entry::SOURCE_UNKNOWN);
+}
+}  // namespace
+
 class HostResolverMdnsTask::Transaction {
  public:
-  Transaction(HostResolver::DnsQueryType query_type, HostResolverMdnsTask* task)
-      : query_type_(query_type), result_(ERR_IO_PENDING), task_(task) {}
+  Transaction(DnsQueryType query_type, HostResolverMdnsTask* task)
+      : query_type_(query_type),
+        results_(ERR_IO_PENDING, HostCache::Entry::SOURCE_UNKNOWN),
+        task_(task) {}
 
   void Start() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(task_->sequence_checker_);
 
     // Should not be completed or running yet.
-    DCHECK_EQ(ERR_IO_PENDING, result_);
+    DCHECK_EQ(ERR_IO_PENDING, results_.error());
     DCHECK(!async_transaction_);
-
-    uint16_t rrtype;
-    switch (query_type_) {
-      case net::HostResolver::DnsQueryType::A:
-        rrtype = net::dns_protocol::kTypeA;
-        break;
-      case net::HostResolver::DnsQueryType::AAAA:
-        rrtype = net::dns_protocol::kTypeAAAA;
-        break;
-      default:
-        // Type not supported for MDNS.
-        NOTREACHED();
-        return;
-    }
 
     // TODO(crbug.com/846423): Use |allow_cached_response| to set the
     // QUERY_CACHE flag or not.
@@ -50,7 +53,7 @@ class HostResolverMdnsTask::Transaction {
     // cancel and prevent invocation of OnComplete.
     std::unique_ptr<MDnsTransaction> inner_transaction =
         task_->mdns_client_->CreateTransaction(
-            rrtype, task_->hostname_, flags,
+            DnsQueryTypeToQtype(query_type_), task_->hostname_, flags,
             base::BindRepeating(&HostResolverMdnsTask::Transaction::OnComplete,
                                 base::Unretained(this)));
 
@@ -58,57 +61,48 @@ class HostResolverMdnsTask::Transaction {
     bool start_result = inner_transaction->Start();
 
     if (!start_result)
-      task_->CompleteWithResult(ERR_FAILED, true /* post_needed */);
-    else if (result_ == ERR_IO_PENDING)
+      task_->Complete(true /* post_needed */);
+    else if (results_.error() == ERR_IO_PENDING)
       async_transaction_ = std::move(inner_transaction);
   }
 
-  bool IsDone() const { return result_ != ERR_IO_PENDING; }
+  bool IsDone() const { return results_.error() != ERR_IO_PENDING; }
   bool IsError() const {
-    return IsDone() && result_ != OK && result_ != ERR_NAME_NOT_RESOLVED;
+    return IsDone() && results_.error() != OK &&
+           results_.error() != ERR_NAME_NOT_RESOLVED;
   }
-  int result() const { return result_; }
+  const HostCache::Entry& results() const { return results_; }
 
   void Cancel() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(task_->sequence_checker_);
-    DCHECK_EQ(ERR_IO_PENDING, result_);
+    DCHECK_EQ(ERR_IO_PENDING, results_.error());
 
-    result_ = ERR_FAILED;
+    results_ = HostCache::Entry(ERR_FAILED, HostCache::Entry::SOURCE_UNKNOWN);
     async_transaction_ = nullptr;
   }
 
  private:
   void OnComplete(MDnsTransaction::Result result, const RecordParsed* parsed) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(task_->sequence_checker_);
-    DCHECK_EQ(ERR_IO_PENDING, result_);
+    DCHECK_EQ(ERR_IO_PENDING, results_.error());
 
+    int error = ERR_UNEXPECTED;
     switch (result) {
       case MDnsTransaction::RESULT_RECORD:
-        result_ = OK;
+        DCHECK(parsed);
+        error = OK;
         break;
       case MDnsTransaction::RESULT_NO_RESULTS:
       case MDnsTransaction::RESULT_NSEC:
-        result_ = ERR_NAME_NOT_RESOLVED;
+        error = ERR_NAME_NOT_RESOLVED;
         break;
       default:
         // No other results should be possible with the request flags used.
         NOTREACHED();
     }
 
-    if (result_ == net::OK) {
-      switch (query_type_) {
-        case net::HostResolver::DnsQueryType::A:
-          task_->result_addresses_.push_back(
-              IPEndPoint(parsed->rdata<net::ARecordRdata>()->address(), 0));
-          break;
-        case net::HostResolver::DnsQueryType::AAAA:
-          task_->result_addresses_.push_back(
-              IPEndPoint(parsed->rdata<net::AAAARecordRdata>()->address(), 0));
-          break;
-        default:
-          NOTREACHED();
-      }
-    }
+    results_ = HostResolverMdnsTask::ParseResult(error, query_type_, parsed,
+                                                 task_->hostname_);
 
     // If we don't have a saved async_transaction, it means OnComplete was
     // invoked inline in MDnsTransaction::Start. Callbacks will need to be
@@ -116,10 +110,10 @@ class HostResolverMdnsTask::Transaction {
     task_->CheckCompletion(!async_transaction_);
   }
 
-  const HostResolver::DnsQueryType query_type_;
+  const DnsQueryType query_type_;
 
   // ERR_IO_PENDING until transaction completes (or is cancelled).
-  int result_;
+  HostCache::Entry results_;
 
   // Not saved until MDnsTransaction::Start completes to differentiate inline
   // completion.
@@ -132,10 +126,10 @@ class HostResolverMdnsTask::Transaction {
 HostResolverMdnsTask::HostResolverMdnsTask(
     MDnsClient* mdns_client,
     const std::string& hostname,
-    const std::vector<HostResolver::DnsQueryType>& query_types)
+    const std::vector<DnsQueryType>& query_types)
     : mdns_client_(mdns_client), hostname_(hostname), weak_ptr_factory_(this) {
   DCHECK(!query_types.empty());
-  for (HostResolver::DnsQueryType query_type : query_types) {
+  for (DnsQueryType query_type : query_types) {
     transactions_.emplace_back(query_type, this);
   }
 }
@@ -145,11 +139,11 @@ HostResolverMdnsTask::~HostResolverMdnsTask() {
   transactions_.clear();
 }
 
-void HostResolverMdnsTask::Start(CompletionOnceCallback completion_callback) {
+void HostResolverMdnsTask::Start(base::OnceClosure completion_closure) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(!completion_callback_);
+  DCHECK(!completion_closure_);
 
-  completion_callback_ = std::move(completion_callback);
+  completion_closure_ = std::move(completion_closure);
 
   for (auto& transaction : transactions_) {
     // Only start transaction if it is not already marked done. A transaction
@@ -160,29 +154,91 @@ void HostResolverMdnsTask::Start(CompletionOnceCallback completion_callback) {
   }
 }
 
-void HostResolverMdnsTask::CheckCompletion(bool post_needed) {
+HostCache::Entry HostResolverMdnsTask::GetResults() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(!transactions_.empty());
+  DCHECK(!completion_closure_);
+  DCHECK(std::all_of(transactions_.begin(), transactions_.end(),
+                     [](const Transaction& t) { return t.IsDone(); }));
 
-  // Finish immediately if any transactions completed with an error.
   auto found_error =
       std::find_if(transactions_.begin(), transactions_.end(),
                    [](const Transaction& t) { return t.IsError(); });
   if (found_error != transactions_.end()) {
-    CompleteWithResult(found_error->result(), post_needed);
+    return found_error->results();
+  }
+
+  HostCache::Entry combined_results = transactions_.front().results();
+  for (auto it = ++transactions_.begin(); it != transactions_.end(); ++it) {
+    combined_results = HostCache::Entry::MergeEntries(
+        std::move(combined_results), it->results());
+  }
+
+  return combined_results;
+}
+
+// static
+HostCache::Entry HostResolverMdnsTask::ParseResult(
+    int error,
+    DnsQueryType query_type,
+    const RecordParsed* parsed,
+    const std::string& expected_hostname) {
+  if (error != OK) {
+    return HostCache::Entry(error, HostCache::Entry::SOURCE_UNKNOWN);
+  }
+  DCHECK(parsed);
+
+  // Expected to be validated by MDnsClient.
+  DCHECK_EQ(DnsQueryTypeToQtype(query_type), parsed->type());
+  DCHECK(base::EqualsCaseInsensitiveASCII(expected_hostname, parsed->name()));
+
+  switch (query_type) {
+    case DnsQueryType::UNSPECIFIED:
+      // Should create two separate transactions with specified type.
+      NOTREACHED();
+      return HostCache::Entry(ERR_FAILED, HostCache::Entry::SOURCE_UNKNOWN);
+    case DnsQueryType::A:
+      return HostCache::Entry(
+          OK,
+          AddressList(
+              IPEndPoint(parsed->rdata<net::ARecordRdata>()->address(), 0)),
+          HostCache::Entry::SOURCE_UNKNOWN);
+    case DnsQueryType::AAAA:
+      return HostCache::Entry(
+          OK,
+          AddressList(
+              IPEndPoint(parsed->rdata<net::AAAARecordRdata>()->address(), 0)),
+          HostCache::Entry::SOURCE_UNKNOWN);
+    case DnsQueryType::TXT:
+      return HostCache::Entry(OK, parsed->rdata<net::TxtRecordRdata>()->texts(),
+                              HostCache::Entry::SOURCE_UNKNOWN);
+    case DnsQueryType::PTR:
+      return ParseHostnameResult(parsed->rdata<PtrRecordRdata>()->ptrdomain(),
+                                 0 /* port */);
+    case DnsQueryType::SRV:
+      return ParseHostnameResult(parsed->rdata<SrvRecordRdata>()->target(),
+                                 parsed->rdata<SrvRecordRdata>()->port());
+  }
+}
+
+void HostResolverMdnsTask::CheckCompletion(bool post_needed) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // Finish immediately if any transactions completed with an error.
+  if (std::any_of(transactions_.begin(), transactions_.end(),
+                  [](const Transaction& t) { return t.IsError(); })) {
+    Complete(post_needed);
     return;
   }
 
   if (std::all_of(transactions_.begin(), transactions_.end(),
                   [](const Transaction& t) { return t.IsDone(); })) {
-    // Task is overall successful if any of the transactions found results.
-    int result = result_addresses_.empty() ? ERR_NAME_NOT_RESOLVED : OK;
-
-    CompleteWithResult(result, post_needed);
+    Complete(post_needed);
     return;
   }
 }
 
-void HostResolverMdnsTask::CompleteWithResult(int result, bool post_needed) {
+void HostResolverMdnsTask::Complete(bool post_needed) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Cancel any incomplete async transactions.
@@ -193,15 +249,14 @@ void HostResolverMdnsTask::CompleteWithResult(int result, bool post_needed) {
 
   if (post_needed) {
     base::SequencedTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::BindOnce(
-            [](base::WeakPtr<HostResolverMdnsTask> task, int result) {
-              if (task)
-                std::move(task->completion_callback_).Run(result);
-            },
-            weak_ptr_factory_.GetWeakPtr(), result));
+        FROM_HERE, base::BindOnce(
+                       [](base::WeakPtr<HostResolverMdnsTask> task) {
+                         if (task)
+                           std::move(task->completion_closure_).Run();
+                       },
+                       weak_ptr_factory_.GetWeakPtr()));
   } else {
-    std::move(completion_callback_).Run(result);
+    std::move(completion_closure_).Run();
   }
 }
 

@@ -15,8 +15,11 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/service_worker_context.h"
-#include "content/public/browser/service_worker_usage_info.h"
 #include "url/gurl.h"
+
+namespace content {
+struct StorageUsageInfo;
+}
 
 // BrowsingDataServiceWorkerHelper is an interface for classes dealing with
 // aggregating and deleting browsing data stored for Service Workers -
@@ -28,7 +31,7 @@ class BrowsingDataServiceWorkerHelper
     : public base::RefCountedThreadSafe<BrowsingDataServiceWorkerHelper> {
  public:
   using FetchCallback =
-      base::Callback<void(const std::list<content::ServiceWorkerUsageInfo>&)>;
+      base::OnceCallback<void(const std::list<content::StorageUsageInfo>&)>;
 
   // Create a BrowsingDataServiceWorkerHelper instance for the Service Workers
   // stored in |context|'s associated profile's user data directory.
@@ -37,7 +40,7 @@ class BrowsingDataServiceWorkerHelper
 
   // Starts the fetching process, which will notify its completion via
   // |callback|. This must be called only in the UI thread.
-  virtual void StartFetching(const FetchCallback& callback);
+  virtual void StartFetching(FetchCallback callback);
   // Requests the Service Worker data for an origin be deleted.
   virtual void DeleteServiceWorkers(const GURL& origin);
 
@@ -51,7 +54,7 @@ class BrowsingDataServiceWorkerHelper
   friend class base::RefCountedThreadSafe<BrowsingDataServiceWorkerHelper>;
 
   // Enumerates all Service Worker instances on the IO thread.
-  void FetchServiceWorkerUsageInfoOnIOThread(const FetchCallback& callback);
+  void FetchServiceWorkerUsageInfoOnIOThread(FetchCallback callback);
 
   // Deletes Service Workers for an origin the IO thread.
   void DeleteServiceWorkersOnIOThread(const GURL& origin);
@@ -100,7 +103,7 @@ class CannedBrowsingDataServiceWorkerHelper
       GetServiceWorkerUsageInfo() const;
 
   // BrowsingDataServiceWorkerHelper methods.
-  void StartFetching(const FetchCallback& callback) override;
+  void StartFetching(FetchCallback callback) override;
   void DeleteServiceWorkers(const GURL& origin) override;
 
  private:

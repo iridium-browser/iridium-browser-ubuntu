@@ -6,6 +6,8 @@
 
 #include "public/fpdf_edit.h"
 
+#include <utility>
+
 #include "core/fpdfapi/cpdf_modulemgr.h"
 #include "core/fpdfapi/page/cpdf_image.h"
 #include "core/fpdfapi/page/cpdf_imageobject.h"
@@ -51,29 +53,34 @@ RetainPtr<IFX_SeekableReadStream> MakeSeekableReadStream(
   return pdfium::MakeRetain<CPDFSDK_CustomAccess>(pFileAccess);
 }
 
-bool LoadJpegHelper(FPDF_PAGE* pages,
-                    int nCount,
-                    FPDF_PAGEOBJECT image_object,
-                    FPDF_FILEACCESS* fileAccess,
-                    bool inlineJpeg) {
-  if (!image_object || !fileAccess)
-    return false;
+CPDF_ImageObject* CPDFImageObjectFromFPDFPageObject(
+    FPDF_PAGEOBJECT image_object) {
+  CPDF_PageObject* pPageObject = CPDFPageObjectFromFPDFPageObject(image_object);
+  return pPageObject ? pPageObject->AsImage() : nullptr;
+}
 
-  CPDF_ImageObject* pImgObj =
-      CPDFPageObjectFromFPDFPageObject(image_object)->AsImage();
+bool LoadJpegHelper(FPDF_PAGE* pages,
+                    int count,
+                    FPDF_PAGEOBJECT image_object,
+                    FPDF_FILEACCESS* file_access,
+                    bool inline_jpeg) {
+  CPDF_ImageObject* pImgObj = CPDFImageObjectFromFPDFPageObject(image_object);
   if (!pImgObj)
     return false;
 
+  if (!file_access)
+    return false;
+
   if (pages) {
-    for (int index = 0; index < nCount; index++) {
+    for (int index = 0; index < count; index++) {
       CPDF_Page* pPage = CPDFPageFromFPDFPage(pages[index]);
       if (pPage)
         pImgObj->GetImage()->ResetCache(pPage);
     }
   }
 
-  RetainPtr<IFX_SeekableReadStream> pFile = MakeSeekableReadStream(fileAccess);
-  if (inlineJpeg)
+  RetainPtr<IFX_SeekableReadStream> pFile = MakeSeekableReadStream(file_access);
+  if (inline_jpeg)
     pImgObj->GetImage()->SetJpegImageInline(pFile);
   else
     pImgObj->GetImage()->SetJpegImage(pFile);
@@ -98,18 +105,34 @@ FPDFPageObj_NewImageObj(FPDF_DOCUMENT document) {
 
 FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
 FPDFImageObj_LoadJpegFile(FPDF_PAGE* pages,
-                          int nCount,
+                          int count,
                           FPDF_PAGEOBJECT image_object,
-                          FPDF_FILEACCESS* fileAccess) {
-  return LoadJpegHelper(pages, nCount, image_object, fileAccess, false);
+                          FPDF_FILEACCESS* file_access) {
+  return LoadJpegHelper(pages, count, image_object, file_access, false);
 }
 
 FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
 FPDFImageObj_LoadJpegFileInline(FPDF_PAGE* pages,
-                                int nCount,
+                                int count,
                                 FPDF_PAGEOBJECT image_object,
-                                FPDF_FILEACCESS* fileAccess) {
-  return LoadJpegHelper(pages, nCount, image_object, fileAccess, true);
+                                FPDF_FILEACCESS* file_access) {
+  return LoadJpegHelper(pages, count, image_object, file_access, true);
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
+FPDFImageObj_GetMatrix(FPDF_PAGEOBJECT image_object,
+                       double* a,
+                       double* b,
+                       double* c,
+                       double* d,
+                       double* e,
+                       double* f) {
+  CPDF_ImageObject* pImgObj = CPDFImageObjectFromFPDFPageObject(image_object);
+  if (!pImgObj || !a || !b || !c || !d || !e || !f)
+    return false;
+
+  std::tie(*a, *b, *c, *d, *e, *f) = pImgObj->matrix().AsTuple();
+  return true;
 }
 
 FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
@@ -120,11 +143,7 @@ FPDFImageObj_SetMatrix(FPDF_PAGEOBJECT image_object,
                        double d,
                        double e,
                        double f) {
-  if (!image_object)
-    return false;
-
-  CPDF_ImageObject* pImgObj =
-      CPDFPageObjectFromFPDFPageObject(image_object)->AsImage();
+  CPDF_ImageObject* pImgObj = CPDFImageObjectFromFPDFPageObject(image_object);
   if (!pImgObj)
     return false;
 
@@ -138,22 +157,24 @@ FPDFImageObj_SetMatrix(FPDF_PAGEOBJECT image_object,
 
 FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
 FPDFImageObj_SetBitmap(FPDF_PAGE* pages,
-                       int nCount,
+                       int count,
                        FPDF_PAGEOBJECT image_object,
                        FPDF_BITMAP bitmap) {
-  if (!image_object || !bitmap || !pages)
-    return false;
-
-  CPDF_ImageObject* pImgObj =
-      CPDFPageObjectFromFPDFPageObject(image_object)->AsImage();
+  CPDF_ImageObject* pImgObj = CPDFImageObjectFromFPDFPageObject(image_object);
   if (!pImgObj)
     return false;
 
-  for (int index = 0; index < nCount; index++) {
-    CPDF_Page* pPage = CPDFPageFromFPDFPage(pages[index]);
-    if (pPage)
-      pImgObj->GetImage()->ResetCache(pPage);
+  if (!bitmap)
+    return false;
+
+  if (pages) {
+    for (int index = 0; index < count; index++) {
+      CPDF_Page* pPage = CPDFPageFromFPDFPage(pages[index]);
+      if (pPage)
+        pImgObj->GetImage()->ResetCache(pPage);
+    }
   }
+
   RetainPtr<CFX_DIBitmap> holder(CFXDIBitmapFromFPDFBitmap(bitmap));
   pImgObj->GetImage()->SetImage(holder);
   pImgObj->CalcBoundingBox();
@@ -163,11 +184,11 @@ FPDFImageObj_SetBitmap(FPDF_PAGE* pages,
 
 FPDF_EXPORT FPDF_BITMAP FPDF_CALLCONV
 FPDFImageObj_GetBitmap(FPDF_PAGEOBJECT image_object) {
-  CPDF_PageObject* pObj = CPDFPageObjectFromFPDFPageObject(image_object);
-  if (!pObj || !pObj->IsImage())
+  CPDF_ImageObject* pImgObj = CPDFImageObjectFromFPDFPageObject(image_object);
+  if (!pImgObj)
     return nullptr;
 
-  RetainPtr<CPDF_Image> pImg = pObj->AsImage()->GetImage();
+  RetainPtr<CPDF_Image> pImg = pImgObj->GetImage();
   if (!pImg)
     return nullptr;
 
@@ -192,11 +213,11 @@ FPDF_EXPORT unsigned long FPDF_CALLCONV
 FPDFImageObj_GetImageDataDecoded(FPDF_PAGEOBJECT image_object,
                                  void* buffer,
                                  unsigned long buflen) {
-  CPDF_PageObject* pObj = CPDFPageObjectFromFPDFPageObject(image_object);
-  if (!pObj || !pObj->IsImage())
+  CPDF_ImageObject* pImgObj = CPDFImageObjectFromFPDFPageObject(image_object);
+  if (!pImgObj)
     return 0;
 
-  RetainPtr<CPDF_Image> pImg = pObj->AsImage()->GetImage();
+  RetainPtr<CPDF_Image> pImg = pImgObj->GetImage();
   if (!pImg)
     return 0;
 
@@ -211,11 +232,11 @@ FPDF_EXPORT unsigned long FPDF_CALLCONV
 FPDFImageObj_GetImageDataRaw(FPDF_PAGEOBJECT image_object,
                              void* buffer,
                              unsigned long buflen) {
-  CPDF_PageObject* pObj = CPDFPageObjectFromFPDFPageObject(image_object);
-  if (!pObj || !pObj->IsImage())
+  CPDF_ImageObject* pImgObj = CPDFImageObjectFromFPDFPageObject(image_object);
+  if (!pImgObj)
     return 0;
 
-  RetainPtr<CPDF_Image> pImg = pObj->AsImage()->GetImage();
+  RetainPtr<CPDF_Image> pImg = pImgObj->GetImage();
   if (!pImg)
     return 0;
 
@@ -236,11 +257,11 @@ FPDFImageObj_GetImageDataRaw(FPDF_PAGEOBJECT image_object,
 
 FPDF_EXPORT int FPDF_CALLCONV
 FPDFImageObj_GetImageFilterCount(FPDF_PAGEOBJECT image_object) {
-  CPDF_PageObject* pObj = CPDFPageObjectFromFPDFPageObject(image_object);
-  if (!pObj || !pObj->IsImage())
+  CPDF_ImageObject* pImgObj = CPDFImageObjectFromFPDFPageObject(image_object);
+  if (!pImgObj)
     return 0;
 
-  RetainPtr<CPDF_Image> pImg = pObj->AsImage()->GetImage();
+  RetainPtr<CPDF_Image> pImg = pImgObj->GetImage();
   if (!pImg)
     return 0;
 
@@ -250,7 +271,7 @@ FPDFImageObj_GetImageFilterCount(FPDF_PAGEOBJECT image_object) {
     return 0;
 
   if (pFilter->IsArray())
-    return pFilter->AsArray()->GetCount();
+    return pFilter->AsArray()->size();
   if (pFilter->IsName())
     return 1;
 
@@ -284,23 +305,23 @@ FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
 FPDFImageObj_GetImageMetadata(FPDF_PAGEOBJECT image_object,
                               FPDF_PAGE page,
                               FPDF_IMAGEOBJ_METADATA* metadata) {
-  CPDF_PageObject* pObj = CPDFPageObjectFromFPDFPageObject(image_object);
-  if (!pObj || !pObj->IsImage() || !metadata)
+  CPDF_ImageObject* pImgObj = CPDFImageObjectFromFPDFPageObject(image_object);
+  if (!pImgObj || !metadata)
     return false;
 
-  RetainPtr<CPDF_Image> pImg = pObj->AsImage()->GetImage();
+  RetainPtr<CPDF_Image> pImg = pImgObj->GetImage();
   if (!pImg)
     return false;
 
-  metadata->marked_content_id = pObj->m_ContentMarks.GetMarkedContentID();
+  metadata->marked_content_id = pImgObj->m_ContentMarks.GetMarkedContentID();
 
   const int nPixelWidth = pImg->GetPixelWidth();
   const int nPixelHeight = pImg->GetPixelHeight();
   metadata->width = nPixelWidth;
   metadata->height = nPixelHeight;
 
-  const float nWidth = pObj->GetRect().Width();
-  const float nHeight = pObj->GetRect().Height();
+  const float nWidth = pImgObj->GetRect().Width();
+  const float nHeight = pImgObj->GetRect().Height();
   constexpr int nPointsPerInch = 72;
   if (nWidth != 0 && nHeight != 0) {
     metadata->horizontal_dpi = nPixelWidth / nWidth * nPointsPerInch;

@@ -53,7 +53,7 @@ class PixelRect
         }
         else
         {
-            ASSERT(target == GL_TEXTURE_2D);
+            ASSERT_TRUE(target == GL_TEXTURE_2D);
             glTexImage2D(target, 0, GL_RGBA, mWidth, mHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                          mData.data());
         }
@@ -208,11 +208,11 @@ class WebGLReadOutsideFramebufferTest : public ANGLETest
     }
 
   protected:
-    static constexpr int kFbWidth    = 128;
-    static constexpr int kFbHeight   = 128;
+    static constexpr int kFbWidth      = 128;
+    static constexpr int kFbHeight     = 128;
     static constexpr int kTextureDepth = 16;
-    static constexpr int kReadWidth  = 4;
-    static constexpr int kReadHeight = 4;
+    static constexpr int kReadWidth    = 4;
+    static constexpr int kReadHeight   = 4;
     static constexpr int kReadLayer    = 2;
 
     // Tag the framebuffer pixels differently than the initial read buffer pixels, so we know for
@@ -235,16 +235,14 @@ class WebGLReadOutsideFramebufferTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        // TODO(fjhenigman): Factor out this shader and others like it in other tests, into
-        // ANGLETest.
-        const std::string vertexShader =
+        constexpr char kVS[] =
             "attribute vec3 a_position;\n"
             "varying vec2 v_texCoord;\n"
             "void main() {\n"
             "    v_texCoord = a_position.xy * 0.5 + 0.5;\n"
             "    gl_Position = vec4(a_position, 1);\n"
             "}\n";
-        const std::string fragmentShader =
+        constexpr char kFS[] =
             "precision mediump float;\n"
             "varying vec2 v_texCoord;\n"
             "uniform sampler2D u_texture;\n"
@@ -252,7 +250,7 @@ class WebGLReadOutsideFramebufferTest : public ANGLETest
             "    gl_FragColor = texture2D(u_texture, v_texCoord);\n"
             "}\n";
 
-        mProgram = CompileProgram(vertexShader, fragmentShader);
+        mProgram = CompileProgram(kVS, kFS);
         glUseProgram(mProgram);
         GLint uniformLoc = glGetUniformLocation(mProgram, "u_texture");
         ASSERT_NE(-1, uniformLoc);
@@ -345,8 +343,7 @@ class WebGLReadOutsideFramebufferTest : public ANGLETest
 };
 
 class WebGL2ReadOutsideFramebufferTest : public WebGLReadOutsideFramebufferTest
-{
-};
+{};
 
 // Check that readPixels does not set a destination pixel when
 // the corresponding source pixel is outside the framebuffer.
@@ -410,4 +407,4 @@ ANGLE_INSTANTIATE_TEST(WebGL2ReadOutsideFramebufferTest,
                        ES2_OPENGLES(),
                        ES3_OPENGLES());
 
-}  // namespace
+}  // namespace angle

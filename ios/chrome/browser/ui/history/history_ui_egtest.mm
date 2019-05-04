@@ -15,15 +15,15 @@
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/ui/authentication/cells/signin_promo_view.h"
 #import "ios/chrome/browser/ui/authentication/signin_earlgrey_utils.h"
-#import "ios/chrome/browser/ui/authentication/signin_promo_view.h"
 #import "ios/chrome/browser/ui/history/history_ui_constants.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
-#import "ios/chrome/browser/ui/settings/settings_collection_view_controller.h"
+#import "ios/chrome/browser/ui/settings/settings_table_view_controller.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_url_item.h"
 #import "ios/chrome/browser/ui/table_view/table_view_navigation_controller_constants.h"
-#include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/util/transparent_link_button.h"
+#include "ios/chrome/browser/ui/util/ui_util.h"
 #include "ios/chrome/common/string_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
@@ -218,10 +218,10 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
 
 // Tests that searching history displays only entries matching the search term.
 - (void)testSearchHistory {
-  // TODO(crbug.com/753098): Re-enable this test on iOS 11 iPad once
-  // grey_typeText works on iOS 11.
-  if (base::ios::IsRunningOnIOS11OrLater() && IsIPadIdiom()) {
-    EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 11.");
+  // TODO(crbug.com/753098): Re-enable this test on iPad once grey_typeText
+  // works on iOS 11.
+  if (IsIPadIdiom()) {
+    EARL_GREY_TEST_DISABLED(@"Test disabled on iPad.");
   }
 
   [self loadTestURLs];

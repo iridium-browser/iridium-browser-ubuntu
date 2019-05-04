@@ -21,7 +21,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_LISTENER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_LISTENER_H_
 
-#include "third_party/blink/renderer/bindings/core/v8/custom_wrappable_adapter.h"
+#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -32,48 +32,67 @@ namespace blink {
 class Event;
 class ExecutionContext;
 
-class CORE_EXPORT EventListener : public CustomWrappableAdapter {
+// EventListener represents 'callback' in 'event listener' in DOM standard.
+// https://dom.spec.whatwg.org/#concept-event-listener
+//
+// While RegisteredEventListener represents 'event listener', which consists of
+//   - type
+//   - callback
+//   - capture
+//   - passive
+//   - once
+//   - removed
+// EventListener represents 'callback' part.
+class CORE_EXPORT EventListener
+    : public GarbageCollectedFinalized<EventListener>,
+      public NameClient {
  public:
-  enum ListenerType {
-    // |kJSEventListenerType| corresponds to EventListener defined in standard:
-    // https://dom.spec.whatwg.org/#callbackdef-eventlistener
-    kJSEventListenerType,
-    // |kJSEventHandlerType| corresponds to EventHandler defined in standard:
-    // https://html.spec.whatwg.org/multipage/webappapis.html#event-handler-attributes
-    kJSEventHandlerType,
-    // These are for C++ native callbacks.
-    kImageEventListenerType,
-    kCPPEventListenerType,
-    kConditionEventListenerType,
-  };
+  virtual ~EventListener() = default;
 
-  ~EventListener() override = default;
-  virtual bool operator==(const EventListener&) const = 0;
-  virtual void handleEvent(ExecutionContext*, Event*) = 0;
-  virtual const String& Code() const { return g_empty_string; }
+  // Invokes this event listener.
+  virtual void Invoke(ExecutionContext*, Event*) = 0;
+
+  // Returns true if this implements IDL EventHandler family.
+  virtual bool IsEventHandler() const { return false; }
+
+  // Returns true if this implements IDL EventHandler family and the value is
+  // a content attribute (or compiled from a content attribute).
   virtual bool IsEventHandlerForContentAttribute() const { return false; }
+
+  // Returns an uncompiled script body.
+  // https://html.spec.whatwg.org/C/webappapis.html#internal-raw-uncompiled-handler
+  virtual const String& ScriptBody() const { return g_empty_string; }
+
+  // Returns true if this event listener was created in the current world.
   virtual bool BelongsToTheCurrentWorld(ExecutionContext*) const {
     return false;
   }
-  virtual bool IsEventHandler() const { return false; }
 
-  ListenerType GetType() const { return type_; }
+  // Returns true if this event listener is considered as the same with the
+  // other event listener (in context of EventTarget.removeEventListener).
+  // See also |RegisteredEventListener::Matches|.
+  //
+  // This function must satisfy the symmetric property; a.Matches(b) must
+  // produce the same result as b.Matches(a).
+  virtual bool Matches(const EventListener&) const = 0;
 
-  // Returns true if this EventListener is implemented based on JS object.
-  bool IsJSBased() const {
-    return type_ == kJSEventListenerType || type_ == kJSEventHandlerType;
-  }
-
-  // Returns true if this EventListener is C++ native callback.
-  bool IsNativeBased() const { return !IsJSBased(); }
+  virtual void Trace(Visitor*) {}
 
   const char* NameInHeapSnapshot() const override { return "EventListener"; }
 
- protected:
-  explicit EventListener(ListenerType type) : type_(type) {}
+  // Helper functions for DowncastTraits.
+  virtual bool IsJSBasedEventListener() const { return false; }
+  virtual bool IsNativeEventListener() const { return false; }
 
  private:
-  ListenerType type_;
+  EventListener() = default;
+
+  // Only these two classes are direct subclasses of EventListener.  Other
+  // subclasses must inherit from either of them.
+  friend class JSBasedEventListener;
+  friend class NativeEventListener;
+
+  DISALLOW_COPY_AND_ASSIGN(EventListener);
 };
 
 }  // namespace blink

@@ -57,7 +57,7 @@
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 TreeScope::TreeScope(ContainerNode& root_node, Document& document)
     : root_node_(&root_node),
@@ -128,7 +128,7 @@ Element* TreeScope::getElementById(const AtomicString& element_id) const {
 const HeapVector<Member<Element>>& TreeScope::GetAllElementsById(
     const AtomicString& element_id) const {
   DEFINE_STATIC_LOCAL(Persistent<HeapVector<Member<Element>>>, empty_vector,
-                      (new HeapVector<Member<Element>>));
+                      (MakeGarbageCollected<HeapVector<Member<Element>>>()));
   if (element_id.IsEmpty())
     return *empty_vector;
   if (!elements_by_id_)
@@ -189,7 +189,9 @@ HTMLMapElement* TreeScope::GetImageMap(const String& url) const {
   if (!image_maps_by_name_)
     return nullptr;
   wtf_size_t hash_pos = url.find('#');
-  String name = hash_pos == kNotFound ? url : url.Substring(hash_pos + 1);
+  if (hash_pos == kNotFound)
+    return nullptr;
+  String name = url.Substring(hash_pos + 1);
   return ToHTMLMapElement(
       image_maps_by_name_->GetElementByMapName(AtomicString(name), *this));
 }
@@ -329,50 +331,44 @@ HeapVector<Member<Element>> TreeScope::ElementsFromPoint(double x,
 }
 
 SVGTreeScopeResources& TreeScope::EnsureSVGTreeScopedResources() {
-  if (!svg_tree_scoped_resources_)
-    svg_tree_scoped_resources_ = new SVGTreeScopeResources(this);
+  if (!svg_tree_scoped_resources_) {
+    svg_tree_scoped_resources_ =
+        MakeGarbageCollected<SVGTreeScopeResources>(this);
+  }
   return *svg_tree_scoped_resources_;
 }
 
 bool TreeScope::HasAdoptedStyleSheets() const {
-  return adopted_style_sheets_ && adopted_style_sheets_->length() > 0;
+  return adopted_style_sheets_.size() > 0;
 }
 
-StyleSheetList& TreeScope::AdoptedStyleSheets() {
-  if (!adopted_style_sheets_)
-    SetAdoptedStyleSheets(StyleSheetList::Create());
-  return *adopted_style_sheets_;
+const HeapVector<Member<CSSStyleSheet>>& TreeScope::AdoptedStyleSheets() {
+  return adopted_style_sheets_;
 }
 
-void TreeScope::SetAdoptedStyleSheets(StyleSheetList* adopted_style_sheets,
-                                      ExceptionState& exception_state) {
-  unsigned style_sheets_count =
-      adopted_style_sheets ? adopted_style_sheets->length() : 0;
-  for (unsigned i = 0; i < style_sheets_count; ++i) {
-    CSSStyleSheet* style_sheet = ToCSSStyleSheet(adopted_style_sheets->item(i));
-    Document* associated_document = style_sheet->AssociatedDocument();
-    Node* owner_node = style_sheet->ownerNode();
+void TreeScope::SetAdoptedStyleSheets(
+    HeapVector<Member<CSSStyleSheet>>& adopted_style_sheets,
+    ExceptionState& exception_state) {
+  for (CSSStyleSheet* sheet : adopted_style_sheets) {
+    if (!sheet->IsConstructed()) {
+      exception_state.ThrowDOMException(
+          DOMExceptionCode::kNotAllowedError,
+          "Can't adopt non-constructed stylesheets.");
+      return;
+    }
+    Document* associated_document = sheet->AssociatedDocument();
     if (associated_document && *associated_document != GetDocument()) {
       exception_state.ThrowDOMException(DOMExceptionCode::kNotAllowedError,
-                                        "Sharing constructable stylesheets in "
+                                        "Sharing constructed stylesheets in "
                                         "multiple documents is not allowed");
       return;
     }
-    if (owner_node && owner_node->GetDocument() != GetDocument()) {
-      exception_state.ThrowDOMException(
-          DOMExceptionCode::kNotAllowedError,
-          "When the style sheet's owner node and the AdoptedStyleSheets' tree "
-          "scope is not in the same Document tree, adding non-constructed "
-          "stylesheets to AdoptedStyleSheets is not allowed");
-      return;
-    }
-    // TODO(momon): Don't allow using non-constructed stylesheets, pending
-    // resolution of https://github.com/WICG/construct-stylesheets/issues/34
   }
   SetAdoptedStyleSheets(adopted_style_sheets);
 }
 
-void TreeScope::SetAdoptedStyleSheets(StyleSheetList* adopted_style_sheets) {
+void TreeScope::SetAdoptedStyleSheets(
+    HeapVector<Member<CSSStyleSheet>>& adopted_style_sheets) {
   GetDocument().GetStyleEngine().AdoptedStyleSheetsWillChange(
       *this, adopted_style_sheets_, adopted_style_sheets);
   adopted_style_sheets_ = adopted_style_sheets;
@@ -485,7 +481,7 @@ Element* TreeScope::AdjustedFocusedElement() const {
     return nullptr;
   }
 
-  EventPath* event_path = new EventPath(*element);
+  EventPath* event_path = MakeGarbageCollected<EventPath>(*element);
   for (const auto& context : event_path->NodeEventContexts()) {
     if (context.GetNode() == RootNode()) {
       // context.target() is one of the followings:
@@ -598,7 +594,7 @@ Element* TreeScope::GetElementByAccessKey(const String& key) const {
   Element* result = nullptr;
   Node& root = RootNode();
   for (Element& element : ElementTraversal::DescendantsOf(root)) {
-    if (DeprecatedEqualIgnoringCase(element.FastGetAttribute(accesskeyAttr),
+    if (DeprecatedEqualIgnoringCase(element.FastGetAttribute(kAccesskeyAttr),
                                     key))
       result = &element;
     if (ShadowRoot* shadow_root = element.GetShadowRoot()) {
@@ -615,14 +611,15 @@ void TreeScope::SetNeedsStyleRecalcForViewportUnits() {
     if (ShadowRoot* root = element->GetShadowRoot())
       root->SetNeedsStyleRecalcForViewportUnits();
     const ComputedStyle* style = element->GetComputedStyle();
-    if (style && style->HasViewportUnits())
+    if (style && style->HasViewportUnits()) {
       element->SetNeedsStyleRecalc(kLocalStyleChange,
                                    StyleChangeReasonForTracing::Create(
-                                       StyleChangeReason::kViewportUnits));
+                                       style_change_reason::kViewportUnits));
+    }
   }
 }
 
-void TreeScope::Trace(blink::Visitor* visitor) {
+void TreeScope::Trace(Visitor* visitor) {
   visitor->Trace(root_node_);
   visitor->Trace(document_);
   visitor->Trace(parent_tree_scope_);

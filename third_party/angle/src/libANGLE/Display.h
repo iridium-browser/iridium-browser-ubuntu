@@ -28,7 +28,7 @@ namespace gl
 {
 class Context;
 class TextureManager;
-}
+}  // namespace gl
 
 namespace rx
 {
@@ -39,8 +39,9 @@ namespace egl
 {
 class Device;
 class Image;
-class Surface;
 class Stream;
+class Surface;
+class Sync;
 class Thread;
 
 using SurfaceSet = std::set<Surface *>;
@@ -60,7 +61,7 @@ constexpr EGLAttrib kProgramCacheSizeAbsoluteMax = 0x4000000;
 class Display final : public LabeledObject, angle::NonCopyable
 {
   public:
-    ~Display();
+    ~Display() override;
 
     void setLabel(EGLLabelKHR label) override;
     EGLLabelKHR getLabel() const override;
@@ -107,12 +108,15 @@ class Display final : public LabeledObject, angle::NonCopyable
                         const AttributeMap &attribs,
                         gl::Context **outContext);
 
+    Error createSync(EGLenum type, const AttributeMap &attribs, Sync **outSync);
+
     Error makeCurrent(Surface *drawSurface, Surface *readSurface, gl::Context *context);
 
     Error destroySurface(Surface *surface);
     void destroyImage(Image *image);
     void destroyStream(Stream *stream);
     Error destroyContext(const Thread *thread, gl::Context *context);
+    void destroySync(Sync *sync);
 
     bool isInitialized() const;
     bool isValidConfig(const Config *config) const;
@@ -120,12 +124,17 @@ class Display final : public LabeledObject, angle::NonCopyable
     bool isValidSurface(const Surface *surface) const;
     bool isValidImage(const Image *image) const;
     bool isValidStream(const Stream *stream) const;
+    bool isValidSync(const Sync *sync) const;
     bool isValidNativeWindow(EGLNativeWindowType window) const;
 
     Error validateClientBuffer(const Config *configuration,
                                EGLenum buftype,
                                EGLClientBuffer clientBuffer,
-                               const AttributeMap &attribs);
+                               const AttributeMap &attribs) const;
+    Error validateImageClientBuffer(const gl::Context *context,
+                                    EGLenum target,
+                                    EGLClientBuffer clientBuffer,
+                                    const egl::AttributeMap &attribs) const;
 
     static bool isValidDisplay(const Display *display);
     static bool isValidNativeDisplay(EGLNativeDisplayType display);
@@ -160,6 +169,9 @@ class Display final : public LabeledObject, angle::NonCopyable
                                EGLint binarysize);
     EGLint programCacheResize(EGLint limit, EGLenum mode);
 
+    Error clientWaitSync(Sync *sync, EGLint flags, EGLTime timeout, EGLint *outResult);
+    Error waitSync(Sync *sync, EGLint flags);
+
     const AttributeMap &getAttributeMap() const { return mAttributeMap; }
     EGLNativeDisplayType getNativeDisplayId() const { return mDisplayId; }
 
@@ -170,6 +182,9 @@ class Display final : public LabeledObject, angle::NonCopyable
     gl::Version getMaxSupportedESVersion() const;
 
     const DisplayState &getState() const { return mState; }
+
+    typedef std::set<gl::Context *> ContextSet;
+    const ContextSet &getContextSet() { return mContextSet; }
 
   private:
     Display(EGLenum platform, EGLNativeDisplayType displayId, Device *eglDevice);
@@ -189,7 +204,6 @@ class Display final : public LabeledObject, angle::NonCopyable
 
     ConfigSet mConfigSet;
 
-    typedef std::set<gl::Context *> ContextSet;
     ContextSet mContextSet;
 
     typedef std::set<Image *> ImageSet;
@@ -197,6 +211,9 @@ class Display final : public LabeledObject, angle::NonCopyable
 
     typedef std::set<Stream *> StreamSet;
     StreamSet mStreamSet;
+
+    typedef std::set<Sync *> SyncSet;
+    SyncSet mSyncSet;
 
     bool mInitialized;
     bool mDeviceLost;

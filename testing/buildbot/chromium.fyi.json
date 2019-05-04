@@ -392,6 +392,28 @@
       },
       {
         "args": [
+          "--test-launcher-filter-file=../../testing/buildbot/filters/mac_window_server_killers.browser_tests.filter",
+          "--gtest_shuffle"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor"
+        ],
+        "name": "non_viz_browser_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
           "--enable-features=WebUIPolymer2",
           "--test-launcher-filter-file=../../testing/buildbot/filters/webui_polymer2_browser_tests.filter"
         ],
@@ -409,6 +431,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -452,7 +477,19 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor"
+        ],
+        "name": "non_viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
         },
         "test": "content_browsertests"
       },
@@ -468,6 +505,37 @@
         "test": "content_browsertests"
       },
       {
+        "args": [
+          "--enable-features=VizDisplayCompositor"
+        ],
+        "name": "viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "content_unittests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor"
+        ],
+        "name": "non_viz_content_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "content_unittests"
+      },
+      {
+        "args": [
+          "--enable-features=VizDisplayCompositor"
+        ],
+        "name": "viz_content_unittests",
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -627,12 +695,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "mac_installer_unittests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
         "test": "media_blink_unittests"
       },
       {
@@ -765,12 +827,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "traffic_annotation_auditor_unittests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
         "test": "ui_base_unittests"
       },
       {
@@ -835,7 +891,13 @@
         }
       },
       {
+        "args": [
+          "--smoke-test-mode"
+        ],
         "isolate_name": "components_perftests",
+        "merge": {
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "components_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -888,6 +950,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -910,6 +978,16 @@
     ],
     "gtest_tests": [
       {
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        },
+        "test": "headless_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "name": "network_service_headless_browsertests",
         "swarming": {
           "can_use_on_swarming_builders": false
         },
@@ -1018,14 +1096,47 @@
     "gtest_tests": [
       {
         "args": [
-          "--enable-features=VizDisplayCompositor"
+          "--disable-features=VizDisplayCompositor"
         ],
-        "name": "viz_browser_tests",
+        "name": "non_viz_browser_tests",
         "swarming": {
           "can_use_on_swarming_builders": true,
           "shards": 10
         },
         "test": "browser_tests"
+      },
+      {
+        "args": [
+          "--enable-features=VizDisplayCompositor,UseSkiaRenderer"
+        ],
+        "name": "skia_renderer_browser_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor"
+        ],
+        "name": "non_viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=VizDisplayCompositor,UseSkiaRenderer"
+        ],
+        "name": "skia_renderer_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
+        },
+        "test": "content_browsertests"
       },
       {
         "args": [
@@ -1040,9 +1151,9 @@
       },
       {
         "args": [
-          "--enable-features=VizDisplayCompositor"
+          "--disable-features=VizDisplayCompositor"
         ],
-        "name": "viz_content_unittests",
+        "name": "non_viz_content_unittests",
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -1052,11 +1163,11 @@
         "args": [
           "--enable-features=VizDisplayCompositor"
         ],
-        "name": "viz_interactive_ui_tests",
+        "name": "viz_content_unittests",
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "interactive_ui_tests"
+        "test": "content_unittests"
       }
     ]
   },
@@ -1188,7 +1299,7 @@
   },
   "Mac Goma Canary (clobber)": {
     "additional_compile_targets": [
-      "all"
+      "chrome"
     ],
     "gtest_tests": [
       {
@@ -1296,6 +1407,54 @@
       },
       {
         "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess",
+          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_chrome_public_test_apk.filter",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "network_service_in_process_chrome_public_test_apk"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "network_service_in_process_chrome_public_test_apk",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "hard_timeout": 3600,
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ],
+          "shards": 20
+        },
+        "test": "chrome_public_test_apk"
+      },
+      {
+        "args": [
           "--enable-features=NetworkService",
           "--gs-results-bucket=chromium-result-details",
           "--recover-devices"
@@ -1342,8 +1501,53 @@
       },
       {
         "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "network_service_in_process_components_browsertests"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "network_service_in_process_components_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "hard_timeout": 3600,
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ]
+        },
+        "test": "components_browsertests"
+      },
+      {
+        "args": [
           "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter",
           "--gs-results-bucket=chromium-result-details",
           "--recover-devices"
         ],
@@ -1385,6 +1589,147 @@
             }
           ],
           "shards": 5
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "network_service_in_process_content_browsertests"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "network_service_in_process_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "hard_timeout": 3600,
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ],
+          "shards": 5
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "non_viz_content_browsertests"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "non_viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "hard_timeout": 3600,
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ],
+          "shards": 10
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=VizDisplayCompositor",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "viz_content_browsertests"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "hard_timeout": 3600,
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ],
+          "shards": 10
         },
         "test": "content_browsertests"
       },
@@ -1437,7 +1782,54 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
+          "--enable-features=NetworkService,NetworkServiceInProcess",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "network_service_in_process_content_shell_test_apk"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "network_service_in_process_content_shell_test_apk",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "hard_timeout": 3600,
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ],
+          "shards": 5
+        },
+        "test": "content_shell_test_apk"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess",
           "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_webview_instrumentation_test_apk.filter",
           "--gs-results-bucket=chromium-result-details",
           "--recover-devices"
@@ -1499,6 +1891,7 @@
       {
         "args": [
           "--enable-features=Mash",
+          "--disable-features=SingleProcessMash",
           "--override-use-software-gl-for-tests",
           "--test-launcher-filter-file=../../testing/buildbot/filters/chromeos.mash.fyi.browser_tests.filter"
         ],
@@ -1513,7 +1906,7 @@
       {
         "args": [
           "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter;../../testing/buildbot/filters/mojo.fyi.chromeos.network_browser_tests.filter"
+          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.chromeos.network_browser_tests.filter"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -1551,8 +1944,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -1574,7 +1966,8 @@
       },
       {
         "args": [
-          "--enable-features=Mash"
+          "--enable-features=Mash",
+          "--disable-features=SingleProcessMash"
         ],
         "name": "mash_fyi_content_unittests",
         "swarming": {
@@ -1604,12 +1997,26 @@
       },
       {
         "args": [
-          "--enable-features=SingleProcessMash",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/chromeos.single_process_mash.interactive_ui_tests.filter"
+          "--enable-features=Mash",
+          "--disable-features=SingleProcessMash",
+          "--test-launcher-filter-file=../../testing/buildbot/filters/chromeos.mash.fyi.interactive_ui_tests.filter"
         ],
-        "name": "single_process_mash_interactive_ui_tests",
+        "name": "mash_fyi_interactive_ui_tests",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 3
+        },
+        "test": "interactive_ui_tests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService",
+          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.chromeos.network_interactive_ui_tests.filter"
+        ],
+        "name": "network_service_interactive_ui_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 3
         },
         "test": "interactive_ui_tests"
       },
@@ -1641,10 +2048,21 @@
     "gtest_tests": [
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "priority_adjustment": 30,
+          "shards": 15
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess"
+        ],
+        "name": "network_service_in_process_browser_tests",
         "swarming": {
           "can_use_on_swarming_builders": true,
           "priority_adjustment": 30,
@@ -1665,10 +2083,21 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "priority_adjustment": 30,
+          "shards": 2
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess"
+        ],
+        "name": "network_service_in_process_content_browsertests",
         "swarming": {
           "can_use_on_swarming_builders": true,
           "priority_adjustment": 30,
@@ -1730,8 +2159,7 @@
     "gtest_tests": [
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -1742,9 +2170,20 @@
       },
       {
         "args": [
-          "--enable-features=VizDisplayCompositor"
+          "--enable-features=NetworkService,NetworkServiceInProcess"
         ],
-        "name": "viz_browser_tests",
+        "name": "network_service_in_process_browser_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 15
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor"
+        ],
+        "name": "non_viz_browser_tests",
         "swarming": {
           "can_use_on_swarming_builders": true,
           "shards": 10
@@ -1763,13 +2202,34 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
           "can_use_on_swarming_builders": true,
           "shards": 2
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess"
+        ],
+        "name": "network_service_in_process_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 2
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor"
+        ],
+        "name": "non_viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
         },
         "test": "content_browsertests"
       },
@@ -1783,6 +2243,16 @@
           "shards": 10
         },
         "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor"
+        ],
+        "name": "non_viz_content_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "content_unittests"
       },
       {
         "args": [
@@ -1812,16 +2282,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true,
           "shards": 3
-        },
-        "test": "interactive_ui_tests"
-      },
-      {
-        "args": [
-          "--enable-features=VizDisplayCompositor"
-        ],
-        "name": "viz_interactive_ui_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true
         },
         "test": "interactive_ui_tests"
       },
@@ -1860,25 +2320,6 @@
         "args": [
           "--site-per-process"
         ],
-        "name": "site_per_process_browser_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "device_os": "MMB29Q",
-              "device_type": "bullhead",
-              "os": "Android"
-            }
-          ],
-          "hard_timeout": 960,
-          "shards": 10
-        },
-        "test": "browser_tests"
-      },
-      {
-        "args": [
-          "--site-per-process"
-        ],
         "name": "site_per_process_components_browsertests",
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -1907,13 +2348,15 @@
               "os": "Android"
             }
           ],
-          "hard_timeout": 960
+          "hard_timeout": 960,
+          "shards": 5
         },
         "test": "components_unittests"
       },
       {
         "args": [
-          "--site-per-process"
+          "--site-per-process",
+          "--test-launcher-filter-file=../../testing/buildbot/filters/site_isolation_android.content_browsertests.filter"
         ],
         "name": "site_per_process_content_browsertests",
         "swarming": {
@@ -1926,7 +2369,7 @@
             }
           ],
           "hard_timeout": 960,
-          "shards": 6
+          "shards": 10
         },
         "test": "content_browsertests"
       },
@@ -1982,13 +2425,12 @@
       }
     ]
   },
-  "WebKit Linux layout_ng Dummy Builder": {
+  "WebKit Linux composite_after_paint Dummy Builder": {
     "isolated_scripts": [
       {
         "args": [
           "--num-retries=3",
-          "--additional-driver-flag=--enable-blink-features=LayoutNG",
-          "--additional-driver-flag=--enable-slimming-paint-v175"
+          "--additional-driver-flag=--enable-blink-features=CompositeAfterPaint"
         ],
         "isolate_name": "webkit_layout_tests_exparchive",
         "merge": {
@@ -2007,7 +2449,55 @@
             }
           ],
           "hard_timeout": 900,
-          "shards": 15
+          "priority_adjustment": 30,
+          "shards": 12
+        }
+      }
+    ]
+  },
+  "WebKit Linux layout_ng Dummy Builder": {
+    "gtest_tests": [
+      {
+        "args": [
+          "--enable-blink-features=LayoutNG"
+        ],
+        "name": "webkit_unit_tests_ng",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-14.04"
+            }
+          ],
+          "hard_timeout": 900
+        },
+        "test": "webkit_unit_tests"
+      }
+    ],
+    "isolated_scripts": [
+      {
+        "args": [
+          "--num-retries=3",
+          "--additional-driver-flag=--enable-blink-features=LayoutNG"
+        ],
+        "isolate_name": "webkit_layout_tests_exparchive",
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "name": "webkit_layout_tests",
+        "results_handler": "layout tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-14.04"
+            }
+          ],
+          "hard_timeout": 900,
+          "shards": 12
         }
       }
     ]
@@ -2036,37 +2526,7 @@
             }
           ],
           "hard_timeout": 900,
-          "shards": 15
-        }
-      }
-    ]
-  },
-  "WebKit Linux slimming_paint_v2 Dummy Builder": {
-    "isolated_scripts": [
-      {
-        "args": [
-          "--num-retries=3",
-          "--additional-driver-flag=--enable-slimming-paint-v2"
-        ],
-        "isolate_name": "webkit_layout_tests_exparchive",
-        "merge": {
-          "args": [
-            "--verbose"
-          ],
-          "script": "//third_party/blink/tools/merge_web_test_results.py"
-        },
-        "name": "webkit_layout_tests",
-        "results_handler": "layout tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-14.04"
-            }
-          ],
-          "hard_timeout": 900,
-          "priority_adjustment": 30,
-          "shards": 15
+          "shards": 12
         }
       }
     ]
@@ -2147,8 +2607,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -2174,6 +2633,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": false
         },
@@ -2257,8 +2719,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -2370,6 +2831,12 @@
           "can_use_on_swarming_builders": false
         },
         "test": "gcm_unit_tests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        },
+        "test": "gcp_unittests"
       },
       {
         "swarming": {
@@ -2876,6 +3343,53 @@
       },
       {
         "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess",
+          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_chrome_public_test_apk.filter",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "network_service_in_process_chrome_public_test_apk"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "network_service_in_process_chrome_public_test_apk",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ],
+          "shards": 20
+        },
+        "test": "chrome_public_test_apk"
+      },
+      {
+        "args": [
           "--enable-features=NetworkService",
           "--gs-results-bucket=chromium-result-details",
           "--recover-devices"
@@ -2921,8 +3435,52 @@
       },
       {
         "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "network_service_in_process_components_browsertests"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "network_service_in_process_components_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ]
+        },
+        "test": "components_browsertests"
+      },
+      {
+        "args": [
           "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter",
           "--gs-results-bucket=chromium-result-details",
           "--recover-devices"
         ],
@@ -2963,6 +3521,144 @@
             }
           ],
           "shards": 5
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "network_service_in_process_content_browsertests"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "network_service_in_process_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ],
+          "shards": 5
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "non_viz_content_browsertests"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "non_viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ],
+          "shards": 10
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=VizDisplayCompositor",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "viz_content_browsertests"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ],
+          "shards": 10
         },
         "test": "content_browsertests"
       },
@@ -3014,7 +3710,53 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
+          "--enable-features=NetworkService,NetworkServiceInProcess",
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "network_service_in_process_content_shell_test_apk"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "name": "network_service_in_process_content_shell_test_apk",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ],
+          "shards": 5
+        },
+        "test": "content_shell_test_apk"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService,NetworkServiceInProcess",
           "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_webview_instrumentation_test_apk.filter",
           "--gs-results-bucket=chromium-result-details",
           "--recover-devices"
@@ -3102,25 +3844,6 @@
         "test": "chrome_login_tast_tests"
       },
       {
-        "args": [
-          "--dbus-stub",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/chromeos.chromeos_unittests.filter"
-        ],
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "kvm": "1",
-              "os": "Ubuntu-14.04",
-              "pool": "Chrome-CrOS-VM"
-            }
-          ],
-          "hard_timeout": 3600,
-          "io_timeout": 3600
-        },
-        "test": "chromeos_unittests"
-      },
-      {
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -3147,7 +3870,7 @@
             {
               "cipd_package": "infra/tools/luci/vpython/linux-amd64",
               "location": "vpython_dir_linux_amd64",
-              "revision": "git_revision:e1abc57be62d198b5c2f487bfb2fa2d2eb0e867c"
+              "revision": "git_revision:9a931a5307c46b16b1c12e01e8239d4a73830b89"
             }
           ],
           "dimension_sets": [
@@ -3162,44 +3885,69 @@
         },
         "test": "services_unittests"
       }
-    ],
-    "isolated_scripts": [
-      {
-        "args": [
-          "--jobs=1",
-          "--browser=cros-chrome",
-          "--remote=127.0.0.1",
-          "--remote-ssh-port=9222",
-          "--skip=telemetry.internal.app.android_app_unittest.AndroidAppTest.testWebView",
-          "--skip=telemetry.internal.backends.browser_backend_unittest.BrowserBackendIntegrationTest.testSmokeIsBrowserRunningReturnFalse"
-        ],
-        "isolate_name": "telemetry_unittests",
-        "name": "telemetry_unittests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "kvm": "1",
-              "os": "Ubuntu-14.04",
-              "pool": "Chrome-CrOS-VM"
-            }
-          ],
-          "hard_timeout": 3600,
-          "idempotent": false,
-          "io_timeout": 3600,
-          "shards": 12
-        }
-      }
     ]
   },
   "chromeos-kevin-rel-hw-tests": {
     "additional_compile_targets": [
       "chromiumos_preflight"
+    ],
+    "gtest_tests": [
+      {
+        "args": [
+          "--test-launcher-filter-file=../../testing/buildbot/filters/chromeos.base_unittests.filter"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "device_type": "kevin",
+              "os": "ChromeOS",
+              "pool": "chrome-cros-dut"
+            }
+          ]
+        },
+        "test": "base_unittests",
+        "trigger_script": {
+          "script": "//testing/trigger_scripts/chromeos_device_trigger.py"
+        }
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "device_type": "kevin",
+              "os": "ChromeOS",
+              "pool": "chrome-cros-dut"
+            }
+          ]
+        },
+        "test": "chrome_kevin_tast_tests",
+        "trigger_script": {
+          "script": "//testing/trigger_scripts/chromeos_device_trigger.py"
+        }
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "device_type": "kevin",
+              "os": "ChromeOS",
+              "pool": "chrome-cros-dut"
+            }
+          ]
+        },
+        "test": "cros_vm_sanity_test",
+        "trigger_script": {
+          "script": "//testing/trigger_scripts/chromeos_device_trigger.py"
+        }
+      }
     ]
   },
   "fuchsia-fyi-arm64-rel": {
     "additional_compile_targets": [
-      "gn_all"
+      "all"
     ],
     "gtest_tests": [
       {
@@ -3207,6 +3955,33 @@
           "can_use_on_swarming_builders": true
         },
         "test": "base_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "cast_runner_browsertests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "cast_runner_integration_tests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "cast_runner_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.content_unittests.filter"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "content_unittests"
       },
       {
         "swarming": {
@@ -3227,9 +4002,24 @@
         "test": "crypto_unittests"
       },
       {
-        "args": [
-          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.ipc_tests.filter"
-        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "fidlgen_js_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "gpu_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "http_service_tests"
+      },
+      {
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -3249,6 +4039,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "mojo_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "perfetto_unittests"
       },
       {
         "swarming": {
@@ -3281,6 +4077,12 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
+        "test": "web_runner_integration_tests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "webrunner_browsertests"
       },
       {
@@ -3293,7 +4095,7 @@
   },
   "fuchsia-fyi-x64-dbg": {
     "additional_compile_targets": [
-      "gn_all"
+      "all"
     ],
     "gtest_tests": [
       {
@@ -3306,6 +4108,39 @@
           ]
         },
         "test": "base_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "cast_runner_browsertests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "cast_runner_integration_tests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "cast_runner_unittests"
       },
       {
         "args": [
@@ -3355,9 +4190,39 @@
         "test": "crypto_unittests"
       },
       {
-        "args": [
-          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.ipc_tests.filter"
-        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "fidlgen_js_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "gpu_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "http_service_tests"
+      },
+      {
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -3392,6 +4257,17 @@
           ]
         },
         "test": "mojo_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "perfetto_unittests"
       },
       {
         "swarming": {
@@ -3439,6 +4315,17 @@
           ]
         },
         "test": "ui_base_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "web_runner_integration_tests"
       },
       {
         "swarming": {
@@ -3466,7 +4353,7 @@
   },
   "fuchsia-fyi-x64-rel": {
     "additional_compile_targets": [
-      "gn_all"
+      "all"
     ],
     "gtest_tests": [
       {
@@ -3479,6 +4366,39 @@
           ]
         },
         "test": "base_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "cast_runner_browsertests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "cast_runner_integration_tests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "cast_runner_unittests"
       },
       {
         "args": [
@@ -3528,9 +4448,39 @@
         "test": "crypto_unittests"
       },
       {
-        "args": [
-          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.ipc_tests.filter"
-        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "fidlgen_js_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "gpu_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "http_service_tests"
+      },
+      {
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -3568,8 +4518,7 @@
       },
       {
         "args": [
-          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.net_unittests.filter",
-          "--test-launcher-batch-limit=200"
+          "--test-launcher-filter-file=../../testing/buildbot/filters/fuchsia.net_unittests.filter"
         ],
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -3580,6 +4529,17 @@
           ]
         },
         "test": "net_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "perfetto_unittests"
       },
       {
         "swarming": {
@@ -3627,6 +4587,17 @@
           ]
         },
         "test": "ui_base_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "kvm": "1"
+            }
+          ]
+        },
+        "test": "web_runner_integration_tests"
       },
       {
         "swarming": {
@@ -3714,6 +4685,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -3739,7 +4713,8 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
@@ -3939,29 +4914,6 @@
       }
     ]
   },
-  "linux-blink-gen-property-trees": {
-    "isolated_scripts": [
-      {
-        "args": [
-          "--num-retries=3",
-          "--debug",
-          "--additional-driver-flag=--enable-blink-gen-property-trees"
-        ],
-        "isolate_name": "webkit_layout_tests_exparchive",
-        "merge": {
-          "args": [
-            "--verbose"
-          ],
-          "script": "//third_party/blink/tools/merge_web_test_results.py"
-        },
-        "name": "webkit_layout_tests",
-        "results_handler": "layout tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        }
-      }
-    ]
-  },
   "linux-blink-heap-incremental-marking": {
     "gtest_tests": [
       {
@@ -4013,6 +4965,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -4038,7 +4993,8 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
@@ -4315,6 +5271,7 @@
       },
       {
         "args": [
+          "--gtest_filter=-*UsingRealWebcam*",
           "--enable-blink-features=HeapUnifiedGarbageCollection"
         ],
         "swarming": {
@@ -4354,7 +5311,8 @@
           "--enable-blink-features=HeapUnifiedGarbageCollection"
         ],
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
@@ -4688,6 +5646,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -4713,7 +5674,8 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
@@ -5027,8 +5989,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -5056,6 +6017,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -5115,14 +6079,14 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -5585,11 +6549,9 @@
       {
         "args": [
           "--additional-driver-flag",
-          "--site-per-process",
-          "--additional-driver-flag",
-          "--isolate-origins=http://www.web-platform.test:8001/,http://www1.web-platform.test:8001/,http://www2.web-platform.test:8001/,http://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8001/,http://xn--lve-6lad.web-platform.test:8001/,http://www.web-platform.test:8081/,http://www1.web-platform.test:8081/,http://www2.web-platform.test:8081/,http://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8081/,http://xn--lve-6lad.web-platform.test:8081/,https://www.web-platform.test:8444/,https://www1.web-platform.test:8444/,https://www2.web-platform.test:8444/,https://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8444/,https://xn--lve-6lad.web-platform.test:8444/",
+          "--disable-site-isolation-trials",
           "--additional-expectations",
-          "src/third_party/WebKit/LayoutTests/FlagExpectations/site-per-process",
+          "src/third_party/blink/web_tests/FlagExpectations/disable-site-isolation-trials",
           "--num-retries=3"
         ],
         "isolate_name": "webkit_layout_tests_exparchive",
@@ -5599,7 +6561,7 @@
           ],
           "script": "//third_party/blink/tools/merge_web_test_results.py"
         },
-        "name": "site_per_process_webkit_layout_tests",
+        "name": "not_site_per_process_webkit_layout_tests",
         "results_handler": "layout tests",
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -5648,6 +6610,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -5680,13 +6648,3418 @@
       }
     ]
   },
-  "linux-code-coverage-generation": {
+  "linux-code-coverage": {
     "gtest_tests": [
       {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "accessibility_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "angle_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "app_shell_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "aura_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
         "swarming": {
           "can_use_on_swarming_builders": true
         },
         "test": "base_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "blink_common_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "blink_fuzzer_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "blink_heap_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "blink_platform_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "boringssl_crypto_tests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "boringssl_ssl_tests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "isolate_coverage_data": true,
+        "name": "network_service_browser_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 15
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
+          "--enable-features=WebUIPolymer2",
+          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_polymer2_browser_tests.filter"
+        ],
+        "isolate_coverage_data": true,
+        "name": "webui_polymer2_browser_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 4
+        },
+        "test": "browser_tests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "cacheinvalidation_unittests"
+      },
+      {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "capture_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "cast_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "cc_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "chrome_app_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "chromedriver_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "components_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "isolate_coverage_data": true,
+        "name": "network_service_components_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "components_browsertests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "components_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "compositor_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 6
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "isolate_coverage_data": true,
+        "name": "network_service_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 2
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=TracingPerfettoBackend",
+          "--gtest_filter=TracingControllerTest.*"
+        ],
+        "isolate_coverage_data": true,
+        "name": "perfetto_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "content_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "cronet_tests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "cronet_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "crypto_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "dbus_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "device_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "display_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "events_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "extensions_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "isolate_coverage_data": true,
+        "name": "network_service_extensions_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "extensions_browsertests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "extensions_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "filesystem_service_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "gcm_unit_tests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "gfx_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "gin_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "google_apis_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "gpu_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "headless_browsertests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "headless_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 3
+        },
+        "test": "interactive_ui_tests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "isolate_coverage_data": true,
+        "name": "network_service_interactive_ui_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 3
+        },
+        "test": "interactive_ui_tests"
+      },
+      {
+        "args": [
+          "--enable-features=WebUIPolymer2",
+          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_polymer2_interactive_ui_tests.filter"
+        ],
+        "isolate_coverage_data": true,
+        "name": "webui_polymer2_interactive_ui_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "interactive_ui_tests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "ipc_tests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "jingle_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "latency_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "leveldb_service_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "libjingle_xmpp_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "media_blink_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "media_service_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "media_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "message_center_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "midi_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "mojo_core_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "mojo_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "nacl_helper_nonsfi_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "nacl_loader_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "native_theme_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "net_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "pdf_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "ppapi_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "printing_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "remoting_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "sandbox_linux_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "service_manager_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "services_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "shell_dialogs_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "skia_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "snapshot_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "sql_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "storage_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "sync_integration_tests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "traffic_annotation_auditor_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "ui_base_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "ui_touch_selection_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "unit_tests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "url_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "views_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "viz_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "vr_common_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "vr_pixeltests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "webkit_unit_tests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "wm_unittests"
+      },
+      {
+        "isolate_coverage_data": true,
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "wtf_unittests"
+      }
+    ],
+    "isolated_scripts": [
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "agc_fuzzer",
+        "name": "agc_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "android_crazy_linker_zip_fuzzer",
+        "name": "android_crazy_linker_zip_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "angle_translator_fuzzer",
+        "name": "angle_translator_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "apdu_fuzzer",
+        "name": "apdu_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "appcache_fuzzer",
+        "name": "appcache_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "appcache_manifest_parser_fuzzer",
+        "name": "appcache_manifest_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "audio_decoder_fuzzer",
+        "name": "audio_decoder_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "audio_decoder_ilbc_fuzzer",
+        "name": "audio_decoder_ilbc_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "audio_decoder_isac_fuzzer",
+        "name": "audio_decoder_isac_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "audio_decoder_isac_incoming_packet_fuzzer",
+        "name": "audio_decoder_isac_incoming_packet_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "audio_decoder_isacfix_fuzzer",
+        "name": "audio_decoder_isacfix_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "audio_decoder_opus_fuzzer",
+        "name": "audio_decoder_opus_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "audio_decoder_opus_redundant_fuzzer",
+        "name": "audio_decoder_opus_redundant_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "audio_encoder_opus_fuzzer",
+        "name": "audio_encoder_opus_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "audio_processing_fuzzer",
+        "name": "audio_processing_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "autofill_phone_number_i18n_fuzzer",
+        "name": "autofill_phone_number_i18n_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "ax_table_fuzzer",
+        "name": "ax_table_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "ax_tree_fuzzer",
+        "name": "ax_tree_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "base64_decode_fuzzer",
+        "name": "base64_decode_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "base64_encode_fuzzer",
+        "name": "base64_encode_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "base_json_correctness_fuzzer",
+        "name": "base_json_correctness_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "base_json_reader_fuzzer",
+        "name": "base_json_reader_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "base_json_string_escape_fuzzer",
+        "name": "base_json_string_escape_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "bdict_fuzzer",
+        "name": "bdict_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "blink_harfbuzz_shaper_fuzzer",
+        "name": "blink_harfbuzz_shaper_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "blink_html_tokenizer_fuzzer",
+        "name": "blink_html_tokenizer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "blink_http_parsers_fuzzer",
+        "name": "blink_http_parsers_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "blink_json_parser_fuzzer",
+        "name": "blink_json_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "blink_png_decoder_fuzzer",
+        "name": "blink_png_decoder_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "blink_text_codec_UTF_8_fuzzer",
+        "name": "blink_text_codec_UTF_8_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "blink_text_codec_WINDOWS_1252_fuzzer",
+        "name": "blink_text_codec_WINDOWS_1252_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_arm_cpuinfo_fuzzer",
+        "name": "boringssl_arm_cpuinfo_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_bn_div_fuzzer",
+        "name": "boringssl_bn_div_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_bn_mod_exp_fuzzer",
+        "name": "boringssl_bn_mod_exp_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_cert_fuzzer",
+        "name": "boringssl_cert_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_client_fuzzer",
+        "name": "boringssl_client_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_client_no_fuzzer_mode_fuzzer",
+        "name": "boringssl_client_no_fuzzer_mode_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_dtls_client_fuzzer",
+        "name": "boringssl_dtls_client_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_dtls_server_fuzzer",
+        "name": "boringssl_dtls_server_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_pkcs12_fuzzer",
+        "name": "boringssl_pkcs12_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_pkcs8_fuzzer",
+        "name": "boringssl_pkcs8_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_privkey_fuzzer",
+        "name": "boringssl_privkey_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_read_pem_fuzzer",
+        "name": "boringssl_read_pem_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_server_fuzzer",
+        "name": "boringssl_server_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_server_no_fuzzer_mode_fuzzer",
+        "name": "boringssl_server_no_fuzzer_mode_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_session_fuzzer",
+        "name": "boringssl_session_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_spki_fuzzer",
+        "name": "boringssl_spki_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "boringssl_ssl_ctx_api_fuzzer",
+        "name": "boringssl_ssl_ctx_api_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "brotli_fuzzer",
+        "name": "brotli_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "cast_message_fuzzer",
+        "name": "cast_message_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "cbcs_decryptor_fuzzer",
+        "name": "cbcs_decryptor_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "cenc_decryptor_fuzzer",
+        "name": "cenc_decryptor_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "clear_site_data_fuzzer",
+        "name": "clear_site_data_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "color_transform_fuzzer",
+        "name": "color_transform_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "comfort_noise_decoder_fuzzer",
+        "name": "comfort_noise_decoder_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "compact_enc_det_fuzzer",
+        "name": "compact_enc_det_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "congestion_controller_feedback_fuzzer",
+        "name": "congestion_controller_feedback_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "content_security_policy_fuzzer",
+        "name": "content_security_policy_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "convert_woff2ttf_fuzzer",
+        "name": "convert_woff2ttf_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "courgette_fuzzer",
+        "name": "courgette_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "css_parser_fast_paths_fuzzer",
+        "name": "css_parser_fast_paths_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "css_parser_proto_fuzzer",
+        "name": "css_parser_proto_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "csv_reader_fuzzer",
+        "name": "csv_reader_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "ctap_response_fuzzer",
+        "name": "ctap_response_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "dawn_spirv_cross_glsl_fast_fuzzer",
+        "name": "dawn_spirv_cross_glsl_fast_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "dawn_spirv_cross_glsl_full_fuzzer",
+        "name": "dawn_spirv_cross_glsl_full_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "dawn_spirv_cross_hlsl_fast_fuzzer",
+        "name": "dawn_spirv_cross_hlsl_fast_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "dawn_spirv_cross_hlsl_full_fuzzer",
+        "name": "dawn_spirv_cross_hlsl_full_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "dawn_spirv_cross_msl_fast_fuzzer",
+        "name": "dawn_spirv_cross_msl_fast_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "dawn_spirv_cross_msl_full_fuzzer",
+        "name": "dawn_spirv_cross_msl_full_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "dawn_wire_server_and_frontend_fuzzer",
+        "name": "dawn_wire_server_and_frontend_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "edid_parser_fuzzer",
+        "name": "edid_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "empty_fuzzer",
+        "name": "empty_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "expat_xml_parse_fuzzer",
+        "name": "expat_xml_parse_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "feature_policy_fuzzer",
+        "name": "feature_policy_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "fido_ble_frames_fuzzer",
+        "name": "fido_ble_frames_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "fido_cable_handshake_handler_fuzzer",
+        "name": "fido_cable_handshake_handler_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "fido_hid_message_fuzzer",
+        "name": "fido_hid_message_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "fingerprint_fuzzer",
+        "name": "fingerprint_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "flatbuffers_verifier_fuzzer",
+        "name": "flatbuffers_verifier_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "flexfec_header_reader_fuzzer",
+        "name": "flexfec_header_reader_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "flexfec_receiver_fuzzer",
+        "name": "flexfec_receiver_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "flexfec_sender_fuzzer",
+        "name": "flexfec_sender_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "form_structure_fuzzer",
+        "name": "form_structure_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "form_structure_process_query_response_fuzzer",
+        "name": "form_structure_process_query_response_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "forward_error_correction_fuzzer",
+        "name": "forward_error_correction_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "frame_buffer2_fuzzer",
+        "name": "frame_buffer2_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "gfx_png_image_fuzzer",
+        "name": "gfx_png_image_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "gpu_angle_fuzzer",
+        "name": "gpu_angle_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "gpu_angle_passthrough_fuzzer",
+        "name": "gpu_angle_passthrough_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "gpu_fuzzer",
+        "name": "gpu_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "gpu_raster_angle_fuzzer",
+        "name": "gpu_raster_angle_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "gpu_raster_fuzzer",
+        "name": "gpu_raster_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "gpu_raster_swiftshader_fuzzer",
+        "name": "gpu_raster_swiftshader_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "gpu_swiftshader_fuzzer",
+        "name": "gpu_swiftshader_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "gurl_fuzzer",
+        "name": "gurl_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "h264_bitstream_parser_fuzzer",
+        "name": "h264_bitstream_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "h264_depacketizer_fuzzer",
+        "name": "h264_depacketizer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "harfbuzz_fuzzer",
+        "name": "harfbuzz_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "hash_fuzzer",
+        "name": "hash_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "hid_report_descriptor_fuzzer",
+        "name": "hid_report_descriptor_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "hit_test_manager_fuzzer",
+        "name": "hit_test_manager_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "hit_test_query_fuzzer",
+        "name": "hit_test_query_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "html_preload_scanner_fuzzer",
+        "name": "html_preload_scanner_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "hunspell_fuzzer",
+        "name": "hunspell_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "icu_break_iterator_fuzzer",
+        "name": "icu_break_iterator_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "icu_break_iterator_utf32_fuzzer",
+        "name": "icu_break_iterator_utf32_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "icu_converter_fuzzer",
+        "name": "icu_converter_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "icu_number_format_fuzzer",
+        "name": "icu_number_format_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "icu_ucasemap_fuzzer",
+        "name": "icu_ucasemap_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "icu_unicode_string_codepage_create_fuzzer",
+        "name": "icu_unicode_string_codepage_create_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "icu_uregex_open_fuzzer",
+        "name": "icu_uregex_open_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "indexed_ruleset_fuzzer",
+        "name": "indexed_ruleset_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "javascript_parser_proto_fuzzer",
+        "name": "javascript_parser_proto_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "language_detection_fuzzer",
+        "name": "language_detection_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "leveldb_put_get_delete_fuzzer",
+        "name": "leveldb_put_get_delete_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libaddressinput_parse_address_fields_fuzzer",
+        "name": "libaddressinput_parse_address_fields_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libaddressinput_parse_format_rule_fuzzer",
+        "name": "libaddressinput_parse_format_rule_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libpng_progressive_read_fuzzer",
+        "name": "libpng_progressive_read_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libpng_read_fuzzer",
+        "name": "libpng_read_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libsrtp_fuzzer",
+        "name": "libsrtp_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libwebp_advanced_api_fuzzer",
+        "name": "libwebp_advanced_api_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libwebp_animation_api_fuzzer",
+        "name": "libwebp_animation_api_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libwebp_demux_api_fuzzer",
+        "name": "libwebp_demux_api_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libwebp_enc_dec_api_fuzzer",
+        "name": "libwebp_enc_dec_api_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libwebp_simple_api_fuzzer",
+        "name": "libwebp_simple_api_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "libxml_xml_read_memory_fuzzer",
+        "name": "libxml_xml_read_memory_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "lookup_affiliation_response_parser_fuzzer",
+        "name": "lookup_affiliation_response_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mdns_parser_fuzzer",
+        "name": "mdns_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "media_bit_reader_fuzzer",
+        "name": "media_bit_reader_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "media_container_names_fuzzer",
+        "name": "media_container_names_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "media_h264_parser_fuzzer",
+        "name": "media_h264_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "media_pipeline_integration_fuzzer",
+        "name": "media_pipeline_integration_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "media_vp8_parser_fuzzer",
+        "name": "media_vp8_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "media_vp9_parser_encrypted_fuzzer",
+        "name": "media_vp9_parser_encrypted_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "media_vp9_parser_fuzzer",
+        "name": "media_vp9_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "media_vpx_video_decoder_fuzzer",
+        "name": "media_vpx_video_decoder_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "media_webm_muxer_fuzzer",
+        "name": "media_webm_muxer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mediasource_MP3_pipeline_integration_fuzzer",
+        "name": "mediasource_MP3_pipeline_integration_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mediasource_MP4_AV1_pipeline_integration_fuzzer",
+        "name": "mediasource_MP4_AV1_pipeline_integration_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mediasource_MP4_FLAC_pipeline_integration_fuzzer",
+        "name": "mediasource_MP4_FLAC_pipeline_integration_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mediasource_MP4_OPUS_pipeline_integration_fuzzer",
+        "name": "mediasource_MP4_OPUS_pipeline_integration_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mediasource_WEBM_OPUS_VP9_pipeline_integration_fuzzer",
+        "name": "mediasource_WEBM_OPUS_VP9_pipeline_integration_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mediasource_WEBM_OPUS_pipeline_integration_fuzzer",
+        "name": "mediasource_WEBM_OPUS_pipeline_integration_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mediasource_WEBM_VORBIS_pipeline_integration_fuzzer",
+        "name": "mediasource_WEBM_VORBIS_pipeline_integration_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mediasource_WEBM_VP8_pipeline_integration_fuzzer",
+        "name": "mediasource_WEBM_VP8_pipeline_integration_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mediasource_WEBM_VP9_pipeline_integration_fuzzer",
+        "name": "mediasource_WEBM_VP9_pipeline_integration_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "merkle_integrity_source_stream_fuzzer",
+        "name": "merkle_integrity_source_stream_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mhtml_parser_fuzzer",
+        "name": "mhtml_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "midi_message_queue_fuzzer",
+        "name": "midi_message_queue_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "midi_webmidi_data_validator_fuzzer",
+        "name": "midi_webmidi_data_validator_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "minidump_fuzzer",
+        "name": "minidump_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "minizip_compress_fuzzer",
+        "name": "minizip_compress_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "minizip_uncompress_fuzzer",
+        "name": "minizip_uncompress_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mojo_core_channel_fuzzer",
+        "name": "mojo_core_channel_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mojo_core_node_channel_fuzzer",
+        "name": "mojo_core_node_channel_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mojo_core_port_event_fuzzer",
+        "name": "mojo_core_port_event_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mojo_core_user_message_fuzzer",
+        "name": "mojo_core_user_message_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mojo_parse_message_fuzzer",
+        "name": "mojo_parse_message_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "mojo_parse_message_proto_fuzzer",
+        "name": "mojo_parse_message_proto_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_auth_challenge_tokenizer_fuzzer",
+        "name": "net_auth_challenge_tokenizer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_brotli_source_stream_fuzzer",
+        "name": "net_brotli_source_stream_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_cert_normalize_name_fuzzer",
+        "name": "net_cert_normalize_name_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_cert_parse_certificate_fuzzer",
+        "name": "net_cert_parse_certificate_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_cert_verify_name_in_subtree_fuzzer",
+        "name": "net_cert_verify_name_in_subtree_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_cert_verify_name_match_fuzzer",
+        "name": "net_cert_verify_name_match_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_data_job_fuzzer",
+        "name": "net_data_job_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_dns_hosts_parse_fuzzer",
+        "name": "net_dns_hosts_parse_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_dns_query_parse_fuzzer",
+        "name": "net_dns_query_parse_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_dns_record_fuzzer",
+        "name": "net_dns_record_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_dns_response_fuzzer",
+        "name": "net_dns_response_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_ftp_ctrl_response_fuzzer",
+        "name": "net_ftp_ctrl_response_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_ftp_directory_listing_fuzzer",
+        "name": "net_ftp_directory_listing_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_get_domain_and_registry_fuzzer",
+        "name": "net_get_domain_and_registry_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_gzip_source_stream_fuzzer",
+        "name": "net_gzip_source_stream_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_host_resolver_impl_fuzzer",
+        "name": "net_host_resolver_impl_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_hpack_decoder_fuzzer",
+        "name": "net_hpack_decoder_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_http2_frame_decoder_fuzzer",
+        "name": "net_http2_frame_decoder_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_http_chunked_decoder_fuzzer",
+        "name": "net_http_chunked_decoder_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_http_proxy_client_socket_fuzzer",
+        "name": "net_http_proxy_client_socket_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_http_security_headers_expect_ct_fuzzer",
+        "name": "net_http_security_headers_expect_ct_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_http_security_headers_hsts_fuzzer",
+        "name": "net_http_security_headers_hsts_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_http_server_fuzzer",
+        "name": "net_http_server_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_http_stream_parser_fuzzer",
+        "name": "net_http_stream_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_http_transport_security_state_static_fuzzer",
+        "name": "net_http_transport_security_state_static_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_mime_sniffer_fuzzer",
+        "name": "net_mime_sniffer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_ntlm_ntlm_client_fuzzer",
+        "name": "net_ntlm_ntlm_client_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_parse_cookie_line_fuzzer",
+        "name": "net_parse_cookie_line_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_parse_data_url_fuzzer",
+        "name": "net_parse_data_url_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_parse_ip_pattern_fuzzer",
+        "name": "net_parse_ip_pattern_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_parse_proxy_bypass_rules_fuzzer",
+        "name": "net_parse_proxy_bypass_rules_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_parse_proxy_list_fuzzer",
+        "name": "net_parse_proxy_list_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_parse_proxy_list_pac_fuzzer",
+        "name": "net_parse_proxy_list_pac_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_parse_proxy_rules_fuzzer",
+        "name": "net_parse_proxy_rules_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_parse_url_hostname_to_address_fuzzer",
+        "name": "net_parse_url_hostname_to_address_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_quic_crypto_framer_parse_message_fuzzer",
+        "name": "net_quic_crypto_framer_parse_message_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_quic_stream_factory_fuzzer",
+        "name": "net_quic_stream_factory_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_quic_transport_parameters_fuzzer",
+        "name": "net_quic_transport_parameters_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_reporting_header_parser_fuzzer",
+        "name": "net_reporting_header_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_socks5_client_socket_fuzzer",
+        "name": "net_socks5_client_socket_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_socks_client_socket_fuzzer",
+        "name": "net_socks_client_socket_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_spdy_session_fuzzer",
+        "name": "net_spdy_session_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_unescape_url_component_fuzzer",
+        "name": "net_unescape_url_component_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_uri_template_fuzzer",
+        "name": "net_uri_template_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_url_request_ftp_fuzzer",
+        "name": "net_url_request_ftp_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_url_request_fuzzer",
+        "name": "net_url_request_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_websocket_deflate_stream_fuzzer",
+        "name": "net_websocket_deflate_stream_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_websocket_extension_parser_fuzzer",
+        "name": "net_websocket_extension_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "net_websocket_frame_parser_fuzzer",
+        "name": "net_websocket_frame_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "neteq_rtp_fuzzer",
+        "name": "neteq_rtp_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "neteq_signal_fuzzer",
+        "name": "neteq_signal_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "origin_policy_parser_fuzzer",
+        "name": "origin_policy_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "origin_trial_token_fuzzer",
+        "name": "origin_trial_token_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "ots_fuzzer",
+        "name": "ots_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "override_lite_runtime_plugin_test_fuzzer",
+        "name": "override_lite_runtime_plugin_test_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "packet_buffer_fuzzer",
+        "name": "packet_buffer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "paint_op_buffer_fuzzer",
+        "name": "paint_op_buffer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "password_generator_fips181_fuzzer",
+        "name": "password_generator_fips181_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "password_generator_proto_fuzzer",
+        "name": "password_generator_proto_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "password_manager_form_parser_fuzzer",
+        "name": "password_manager_form_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "password_manager_form_parser_generic_fuzzer",
+        "name": "password_manager_form_parser_generic_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "password_manager_form_parser_proto_fuzzer",
+        "name": "password_manager_form_parser_proto_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "password_manager_form_parser_proto_generic_fuzzer",
+        "name": "password_manager_form_parser_proto_generic_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "payment_method_manifest_fuzzer",
+        "name": "payment_method_manifest_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "payment_web_app_manifest_fuzzer",
+        "name": "payment_web_app_manifest_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_cjs_util_fuzzer",
+        "name": "pdf_cjs_util_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_cmap_fuzzer",
+        "name": "pdf_cmap_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_codec_a85_fuzzer",
+        "name": "pdf_codec_a85_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_codec_fax_fuzzer",
+        "name": "pdf_codec_fax_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_codec_icc_fuzzer",
+        "name": "pdf_codec_icc_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_codec_jbig2_fuzzer",
+        "name": "pdf_codec_jbig2_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_codec_rle_fuzzer",
+        "name": "pdf_codec_rle_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_font_fuzzer",
+        "name": "pdf_font_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_fx_date_helpers_fuzzer",
+        "name": "pdf_fx_date_helpers_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_hint_table_fuzzer",
+        "name": "pdf_hint_table_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_jpx_fuzzer",
+        "name": "pdf_jpx_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_psengine_fuzzer",
+        "name": "pdf_psengine_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_streamparser_fuzzer",
+        "name": "pdf_streamparser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdf_xml_fuzzer",
+        "name": "pdf_xml_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pdfium_fuzzer",
+        "name": "pdfium_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pickle_fuzzer",
+        "name": "pickle_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "preg_parser_fuzzer",
+        "name": "preg_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "profiling_fuzzer",
+        "name": "profiling_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "prtime_fuzzer",
+        "name": "prtime_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "pseudotcp_parser_fuzzer",
+        "name": "pseudotcp_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "qcms_color_space_fuzzer",
+        "name": "qcms_color_space_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "reader_fuzzer",
+        "name": "reader_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "renderer_fuzzer",
+        "name": "renderer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "renderer_proto_tree_fuzzer",
+        "name": "renderer_proto_tree_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "renderer_tree_fuzzer",
+        "name": "renderer_tree_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "residual_echo_detector_fuzzer",
+        "name": "residual_echo_detector_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "rtcp_receiver_fuzzer",
+        "name": "rtcp_receiver_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "rtp_frame_reference_finder_fuzzer",
+        "name": "rtp_frame_reference_finder_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "rtp_header_fuzzer",
+        "name": "rtp_header_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "rtp_packet_fuzzer",
+        "name": "rtp_packet_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sandbox_ipc_fuzzer",
+        "name": "sandbox_ipc_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sdp_parser_fuzzer",
+        "name": "sdp_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sequence_manager_fuzzer",
+        "name": "sequence_manager_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sfntly_fuzzer",
+        "name": "sfntly_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sha1_fuzzer",
+        "name": "sha1_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "signed_exchange_certificate_chain_fuzzer",
+        "name": "signed_exchange_certificate_chain_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "signed_exchange_envelope_fuzzer",
+        "name": "signed_exchange_envelope_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "signed_exchange_signature_header_field_fuzzer",
+        "name": "signed_exchange_signature_header_field_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "skia_image_filter_proto_fuzzer",
+        "name": "skia_image_filter_proto_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "skia_path_fuzzer",
+        "name": "skia_path_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "skia_pathop_fuzzer",
+        "name": "skia_pathop_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "snappy_compress_fuzzer",
+        "name": "snappy_compress_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "snappy_uncompress_fuzzer",
+        "name": "snappy_uncompress_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "spvtools_binary_parser_fuzzer",
+        "name": "spvtools_binary_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "spvtools_opt_legalization_fuzzer",
+        "name": "spvtools_opt_legalization_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "spvtools_opt_performance_fuzzer",
+        "name": "spvtools_opt_performance_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "spvtools_opt_size_fuzzer",
+        "name": "spvtools_opt_size_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "spvtools_val_fuzzer",
+        "name": "spvtools_val_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sqlite3_fts3_lpm_fuzzer",
+        "name": "sqlite3_fts3_lpm_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sqlite3_lpm_fuzzer",
+        "name": "sqlite3_lpm_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sqlite3_ossfuzz_fuzzer",
+        "name": "sqlite3_ossfuzz_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sqlite3_select_expr_lpm_fuzzer",
+        "name": "sqlite3_select_expr_lpm_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sqlite3_select_printf_lpm_fuzzer",
+        "name": "sqlite3_select_printf_lpm_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "sqlite3_select_strftime_lpm_fuzzer",
+        "name": "sqlite3_select_strftime_lpm_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "string_number_conversions_fuzzer",
+        "name": "string_number_conversions_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "string_tokenizer_fuzzer",
+        "name": "string_tokenizer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "stun_parser_fuzzer",
+        "name": "stun_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "stun_validator_fuzzer",
+        "name": "stun_validator_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "stylesheet_contents_fuzzer",
+        "name": "stylesheet_contents_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "swiftshader_vertex_routine_fuzzer",
+        "name": "swiftshader_vertex_routine_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "template_url_parser_fuzzer",
+        "name": "template_url_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "test_config_and_dict",
+        "name": "test_config_and_dict",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "test_config_and_seed_corpus",
+        "name": "test_config_and_seed_corpus",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "test_config_and_seed_corpuses",
+        "name": "test_config_and_seed_corpuses",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "test_config_only",
+        "name": "test_config_only",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "test_dict_from_subdir",
+        "name": "test_dict_from_subdir",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "test_dict_only",
+        "name": "test_dict_only",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "text_resource_decoder_fuzzer",
+        "name": "text_resource_decoder_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "third_party_re2_fuzzer",
+        "name": "third_party_re2_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "transfer_cache_fuzzer",
+        "name": "transfer_cache_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "transport_feedback_packet_loss_tracker_fuzzer",
+        "name": "transport_feedback_packet_loss_tracker_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "turn_unwrap_fuzzer",
+        "name": "turn_unwrap_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "ulpfec_generator_fuzzer",
+        "name": "ulpfec_generator_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "ulpfec_header_reader_fuzzer",
+        "name": "ulpfec_header_reader_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "ulpfec_receiver_fuzzer",
+        "name": "ulpfec_receiver_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "url_parse_proto_fuzzer",
+        "name": "url_parse_proto_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "usb_descriptors_fuzzer",
+        "name": "usb_descriptors_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "usb_string_read_fuzzer",
+        "name": "usb_string_read_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "usrsctp_fuzzer",
+        "name": "usrsctp_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "utf_string_conversions_fuzzer",
+        "name": "utf_string_conversions_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v4_get_hash_protocol_manager_fuzzer",
+        "name": "v4_get_hash_protocol_manager_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_fully_instrumented_fuzzer",
+        "name": "v8_fully_instrumented_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_json_parser_fuzzer",
+        "name": "v8_json_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_multi_return_fuzzer",
+        "name": "v8_multi_return_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_regexp_builtins_fuzzer",
+        "name": "v8_regexp_builtins_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_regexp_parser_fuzzer",
+        "name": "v8_regexp_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_script_parser_fuzzer",
+        "name": "v8_script_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_serialized_script_value_fuzzer",
+        "name": "v8_serialized_script_value_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_wasm_async_fuzzer",
+        "name": "v8_wasm_async_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_wasm_code_fuzzer",
+        "name": "v8_wasm_code_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_wasm_compile_fuzzer",
+        "name": "v8_wasm_compile_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "v8_wasm_fuzzer",
+        "name": "v8_wasm_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "vp8_depacketizer_fuzzer",
+        "name": "vp8_depacketizer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "vp8_qp_parser_fuzzer",
+        "name": "vp8_qp_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "vp9_depacketizer_fuzzer",
+        "name": "vp9_depacketizer_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "vp9_qp_parser_fuzzer",
+        "name": "vp9_qp_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "web_icon_sizes_fuzzer",
+        "name": "web_icon_sizes_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "webcrypto_ec_import_key_pkcs8_fuzzer",
+        "name": "webcrypto_ec_import_key_pkcs8_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "webcrypto_ec_import_key_raw_fuzzer",
+        "name": "webcrypto_ec_import_key_raw_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "webcrypto_ec_import_key_spki_fuzzer",
+        "name": "webcrypto_ec_import_key_spki_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "webcrypto_rsa_import_key_pkcs8_fuzzer",
+        "name": "webcrypto_rsa_import_key_pkcs8_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "webcrypto_rsa_import_key_spki_fuzzer",
+        "name": "webcrypto_rsa_import_key_spki_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "args": [
+          "--additional-driver-flag=--no-sandbox",
+          "--num-retries=3"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "webkit_layout_tests_exparchive",
+        "name": "webkit_layout_tests",
+        "results_handler": "layout tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 12
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "webusb_descriptors_fuzzer",
+        "name": "webusb_descriptors_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "xml_parser_fuzzer",
+        "name": "xml_parser_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zlib_deflate_fuzzer",
+        "name": "zlib_deflate_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zlib_deflate_set_dictionary_fuzzer",
+        "name": "zlib_deflate_set_dictionary_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zlib_inflate_fuzzer",
+        "name": "zlib_inflate_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zlib_uncompress_fuzzer",
+        "name": "zlib_uncompress_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zucchini_apply_fuzzer",
+        "name": "zucchini_apply_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zucchini_disassembler_dex_fuzzer",
+        "name": "zucchini_disassembler_dex_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zucchini_disassembler_win32_fuzzer",
+        "name": "zucchini_disassembler_win32_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zucchini_imposed_ensemble_matcher_fuzzer",
+        "name": "zucchini_imposed_ensemble_matcher_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zucchini_patch_fuzzer",
+        "name": "zucchini_patch_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zucchini_raw_gen_fuzzer",
+        "name": "zucchini_raw_gen_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
+      },
+      {
+        "isolate_coverage_data": true,
+        "isolate_name": "zucchini_ztf_gen_fuzzer",
+        "name": "zucchini_ztf_gen_fuzzer",
+        "swarming": {
+          "can_use_on_swarming_builders": false
+        }
       }
     ]
   },
@@ -5767,8 +10140,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -5796,6 +10168,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -5855,14 +10230,14 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -6325,11 +10700,9 @@
       {
         "args": [
           "--additional-driver-flag",
-          "--site-per-process",
-          "--additional-driver-flag",
-          "--isolate-origins=http://www.web-platform.test:8001/,http://www1.web-platform.test:8001/,http://www2.web-platform.test:8001/,http://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8001/,http://xn--lve-6lad.web-platform.test:8001/,http://www.web-platform.test:8081/,http://www1.web-platform.test:8081/,http://www2.web-platform.test:8081/,http://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8081/,http://xn--lve-6lad.web-platform.test:8081/,https://www.web-platform.test:8444/,https://www1.web-platform.test:8444/,https://www2.web-platform.test:8444/,https://xn--n8j6ds53lwwkrqhv28a.web-platform.test:8444/,https://xn--lve-6lad.web-platform.test:8444/",
+          "--disable-site-isolation-trials",
           "--additional-expectations",
-          "src/third_party/WebKit/LayoutTests/FlagExpectations/site-per-process",
+          "src/third_party/blink/web_tests/FlagExpectations/disable-site-isolation-trials",
           "--num-retries=3"
         ],
         "isolate_name": "webkit_layout_tests_exparchive",
@@ -6339,7 +10712,7 @@
           ],
           "script": "//third_party/blink/tools/merge_web_test_results.py"
         },
-        "name": "site_per_process_webkit_layout_tests",
+        "name": "not_site_per_process_webkit_layout_tests",
         "results_handler": "layout tests",
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -6360,6 +10733,10 @@
         }
       },
       {
+        "args": [
+          "--xvfb",
+          "--jobs=1"
+        ],
         "isolate_name": "telemetry_perf_unittests",
         "name": "telemetry_perf_unittests",
         "swarming": {
@@ -6384,6 +10761,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -6417,6 +10800,10 @@
     ],
     "scripts": [
       {
+        "name": "check_static_initializers",
+        "script": "check_static_initializers.py"
+      },
+      {
         "name": "checkdeps",
         "script": "checkdeps.py"
       },
@@ -6427,6 +10814,125 @@
       {
         "name": "webkit_lint",
         "script": "webkit_lint.py"
+      }
+    ]
+  },
+  "mac-hermetic-upgrade-rel": {
+    "additional_compile_targets": [
+      "all"
+    ]
+  },
+  "mac-mojo-rel": {
+    "gtest_tests": [
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "name": "network_service_browser_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "none",
+              "os": "Mac-10.13"
+            }
+          ],
+          "shards": 15
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "name": "network_service_components_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "none",
+              "os": "Mac-10.13"
+            }
+          ]
+        },
+        "test": "components_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "name": "network_service_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "none",
+              "os": "Mac-10.13"
+            }
+          ],
+          "shards": 2
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "name": "network_service_extensions_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "none",
+              "os": "Mac-10.13"
+            }
+          ]
+        },
+        "test": "extensions_browsertests"
+      },
+      {
+        "args": [
+          "--enable-features=NetworkService"
+        ],
+        "name": "network_service_interactive_ui_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "none",
+              "os": "Mac-10.13"
+            }
+          ],
+          "shards": 3
+        },
+        "test": "interactive_ui_tests"
+      }
+    ],
+    "isolated_scripts": [
+      {
+        "args": [
+          "--additional-driver-flag=--enable-features=NetworkService",
+          "--num-retries=3"
+        ],
+        "isolate_name": "webkit_layout_tests_exparchive",
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "name": "webkit_layout_tests",
+        "results_handler": "layout tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "none",
+              "os": "Mac-10.13"
+            }
+          ],
+          "shards": 12
+        }
       }
     ]
   },
@@ -6571,9 +11077,8 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "gpu": "none",
-              "os": "Mac-10.14",
-              "pool": "Chrome-quarantine"
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14"
             }
           ],
           "expiration": 21600,
@@ -6583,8 +11088,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -6597,6 +11101,24 @@
           ],
           "expiration": 21600,
           "shards": 15
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor"
+        ],
+        "name": "non_viz_browser_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14"
+            }
+          ],
+          "expiration": 21600,
+          "shards": 10
         },
         "test": "browser_tests"
       },
@@ -6633,6 +11155,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -6749,14 +11274,14 @@
               "os": "Mac-10.14"
             }
           ],
-          "expiration": 21600
+          "expiration": 21600,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -6769,6 +11294,24 @@
           ],
           "expiration": 21600,
           "shards": 2
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor"
+        ],
+        "name": "non_viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14"
+            }
+          ],
+          "expiration": 21600,
+          "shards": 10
         },
         "test": "content_browsertests"
       },
@@ -6791,6 +11334,58 @@
         "test": "content_browsertests"
       },
       {
+        "args": [
+          "--enable-features=VizDisplayCompositor"
+        ],
+        "name": "viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14"
+            }
+          ],
+          "expiration": 21600,
+          "shards": 10
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14"
+            }
+          ],
+          "expiration": 21600
+        },
+        "test": "content_unittests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor"
+        ],
+        "name": "non_viz_content_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14"
+            }
+          ],
+          "expiration": 21600
+        },
+        "test": "content_unittests"
+      },
+      {
+        "args": [
+          "--enable-features=VizDisplayCompositor"
+        ],
+        "name": "viz_content_unittests",
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -7167,19 +11762,6 @@
           ],
           "expiration": 21600
         },
-        "test": "mac_installer_unittests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "gpu": "8086:0a2e",
-              "os": "Mac-10.14"
-            }
-          ],
-          "expiration": 21600
-        },
         "test": "media_blink_unittests"
       },
       {
@@ -7466,19 +12048,6 @@
           ],
           "expiration": 21600
         },
-        "test": "traffic_annotation_auditor_unittests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "gpu": "8086:0a2e",
-              "os": "Mac-10.14"
-            }
-          ],
-          "expiration": 21600
-        },
         "test": "ui_base_unittests"
       },
       {
@@ -7606,7 +12175,13 @@
         }
       },
       {
+        "args": [
+          "--smoke-test-mode"
+        ],
         "isolate_name": "components_perftests",
+        "merge": {
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "components_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -7701,6 +12276,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -7848,6 +12429,30 @@
       },
       {
         "args": [
+          "--enable-features=ViewsBrowserWindows",
+          "--test-launcher-filter-file=../../testing/buildbot/filters/mac_window_server_killers.browser_tests.filter",
+          "--gtest_shuffle"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor",
+          "--enable-features=ViewsBrowserWindows"
+        ],
+        "name": "non_viz_browser_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
+        },
+        "test": "browser_tests"
+      },
+      {
+        "args": [
           "--enable-features=WebUIPolymer2,ViewsBrowserWindows",
           "--test-launcher-filter-file=../../testing/buildbot/filters/webui_polymer2_browser_tests.filter"
         ],
@@ -7869,6 +12474,7 @@
       },
       {
         "args": [
+          "--gtest_filter=-*UsingRealWebcam*",
           "--enable-features=ViewsBrowserWindows"
         ],
         "swarming": {
@@ -7935,7 +12541,20 @@
           "--enable-features=ViewsBrowserWindows"
         ],
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor",
+          "--enable-features=ViewsBrowserWindows"
+        ],
+        "name": "non_viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
         },
         "test": "content_browsertests"
       },
@@ -7952,8 +12571,40 @@
       },
       {
         "args": [
+          "--enable-features=VizDisplayCompositor,ViewsBrowserWindows"
+        ],
+        "name": "viz_content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "shards": 10
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "args": [
           "--enable-features=ViewsBrowserWindows"
         ],
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "content_unittests"
+      },
+      {
+        "args": [
+          "--disable-features=VizDisplayCompositor",
+          "--enable-features=ViewsBrowserWindows"
+        ],
+        "name": "non_viz_content_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "content_unittests"
+      },
+      {
+        "args": [
+          "--enable-features=VizDisplayCompositor,ViewsBrowserWindows"
+        ],
+        "name": "viz_content_unittests",
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -8185,15 +12836,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "mac_installer_unittests"
-      },
-      {
-        "args": [
-          "--enable-features=ViewsBrowserWindows"
-        ],
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
         "test": "media_blink_unittests"
       },
       {
@@ -8384,15 +13026,6 @@
           "can_use_on_swarming_builders": true
         },
         "test": "sync_integration_tests"
-      },
-      {
-        "args": [
-          "--enable-features=ViewsBrowserWindows"
-        ],
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
-        "test": "traffic_annotation_auditor_unittests"
       },
       {
         "args": [

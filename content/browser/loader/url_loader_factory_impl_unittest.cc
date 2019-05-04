@@ -46,6 +46,7 @@
 #include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/test/url_request/url_request_slow_download_job.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_filter.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
@@ -76,8 +77,7 @@ class URLLoaderFactoryImplTest : public ::testing::TestWithParam<size_t> {
             nullptr,
             nullptr,
             nullptr,
-            BrowserContext::GetSharedCorsOriginAccessList(
-                browser_context_.get()),
+            browser_context_->GetSharedCorsOriginAccessList(),
             base::Bind(&URLLoaderFactoryImplTest::GetContexts,
                        base::Unretained(this)),
             base::CreateSingleThreadTaskRunnerWithTraits(
@@ -98,7 +98,7 @@ class URLLoaderFactoryImplTest : public ::testing::TestWithParam<size_t> {
         mojo::MakeRequest(&factory_));
 
     // Calling this function creates a request context.
-    browser_context_->GetResourceContext()->GetRequestContext();
+    browser_context_->GetRequestContext()->GetURLRequestContext();
     base::RunLoop().RunUntilIdle();
   }
 
@@ -119,7 +119,7 @@ class URLLoaderFactoryImplTest : public ::testing::TestWithParam<size_t> {
                    net::URLRequestContext** request_context) {
     *resource_context = browser_context_->GetResourceContext();
     *request_context =
-        browser_context_->GetResourceContext()->GetRequestContext();
+        browser_context_->GetRequestContext()->GetURLRequestContext();
   }
 
   // Must outlive all members below.

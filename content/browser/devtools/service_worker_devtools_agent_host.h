@@ -14,7 +14,7 @@
 #include "base/unguessable_token.h"
 #include "content/browser/devtools/devtools_agent_host_impl.h"
 #include "content/browser/devtools/service_worker_devtools_manager.h"
-#include "third_party/blink/public/web/devtools_agent.mojom.h"
+#include "third_party/blink/public/mojom/devtools/devtools_agent.mojom.h"
 
 namespace content {
 
@@ -76,8 +76,7 @@ class ServiceWorkerDevToolsAgentHost : public DevToolsAgentHostImpl {
   void UpdateIsAttached(bool attached);
 
   // DevToolsAgentHostImpl overrides.
-  bool AttachSession(DevToolsSession* session,
-                     TargetRegistry* registry) override;
+  bool AttachSession(DevToolsSession* session) override;
   void DetachSession(DevToolsSession* session) override;
 
   enum WorkerState {

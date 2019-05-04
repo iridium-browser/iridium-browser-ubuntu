@@ -41,8 +41,6 @@
 
 namespace blink {
 
-using namespace HTMLNames;
-
 V0InsertionPoint::V0InsertionPoint(const QualifiedName& tag_name,
                                    Document& document)
     : HTMLElement(tag_name, document, kCreateV0InsertionPoint),
@@ -159,7 +157,7 @@ void V0InsertionPoint::DidRecalcStyle(StyleRecalcChange change) {
     node->SetNeedsStyleRecalc(
         style_change_type,
         StyleChangeReasonForTracing::Create(
-            StyleChangeReason::kPropagateInheritChangeToDistributedNodes));
+            style_change_reason::kPropagateInheritChangeToDistributedNodes));
   }
 }
 
@@ -264,7 +262,7 @@ void V0InsertionPoint::RemovedFrom(ContainerNode& insertion_point) {
   HTMLElement::RemovedFrom(insertion_point);
 }
 
-void V0InsertionPoint::Trace(blink::Visitor* visitor) {
+void V0InsertionPoint::Trace(Visitor* visitor) {
   visitor->Trace(distributed_nodes_);
   HTMLElement::Trace(visitor);
 }

@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style/style_svg_resource.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
+#include "third_party/blink/renderer/core/svg/svg_element.h"
 
 namespace blink {
 
@@ -502,7 +503,7 @@ CSSValue* ComputedStyleUtils::MinWidthOrMinHeightAuto(
   LayoutObject* layout_object =
       styled_node ? styled_node->GetLayoutObject() : nullptr;
   if (layout_object && layout_object->IsBox() &&
-      (ToLayoutBox(layout_object)->IsFlexItem() ||
+      (ToLayoutBox(layout_object)->IsFlexItemIncludingNG() ||
        ToLayoutBox(layout_object)->IsGridItem())) {
     return CSSIdentifierValue::Create(CSSValueAuto);
   }
@@ -709,17 +710,17 @@ CSSValue* ComputedStyleUtils::ValueForLineHeight(const ComputedStyle& style) {
 }
 
 CSSValueID IdentifierForFamily(const AtomicString& family) {
-  if (family == FontFamilyNames::webkit_cursive)
+  if (family == font_family_names::kWebkitCursive)
     return CSSValueCursive;
-  if (family == FontFamilyNames::webkit_fantasy)
+  if (family == font_family_names::kWebkitFantasy)
     return CSSValueFantasy;
-  if (family == FontFamilyNames::webkit_monospace)
+  if (family == font_family_names::kWebkitMonospace)
     return CSSValueMonospace;
-  if (family == FontFamilyNames::webkit_pictograph)
+  if (family == font_family_names::kWebkitPictograph)
     return CSSValueWebkitPictograph;
-  if (family == FontFamilyNames::webkit_sans_serif)
+  if (family == font_family_names::kWebkitSansSerif)
     return CSSValueSansSerif;
-  if (family == FontFamilyNames::webkit_serif)
+  if (family == font_family_names::kWebkitSerif)
     return CSSValueSerif;
   return CSSValueInvalid;
 }
@@ -1272,14 +1273,28 @@ CSSValue* ComputedStyleUtils::ValueForGridPosition(
   return list;
 }
 
-LayoutRect ComputedStyleUtils::SizingBox(const LayoutObject& layout_object) {
-  if (!layout_object.IsBox())
-    return LayoutRect();
+static bool IsSVGObjectWithWidthAndHeight(const LayoutObject& layout_object) {
+  DCHECK(layout_object.IsSVGChild());
+  return layout_object.IsSVGImage() || layout_object.IsSVGForeignObject() ||
+         (layout_object.IsSVGShape() &&
+          IsSVGRectElement(layout_object.GetNode()));
+}
 
+FloatSize ComputedStyleUtils::UsedBoxSize(const LayoutObject& layout_object) {
+  if (layout_object.IsSVGChild() &&
+      IsSVGObjectWithWidthAndHeight(layout_object)) {
+    FloatSize size(layout_object.ObjectBoundingBox().Size());
+    // The object bounding box does not have zoom applied. Multiply with zoom
+    // here since we'll divide by it when we produce the CSS value.
+    size.Scale(layout_object.StyleRef().EffectiveZoom());
+    return size;
+  }
+  if (!layout_object.IsBox())
+    return FloatSize();
   const LayoutBox& box = ToLayoutBox(layout_object);
-  return box.StyleRef().BoxSizing() == EBoxSizing::kBorderBox
-             ? box.BorderBoxRect()
-             : box.ComputedCSSContentBoxRect();
+  return FloatSize(box.StyleRef().BoxSizing() == EBoxSizing::kBorderBox
+                       ? box.BorderBoxRect().Size()
+                       : box.ComputedCSSContentBoxRect().Size());
 }
 
 CSSValue* ComputedStyleUtils::RenderTextDecorationFlagsToCSSValue(
@@ -1627,18 +1642,30 @@ CSSFunctionValue* ValueForMatrixTransform(
   return transform_value;
 }
 
+FloatRect ComputedStyleUtils::ReferenceBoxForTransform(
+    const LayoutObject& layout_object,
+    UsePixelSnappedBox pixel_snap_box) {
+  if (layout_object.IsSVGChild())
+    return ComputeSVGTransformReferenceBox(layout_object);
+  if (layout_object.IsBox()) {
+    const auto& layout_box = ToLayoutBox(layout_object);
+    if (pixel_snap_box == kUsePixelSnappedBox)
+      return FloatRect(layout_box.PixelSnappedBorderBoxRect());
+    return FloatRect(layout_box.BorderBoxRect());
+  }
+  return FloatRect();
+}
+
 CSSValue* ComputedStyleUtils::ComputedTransform(
     const LayoutObject* layout_object,
     const ComputedStyle& style) {
   if (!layout_object || !style.HasTransform())
     return CSSIdentifierValue::Create(CSSValueNone);
 
-  IntRect box;
-  if (layout_object->IsBox())
-    box = PixelSnappedIntRect(ToLayoutBox(layout_object)->BorderBoxRect());
+  FloatRect reference_box = ReferenceBoxForTransform(*layout_object);
 
   TransformationMatrix transform;
-  style.ApplyTransform(transform, LayoutSize(box.Size()),
+  style.ApplyTransform(transform, reference_box,
                        ComputedStyle::kExcludeTransformOrigin,
                        ComputedStyle::kExcludeMotionPath,
                        ComputedStyle::kExcludeIndependentTransformProperties);
@@ -1851,27 +1878,6 @@ CSSValue* ComputedStyleUtils::StrokeDashArrayToCSSValueList(
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   for (const Length& dash_length : dashes.GetVector()) {
     list->Append(*ZoomAdjustedPixelValueForLength(dash_length, style));
-  }
-
-  return list;
-}
-
-CSSValue* ComputedStyleUtils::PaintOrderToCSSValueList(
-    const SVGComputedStyle& svg_style) {
-  CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  for (int i = 0; i < 3; i++) {
-    EPaintOrderType paint_order_type = svg_style.PaintOrderType(i);
-    switch (paint_order_type) {
-      case PT_FILL:
-      case PT_STROKE:
-      case PT_MARKERS:
-        list->Append(*CSSIdentifierValue::Create(paint_order_type));
-        break;
-      case PT_NONE:
-      default:
-        NOTREACHED();
-        break;
-    }
   }
 
   return list;
@@ -2132,17 +2138,15 @@ bool ComputedStyleUtils::WidthOrHeightShouldReturnUsedValue(
   // The display property is 'none'.
   if (!object)
     return false;
+  // Non-root SVG objects return the resolved value except <image>,
+  // <rect> and <foreignObject> which return the used value.
+  if (object->IsSVGChild())
+    return IsSVGObjectWithWidthAndHeight(*object);
   // According to
   // http://www.w3.org/TR/CSS2/visudet.html#the-width-property and
   // http://www.w3.org/TR/CSS2/visudet.html#the-height-property, the "width" or
   // "height" property does not apply to non-atomic inline elements.
-  if (!object->IsAtomicInlineLevel() && object->IsInline())
-    return false;
-  // Non-root SVG objects return the resolved value.
-  // TODO(fs): Return the used value for <image>, <rect> and <foreignObject> (to
-  // which 'width' or 'height' can be said to apply) too? We don't return the
-  // used value for other geometric properties ('x', 'y' et.c.)
-  return !object->IsSVGChild();
+  return object->IsAtomicInlineLevel() || !object->IsInline();
 }
 
 CSSValueList* ComputedStyleUtils::ValuesForShorthandProperty(
@@ -2309,30 +2313,30 @@ CSSValue* ComputedStyleUtils::ValuesForFontVariantProperty(
 // Returns up to two values for 'scroll-customization' property. The values
 // correspond to the customization values for 'x' and 'y' axes.
 CSSValue* ComputedStyleUtils::ScrollCustomizationFlagsToCSSValue(
-    ScrollCustomization::ScrollDirection scroll_customization) {
+    scroll_customization::ScrollDirection scroll_customization) {
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  if (scroll_customization == ScrollCustomization::kScrollDirectionAuto) {
+  if (scroll_customization == scroll_customization::kScrollDirectionAuto) {
     list->Append(*CSSIdentifierValue::Create(CSSValueAuto));
   } else if (scroll_customization ==
-             ScrollCustomization::kScrollDirectionNone) {
+             scroll_customization::kScrollDirectionNone) {
     list->Append(*CSSIdentifierValue::Create(CSSValueNone));
   } else {
-    if ((scroll_customization & ScrollCustomization::kScrollDirectionPanX) ==
-        ScrollCustomization::kScrollDirectionPanX)
+    if ((scroll_customization & scroll_customization::kScrollDirectionPanX) ==
+        scroll_customization::kScrollDirectionPanX)
       list->Append(*CSSIdentifierValue::Create(CSSValuePanX));
     else if (scroll_customization &
-             ScrollCustomization::kScrollDirectionPanLeft)
+             scroll_customization::kScrollDirectionPanLeft)
       list->Append(*CSSIdentifierValue::Create(CSSValuePanLeft));
     else if (scroll_customization &
-             ScrollCustomization::kScrollDirectionPanRight)
+             scroll_customization::kScrollDirectionPanRight)
       list->Append(*CSSIdentifierValue::Create(CSSValuePanRight));
-    if ((scroll_customization & ScrollCustomization::kScrollDirectionPanY) ==
-        ScrollCustomization::kScrollDirectionPanY)
+    if ((scroll_customization & scroll_customization::kScrollDirectionPanY) ==
+        scroll_customization::kScrollDirectionPanY)
       list->Append(*CSSIdentifierValue::Create(CSSValuePanY));
-    else if (scroll_customization & ScrollCustomization::kScrollDirectionPanUp)
+    else if (scroll_customization & scroll_customization::kScrollDirectionPanUp)
       list->Append(*CSSIdentifierValue::Create(CSSValuePanUp));
     else if (scroll_customization &
-             ScrollCustomization::kScrollDirectionPanDown)
+             scroll_customization::kScrollDirectionPanDown)
       list->Append(*CSSIdentifierValue::Create(CSSValuePanDown));
   }
 

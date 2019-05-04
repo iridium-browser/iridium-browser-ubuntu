@@ -10,9 +10,9 @@
 
 #include <utility>
 
-#include "call/degraded_call.h"
-
 #include "absl/memory/memory.h"
+#include "call/degraded_call.h"
+#include "rtc_base/location.h"
 
 namespace webrtc {
 DegradedCall::DegradedCall(
@@ -213,6 +213,12 @@ PacketReceiver::DeliveryStatus DegradedCall::DeliverPacket(
   // than anticipated at very low packet rates.
   receive_pipe_->Process();
   return status;
+}
+
+void DegradedCall::MediaTransportChange(
+    MediaTransportInterface* media_transport) {
+  // TODO(bugs.webrtc.org/9719) We should add support for media transport here
+  // at some point.
 }
 
 }  // namespace webrtc

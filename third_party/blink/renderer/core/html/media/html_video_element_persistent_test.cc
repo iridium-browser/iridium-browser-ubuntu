@@ -22,7 +22,7 @@ namespace {
 
 class FullscreenMockChromeClient : public EmptyChromeClient {
  public:
-  MOCK_METHOD2(EnterFullscreen, void(LocalFrame&, const FullscreenOptions&));
+  MOCK_METHOD2(EnterFullscreen, void(LocalFrame&, const FullscreenOptions*));
   MOCK_METHOD1(ExitFullscreen, void(LocalFrame&));
 };
 
@@ -34,7 +34,7 @@ using testing::Sequence;
 class HTMLVideoElementPersistentTest : public PageTestBase {
  protected:
   void SetUp() override {
-    chrome_client_ = new FullscreenMockChromeClient();
+    chrome_client_ = MakeGarbageCollected<FullscreenMockChromeClient>();
 
     Page::PageClients clients;
     FillWithEmptyClients(clients);
@@ -282,7 +282,8 @@ TEST_F(HTMLVideoElementPersistentTest, removeVideoWithLayerWhilePersisting) {
   EXPECT_EQ(FullscreenElement(), nullptr);
 
   // Inserting a <span> between the <div> and <video>.
-  Persistent<Element> span = GetDocument().CreateRawElement(HTMLNames::spanTag);
+  Persistent<Element> span =
+      GetDocument().CreateRawElement(html_names::kSpanTag);
   DivElement()->AppendChild(span);
   span->AppendChild(VideoElement());
 

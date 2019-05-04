@@ -9,7 +9,7 @@
 
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_util.h"
@@ -19,8 +19,8 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "chrome/test/base/testing_profile.h"
-#include "chromeos/chromeos_switches.h"
-#include "chromeos/login/login_state.h"
+#include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/login/login_state/login_state.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_image/user_image.h"
 #include "components/user_manager/user_names.h"
@@ -241,6 +241,7 @@ void FakeChromeUserManager::SwitchActiveUser(const AccountId& account_id) {
       }
     }
   }
+  NotifyActiveUserChanged(active_user_);
 }
 
 void FakeChromeUserManager::OnSessionStarted() {}
@@ -546,8 +547,7 @@ bool FakeChromeUserManager::IsLoggedInAsUserWithGaiaAccount() const {
 }
 
 bool FakeChromeUserManager::IsLoggedInAsChildUser() const {
-  NOTREACHED();
-  return false;
+  return current_user_child_;
 }
 
 bool FakeChromeUserManager::IsLoggedInAsPublicAccount() const {
@@ -706,6 +706,16 @@ void FakeChromeUserManager::SetUserAffiliation(
 
 bool FakeChromeUserManager::ShouldReportUser(const std::string& user_id) const {
   return false;
+}
+
+bool FakeChromeUserManager::IsManagedSessionEnabledForUser(
+    const user_manager::User& active_user) const {
+  return true;
+}
+
+bool FakeChromeUserManager::IsFullManagementDisclosureNeeded(
+    policy::DeviceLocalAccountPolicyBroker* broker) const {
+  return true;
 }
 
 user_manager::User* FakeChromeUserManager::GetActiveUserInternal() const {

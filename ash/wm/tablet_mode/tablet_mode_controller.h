@@ -7,6 +7,8 @@
 
 #include <memory>
 
+#include "ash/accelerometer/accelerometer_reader.h"
+#include "ash/accelerometer/accelerometer_types.h"
 #include "ash/ash_export.h"
 #include "ash/bluetooth_devices_observer.h"
 #include "ash/display/window_tree_host_manager.h"
@@ -20,8 +22,6 @@
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chromeos/accelerometer/accelerometer_reader.h"
-#include "chromeos/accelerometer/accelerometer_types.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/interface_ptr_set.h"
@@ -46,7 +46,7 @@ class Widget;
 
 namespace ash {
 
-class ScopedDisableInternalMouseAndKeyboard;
+class InternalInputDevicesEventBlocker;
 class TabletModeObserver;
 class TabletModeWindowManager;
 
@@ -54,7 +54,7 @@ class TabletModeWindowManager;
 // enters and exits tablet mode when the lid is opened beyond the triggering
 // angle and rotates the display to match the device when in tablet mode.
 class ASH_EXPORT TabletModeController
-    : public chromeos::AccelerometerReader::Observer,
+    : public AccelerometerReader::Observer,
       public chromeos::PowerManagerClient::Observer,
       public mojom::TabletModeController,
       public ShellObserver,
@@ -123,9 +123,9 @@ class ASH_EXPORT TabletModeController
   // SessionObserver:
   void OnChromeTerminating() override;
 
-  // chromeos::AccelerometerReader::Observer:
+  // AccelerometerReader::Observer:
   void OnAccelerometerUpdated(
-      scoped_refptr<const chromeos::AccelerometerUpdate> update) override;
+      scoped_refptr<const AccelerometerUpdate> update) override;
 
   // chromeos::PowerManagerClient::Observer:
   void LidEventReceived(chromeos::PowerManagerClient::LidState state,
@@ -136,7 +136,7 @@ class ASH_EXPORT TabletModeController
   void SuspendDone(const base::TimeDelta& sleep_duration) override;
 
   // ui::InputDeviceEventObserver:
-  void OnMouseDeviceConfigurationChanged() override;
+  void OnInputDeviceConfigurationChanged(uint8_t input_device_types) override;
   void OnDeviceListsComplete() override;
 
  private:
@@ -151,8 +151,7 @@ class ASH_EXPORT TabletModeController
 
   // Detect hinge rotation from base and lid accelerometers and automatically
   // start / stop tablet mode.
-  void HandleHingeRotation(
-      scoped_refptr<const chromeos::AccelerometerUpdate> update);
+  void HandleHingeRotation(scoped_refptr<const AccelerometerUpdate> update);
 
   void OnGetSwitchStates(
       base::Optional<chromeos::PowerManagerClient::SwitchStates> result);
@@ -200,20 +199,20 @@ class ASH_EXPORT TabletModeController
   // software to behave in a certain way regardless of configuration.
   bool AllowUiModeChange() const;
 
-  // Called when a mouse config is changed, or when a device list is
+  // Called when a pointing device config is changed, or when a device list is
   // sent from device manager. This will exit tablet mode if needed.
-  void HandleMouseAddedOrRemoved();
+  void HandlePointingDeviceAddedOrRemoved();
 
-  // Callback function for |bluetooth_devices_observer_|. Called when |device|
-  // changes.
-  void UpdateBluetoothDevice(device::BluetoothDevice* device);
+  // Callback function of |bluetooth_devices_observer_|. Called when the
+  // bluetooth adapter or |device| changes.
+  void OnBluetoothAdapterOrDeviceChanged(device::BluetoothDevice* device);
 
   // Update the internal mouse and keyboard event blocker |event_blocker_|
   // according to current configuration. The internal input events should be
   // blocked if 1) we are currently in tablet mode or 2) we are currently in
   // laptop mode but the lid is flipped over (i.e., we are in laptop mode
   // because of an external attached mouse).
-  void UpdateInternalMouseAndKeyboardEventBlocker();
+  void UpdateInternalInputDevicesEventBlocker();
 
   // Returns true if the current lid angle can be detected and is in tablet mode
   // angle range.
@@ -224,7 +223,7 @@ class ASH_EXPORT TabletModeController
 
   // A helper class which when instantiated will block native events from the
   // internal keyboard and touchpad.
-  std::unique_ptr<ScopedDisableInternalMouseAndKeyboard> event_blocker_;
+  std::unique_ptr<InternalInputDevicesEventBlocker> event_blocker_;
 
   // Whether we have ever seen accelerometer data.
   bool have_seen_accelerometer_data_ = false;
@@ -261,9 +260,9 @@ class ASH_EXPORT TabletModeController
   // Last computed lid angle.
   double lid_angle_ = 0.0f;
 
-  // Tracks if the device has an external mouse. The device will
+  // Tracks if the device has an external pointing device. The device will
   // not enter tablet mode if this is true.
-  bool has_external_mouse_ = false;
+  bool has_external_pointing_device_ = false;
 
   // Tracks smoothed accelerometer data over time. This is done when the hinge
   // is approaching vertical to remove abrupt acceleration that can lead to

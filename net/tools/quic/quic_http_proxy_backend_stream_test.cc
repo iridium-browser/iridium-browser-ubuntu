@@ -14,7 +14,9 @@
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
+#include "net/third_party/quic/core/quic_connection_id.h"
 #include "net/third_party/quic/platform/api/quic_test.h"
+#include "net/third_party/quic/test_tools/quic_test_utils.h"
 #include "net/third_party/quic/tools/quic_backend_response.h"
 #include "net/tools/quic/quic_http_proxy_backend.h"
 
@@ -118,9 +120,11 @@ class TestQuicServerStreamDelegate
     run_loop_.Run();
   }
 
-  quic::QuicConnectionId connection_id() const override { return 123; };
-  quic::QuicStreamId stream_id() const override { return 5; };
-  std::string peer_host() const override { return "127.0.0.1"; };
+  quic::QuicConnectionId connection_id() const override {
+    return quic::test::TestConnectionId(123);
+  }
+  quic::QuicStreamId stream_id() const override { return 5; }
+  std::string peer_host() const override { return "127.0.0.1"; }
 
   void OnResponseBackendComplete(
       const quic::QuicBackendResponse* response,
@@ -136,7 +140,6 @@ class TestQuicServerStreamDelegate
   bool send_success_;
   bool did_complete_;
   std::unique_ptr<QuicHttpProxyBackendStream> quic_backend_stream_;
-  base::test::ScopedTaskEnvironment scoped_task_environment;
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_ =
       base::ThreadTaskRunnerHandle::Get();
   base::RunLoop run_loop_;
@@ -185,6 +188,7 @@ class QuicHttpProxyBackendStreamTest : public QuicTest {
   }
 
  protected:
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::string backend_url_;
   std::unique_ptr<QuicHttpProxyBackend> proxy_backend_;
   std::unique_ptr<QuicHttpProxyBackend> proxy_backend_fail_;

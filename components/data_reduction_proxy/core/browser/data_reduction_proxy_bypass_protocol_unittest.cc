@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_protocol.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_bypass_protocol.h"
 
 #include <stddef.h>
 
@@ -10,20 +10,21 @@
 #include <utility>
 
 #include "base/containers/span.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_entropy_provider.h"
+#include "base/test/scoped_feature_list.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_interceptor.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
@@ -102,6 +103,7 @@ class DataReductionProxyProtocolEmbeddedServerTest : public testing::Test {
     test_context_ = DataReductionProxyTestContext::Builder()
                         .SkipSettingsInitialization()
                         .Build();
+    test_context_->DisableWarmupURLFetch();
     // Since some of the tests fetch a webpage from the embedded server running
     // on localhost, the adding of default bypass rules is disabled. This allows
     // Chrome to fetch webpages using data saver proxy.
@@ -124,7 +126,7 @@ class DataReductionProxyProtocolEmbeddedServerTest : public testing::Test {
     DataReductionProxyInterceptor* interceptor =
         new DataReductionProxyInterceptor(
             test_context_->config(), test_context_->io_data()->config_client(),
-            nullptr /* bypass_stats */, test_context_->event_creator());
+            nullptr /* bypass_stats */);
 
     std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory_impl(
         new net::URLRequestJobFactoryImpl());
@@ -143,7 +145,8 @@ class DataReductionProxyProtocolEmbeddedServerTest : public testing::Test {
   }
 
  protected:
-  base::MessageLoopForIO message_loop_;
+  base::test::ScopedTaskEnvironment task_environment_{
+      base::test::ScopedTaskEnvironment::MainThreadType::IO};
   net::EmbeddedTestServer embedded_test_server_;
 
   std::unique_ptr<ProxyResolutionService> proxy_resolution_service_;
@@ -290,7 +293,7 @@ class DataReductionProxyProtocolTest : public testing::Test {
     DataReductionProxyInterceptor* interceptor =
         new DataReductionProxyInterceptor(
             test_context_->config(), test_context_->io_data()->config_client(),
-            bypass_stats_.get(), test_context_->event_creator());
+            bypass_stats_.get());
     std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory_impl(
         new net::URLRequestJobFactoryImpl());
     job_factory_.reset(new net::URLRequestInterceptingJobFactory(
@@ -502,7 +505,8 @@ class DataReductionProxyProtocolTest : public testing::Test {
   }
 
  protected:
-  base::MessageLoopForIO message_loop_;
+  base::test::ScopedTaskEnvironment task_environment_{
+      base::test::ScopedTaskEnvironment::MainThreadType::IO};
   std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   std::unique_ptr<net::URLRequestInterceptor> simple_interceptor_;
@@ -534,7 +538,7 @@ TEST_F(DataReductionProxyProtocolTest, TestIdempotency) {
       { "POST", false },
       { "CONNECT", false },
   };
-  for (size_t i = 0; i < arraysize(tests); ++i) {
+  for (size_t i = 0; i < base::size(tests); ++i) {
     std::unique_ptr<net::URLRequest> request(context.CreateRequest(
         GURL("http://www.google.com/"), net::DEFAULT_PRIORITY, nullptr,
         TRAFFIC_ANNOTATION_FOR_TESTS));
@@ -577,7 +581,7 @@ TEST_F(DataReductionProxyProtocolTest, BypassRetryOnPostConnectionErrors) {
                              .proxy_server()
                              .host_port_pair()
                              .ToString();
-  for (size_t i = 0; i < arraysize(tests); ++i) {
+  for (size_t i = 0; i < base::size(tests); ++i) {
     base::HistogramTester histogram_tester;
 
     ConfigureTestDependencies(
@@ -625,6 +629,9 @@ TEST_F(DataReductionProxyProtocolTest, BypassRetryOnPostConnectionErrors) {
 // was indicated. In both the single and double bypass cases, if the request
 // was idempotent, it will be retried over a direct connection.
 TEST_F(DataReductionProxyProtocolTest, BypassLogic) {
+  // The test manually controls the fetch of warmup URL and the response.
+  test_context_->DisableWarmupURLFetchCallback();
+
   const struct {
     const char* method;
     const char* first_response;
@@ -1027,7 +1034,7 @@ TEST_F(DataReductionProxyProtocolTest, BypassLogic) {
                              .proxy_server()
                              .host_port_pair()
                              .ToString();
-  for (size_t i = 0; i < arraysize(tests); ++i) {
+  for (size_t i = 0; i < base::size(tests); ++i) {
     ConfigureTestDependencies(
         ProxyResolutionService::CreateFixedFromPacResult(
             net::ProxyServer::FromURI(primary, net::ProxyServer::SCHEME_HTTP)
@@ -1133,7 +1140,8 @@ class DataReductionProxyBypassProtocolEndToEndTest : public testing::Test {
   }
 
  private:
-  base::MessageLoopForIO loop_;
+  base::test::ScopedTaskEnvironment task_environment{
+      base::test::ScopedTaskEnvironment::MainThreadType::IO};
   std::unique_ptr<net::TestURLRequestContext> context_;
   std::unique_ptr<net::URLRequestContextStorage> storage_;
   std::unique_ptr<net::MockClientSocketFactory> mock_socket_factory_;

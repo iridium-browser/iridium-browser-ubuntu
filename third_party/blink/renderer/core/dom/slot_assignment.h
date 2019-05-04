@@ -18,8 +18,10 @@ class ShadowRoot;
 class SlotAssignment final : public GarbageCollected<SlotAssignment> {
  public:
   static SlotAssignment* Create(ShadowRoot& owner) {
-    return new SlotAssignment(owner);
+    return MakeGarbageCollected<SlotAssignment>(owner);
   }
+
+  explicit SlotAssignment(ShadowRoot& owner);
 
   // Relevant DOM Standard: https://dom.spec.whatwg.org/#find-a-slot
   HTMLSlotElement* FindSlot(const Node&);
@@ -53,15 +55,13 @@ class SlotAssignment final : public GarbageCollected<SlotAssignment> {
 
   HTMLSlotElement* FindSlotChange(HTMLSlotElement& slot, Node& child);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
   bool NeedsAssignmentRecalc() const { return needs_assignment_recalc_; }
   void SetNeedsAssignmentRecalc();
   void RecalcAssignment();
 
  private:
-  explicit SlotAssignment(ShadowRoot& owner);
-
   enum class SlotMutationType {
     kRemoved,
     kRenamed,

@@ -10,6 +10,7 @@
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
+#include "base/json/json_writer.h"
 #include "base/macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -26,12 +27,14 @@ namespace commands {
 
 const char kSwitchDryRun[] = "dry-run";
 const char kSwitchDumpTree[] = "dump-tree";
+const char kSwitchDumpTreeText[] = "text";
+const char kSwitchDumpTreeJSON[] = "json";
 const char kSwitchStdin[] = "stdin";
 
 const char kFormat[] = "format";
-const char kFormat_HelpShort[] = "format: Format .gn file.";
+const char kFormat_HelpShort[] = "format: Format .gn files.";
 const char kFormat_Help[] =
-    R"(gn format [--dump-tree] (--stdin | <build_file>)
+    R"(gn format [--dump-tree] (--stdin | <list of build_files...>)
 
   Formats .gn file to a standard format.
 
@@ -55,16 +58,16 @@ Arguments
       - Exit code 1: general failure (parse error, etc.)
       - Exit code 2: successful format, but differs from on disk.
 
-  --dump-tree
-      For debugging, dumps the parse tree to stdout and does not update the
-      file or print formatted output.
+  --dump-tree[=( text | json )]
+      Dumps the parse tree to stdout and does not update the file or print
+      formatted output. If no format is specified, text format will be used.
 
   --stdin
       Read input from stdin and write to stdout rather than update a file
       in-place.
 
 Examples
-  gn format //some/BUILD.gn
+  gn format //some/BUILD.gn //some/other/BUILD.gn //and/another/BUILD.gn
   gn format some\\BUILD.gn
   gn format /abspath/some/BUILD.gn
   gn format --stdin
@@ -112,6 +115,7 @@ class Printer {
   enum SequenceStyle {
     kSequenceStyleList,
     kSequenceStyleBracedBlock,
+    kSequenceStyleBracedBlockAlreadyOpen,
   };
 
   struct Metrics {
@@ -328,11 +332,15 @@ void Printer::AnnotatePreferredMultilineAssignment(const BinaryOpNode* binop) {
 }
 
 void Printer::SortIfSourcesOrDeps(const BinaryOpNode* binop) {
-  if (binop->comments() && !binop->comments()->before().empty() &&
-      binop->comments()->before()[0].value().as_string() == "# NOSORT") {
-    // Allow disabling of sort for specific actions that might be
-    // order-sensitive.
-    return;
+  if (const Comments* comments = binop->comments()) {
+    const std::vector<Token>& before = comments->before();
+    if (!before.empty() &&
+        (before.front().value().as_string() == "# NOSORT" ||
+         before.back().value().as_string() == "# NOSORT")) {
+      // Allow disabling of sort for specific actions that might be
+      // order-sensitive.
+      return;
+    }
   }
   const IdentifierNode* ident = binop->left()->AsIdentifier();
   const ListNode* list = binop->right()->AsList();
@@ -423,6 +431,8 @@ void Printer::SortImports(std::vector<std::unique_ptr<PARSENODE>>& statements) {
       const PARSENODE* node = statements[i].get();
       int line_number =
           prev ? prev->GetRange().end().line_number() + 1 : start_line;
+      if (node->comments() && !node->comments()->before().empty())
+        line_number++;
       const_cast<FunctionCallNode*>(node->AsFunctionCall())
           ->SetNewLocation(line_number);
       prev = node;
@@ -718,10 +728,10 @@ int Printer::Expr(const ParseNode* root,
              false);
   } else if (const ConditionNode* condition = root->AsConditionNode()) {
     Print("if (");
-    // TODO(scottmg): The { needs to be included in the suffix here.
-    Expr(condition->condition(), kPrecedenceLowest, ") ");
-    Sequence(kSequenceStyleBracedBlock, condition->if_true()->statements(),
-             condition->if_true()->End(), false);
+    Expr(condition->condition(), kPrecedenceLowest, ") {");
+    Sequence(kSequenceStyleBracedBlockAlreadyOpen,
+             condition->if_true()->statements(), condition->if_true()->End(),
+             false);
     if (condition->if_false()) {
       Print(" else ");
       // If it's a block it's a bare 'else', otherwise it's an 'else if'. See
@@ -778,10 +788,13 @@ void Printer::Sequence(SequenceStyle style,
                        const std::vector<std::unique_ptr<PARSENODE>>& list,
                        const ParseNode* end,
                        bool force_multiline) {
-  if (style == kSequenceStyleList)
+  if (style == kSequenceStyleList) {
     Print("[");
-  else if (style == kSequenceStyleBracedBlock)
+  } else if (style == kSequenceStyleBracedBlock) {
     Print("{");
+  } else if (style == kSequenceStyleBracedBlockAlreadyOpen) {
+    style = kSequenceStyleBracedBlock;
+  }
 
   if (style == kSequenceStyleBracedBlock) {
     force_multiline = true;
@@ -1049,12 +1062,19 @@ bool Printer::ListWillBeMultiline(
   return false;
 }
 
-void DoFormat(const ParseNode* root, bool dump_tree, std::string* output) {
-  if (dump_tree) {
+void DoFormat(const ParseNode* root, TreeDumpMode dump_tree,
+              std::string* output) {
+  if (dump_tree == TreeDumpMode::kPlainText) {
     std::ostringstream os;
-    root->Print(os, 0);
+    RenderToText(root->GetJSONNode(), 0, os);
     fprintf(stderr, "%s", os.str().c_str());
+  } else if (dump_tree == TreeDumpMode::kJSON) {
+    std::string os;
+    base::JSONWriter::WriteWithOptions(root->GetJSONNode(),
+        base::JSONWriter::OPTIONS_PRETTY_PRINT, &os);
+    fprintf(stderr, "%s", os.c_str());
   }
+
   Printer pr;
   pr.Block(root);
   *output = pr.String();
@@ -1081,7 +1101,7 @@ std::string ReadStdin() {
 
 bool FormatFileToString(Setup* setup,
                         const SourceFile& file,
-                        bool dump_tree,
+                        TreeDumpMode dump_tree,
                         std::string* output) {
   Err err;
   const ParseNode* parse_node =
@@ -1096,7 +1116,7 @@ bool FormatFileToString(Setup* setup,
 }
 
 bool FormatStringToString(const std::string& input,
-                          bool dump_tree,
+                          TreeDumpMode dump_tree,
                           std::string* output) {
   SourceFile source_file;
   InputFile file(source_file);
@@ -1123,8 +1143,23 @@ bool FormatStringToString(const std::string& input,
 int RunFormat(const std::vector<std::string>& args) {
   bool dry_run =
       base::CommandLine::ForCurrentProcess()->HasSwitch(kSwitchDryRun);
-  bool dump_tree =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(kSwitchDumpTree);
+  TreeDumpMode dump_tree = TreeDumpMode::kInactive;
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(kSwitchDumpTree)) {
+    std::string tree_type = base::CommandLine::ForCurrentProcess()->
+        GetSwitchValueASCII(kSwitchDumpTree);
+    if (tree_type == kSwitchDumpTreeJSON) {
+      dump_tree = TreeDumpMode::kJSON;
+    } else if (tree_type.empty() || tree_type == kSwitchDumpTreeText) {
+      dump_tree = TreeDumpMode::kPlainText;
+    } else {
+      Err(Location(),
+          tree_type + " is an invalid value for --dump-tree. Specify "
+          "\"" + kSwitchDumpTreeText + "\" or \"" + kSwitchDumpTreeJSON +
+          "\".\n")
+          .PrintToStdout();
+      return 1;
+    }
+  }
   bool from_stdin =
       base::CommandLine::ForCurrentProcess()->HasSwitch(kSwitchStdin);
 
@@ -1147,10 +1182,8 @@ int RunFormat(const std::vector<std::string>& args) {
     return 0;
   }
 
-  // TODO(scottmg): Eventually, this should be a list/spec of files, and they
-  // should all be done in parallel.
-  if (args.size() != 1) {
-    Err(Location(), "Expecting exactly one argument, see `gn help format`.\n")
+  if (args.size() == 0) {
+    Err(Location(), "Expecting one or more arguments, see `gn help format`.\n")
         .PrintToStdout();
     return 1;
   }
@@ -1159,39 +1192,43 @@ int RunFormat(const std::vector<std::string>& args) {
   SourceDir source_dir =
       SourceDirForCurrentDirectory(setup.build_settings().root_path());
 
-  Err err;
-  SourceFile file =
-      source_dir.ResolveRelativeFile(Value(nullptr, args[0]), &err);
-  if (err.has_error()) {
-    err.PrintToStdout();
-    return 1;
-  }
+  // TODO(scottmg): Eventually, this list of files should be processed in
+  // parallel.
+  for (const auto& arg : args) {
+    Err err;
+    SourceFile file =
+        source_dir.ResolveRelativeFile(Value(nullptr, arg), &err);
+    if (err.has_error()) {
+      err.PrintToStdout();
+      return 1;
+    }
 
-  std::string output_string;
-  if (FormatFileToString(&setup, file, dump_tree, &output_string)) {
-    if (!dump_tree) {
-      // Update the file in-place.
-      base::FilePath to_write = setup.build_settings().GetFullPath(file);
-      std::string original_contents;
-      if (!base::ReadFileToString(to_write, &original_contents)) {
-        Err(Location(), std::string("Couldn't read \"") +
-                            FilePathToUTF8(to_write) +
-                            std::string("\" for comparison."))
-            .PrintToStdout();
-        return 1;
-      }
-      if (dry_run)
-        return original_contents == output_string ? 0 : 2;
-      if (original_contents != output_string) {
-        if (base::WriteFile(to_write, output_string.data(),
-                            static_cast<int>(output_string.size())) == -1) {
-          Err(Location(),
-              std::string("Failed to write formatted output back to \"") +
-                  FilePathToUTF8(to_write) + std::string("\"."))
+    std::string output_string;
+    if (FormatFileToString(&setup, file, dump_tree, &output_string)) {
+      if (dump_tree == TreeDumpMode::kInactive) {
+        // Update the file in-place.
+        base::FilePath to_write = setup.build_settings().GetFullPath(file);
+        std::string original_contents;
+        if (!base::ReadFileToString(to_write, &original_contents)) {
+          Err(Location(), std::string("Couldn't read \"") +
+                              FilePathToUTF8(to_write) +
+                              std::string("\" for comparison."))
               .PrintToStdout();
           return 1;
         }
-        printf("Wrote formatted to '%s'.\n", FilePathToUTF8(to_write).c_str());
+        if (dry_run)
+          return original_contents == output_string ? 0 : 2;
+        if (original_contents != output_string) {
+          if (base::WriteFile(to_write, output_string.data(),
+                              static_cast<int>(output_string.size())) == -1) {
+            Err(Location(),
+                std::string("Failed to write formatted output back to \"") +
+                    FilePathToUTF8(to_write) + std::string("\"."))
+                .PrintToStdout();
+            return 1;
+          }
+          printf("Wrote formatted to '%s'.\n", FilePathToUTF8(to_write).c_str());
+        }
       }
     }
   }

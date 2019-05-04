@@ -17,6 +17,7 @@
 #include "fpdfsdk/cpdfsdk_pageview.h"
 #include "fpdfsdk/cpdfsdk_widget.h"
 #include "fpdfsdk/cpdfsdk_widgethandler.h"
+#include "public/fpdf_fwlevent.h"
 #include "third_party/base/ptr_util.h"
 
 #ifdef PDF_ENABLE_XFA
@@ -143,6 +144,16 @@ bool CPDFSDK_AnnotHandlerMgr::Annot_OnLButtonUp(
   ASSERT(pAnnot->HasObservable());
   return GetAnnotHandler(pAnnot->Get())
       ->OnLButtonUp(pPageView, pAnnot, nFlags, point);
+}
+
+bool CPDFSDK_AnnotHandlerMgr::Annot_OnLButtonDblClk(
+    CPDFSDK_PageView* pPageView,
+    CPDFSDK_Annot::ObservedPtr* pAnnot,
+    uint32_t nFlags,
+    const CFX_PointF& point) {
+  ASSERT(pAnnot->HasObservable());
+  return GetAnnotHandler(pAnnot->Get())
+      ->OnLButtonDblClk(pPageView, pAnnot, nFlags, point);
 }
 
 bool CPDFSDK_AnnotHandlerMgr::Annot_OnMouseMove(

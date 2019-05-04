@@ -299,8 +299,6 @@ TEST(VideoLayerImplTest, Rotated270) {
   EXPECT_EQ(gfx::Point3F(0, 0, 0), p2);
 }
 
-void EmptyCallback(const gpu::SyncToken& sync_token) {}
-
 TEST(VideoLayerImplTest, SoftwareVideoFrameGeneratesYUVQuad) {
   gfx::Size layer_size(1000, 1000);
 
@@ -388,14 +386,12 @@ TEST(VideoLayerImplTest, NativeYUVFrameGeneratesYUVQuad) {
 
   scoped_refptr<media::VideoFrame> video_frame =
       media::VideoFrame::WrapNativeTextures(
-          media::PIXEL_FORMAT_I420, mailbox_holders, base::Bind(EmptyCallback),
+          media::PIXEL_FORMAT_I420, mailbox_holders, base::DoNothing(),
           gfx::Size(10, 10), gfx::Rect(10, 10), gfx::Size(10, 10),
           base::TimeDelta());
   ASSERT_TRUE(video_frame);
   video_frame->metadata()->SetBoolean(media::VideoFrameMetadata::ALLOW_OVERLAY,
                                       true);
-  video_frame->metadata()->SetBoolean(
-      media::VideoFrameMetadata::REQUIRE_OVERLAY, true);
   FakeVideoFrameProvider provider;
   provider.set_frame(video_frame);
 
@@ -419,7 +415,6 @@ TEST(VideoLayerImplTest, NativeYUVFrameGeneratesYUVQuad) {
             (yuv_draw_quad->ya_tex_size.height() + 1) / 2);
   EXPECT_EQ(yuv_draw_quad->uv_tex_size.width(),
             (yuv_draw_quad->ya_tex_size.width() + 1) / 2);
-  EXPECT_TRUE(yuv_draw_quad->require_overlay);
 }
 
 TEST(VideoLayerImplTest, NativeARGBFrameGeneratesTextureQuad) {
@@ -435,7 +430,7 @@ TEST(VideoLayerImplTest, NativeARGBFrameGeneratesTextureQuad) {
   gfx::Size resource_size = gfx::Size(10, 10);
   scoped_refptr<media::VideoFrame> video_frame =
       media::VideoFrame::WrapNativeTextures(
-          media::PIXEL_FORMAT_ARGB, mailbox_holders, base::Bind(EmptyCallback),
+          media::PIXEL_FORMAT_ARGB, mailbox_holders, base::DoNothing(),
           resource_size, gfx::Rect(10, 10), resource_size, base::TimeDelta());
   ASSERT_TRUE(video_frame);
   video_frame->metadata()->SetBoolean(media::VideoFrameMetadata::ALLOW_OVERLAY,

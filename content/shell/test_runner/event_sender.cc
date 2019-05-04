@@ -429,7 +429,7 @@ void PopulateCustomItems(const WebVector<WebMenuItemInfo>& customItems,
 }
 
 // Because actual context menu is implemented by the browser side,
-// this function does only what LayoutTests are expecting:
+// this function does only what web_tests are expecting:
 // - Many test checks the count of items. So returning non-zero value makes
 // sense.
 // - Some test compares the count before and after some action. So changing the
@@ -487,7 +487,7 @@ std::vector<std::string> MakeMenuItemStringsFor(
 }
 
 // How much we should scroll per event - the value here is chosen to match the
-// WebKit impl and layout test results.
+// WebKit impl and web test results.
 const float kScrollbarPixelsPerTick = 40.0f;
 
 // Get the edit command corresponding to a keyboard event.
@@ -1411,8 +1411,7 @@ void EventSender::PointerDown(int button_number,
                               int tiltX,
                               int tiltY) {
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
-
+    UpdateLifecycleToPrePaint();
   DCHECK_NE(-1, button_number);
 
   WebMouseEvent::Button button_type =
@@ -1447,7 +1446,7 @@ void EventSender::PointerUp(int button_number,
                             int tiltX,
                             int tiltY) {
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   DCHECK_NE(-1, button_number);
 
@@ -1503,7 +1502,7 @@ void EventSender::KeyDown(const std::string& code_str,
 
   bool generate_char = false;
 
-  // Convert \n -> VK_RETURN. Some layout tests use \n to mean "Enter", when
+  // Convert \n -> VK_RETURN. Some web tests use \n to mean "Enter", when
   // Windows uses \r for "Enter".
   int code = 0;
   int text = 0;
@@ -1713,7 +1712,7 @@ void EventSender::KeyDown(const std::string& code_str,
   // EventSender.m forces a layout here, with at least one
   // test (fast/forms/focus-control-to-page.html) relying on this.
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   // In the browser, if a keyboard event corresponds to an editor command,
   // the command will be dispatched to the renderer just before dispatching
@@ -1756,7 +1755,7 @@ void EventSender::ClearKillRing() {}
 
 std::vector<std::string> EventSender::ContextClick() {
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   UpdateClickCountForButton(WebMouseEvent::Button::kRight);
 
@@ -1945,7 +1944,7 @@ void EventSender::GestureFlingCancel() {
   // choose Touchpad here.
 
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   HandleInputEventOnViewOrPopup(event);
 }
@@ -1986,7 +1985,7 @@ void EventSender::GestureFlingStart(float x,
   event.data.fling_start.velocity_y = velocity_y;
 
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   HandleInputEventOnViewOrPopup(event);
 }
@@ -2165,7 +2164,7 @@ void EventSender::MouseScrollBy(gin::Arguments* args,
 
 void EventSender::MouseMoveTo(gin::Arguments* args) {
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   double x;
   double y;
@@ -2222,7 +2221,7 @@ void EventSender::MouseLeave(
     blink::WebPointerProperties::PointerType pointerType,
     int pointerId) {
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   WebMouseEvent event(WebInputEvent::kMouseLeave,
                       ModifiersForPointer(pointerId), GetCurrentEventTime());
@@ -2278,7 +2277,7 @@ void EventSender::SendCurrentTouchEvent(WebInputEvent::Type type,
   DCHECK_LE(touch_points_.size(),
             static_cast<unsigned>(WebTouchEvent::kTouchesLengthCap));
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   base::TimeTicks time_stamp = GetCurrentEventTime();
   blink::WebInputEvent::DispatchType dispatch_type =
@@ -2306,7 +2305,7 @@ void EventSender::SendCurrentTouchEvent(WebInputEvent::Type type,
       HandleInputEventOnViewOrPopup(pointer_event);
     }
   }
-  WebPagePopup* popup = widget()->GetPagePopup();
+  WebPagePopup* popup = view()->GetPagePopup();
   if (popup)
     popup->DispatchBufferedTouchEvents();
   else
@@ -2511,7 +2510,7 @@ void EventSender::GestureEvent(WebInputEvent::Type type, gin::Arguments* args) {
   event.SetPositionInScreen(event.PositionInWidget());
 
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   WebInputEventResult result = HandleInputEventOnViewOrPopup(event);
 
@@ -2551,7 +2550,7 @@ WebMouseWheelEvent EventSender::GetMouseWheelEvent(gin::Arguments* args,
   // determined before we send events (as well as all the other methods
   // that send an event do).
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   double horizontal;
   double vertical;
@@ -2784,7 +2783,7 @@ WebInputEventResult EventSender::HandleInputEventOnViewOrPopup(
     const WebInputEvent& raw_event) {
   last_event_timestamp_ = raw_event.TimeStamp();
 
-  WebPagePopup* popup = widget()->GetPagePopup();
+  WebPagePopup* popup = view()->GetPagePopup();
   if (popup && !WebInputEvent::IsKeyboardEventType(raw_event.GetType())) {
     // ui::ScaleWebInputEvent returns nullptr when the scale is 1.0f as the
     // event does not have to be converted.
@@ -2831,7 +2830,7 @@ void EventSender::SendGesturesForMouseWheelEvent(
   }
 
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
 
   HandleInputEventOnViewOrPopup(begin_event);
 
@@ -2847,7 +2846,7 @@ void EventSender::SendGesturesForMouseWheelEvent(
       begin_event.data.scroll_begin.delta_hint_units;
 
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
   HandleInputEventOnViewOrPopup(update_event);
 
   WebGestureEvent end_event(WebInputEvent::kGestureScrollEnd,
@@ -2858,7 +2857,7 @@ void EventSender::SendGesturesForMouseWheelEvent(
       begin_event.data.scroll_begin.delta_hint_units;
 
   if (force_layout_on_events_)
-    widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint);
+    UpdateLifecycleToPrePaint();
   HandleInputEventOnViewOrPopup(end_event);
 }
 
@@ -2891,6 +2890,11 @@ std::unique_ptr<WebInputEvent> EventSender::TransformScreenToWidgetCoordinates(
     const WebInputEvent& event) {
   return delegate()->TransformScreenToWidgetCoordinates(
       web_widget_test_proxy_base_, event);
+}
+
+void EventSender::UpdateLifecycleToPrePaint() {
+  widget()->UpdateLifecycle(blink::WebWidget::LifecycleUpdate::kPrePaint,
+                            blink::WebWidget::LifecycleUpdateReason::kTest);
 }
 
 }  // namespace test_runner

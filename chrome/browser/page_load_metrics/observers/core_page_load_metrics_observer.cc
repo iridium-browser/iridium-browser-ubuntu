@@ -17,7 +17,6 @@
 #include "ui/base/page_transition_types.h"
 
 namespace {
-
 // TODO(bmcquade): If other observers want to log histograms based on load type,
 // promote this enum to page_load_metrics_observer.h.
 enum PageLoadType {
@@ -72,10 +71,6 @@ const char kHistogramFirstPaint[] =
     "PageLoad.PaintTiming.NavigationToFirstPaint";
 const char kBackgroundHistogramFirstPaint[] =
     "PageLoad.PaintTiming.NavigationToFirstPaint.Background";
-const char kHistogramFirstTextPaint[] =
-    "PageLoad.PaintTiming.NavigationToFirstTextPaint";
-const char kBackgroundHistogramFirstTextPaint[] =
-    "PageLoad.PaintTiming.NavigationToFirstTextPaint.Background";
 const char kHistogramFirstImagePaint[] =
     "PageLoad.PaintTiming.NavigationToFirstImagePaint";
 const char kBackgroundHistogramFirstImagePaint[] =
@@ -89,18 +84,28 @@ const char kHistogramFirstContentfulPaintInitiatingProcess[] =
     "InitiatingProcess";
 const char kHistogramFirstMeaningfulPaint[] =
     "PageLoad.Experimental.PaintTiming.NavigationToFirstMeaningfulPaint";
+const char kHistogramLargestImagePaint[] =
+    "PageLoad.Experimental.PaintTiming.NavigationToLargestImagePaint";
+const char kHistogramLastImagePaint[] =
+    "PageLoad.Experimental.PaintTiming.NavigationToLastImagePaint";
+const char kHistogramLargestTextPaint[] =
+    "PageLoad.Experimental.PaintTiming.NavigationToLargestTextPaint";
+const char kHistogramLastTextPaint[] =
+    "PageLoad.Experimental.PaintTiming.NavigationToLastTextPaint";
+const char kHistogramLargestContentPaint[] =
+    "PageLoad.Experimental.PaintTiming.NavigationToLargestContentPaint";
 const char kHistogramTimeToInteractive[] =
     "PageLoad.Experimental.NavigationToInteractive";
 const char kHistogramInteractiveToInteractiveDetection[] =
     "PageLoad.Internal.InteractiveToInteractiveDetection";
 const char kHistogramFirstInputDelay[] =
-    "PageLoad.InteractiveTiming.FirstInputDelay";
+    "PageLoad.InteractiveTiming.FirstInputDelay2";
 const char kHistogramFirstInputTimestamp[] =
-    "PageLoad.InteractiveTiming.FirstInputTimestamp";
+    "PageLoad.InteractiveTiming.FirstInputTimestamp2";
 const char kHistogramLongestInputDelay[] =
-    "PageLoad.InteractiveTiming.LongestInputDelay";
+    "PageLoad.InteractiveTiming.LongestInputDelay2";
 const char kHistogramLongestInputTimestamp[] =
-    "PageLoad.InteractiveTiming.LongestInputTimestamp";
+    "PageLoad.InteractiveTiming.LongestInputTimestamp2";
 const char kHistogramParseStartToFirstMeaningfulPaint[] =
     "PageLoad.Experimental.PaintTiming.ParseStartToFirstMeaningfulPaint";
 const char kHistogramParseStartToFirstContentfulPaint[] =
@@ -204,6 +209,8 @@ const char kHistogramPageLoadTotalBytes[] = "PageLoad.Experimental.Bytes.Total";
 const char kHistogramPageLoadNetworkBytes[] =
     "PageLoad.Experimental.Bytes.Network";
 const char kHistogramPageLoadCacheBytes[] = "PageLoad.Experimental.Bytes.Cache";
+const char kHistogramPageLoadNetworkBytesIncludingHeaders[] =
+    "PageLoad.Experimental.Bytes.NetworkIncludingHeaders";
 
 const char kHistogramLoadTypeTotalBytesForwardBack[] =
     "PageLoad.Experimental.Bytes.Total.LoadType.ForwardBackNavigation";
@@ -259,6 +266,7 @@ CorePageLoadMetricsObserver::CorePageLoadMetricsObserver()
       num_network_resources_(0),
       cache_bytes_(0),
       network_bytes_(0),
+      network_bytes_including_headers_(0),
       redirect_chain_size_(0) {}
 
 CorePageLoadMetricsObserver::~CorePageLoadMetricsObserver() {}
@@ -356,19 +364,6 @@ void CorePageLoadMetricsObserver::OnFirstPaintInPage(
     PAGE_LOAD_HISTOGRAM(internal::kHistogramForegroundToFirstPaint,
                         timing.paint_timing->first_paint.value() -
                             info.first_foreground_time.value());
-  }
-}
-
-void CorePageLoadMetricsObserver::OnFirstTextPaintInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_text_paint, info)) {
-    PAGE_LOAD_HISTOGRAM(internal::kHistogramFirstTextPaint,
-                        timing.paint_timing->first_text_paint.value());
-  } else {
-    PAGE_LOAD_HISTOGRAM(internal::kBackgroundHistogramFirstTextPaint,
-                        timing.paint_timing->first_text_paint.value());
   }
 }
 
@@ -692,7 +687,9 @@ void CorePageLoadMetricsObserver::OnFailedProvisionalLoad(
 }
 
 void CorePageLoadMetricsObserver::OnUserInput(
-    const blink::WebInputEvent& event) {
+    const blink::WebInputEvent& event,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& extra_info) {
   base::TimeTicks now;
 
   if (first_paint_.is_null())
@@ -719,15 +716,21 @@ void CorePageLoadMetricsObserver::OnUserInput(
   }
 }
 
-void CorePageLoadMetricsObserver::OnLoadedResource(
-    const page_load_metrics::ExtraRequestCompleteInfo&
-        extra_request_complete_info) {
-  if (extra_request_complete_info.was_cached) {
-    ++num_cache_resources_;
-    cache_bytes_ += extra_request_complete_info.raw_body_bytes;
-  } else {
-    ++num_network_resources_;
-    network_bytes_ += extra_request_complete_info.raw_body_bytes;
+void CorePageLoadMetricsObserver::OnResourceDataUseObserved(
+    FrameTreeNodeId frame_tree_node_id,
+    const std::vector<page_load_metrics::mojom::ResourceDataUpdatePtr>&
+        resources) {
+  for (auto const& resource : resources) {
+    if (resource->is_complete) {
+      if (!resource->was_fetched_via_cache) {
+        network_bytes_ += resource->encoded_body_length;
+        num_network_resources_++;
+      } else {
+        cache_bytes_ += resource->encoded_body_length;
+        num_cache_resources_++;
+      }
+    }
+    network_bytes_including_headers_ += resource->delta_bytes;
   }
 }
 
@@ -743,6 +746,38 @@ void CorePageLoadMetricsObserver::RecordTimingHistograms(
   if (!info.started_in_foreground && info.first_foreground_time) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFirstForeground,
                         info.first_foreground_time.value());
+  }
+
+  if (WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->largest_image_paint, info)) {
+    PAGE_LOAD_HISTOGRAM(internal::kHistogramLargestImagePaint,
+                        timing.paint_timing->largest_image_paint.value());
+  }
+  if (WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->last_image_paint, info)) {
+    PAGE_LOAD_HISTOGRAM(internal::kHistogramLastImagePaint,
+                        timing.paint_timing->last_image_paint.value());
+  }
+  if (WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->largest_text_paint, info)) {
+    PAGE_LOAD_HISTOGRAM(internal::kHistogramLargestTextPaint,
+                        timing.paint_timing->largest_text_paint.value());
+  }
+  if (WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->last_text_paint, info)) {
+    PAGE_LOAD_HISTOGRAM(internal::kHistogramLastTextPaint,
+                        timing.paint_timing->last_text_paint.value());
+  }
+  base::Optional<base::TimeDelta> largest_content_paint_time;
+  uint64_t largest_content_paint_size;
+  AssignTimeAndSizeForLargestContentfulPaint(largest_content_paint_time,
+                                             largest_content_paint_size,
+                                             timing.paint_timing);
+  if (largest_content_paint_size > 0 &&
+      WasStartedInForegroundOptionalEventInForeground(
+          largest_content_paint_time, info)) {
+    PAGE_LOAD_HISTOGRAM(internal::kHistogramLargestContentPaint,
+                        largest_content_paint_time.value());
   }
 
   if (timing.paint_timing->first_paint &&
@@ -828,6 +863,8 @@ void CorePageLoadMetricsObserver::RecordByteAndResourceHistograms(
                        network_bytes_);
   PAGE_BYTES_HISTOGRAM(internal::kHistogramPageLoadCacheBytes, cache_bytes_);
   PAGE_BYTES_HISTOGRAM(internal::kHistogramPageLoadTotalBytes, total_bytes);
+  PAGE_BYTES_HISTOGRAM(internal::kHistogramPageLoadNetworkBytesIncludingHeaders,
+                       network_bytes_including_headers_);
 
   switch (GetPageLoadType(transition_)) {
     case LOAD_TYPE_RELOAD:

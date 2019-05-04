@@ -93,6 +93,10 @@ NextProto SpdyProxyClientSocket::GetProxyNegotiatedProtocol() const {
   return spdy_stream_->GetNegotiatedProtocol();
 }
 
+void SpdyProxyClientSocket::SetStreamPriority(RequestPriority priority) {
+  spdy_stream_->SetPriority(priority);
+}
+
 std::unique_ptr<HttpStream>
 SpdyProxyClientSocket::CreateConnectResponseStream() {
   return std::make_unique<ProxyConnectRedirectHttpStream>(
@@ -414,7 +418,7 @@ int SpdyProxyClientSocket::DoReadReplyComplete(int result) {
       // Note that this triggers a spdy::ERROR_CODE_CANCEL.
       spdy_stream_->DetachDelegate();
       next_state_ = STATE_DISCONNECTED;
-      return ERR_HTTPS_PROXY_TUNNEL_RESPONSE;
+      return ERR_HTTPS_PROXY_TUNNEL_RESPONSE_REDIRECT;
 
     case 407:  // Proxy Authentication Required
       next_state_ = STATE_OPEN;

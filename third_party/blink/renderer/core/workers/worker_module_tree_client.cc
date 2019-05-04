@@ -5,7 +5,6 @@
 #include "third_party/blink/renderer/core/workers/worker_module_tree_client.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
-#include "third_party/blink/renderer/core/events/error_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/script/module_script.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
@@ -24,16 +23,12 @@ void WorkerModuleTreeClient::NotifyModuleTreeLoadFinished(
   auto* execution_context =
       ExecutionContext::From(modulator_->GetScriptState());
   blink::WorkerReportingProxy& worker_reporting_proxy =
-      ToWorkerGlobalScope(execution_context)->ReportingProxy();
+      To<WorkerGlobalScope>(execution_context)->ReportingProxy();
 
   if (!module_script) {
     // Step 12: "If the algorithm asynchronously completes with null, queue
     // a task to fire an event named error at worker, and return."
-    // This ErrorEvent object is just used for passing error information to a
-    // worker object on the parent context thread and not dispatched directly.
-    execution_context->ExceptionThrown(
-        ErrorEvent::Create("Failed to load a module script.",
-                           SourceLocation::Capture(), nullptr /* world */));
+    worker_reporting_proxy.DidFailToFetchModuleScript();
     return;
   }
 
@@ -41,6 +36,9 @@ void WorkerModuleTreeClient::NotifyModuleTreeLoadFinished(
   // asynchronous completion, with script being the asynchronous completion
   // value."
   worker_reporting_proxy.WillEvaluateModuleScript();
+  // This |error| is always null because the second argument is |kReport|.
+  // TODO(nhiroki): Catch an error when an evaluation error happens.
+  // (https://crbug.com/680046)
   ScriptValue error = modulator_->ExecuteModule(
       module_script, Modulator::CaptureEvalErrorFlag::kReport);
   worker_reporting_proxy.DidEvaluateModuleScript(error.IsEmpty());

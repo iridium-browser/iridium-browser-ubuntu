@@ -17,7 +17,6 @@ import functools
 import hashlib
 import json
 import mock
-import mox
 import netrc
 import os
 import re
@@ -1197,7 +1196,7 @@ class GerritTestCase(MockTempDirTestCase):
   def _create_gerrit_instance(self, tmp_dir):
     default_host = 't3st-chr0m3'
     git_host = os.environ.get('CROS_TEST_GIT_HOST',
-                              '%s.googlesource.com' % default_host)
+                              constants.GOB_HOST % default_host)
     gerrit_host = os.environ.get('CROS_TEST_GERRIT_HOST',
                                  '%s-review.googlesource.com' % default_host)
     ip = socket.gethostbyname(socket.gethostname())
@@ -1320,16 +1319,10 @@ class GerritTestCase(MockTempDirTestCase):
 
     site_params.update(self.patched_params)
 
-    # site_config.params shouldn't be being used, but just to be safe...
-    site_config = config_lib.GetConfig()
-    site_config._site_params.update(self.patched_params)
-
   def tearDown(self):
     # Restore the 'patched' site parameters.
     site_params = config_lib.GetSiteParams()
     site_params.update(self.saved_params)
-    site_config = config_lib.GetConfig()
-    site_config._site_params.update(self.saved_params)
 
   def createProject(self, suffix, description='Test project', owners=None,
                     submit_type='CHERRY_PICK'):
@@ -1501,99 +1494,6 @@ class GerritTestCase(MockTempDirTestCase):
     self.assertEquals(")]}'", s.readline().rstrip())
     jmsg = json.load(s)
     self.assertEquals(email, jmsg['email'])
-
-
-class _RunCommandMock(mox.MockObject):
-  """Custom mock class used to suppress arguments we don't care about"""
-
-  DEFAULT_IGNORED_ARGS = ('print_cmd',)
-
-  def __call__(self, *args, **kwargs):
-    for arg in self.DEFAULT_IGNORED_ARGS:
-      kwargs.setdefault(arg, mox.IgnoreArg())
-    return mox.MockObject.__call__(self, *args, **kwargs)
-
-
-class _LessAnnoyingMox(mox.Mox):
-  """Mox derivative that slips in our suppressions to mox.
-
-  This is used by default via MoxTestCase; namely, this suppresses
-  certain arguments awareness that we don't care about via switching
-  in (dependent on the namespace requested) overriding MockObject
-  classing.
-
-  Via this, it makes maintenance much simpler- simplest example, if code
-  doesn't explicitly assert that print_cmd must be true/false... then
-  we don't care about what argument is set (it has no effect beyond output).
-  Mox normally *would* care, making it a pita to maintain.  This selectively
-  suppresses that awareness, making it maintainable.
-  """
-
-  mock_classes = {}.fromkeys(
-      ['chromite.lib.cros_build_lib.%s' % x
-       for x in dir(cros_build_lib) if 'RunCommand' in x],
-      _RunCommandMock)
-
-  @staticmethod
-  def _GetNamespace(obj):
-    return '%s.%s' % (obj.__module__, obj.__name__)
-
-  def CreateMock(self, obj, attrs=None):
-    if attrs is None:
-      attrs = {}
-    kls = self.mock_classes.get(
-        self._GetNamespace(obj), mox.MockObject)
-    # Copy attrs; I don't trust mox to not be stupid here.
-    new_mock = kls(obj, attrs=attrs)
-    self._mock_objects.append(new_mock)
-    return new_mock
-
-
-class MoxTestCase(TestCase):
-  """Mox based test case; compatible with StackedSetup
-
-  Note: mox is deprecated; please use MockTestCase instead.
-  """
-
-  mox_suppress_verify_all = False
-
-  def setUp(self):
-    self.mox = _LessAnnoyingMox()
-    self.stubs = mox.stubout.StubOutForTesting()
-
-  def tearDown(self):
-    try:
-      if self.__test_was_run__ and not self.mox_suppress_verify_all:
-        # This means the test code was actually ran.
-        # force a verifyall
-        self.mox.VerifyAll()
-    finally:
-      if hasattr(self, 'mox'):
-        self.mox.UnsetStubs()
-      if hasattr(self, 'stubs'):
-        self.stubs.UnsetAll()
-        self.stubs.SmartUnsetAll()
-
-
-class MoxTempDirTestCase(MoxTestCase, TempDirTestCase):
-  """Convenience class mixing TempDir and Mox
-
-  Note: mox is deprecated; please use MockTempDirTestCase instead.
-  """
-
-
-class MoxOutputTestCase(OutputTestCase, MoxTestCase):
-  """Conevenience class mixing OutputTestCase and MoxTestCase
-
-  Note: mox is deprecated; please use MockOutputTestCase instead.
-  """
-
-
-class MoxTempDirTestOutputCase(OutputTestCase, MoxTempDirTestCase):
-  """Conevenience class mixing OutputTestCase and MoxTempDirTestCase
-
-  Note: mox is deprecated; please use MockOutputTestCase instead.
-  """
 
 
 class MockOutputTestCase(MockTestCase, OutputTestCase):

@@ -15,6 +15,8 @@ import re
 import subprocess
 import sys
 
+from libcxx.util import executeCommand
+
 class DefaultTargetInfo(object):
     def __init__(self, full_config):
         self.full_config = full_config
@@ -127,14 +129,13 @@ class DarwinLocalTI(DefaultTargetInfo):
             cmd = ['xcrun', '--sdk', name, '--show-sdk-path']
         else:
             cmd = ['xcrun', '--show-sdk-path']
-        try:
-            out = subprocess.check_output(cmd).strip()
-            res = 0
-        except OSError:
-            res = -1
-        if res == 0 and out:
-            sdk_path = out
+        out, err, exit_code = executeCommand(cmd)
+        if exit_code != 0:
+            self.full_config.lit_config.warning("Could not determine macOS SDK path! stderr was " + err)
+        if exit_code == 0 and out:
+            sdk_path = out.strip()
             self.full_config.lit_config.note('using SDKROOT: %r' % sdk_path)
+            assert isinstance(sdk_path, str)
             flags += ["-isysroot", sdk_path]
 
     def add_cxx_link_flags(self, flags):
@@ -222,12 +223,17 @@ class LinuxLocalTI(DefaultTargetInfo):
                           self.full_config.config.available_features)
         llvm_unwinder = self.full_config.get_lit_bool('llvm_unwinder', False)
         shared_libcxx = self.full_config.get_lit_bool('enable_shared', True)
+        # FIXME: Remove the need to link -lrt in all the tests, and instead
+        # limit it only to the filesystem tests. This ensures we don't cause an
+        # implicit dependency on librt except when filesystem is needed.
+        enable_fs = self.full_config.get_lit_bool('enable_filesystem',
+                                                  default=False)
         flags += ['-lm']
         if not llvm_unwinder:
             flags += ['-lgcc_s', '-lgcc']
         if enable_threads:
             flags += ['-lpthread']
-            if not shared_libcxx:
+            if not shared_libcxx or enable_fs:
               flags += ['-lrt']
         flags += ['-lc']
         if llvm_unwinder:

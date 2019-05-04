@@ -10,9 +10,9 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/core/dom/pausable_object.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/workers/abstract_worker.h"
+#include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/worker_options.h"
 #include "third_party/blink/renderer/platform/graphics/begin_frame_provider.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -31,7 +31,6 @@ class PostMessageOptions;
 class ScriptState;
 class WorkerClassicScriptLoader;
 class WorkerClients;
-struct GlobalScopeCreationParams;
 
 // Implementation of the Worker interface defined in the WebWorker HTML spec:
 // https://html.spec.whatwg.org/multipage/workers.html#worker
@@ -50,9 +49,12 @@ class CORE_EXPORT DedicatedWorker final
  public:
   static DedicatedWorker* Create(ExecutionContext*,
                                  const String& url,
-                                 const WorkerOptions&,
+                                 const WorkerOptions*,
                                  ExceptionState&);
 
+  DedicatedWorker(ExecutionContext*,
+                  const KURL& script_request_url,
+                  const WorkerOptions*);
   ~DedicatedWorker() override;
 
   void postMessage(ScriptState*,
@@ -61,7 +63,7 @@ class CORE_EXPORT DedicatedWorker final
                    ExceptionState&);
   void postMessage(ScriptState*,
                    const ScriptValue& message,
-                   const PostMessageOptions&,
+                   const PostMessageOptions*,
                    ExceptionState&);
   void terminate();
   BeginFrameProviderParams CreateBeginFrameProviderParams();
@@ -73,23 +75,23 @@ class CORE_EXPORT DedicatedWorker final
   // (via AbstractWorker -> EventTargetWithInlineData -> EventTarget).
   bool HasPendingActivity() const final;
 
+  void DispatchErrorEventForScriptFetchFailure();
+
   // Returns the name specified by WorkerOptions.
   const String Name() const;
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(message, kMessage);
 
   void Trace(blink::Visitor*) override;
 
  private:
-  DedicatedWorker(ExecutionContext*,
-                  const KURL& script_request_url,
-                  const WorkerOptions&);
-
   // Starts the worker.
   void Start();
 
   std::unique_ptr<GlobalScopeCreationParams> CreateGlobalScopeCreationParams(
-      const KURL& script_url);
+      const KURL& script_url,
+      OffMainThreadWorkerScriptFetchOption,
+      network::mojom::ReferrerPolicy);
 
   WorkerClients* CreateWorkerClients();
 
@@ -101,10 +103,10 @@ class CORE_EXPORT DedicatedWorker final
   const AtomicString& InterfaceName() const final;
 
   const KURL script_request_url_;
-  const WorkerOptions options_;
+  Member<const WorkerOptions> options_;
   const Member<DedicatedWorkerMessagingProxy> context_proxy_;
 
-  scoped_refptr<WorkerClassicScriptLoader> classic_script_loader_;
+  Member<WorkerClassicScriptLoader> classic_script_loader_;
 };
 
 }  // namespace blink

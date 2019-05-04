@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/layout/layout_image.h"
 #include "third_party/blink/renderer/core/layout/layout_replaced.h"
 #include "third_party/blink/renderer/core/layout/text_run_constructor.h"
+#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/image_element_timing.h"
@@ -22,6 +23,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/display_item_cache_skipper.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/path.h"
+#include "third_party/blink/renderer/platform/graphics/placeholder_image.h"
 #include "third_party/blink/renderer/platform/graphics/scoped_interpolation_quality.h"
 
 namespace blink {
@@ -52,6 +54,8 @@ void ImagePainter::PaintAreaElementFocusRing(const PaintInfo& paint_info) {
   // do it for an area within an image, so we don't call
   // LayoutTheme::themeDrawsFocusRing here.
 
+  // We use EnsureComputedStyle() instead of GetComputedStyle() here because
+  // <area> is used and its style applied even if it has display:none.
   const ComputedStyle& area_element_style = *area_element.EnsureComputedStyle();
   // If the outline width is 0 we want to avoid drawing anything even if we
   // don't use the value directly.
@@ -152,8 +156,8 @@ void ImagePainter::PaintIntoRect(GraphicsContext& context,
   if (pixel_snapped_dest_rect.IsEmpty())
     return;
 
-  scoped_refptr<Image> image = layout_image_.ImageResource()->GetImage(
-      LayoutSize(pixel_snapped_dest_rect.Size()));
+  scoped_refptr<Image> image =
+      layout_image_.ImageResource()->GetImage(pixel_snapped_dest_rect.Size());
   if (!image || image->IsNull())
     return;
 
@@ -172,8 +176,8 @@ void ImagePainter::PaintIntoRect(GraphicsContext& context,
 
   TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage",
                "data",
-               InspectorPaintImageEvent::Data(layout_image_, src_rect,
-                                              FloatRect(dest_rect)));
+               inspector_paint_image_event::Data(layout_image_, src_rect,
+                                                 FloatRect(dest_rect)));
 
   ScopedInterpolationQuality interpolation_quality_scope(
       context, layout_image_.StyleRef().GetInterpolationQuality());
@@ -184,12 +188,24 @@ void ImagePainter::PaintIntoRect(GraphicsContext& context,
           ? ToHTMLImageElement(node)->GetDecodingModeForPainting(
                 image->paint_image_id())
           : Image::kUnspecifiedDecode;
+
+  if (layout_image_.IsImagePolicyViolated()) {
+    // Does not set an observer for the placeholder image, setting it to null.
+    scoped_refptr<PlaceholderImage> placeholder_image =
+        PlaceholderImage::Create(nullptr, image->Size(),
+                                 image->Data() ? image->Data()->size() : 0);
+    placeholder_image->SetIconAndTextScaleFactor(
+        layout_image_.GetFrame()->PageZoomFactor());
+    image = std::move(placeholder_image);
+  }
+
   context.DrawImage(
       image.get(), decode_mode, FloatRect(pixel_snapped_dest_rect), &src_rect,
       SkBlendMode::kSrcOver,
       LayoutObject::ShouldRespectImageOrientation(&layout_image_));
-  if (RuntimeEnabledFeatures::ElementTimingEnabled() &&
-      IsHTMLImageElement(node) && !context.ContextDisabled()) {
+  if (origin_trials::ElementTimingEnabled(&layout_image_.GetDocument()) &&
+      IsHTMLImageElement(node) && !context.ContextDisabled() &&
+      layout_image_.CachedImage() && layout_image_.CachedImage()->IsLoaded()) {
     LocalDOMWindow* window = layout_image_.GetDocument().domWindow();
     DCHECK(window);
     ImageElementTiming::From(*window).NotifyImagePainted(

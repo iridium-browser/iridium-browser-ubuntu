@@ -11,8 +11,9 @@
 
 #include "core/fxcrt/xml/cfx_xmldocument.h"
 #include "core/fxcrt/xml/cfx_xmltext.h"
-#include "fxjs/cfxjse_value.h"
+#include "fxjs/cfx_v8.h"
 #include "fxjs/js_resources.h"
+#include "fxjs/xfa/cfxjse_value.h"
 #include "xfa/fxfa/cxfa_ffdoc.h"
 #include "xfa/fxfa/cxfa_ffnotify.h"
 #include "xfa/fxfa/parser/cxfa_packet.h"
@@ -28,6 +29,10 @@ CJX_Packet::CJX_Packet(CXFA_Packet* packet) : CJX_Node(packet) {
 
 CJX_Packet::~CJX_Packet() {}
 
+bool CJX_Packet::DynamicTypeIs(TypeTag eType) const {
+  return eType == static_type__ || ParentType__::DynamicTypeIs(eType);
+}
+
 CJS_Result CJX_Packet::getAttribute(
     CFX_V8* runtime,
     const std::vector<v8::Local<v8::Value>>& params) {
@@ -40,7 +45,7 @@ CJS_Result CJX_Packet::getAttribute(
     attributeValue = element->GetAttribute(runtime->ToWideString(params[0]));
 
   return CJS_Result::Success(
-      runtime->NewString(attributeValue.UTF8Encode().AsStringView()));
+      runtime->NewString(attributeValue.ToUTF8().AsStringView()));
 }
 
 CJS_Result CJX_Packet::setAttribute(
@@ -93,5 +98,5 @@ void CJX_Packet::content(CFXJSE_Value* pValue,
   if (element)
     wsTextData = element->GetTextData();
 
-  pValue->SetString(wsTextData.UTF8Encode().AsStringView());
+  pValue->SetString(wsTextData.ToUTF8().AsStringView());
 }

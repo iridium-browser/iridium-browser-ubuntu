@@ -12,7 +12,6 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
-#include "chrome/browser/ui/views_mode_controller.h"
 #include "chrome/grit/platform_locale_settings.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -49,7 +48,7 @@ class BookmarkDragHelper;
 // Generates a bookmark drag and drop chip image.
 class BookmarkDragImageSource : public gfx::CanvasImageSource {
  public:
-  // These DIP measurements come from the MD Bookmarks Drag Drop spec.
+  // These DIP measurements come from the Bookmarks Drag Drop spec.
   static constexpr int kContainerWidth = 172;
   static constexpr int kContainerHeight = 40;
   static constexpr int kContainerRadius = kContainerHeight / 2;

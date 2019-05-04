@@ -15,6 +15,7 @@
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
 #include "base/single_thread_task_runner.h"
@@ -43,6 +44,7 @@ namespace gpu {
 
 class GpuChannelManager;
 class GpuChannelMessageFilter;
+class ImageDecodeAcceleratorWorker;
 class Scheduler;
 class SharedImageStub;
 class SyncPointManager;
@@ -61,7 +63,8 @@ class GPU_IPC_SERVICE_EXPORT GpuChannel : public IPC::Listener,
              scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
              int32_t client_id,
              uint64_t client_tracing_id,
-             bool is_gpu_host);
+             bool is_gpu_host,
+             ImageDecodeAcceleratorWorker* image_decode_accelerator_worker);
   ~GpuChannel() override;
 
   // Init() sets up the underlying IPC channel.  Use a separate method because
@@ -120,7 +123,6 @@ class GPU_IPC_SERVICE_EXPORT GpuChannel : public IPC::Listener,
   CommandBufferStub* LookupCommandBuffer(int32_t route_id);
 
   bool HasActiveWebGLContext() const;
-  void LoseAllContexts();
   void MarkAllContextsLost();
 
   // Called to add a listener for a particular message routing ID.
@@ -140,7 +142,6 @@ class GPU_IPC_SERVICE_EXPORT GpuChannel : public IPC::Listener,
       gfx::GpuMemoryBufferHandle handle,
       const gfx::Size& size,
       gfx::BufferFormat format,
-      uint32_t internalformat,
       SurfaceHandle surface_handle);
 
   void HandleMessage(const IPC::Message& msg);

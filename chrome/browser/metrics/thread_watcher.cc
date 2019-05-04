@@ -737,10 +737,10 @@ bool WatchDogThread::PostTaskHelper(const base::Location& from_here,
   {
     base::AutoLock lock(g_watchdog_lock.Get());
 
-    base::MessageLoop* message_loop = g_watchdog_thread ?
-        g_watchdog_thread->message_loop() : nullptr;
-    if (message_loop) {
-      message_loop->task_runner()->PostDelayedTask(from_here, task, delay);
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+        g_watchdog_thread ? g_watchdog_thread->task_runner() : nullptr;
+    if (task_runner) {
+      task_runner->PostDelayedTask(from_here, task, delay);
       return true;
     }
   }
@@ -867,7 +867,7 @@ void StartupTimeBomb::DeleteStartupWatchdog(
   if (startup_watchdog->IsJoinable()) {
     // Allow the watchdog thread to shutdown on UI. Watchdog thread shutdowns
     // very fast.
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBaseSyncPrimitivesOutsideBlockingScope allow_thread_join;
     delete startup_watchdog;
     return;
   }

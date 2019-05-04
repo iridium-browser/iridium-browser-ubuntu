@@ -52,6 +52,8 @@ class ContentPasswordManagerDriver : public PasswordManagerDriver {
       const autofill::PasswordForm& form) override;
   void FormsEligibleForGenerationFound(
       const std::vector<autofill::PasswordFormGenerationData>& forms) override;
+  void FormEligibleForGenerationFound(
+      const autofill::NewPasswordFormGenerationData& form) override;
   void AutofillDataReceived(
       const std::map<autofill::FormData,
                      autofill::PasswordFormFieldPredictionMap>& predictions)
@@ -68,15 +70,22 @@ class ContentPasswordManagerDriver : public PasswordManagerDriver {
   void ShowInitialPasswordAccountSuggestions(
       const autofill::PasswordFormFillData& form_data) override;
   void ClearPreviewedForm() override;
-  void GeneratePassword() override;
   PasswordGenerationManager* GetPasswordGenerationManager() override;
   PasswordManager* GetPasswordManager() override;
   PasswordAutofillManager* GetPasswordAutofillManager() override;
   void SendLoggingAvailability() override;
   autofill::AutofillDriver* GetAutofillDriver() override;
   bool IsMainFrame() const override;
+  GURL GetLastCommittedURL() const override;
 
   void DidNavigateFrame(content::NavigationHandle* navigation_handle);
+  // Notify the renderer that the user wants to generate password manually.
+  void GeneratePassword(autofill::mojom::PasswordGenerationAgent::
+                            UserTriggeredGeneratePasswordCallback callback);
+
+  content::RenderFrameHost* render_frame_host() const {
+    return render_frame_host_;
+  }
 
  private:
   const autofill::mojom::AutofillAgentAssociatedPtr& GetAutofillAgent();

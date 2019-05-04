@@ -5,8 +5,8 @@
 import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
 import("//device/vr/buildflags/buildflags.gni")
-import("//testing/test.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
+import("//testing/test.gni")
 
 if (is_android) {
   import("//build/config/android/config.gni")
@@ -26,6 +26,8 @@ source_set("gfx_export") {
 jumbo_component("geometry_skia") {
   sources = [
     "geometry_skia_export.h",
+    "rrect_f.cc",
+    "rrect_f.h",
     "skia_util.cc",
     "skia_util.h",
     "transform.cc",
@@ -36,7 +38,6 @@ jumbo_component("geometry_skia") {
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
   deps = [
     "//base",
-    "//gpu/vulkan:buildflags",
     "//skia",
     "//ui/gfx/geometry",
   ]
@@ -86,8 +87,6 @@ jumbo_component("gfx") {
     "font_render_params_win.cc",
     "gdi_util.cc",
     "gdi_util.h",
-    "gfx_paths.cc",
-    "gfx_paths.h",
     "half_float.cc",
     "half_float.h",
     "icon_util.cc",
@@ -120,8 +119,6 @@ jumbo_component("gfx") {
     "ios/NSString+CrStringDrawing.mm",
     "ios/uikit_util.h",
     "ios/uikit_util.mm",
-    "linux_font_delegate.cc",
-    "linux_font_delegate.h",
     "mac/coordinate_conversion.h",
     "mac/coordinate_conversion.mm",
     "mac/nswindow_frame_controls.h",
@@ -130,8 +127,6 @@ jumbo_component("gfx") {
     "mac/scoped_cocoa_disable_screen_updates.mm",
     "nine_image_painter.cc",
     "nine_image_painter.h",
-    "path.cc",
-    "path.h",
     "path_mac.h",
     "path_mac.mm",
     "path_win.cc",
@@ -141,8 +136,6 @@ jumbo_component("gfx") {
     "platform_font.h",
     "platform_font_ios.h",
     "platform_font_ios.mm",
-    "platform_font_linux.cc",
-    "platform_font_linux.h",
     "platform_font_mac.h",
     "platform_font_mac.mm",
     "platform_font_win.cc",
@@ -187,6 +180,8 @@ jumbo_component("gfx") {
     "win/scoped_set_map_mode.h",
     "win/singleton_hwnd.cc",
     "win/singleton_hwnd.h",
+    "win/singleton_hwnd_hot_key_observer.cc",
+    "win/singleton_hwnd_hot_key_observer.h",
     "win/singleton_hwnd_observer.cc",
     "win/singleton_hwnd_observer.h",
     "win/text_analysis_source.cc",
@@ -223,8 +218,6 @@ jumbo_component("gfx") {
       "skia_vector_animation.cc",
       "skia_vector_animation.h",
       "skia_vector_animation_observer.h",
-      "skottie_wrapper.cc",
-      "skottie_wrapper.h",
     ]
   } else {
     sources += [
@@ -235,9 +228,7 @@ jumbo_component("gfx") {
 
   configs += [
     "//build/config:precompiled_headers",
-
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
+    "//build/config/compiler:noshadowing",
     "//build/config/compiler:wexit_time_destructors",
   ]
 
@@ -271,13 +262,13 @@ jumbo_component("gfx") {
     "//third_party/zlib",
   ]
 
-  if (is_android) {
-    set_sources_assignment_filter([])
+  if (is_linux || is_android || is_fuchsia) {
     sources += [
-      "platform_font_linux.cc",
-      "platform_font_linux.h",
+      "platform_font_skia.cc",
+      "platform_font_skia.h",
+      "skia_font_delegate.cc",
+      "skia_font_delegate.h",
     ]
-    set_sources_assignment_filter(sources_assignment_filter)
   }
 
   # iOS.
@@ -371,7 +362,6 @@ jumbo_component("gfx") {
     sources += [
       "font_fallback_fuchsia.cc",
       "font_render_params_fuchsia.cc",
-      "platform_font_fuchsia.cc",
     ]
   }
 }
@@ -419,6 +409,7 @@ source_set("native_widget_types") {
   ]
 
   public_deps = [
+    ":gfx_export",
     "//base",
   ]
 }
@@ -493,7 +484,6 @@ jumbo_source_set("memory_buffer_sources") {
     "ca_layer_params.cc",
     "ca_layer_params.h",
     "client_native_pixmap.h",
-    "client_native_pixmap_factory.cc",
     "client_native_pixmap_factory.h",
     "generic_shared_memory_id.cc",
     "generic_shared_memory_id.h",
@@ -539,7 +529,7 @@ jumbo_source_set("memory_buffer_sources") {
       "linux/native_pixmap_dmabuf.h",
     ]
 
-    deps += [ "//third_party/libdrm" ]
+    deps += [ "//build/config/linux/libdrm" ]
   }
 
   if (is_linux || is_android) {
@@ -625,7 +615,7 @@ test("gfx_unittests") {
     "image/image_unittest.cc",
     "ios/NSString+CrStringDrawing_unittest.mm",
     "ios/uikit_util_unittest.mm",
-    "platform_font_linux_unittest.cc",
+    "rrect_f_unittest.cc",
     "test/run_all_unittests.cc",
     "text_elider_unittest.cc",
     "text_utils_unittest.cc",
@@ -694,12 +684,13 @@ test("gfx_unittests") {
     ]
   }
 
+  if (is_linux || is_android || is_fuchsia) {
+    sources += [ "platform_font_skia_unittest.cc" ]
+  }
+
   if (!is_ios) {
     sources += [ "paint_vector_icon_unittest.cc" ]
   }
-
-  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   deps = [
     ":gfx",

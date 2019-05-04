@@ -503,10 +503,14 @@ static void addParameterValuesToBindings(const StackFrameContext *CalleeCtx,
     const ParmVarDecl *ParamDecl = *I;
     assert(ParamDecl && "Formal parameter has no decl?");
 
+    // TODO: Support allocator calls.
     if (Call.getKind() != CE_CXXAllocator)
       if (Call.isArgumentConstructedDirectly(Idx))
         continue;
 
+    // TODO: Allocators should receive the correct size and possibly alignment,
+    // determined in compile-time but not represented as arg-expressions,
+    // which makes getArgSVal() fail and return UnknownVal.
     SVal ArgVal = Call.getArgSVal(Idx);
     if (!ArgVal.isUnknown()) {
       Loc ParamLoc = SVB.makeLoc(MRMgr.getVarRegion(ParamDecl, CalleeCtx));
@@ -546,17 +550,18 @@ RuntimeDefinition AnyFunctionCall::getRuntimeDefinition() const {
     return RuntimeDefinition(Decl);
   }
 
-  SubEngine *Engine = getState()->getStateManager().getOwningEngine();
-  AnalyzerOptions &Opts = Engine->getAnalysisManager().options;
+  SubEngine &Engine = getState()->getStateManager().getOwningEngine();
+  AnalyzerOptions &Opts = Engine.getAnalysisManager().options;
 
   // Try to get CTU definition only if CTUDir is provided.
-  if (!Opts.naiveCTUEnabled())
+  if (!Opts.IsNaiveCTUEnabled)
     return {};
 
   cross_tu::CrossTranslationUnitContext &CTUCtx =
-      *Engine->getCrossTranslationUnitContext();
+      *Engine.getCrossTranslationUnitContext();
   llvm::Expected<const FunctionDecl *> CTUDeclOrError =
-      CTUCtx.getCrossTUDefinition(FD, Opts.getCTUDir(), Opts.getCTUIndexName());
+      CTUCtx.getCrossTUDefinition(FD, Opts.CTUDir, Opts.CTUIndexName,
+                                  Opts.DisplayCTUProgress);
 
   if (!CTUDeclOrError) {
     handleAllErrors(CTUDeclOrError.takeError(),
@@ -832,7 +837,7 @@ const BlockDataRegion *BlockCall::getBlockRegion() const {
 ArrayRef<ParmVarDecl*> BlockCall::parameters() const {
   const BlockDecl *D = getDecl();
   if (!D)
-    return nullptr;
+    return None;
   return D->parameters();
 }
 
@@ -1082,7 +1087,7 @@ bool ObjCMethodCall::canBeOverridenInSubclass(ObjCInterfaceDecl *IDecl,
                                              Selector Sel) const {
   assert(IDecl);
   AnalysisManager &AMgr =
-      getState()->getStateManager().getOwningEngine()->getAnalysisManager();
+      getState()->getStateManager().getOwningEngine().getAnalysisManager();
   // If the class interface is declared inside the main file, assume it is not
   // subcassed.
   // TODO: It could actually be subclassed if the subclass is private as well.
@@ -1364,28 +1369,20 @@ CallEventManager::getCaller(const StackFrameContext *CalleeCtx,
   const Stmt *CallSite = CalleeCtx->getCallSite();
 
   if (CallSite) {
-    if (const CallExpr *CE = dyn_cast<CallExpr>(CallSite))
-      return getSimpleCall(CE, State, CallerCtx);
+    if (CallEventRef<> Out = getCall(CallSite, State, CallerCtx))
+      return Out;
 
-    switch (CallSite->getStmtClass()) {
-    case Stmt::CXXConstructExprClass:
-    case Stmt::CXXTemporaryObjectExprClass: {
-      SValBuilder &SVB = State->getStateManager().getSValBuilder();
-      const auto *Ctor = cast<CXXMethodDecl>(CalleeCtx->getDecl());
-      Loc ThisPtr = SVB.getCXXThis(Ctor, CalleeCtx);
-      SVal ThisVal = State->getSVal(ThisPtr);
+    // All other cases are handled by getCall.
+    assert(isa<CXXConstructExpr>(CallSite) &&
+           "This is not an inlineable statement");
 
-      return getCXXConstructorCall(cast<CXXConstructExpr>(CallSite),
-                                   ThisVal.getAsRegion(), State, CallerCtx);
-    }
-    case Stmt::CXXNewExprClass:
-      return getCXXAllocatorCall(cast<CXXNewExpr>(CallSite), State, CallerCtx);
-    case Stmt::ObjCMessageExprClass:
-      return getObjCMethodCall(cast<ObjCMessageExpr>(CallSite),
-                               State, CallerCtx);
-    default:
-      llvm_unreachable("This is not an inlineable statement.");
-    }
+    SValBuilder &SVB = State->getStateManager().getSValBuilder();
+    const auto *Ctor = cast<CXXMethodDecl>(CalleeCtx->getDecl());
+    Loc ThisPtr = SVB.getCXXThis(Ctor, CalleeCtx);
+    SVal ThisVal = State->getSVal(ThisPtr);
+
+    return getCXXConstructorCall(cast<CXXConstructExpr>(CallSite),
+                                 ThisVal.getAsRegion(), State, CallerCtx);
   }
 
   // Fall back to the CFG. The only thing we haven't handled yet is
@@ -1411,4 +1408,17 @@ CallEventManager::getCaller(const StackFrameContext *CalleeCtx,
   return getCXXDestructorCall(Dtor, Trigger, ThisVal.getAsRegion(),
                               E.getAs<CFGBaseDtor>().hasValue(), State,
                               CallerCtx);
+}
+
+CallEventRef<> CallEventManager::getCall(const Stmt *S, ProgramStateRef State,
+                                         const LocationContext *LC) {
+  if (const auto *CE = dyn_cast<CallExpr>(S)) {
+    return getSimpleCall(CE, State, LC);
+  } else if (const auto *NE = dyn_cast<CXXNewExpr>(S)) {
+    return getCXXAllocatorCall(NE, State, LC);
+  } else if (const auto *ME = dyn_cast<ObjCMessageExpr>(S)) {
+    return getObjCMethodCall(ME, State, LC);
+  } else {
+    return nullptr;
+  }
 }

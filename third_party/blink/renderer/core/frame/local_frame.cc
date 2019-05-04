@@ -30,7 +30,9 @@
 
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 
+#include <limits>
 #include <memory>
+#include <utility>
 
 #include "services/network/public/cpp/features.h"
 #include "services/service_manager/public/cpp/connector.h"
@@ -38,6 +40,7 @@
 #include "third_party/blink/public/platform/interface_provider.h"
 #include "third_party/blink/public/platform/interface_registry.h"
 #include "third_party/blink/public/platform/scheduler/web_resource_loading_task_runner_handle.h"
+#include "third_party/blink/public/platform/web_content_settings_client.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
@@ -61,9 +64,9 @@
 #include "third_party/blink/renderer/core/events/current_input_event.h"
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
 #include "third_party/blink/renderer/core/frame/ad_tracker.h"
-#include "third_party/blink/renderer/core/frame/content_settings_client.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
+#include "third_party/blink/renderer/core/frame/frame_overlay.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -98,13 +101,17 @@
 #include "third_party/blink/renderer/core/svg/svg_document_extensions.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
+#include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
+#include "third_party/blink/renderer/platform/graphics/paint/scoped_paint_chunk_properties.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/frame_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/json/json_values.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
+#include "third_party/blink/renderer/platform/network/network_state_notifier.h"
 #include "third_party/blink/renderer/platform/network/network_utils.h"
 #include "third_party/blink/renderer/platform/plugins/plugin_data.h"
 #include "third_party/blink/renderer/platform/plugins/plugin_script_forbidden_scope.h"
@@ -113,8 +120,6 @@
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
-
-using namespace HTMLNames;
 
 namespace {
 
@@ -150,6 +155,60 @@ bool ShouldUseClientLoFiForRequest(
   return true;
 }
 
+WeakPersistent<LocalFrame>& UserActivationNotifierFrame() {
+  DEFINE_STATIC_LOCAL(WeakPersistent<LocalFrame>,
+                      user_activation_notifier_frame, (nullptr));
+  return user_activation_notifier_frame;
+}
+
+enum class UserActivationFrameResultEnum : int {
+  kNullFailure = 0,
+  kNullSuccess = 1,
+  kSelfFailure = 2,
+  kSelfSuccess = 3,
+  kAncestorFailure = 4,
+  kAncestorSuccess = 5,
+  kDescendantFailure = 6,
+  kDescendantSuccess = 7,
+  kOtherFailure = 8,
+  kOtherSuccess = 9,
+  kNonMainThreadFailure = 10,
+  kNonMainThreadSuccess = 11,
+  kMaxValue = kNonMainThreadSuccess
+};
+
+UserActivationFrameResultEnum DetermineActivationResultEnum(
+    const LocalFrame* const caller_frame,
+    const bool call_succeeded,
+    const bool off_main_thread) {
+  if (off_main_thread) {
+    return call_succeeded
+               ? UserActivationFrameResultEnum::kNonMainThreadSuccess
+               : UserActivationFrameResultEnum::kNonMainThreadFailure;
+  }
+
+  LocalFrame* user_activation_notifier_frame = UserActivationNotifierFrame();
+
+  if (!caller_frame || !user_activation_notifier_frame) {
+    return call_succeeded ? UserActivationFrameResultEnum::kNullSuccess
+                          : UserActivationFrameResultEnum::kNullFailure;
+  }
+  if (caller_frame == user_activation_notifier_frame) {
+    return call_succeeded ? UserActivationFrameResultEnum::kSelfSuccess
+                          : UserActivationFrameResultEnum::kSelfFailure;
+  }
+  if (user_activation_notifier_frame->Tree().IsDescendantOf(caller_frame)) {
+    return call_succeeded ? UserActivationFrameResultEnum::kAncestorSuccess
+                          : UserActivationFrameResultEnum::kAncestorFailure;
+  }
+  if (caller_frame->Tree().IsDescendantOf(user_activation_notifier_frame)) {
+    return call_succeeded ? UserActivationFrameResultEnum::kDescendantSuccess
+                          : UserActivationFrameResultEnum::kDescendantFailure;
+  }
+  return call_succeeded ? UserActivationFrameResultEnum::kOtherSuccess
+                        : UserActivationFrameResultEnum::kOtherFailure;
+}
+
 }  // namespace
 
 template class CORE_TEMPLATE_EXPORT Supplement<LocalFrame>;
@@ -159,7 +218,7 @@ LocalFrame* LocalFrame::Create(LocalFrameClient* client,
                                Page& page,
                                FrameOwner* owner,
                                InterfaceRegistry* interface_registry) {
-  LocalFrame* frame = new LocalFrame(
+  LocalFrame* frame = MakeGarbageCollected<LocalFrame>(
       client, page, owner,
       interface_registry ? interface_registry
                          : InterfaceRegistry::GetEmptyInterfaceRegistry());
@@ -234,7 +293,7 @@ LocalFrame::~LocalFrame() {
   // Verify that the LocalFrameView has been cleared as part of detaching
   // the frame owner.
   DCHECK(!view_);
-  if (is_ad_subframe_)
+  if (IsAdSubframe())
     InstanceCounters::DecrementCounter(InstanceCounters::kAdSubframeCounter);
 }
 
@@ -274,12 +333,16 @@ void LocalFrame::ScheduleNavigation(Document& origin_document,
                                     const KURL& url,
                                     WebFrameLoadType frame_load_type,
                                     UserGestureStatus user_gesture_status) {
+  if (!navigation_rate_limiter().CanProceed())
+    return;
   navigation_scheduler_->ScheduleFrameNavigation(&origin_document, url,
                                                  frame_load_type);
 }
 
 void LocalFrame::Navigate(const FrameLoadRequest& request,
                           WebFrameLoadType frame_load_type) {
+  if (!navigation_rate_limiter().CanProceed())
+    return;
   loader_.StartNavigation(request, frame_load_type);
 }
 
@@ -289,6 +352,10 @@ void LocalFrame::DetachImpl(FrameDetachType type) {
   // Starting here, the code must be safe against re-entrancy. Dispatching
   // events, et cetera can run Javascript, which can reenter Detach().
   // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  if (this == UserActivationNotifierFrame())
+    UserActivationNotifierFrame().Clear();
+
+  frame_color_overlay_.reset();
 
   if (IsLocalRoot()) {
     performance_monitor_->Shutdown();
@@ -366,9 +433,6 @@ void LocalFrame::DetachImpl(FrameDetachType type) {
 
   DomWindow()->FrameDestroyed();
 
-  if (GetPage() && GetPage()->GetFocusController().FocusedFrame() == this)
-    GetPage()->GetFocusController().SetFocusedFrame(nullptr);
-
   probe::frameDetachedFromParent(this);
 
   supplements_.clear();
@@ -429,14 +493,19 @@ void LocalFrame::DetachChildren() {
     ChildFrameDisconnector(*document).Disconnect();
 }
 
-void LocalFrame::DocumentAttached() {
-  DCHECK(GetDocument());
+void LocalFrame::DidAttachDocument() {
+  Document* document = GetDocument();
+  DCHECK(document);
   GetEditor().Clear();
+  // Clearing the event handler clears many events, but notably can ensure that
+  // for a drag started on an element in a frame that was moved (likely via
+  // appendChild()), the drag source will detach and stop firing drag events
+  // even after the frame reattaches.
   GetEventHandler().Clear();
-  Selection().DocumentAttached(GetDocument());
-  GetInputMethodController().DocumentAttached(GetDocument());
-  GetSpellChecker().DocumentAttached(GetDocument());
-  GetTextSuggestionController().DocumentAttached(GetDocument());
+  Selection().DidAttachDocument(document);
+  GetInputMethodController().DidAttachDocument(document);
+  GetSpellChecker().DidAttachDocument(document);
+  GetTextSuggestionController().DidAttachDocument(document);
   previews_resource_loading_hints_receiver_.reset();
 }
 
@@ -452,21 +521,21 @@ Frame* LocalFrame::FindFrameForNavigation(const AtomicString& name,
 void LocalFrame::Reload(WebFrameLoadType load_type,
                         ClientRedirectPolicy client_redirect_policy) {
   DCHECK(IsReloadLoadType(load_type));
-  if (client_redirect_policy == ClientRedirectPolicy::kNotClientRedirect) {
-    if (!loader_.GetDocumentLoader()->GetHistoryItem())
-      return;
-    FrameLoadRequest request = FrameLoadRequest(
-        nullptr,
-        loader_.ResourceRequestForReload(load_type, client_redirect_policy));
-    request.SetClientRedirect(client_redirect_policy);
-    if (const WebInputEvent* input_event = CurrentInputEvent::Get()) {
-      request.SetInputStartTime(input_event->TimeStamp());
-    }
-    loader_.StartNavigation(request, load_type);
-  } else {
-    DCHECK_EQ(WebFrameLoadType::kReload, load_type);
-    navigation_scheduler_->ScheduleReload();
+  if (!loader_.GetDocumentLoader()->GetHistoryItem())
+    return;
+  FrameLoadRequest request = FrameLoadRequest(
+      nullptr,
+      loader_.ResourceRequestForReload(load_type, client_redirect_policy));
+  request.SetClientRedirect(client_redirect_policy);
+  if (const WebInputEvent* input_event = CurrentInputEvent::Get())
+    request.SetInputStartTime(input_event->TimeStamp());
+  if (client_redirect_policy == ClientRedirectPolicy::kClientRedirect) {
+    probe::frameScheduledNavigation(this, request.GetResourceRequest().Url(),
+                                    0.0, ClientNavigationReason::kReload);
+    probe::frameClearedScheduledNavigation(this);
   }
+
+  loader_.StartNavigation(request, load_type);
 }
 
 LocalWindowProxy* LocalFrame::WindowProxy(DOMWrapperWorld& world) {
@@ -516,8 +585,7 @@ void LocalFrame::DidFreeze() {
       // handler indicating potentially unsaved user state.
       bool unused_did_allow_navigation = false;
       bool proceed = GetDocument()->DispatchBeforeUnloadEvent(
-          *View()->GetChromeClient(), false /* is_reload */,
-          true /* auto_cancel */, unused_did_allow_navigation);
+          nullptr, false /* is_reload */, unused_did_allow_navigation);
       frame_resource_coordinator->SetHasNonEmptyBeforeUnload(!proceed);
     }
 
@@ -535,7 +603,7 @@ void LocalFrame::DidResume() {
   DCHECK(RuntimeEnabledFeatures::PageLifecycleEnabled());
   if (GetDocument()) {
     const TimeTicks resume_event_start = CurrentTimeTicks();
-    GetDocument()->DispatchEvent(*Event::Create(EventTypeNames::resume));
+    GetDocument()->DispatchEvent(*Event::Create(event_type_names::kResume));
     const TimeTicks resume_event_end = CurrentTimeTicks();
     DEFINE_STATIC_LOCAL(
         CustomCountHistogram, resume_histogram,
@@ -574,7 +642,7 @@ void LocalFrame::SetInheritedEffectiveTouchAction(TouchAction touch_action) {
     GetDocument()->documentElement()->SetNeedsStyleRecalc(
         kSubtreeStyleChange,
         StyleChangeReasonForTracing::Create(
-            StyleChangeReason::kInheritedStyleChangeFromParentFrame));
+            style_change_reason::kInheritedStyleChangeFromParentFrame));
   }
 }
 
@@ -643,7 +711,7 @@ void LocalFrame::SetPrinting(bool printing,
   } else {
     if (LayoutView* layout_view = View()->GetLayoutView()) {
       layout_view->SetPreferredLogicalWidthsDirty();
-      layout_view->SetNeedsLayout(LayoutInvalidationReason::kPrintingChanged);
+      layout_view->SetNeedsLayout(layout_invalidation_reason::kPrintingChanged);
       layout_view->SetShouldDoFullPaintInvalidationForViewAndAllDescendants();
     }
     View()->UpdateLayout();
@@ -755,15 +823,16 @@ void LocalFrame::SetPageAndTextZoomFactors(float page_zoom_factor,
   document->MediaQueryAffectingValueChanged();
   document->SetNeedsStyleRecalc(
       kSubtreeStyleChange,
-      StyleChangeReasonForTracing::Create(StyleChangeReason::kZoom));
-  document->UpdateStyleAndLayoutIgnorePendingStylesheets();
+      StyleChangeReasonForTracing::Create(style_change_reason::kZoom));
+  if (View() && View()->DidFirstLayout())
+    document->UpdateStyleAndLayoutIgnorePendingStylesheets();
 }
 
 void LocalFrame::DeviceScaleFactorChanged() {
   GetDocument()->MediaQueryAffectingValueChanged();
   GetDocument()->SetNeedsStyleRecalc(
       kSubtreeStyleChange,
-      StyleChangeReasonForTracing::Create(StyleChangeReason::kZoom));
+      StyleChangeReasonForTracing::Create(style_change_reason::kZoom));
   for (Frame* child = Tree().FirstChild(); child;
        child = child->Tree().NextSibling()) {
     if (child->IsLocalFrame())
@@ -851,7 +920,7 @@ String LocalFrame::GetLayerTreeAsTextForTesting(unsigned flags) const {
     return String();
 
   std::unique_ptr<JSONObject> layers;
-  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
     layers = View()->CompositedLayersAsJSON(static_cast<LayerTreeFlags>(flags));
   } else {
     if (const auto* root_layer =
@@ -889,24 +958,28 @@ inline LocalFrame::LocalFrame(LocalFrameClient* client,
       editor_(Editor::Create(*this)),
       spell_checker_(SpellChecker::Create(*this)),
       selection_(FrameSelection::Create(*this)),
-      event_handler_(new EventHandler(*this)),
+      event_handler_(MakeGarbageCollected<EventHandler>(*this)),
       console_(FrameConsole::Create(*this)),
       input_method_controller_(InputMethodController::Create(*this)),
-      text_suggestion_controller_(new TextSuggestionController(*this)),
+      text_suggestion_controller_(
+          MakeGarbageCollected<TextSuggestionController>(*this)),
       navigation_disable_count_(0),
       page_zoom_factor_(ParentPageZoomFactor(this)),
       text_zoom_factor_(ParentTextZoomFactor(this)),
       in_view_source_mode_(false),
       inspector_task_runner_(InspectorTaskRunner::Create(
           GetTaskRunner(TaskType::kInternalInspector))),
-      interface_registry_(interface_registry) {
+      interface_registry_(interface_registry),
+      is_save_data_enabled_(
+          !(GetSettings() && GetSettings()->GetDataSaverHoldbackWebApi()) &&
+          GetNetworkStateNotifier().SaveDataEnabled()) {
   if (IsLocalRoot()) {
-    probe_sink_ = new CoreProbeSink();
-    performance_monitor_ = new PerformanceMonitor(this);
-    inspector_trace_events_ = new InspectorTraceEvents();
+    probe_sink_ = MakeGarbageCollected<CoreProbeSink>();
+    performance_monitor_ = MakeGarbageCollected<PerformanceMonitor>(this);
+    inspector_trace_events_ = MakeGarbageCollected<InspectorTraceEvents>();
     probe_sink_->addInspectorTraceEvents(inspector_trace_events_);
     if (RuntimeEnabledFeatures::AdTaggingEnabled()) {
-      ad_tracker_ = new AdTracker(this);
+      ad_tracker_ = MakeGarbageCollected<AdTracker>(this);
     }
   } else {
     // Inertness only needs to be updated if this frame might inherit the
@@ -918,7 +991,7 @@ inline LocalFrame::LocalFrame(LocalFrameClient* client,
     ad_tracker_ = LocalFrameRoot().ad_tracker_;
     performance_monitor_ = LocalFrameRoot().performance_monitor_;
   }
-  idleness_detector_ = new IdlenessDetector(this);
+  idleness_detector_ = MakeGarbageCollected<IdlenessDetector>(this);
   inspector_task_runner_->InitIsolate(V8PerIsolateData::MainThreadIsolate());
 
   if (ad_tracker_) {
@@ -979,7 +1052,7 @@ bool LocalFrame::CanNavigate(const Frame& target_frame,
     if (has_user_gesture)
       framebust_params |= kUserGestureBit;
 
-    if (is_ad_subframe_)
+    if (IsAdSubframe())
       framebust_params |= kAdBit;
 
     UseCounter::Count(this, WebFeature::kTopNavigationFromSubFrame);
@@ -1001,11 +1074,11 @@ bool LocalFrame::CanNavigate(const Frame& target_frame,
       return true;
     }
 
-    String target_domain = NetworkUtils::GetDomainAndRegistry(
+    String target_domain = network_utils::GetDomainAndRegistry(
         target_frame.GetSecurityContext()->GetSecurityOrigin()->Domain(),
-        NetworkUtils::kIncludePrivateRegistries);
-    String destination_domain = NetworkUtils::GetDomainAndRegistry(
-        destination_url.Host(), NetworkUtils::kIncludePrivateRegistries);
+        network_utils::kIncludePrivateRegistries);
+    String destination_domain = network_utils::GetDomainAndRegistry(
+        destination_url.Host(), network_utils::kIncludePrivateRegistries);
     if (!target_domain.IsEmpty() && !destination_domain.IsEmpty() &&
         target_domain == destination_domain) {
       return true;
@@ -1017,10 +1090,14 @@ bool LocalFrame::CanNavigate(const Frame& target_frame,
     //
     // TODO(csharrison,japhet): Consider not logging an error message if the
     // user has allowed popups/redirects.
+    bool allow_popups_and_redirects = false;
+    if (auto* settings_client = Client()->GetContentSettingsClient()) {
+      allow_popups_and_redirects =
+          settings_client->AllowPopupsAndRedirects(allow_popups_and_redirects);
+    }
     if (!RuntimeEnabledFeatures::
             FramebustingNeedsSameOriginOrUserGestureEnabled() ||
-        Client()->GetContentSettingsClient().AllowPopupsAndRedirects(
-            false /* default_value */)) {
+        allow_popups_and_redirects) {
       String target_frame_description =
           target_frame.IsLocalFrame() ? "with URL '" +
                                             ToLocalFrame(target_frame)
@@ -1201,13 +1278,21 @@ void LocalFrame::SetIsAdSubframeIfNecessary() {
   bool parent_is_ad =
       parent->IsLocalFrame() && ToLocalFrame(parent)->IsAdSubframe();
 
-  if (parent_is_ad || ad_tracker_->IsAdScriptInStack())
-    SetIsAdSubframe();
+  if (parent_is_ad || ad_tracker_->IsAdScriptInStack()) {
+    SetIsAdSubframe(parent_is_ad ? blink::mojom::AdFrameType::kChildAd
+                                 : blink::mojom::AdFrameType::kRootAd);
+  }
 }
 
 service_manager::InterfaceProvider& LocalFrame::GetInterfaceProvider() {
   DCHECK(Client());
   return *Client()->GetInterfaceProvider();
+}
+
+mojom::blink::DocumentInterfaceBroker&
+LocalFrame::GetDocumentInterfaceBroker() {
+  DCHECK(Client());
+  return *Client()->GetDocumentInterfaceBroker();
 }
 
 AssociatedInterfaceProvider*
@@ -1220,8 +1305,8 @@ LocalFrameClient* LocalFrame::Client() const {
   return static_cast<LocalFrameClient*>(Frame::Client());
 }
 
-ContentSettingsClient* LocalFrame::GetContentSettingsClient() {
-  return Client() ? &Client()->GetContentSettingsClient() : nullptr;
+WebContentSettingsClient* LocalFrame::GetContentSettingsClient() {
+  return Client() ? Client()->GetContentSettingsClient() : nullptr;
 }
 
 FrameResourceCoordinator* LocalFrame::GetFrameResourceCoordinator() {
@@ -1299,6 +1384,10 @@ bool LocalFrame::IsLazyLoadingImageAllowed() const {
     return false;
   if (Owner() && !Owner()->ShouldLazyLoadChildren())
     return false;
+  if (RuntimeEnabledFeatures::RestrictLazyImageLoadingToDataSaverEnabled() &&
+      !is_save_data_enabled_) {
+    return false;
+  }
   return true;
 }
 
@@ -1403,6 +1492,41 @@ ComputedAccessibleNode* LocalFrame::GetOrCreateComputedAccessibleNode(
   return computed_node_mapping_.at(ax_id);
 }
 
+bool LocalFrame::IsAdSubframe() const {
+  return ad_frame_type_ != blink::mojom::AdFrameType::kNonAd;
+}
+
+bool LocalFrame::IsAdRoot() const {
+  return ad_frame_type_ == blink::mojom::AdFrameType::kRootAd;
+}
+
+void LocalFrame::SetIsAdSubframe(blink::mojom::AdFrameType ad_frame_type) {
+  DCHECK(!IsMainFrame());
+
+  // Once |ad_frame_type_| has been set to an ad type on this frame, it cannot
+  // be changed.
+  if (ad_frame_type == blink::mojom::AdFrameType::kNonAd)
+    return;
+  if (ad_frame_type_ != blink::mojom::AdFrameType::kNonAd)
+    return;
+  ad_frame_type_ = ad_frame_type;
+  UpdateAdHighlight();
+  frame_scheduler_->SetIsAdFrame();
+  InstanceCounters::IncrementCounter(InstanceCounters::kAdSubframeCounter);
+}
+
+void LocalFrame::UpdateAdHighlight() {
+  if (!IsAdRoot()) {
+    // Verify that non root ad subframes do not have an overlay.
+    DCHECK(IsMainFrame() || !frame_color_overlay_);
+    return;
+  }
+  if (GetPage()->GetSettings().GetHighlightAds())
+    SetSubframeColorOverlay(SkColorSetARGB(128, 255, 0, 0));
+  else
+    SetSubframeColorOverlay(Color::kTransparent);
+}
+
 void LocalFrame::PauseSubresourceLoading(
     blink::mojom::blink::PauseSubresourceLoadingHandleRequest request) {
   auto handle = GetFrameScheduler()->GetPauseSubresourceLoadingHandle();
@@ -1431,7 +1555,7 @@ SmoothScrollSequencer& LocalFrame::GetSmoothScrollSequencer() {
   if (!IsLocalRoot())
     return LocalFrameRoot().GetSmoothScrollSequencer();
   if (!smooth_scroll_sequencer_)
-    smooth_scroll_sequencer_ = new SmoothScrollSequencer();
+    smooth_scroll_sequencer_ = MakeGarbageCollected<SmoothScrollSequencer>();
   return *smooth_scroll_sequencer_;
 }
 
@@ -1458,17 +1582,14 @@ const mojom::blink::ReportingServiceProxyPtr& LocalFrame::GetReportingService()
   return reporting_service_;
 }
 
-void LocalFrame::DeprecatedReportFeaturePolicyViolation(
-    mojom::FeaturePolicyFeature feature) const {
-  GetSecurityContext()->ReportFeaturePolicyViolation(feature);
-}
-
 // static
 std::unique_ptr<UserGestureIndicator> LocalFrame::NotifyUserActivation(
     LocalFrame* frame,
     UserGestureToken::Status status) {
-  if (frame)
+  if (frame) {
+    UserActivationNotifierFrame() = frame;
     frame->NotifyUserActivation();
+  }
   return std::make_unique<UserGestureIndicator>(status);
 }
 
@@ -1477,21 +1598,32 @@ std::unique_ptr<UserGestureIndicator> LocalFrame::NotifyUserActivation(
     LocalFrame* frame,
     UserGestureToken* token) {
   DCHECK(!RuntimeEnabledFeatures::UserActivationV2Enabled());
-  if (frame)
+  if (frame) {
+    UserActivationNotifierFrame() = frame;
     frame->NotifyUserActivation();
+  }
   return std::make_unique<UserGestureIndicator>(token);
 }
 
 // static
 bool LocalFrame::HasTransientUserActivation(LocalFrame* frame,
                                             bool check_if_main_thread) {
+  bool available;
+
   if (RuntimeEnabledFeatures::UserActivationV2Enabled()) {
-    return frame ? frame->HasTransientUserActivation() : false;
+    available = frame ? frame->HasTransientUserActivation() : false;
+  } else {
+    available = check_if_main_thread
+                    ? UserGestureIndicator::ProcessingUserGestureThreadSafe()
+                    : UserGestureIndicator::ProcessingUserGesture();
   }
 
-  return check_if_main_thread
-             ? UserGestureIndicator::ProcessingUserGestureThreadSafe()
-             : UserGestureIndicator::ProcessingUserGesture();
+  const bool off_main_thread = check_if_main_thread && !IsMainThread();
+  UMA_HISTOGRAM_ENUMERATION(
+      "UserActivation.AvailabilityCheck.FrameResult",
+      DetermineActivationResultEnum(frame, available, off_main_thread));
+
+  return available;
 }
 
 // static
@@ -1499,13 +1631,25 @@ bool LocalFrame::ConsumeTransientUserActivation(
     LocalFrame* frame,
     bool check_if_main_thread,
     UserActivationUpdateSource update_source) {
+  bool consumed;
+
   if (RuntimeEnabledFeatures::UserActivationV2Enabled()) {
-    return frame ? frame->ConsumeTransientUserActivation(update_source) : false;
+    consumed =
+        frame ? frame->ConsumeTransientUserActivation(update_source) : false;
+  } else {
+    consumed = check_if_main_thread
+                   ? UserGestureIndicator::ConsumeUserGestureThreadSafe()
+                   : UserGestureIndicator::ConsumeUserGesture();
   }
 
-  return check_if_main_thread
-             ? UserGestureIndicator::ConsumeUserGestureThreadSafe()
-             : UserGestureIndicator::ConsumeUserGesture();
+  const bool off_main_thread = check_if_main_thread && !IsMainThread();
+  UMA_HISTOGRAM_ENUMERATION(
+      "UserActivation.Consumption.FrameResult",
+      DetermineActivationResultEnum(frame, consumed, off_main_thread));
+  if (!off_main_thread)
+    UserActivationNotifierFrame().Clear();
+
+  return consumed;
 }
 
 void LocalFrame::NotifyUserActivation() {
@@ -1522,6 +1666,92 @@ bool LocalFrame::ConsumeTransientUserActivation(
   if (update_source == UserActivationUpdateSource::kRenderer)
     Client()->ConsumeUserActivation();
   return ConsumeTransientUserActivationInLocalTree();
+}
+
+namespace {
+
+class FrameColorOverlay final : public FrameOverlay::Delegate {
+ public:
+  explicit FrameColorOverlay(LocalFrame* frame, SkColor color)
+      : color_(color), frame_(frame) {}
+
+ private:
+  void PaintFrameOverlay(const FrameOverlay& frame_overlay,
+                         GraphicsContext& graphics_context,
+                         const IntSize&) const override {
+    const auto* view = frame_->View();
+    DCHECK(view);
+    if (view->Width() == 0 || view->Height() == 0)
+      return;
+    ScopedPaintChunkProperties properties(
+        graphics_context.GetPaintController(),
+        view->GetLayoutView()->FirstFragment().LocalBorderBoxProperties(),
+        frame_overlay, DisplayItem::kFrameOverlay);
+    if (DrawingRecorder::UseCachedDrawingIfPossible(
+            graphics_context, frame_overlay, DisplayItem::kFrameOverlay))
+      return;
+    DrawingRecorder recorder(graphics_context, frame_overlay,
+                             DisplayItem::kFrameOverlay);
+    FloatRect rect(0, 0, view->Width(), view->Height());
+    graphics_context.FillRect(rect, color_);
+  }
+
+  SkColor color_;
+  Persistent<LocalFrame> frame_;
+};
+
+}  // namespace
+
+void LocalFrame::SetMainFrameColorOverlay(SkColor color) {
+  DCHECK(IsMainFrame());
+  SetFrameColorOverlay(color);
+}
+
+void LocalFrame::SetSubframeColorOverlay(SkColor color) {
+  DCHECK(!IsMainFrame());
+  SetFrameColorOverlay(color);
+}
+
+void LocalFrame::SetFrameColorOverlay(SkColor color) {
+  frame_color_overlay_.reset();
+
+  if (color == Color::kTransparent)
+    return;
+
+  frame_color_overlay_ = FrameOverlay::Create(
+      this, std::make_unique<FrameColorOverlay>(this, color));
+
+  // Update compositing which will create graphics layers so the page color
+  // update below will be able to attach to the root graphics layer.
+  if (View()) {
+    View()->UpdateLifecycleToCompositingCleanPlusScrolling();
+    frame_color_overlay_->Update();
+  }
+}
+
+void LocalFrame::PaintFrameColorOverlay() {
+  DCHECK(!RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
+  if (!frame_color_overlay_)
+    return;
+  frame_color_overlay_->Update();
+  if (frame_color_overlay_->GetGraphicsLayer())
+    frame_color_overlay_->GetGraphicsLayer()->Paint();
+}
+
+void LocalFrame::PaintFrameColorOverlay(GraphicsContext& context) {
+  DCHECK(RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
+  if (!frame_color_overlay_)
+    return;
+  frame_color_overlay_->Update();
+  frame_color_overlay_->Paint(context);
+}
+
+void LocalFrame::ForciblyPurgeV8Memory() {
+  GetDocument()->NotifyContextDestroyed();
+
+  WindowProxyManager* window_proxy_manager = GetWindowProxyManager();
+  window_proxy_manager->ClearForV8MemoryPurge();
+  Loader().StopAllLoaders();
 }
 
 }  // namespace blink

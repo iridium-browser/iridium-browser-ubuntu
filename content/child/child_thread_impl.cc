@@ -551,20 +551,6 @@ void ChildThreadImpl::Init(const Options& options) {
     field_trial_syncer_->InitFieldTrialObserving(
         *base::CommandLine::ForCurrentProcess());
   }
-
-  if (base::FeatureList::IsEnabled(features::kMemoryCoordinator)) {
-    // Disable MemoryPressureListener when memory coordinator is enabled.
-    base::MemoryPressureListener::SetNotificationsSuppressed(true);
-
-    // TODO(bashi): Revisit how to manage the lifetime of
-    // ChildMemoryCoordinatorImpl.
-    // https://codereview.chromium.org/2094583002/#msg52
-    mojom::MemoryCoordinatorHandlePtr parent_coordinator;
-    GetConnector()->BindInterface(mojom::kBrowserServiceName,
-                                  mojo::MakeRequest(&parent_coordinator));
-    memory_coordinator_ =
-        CreateChildMemoryCoordinator(std::move(parent_coordinator), this);
-  }
 }
 
 void ChildThreadImpl::InitTracing() {
@@ -584,9 +570,6 @@ void ChildThreadImpl::InitTracing() {
 
   channel_->AddFilter(new tracing::ChildTraceMessageFilter(
       ChildProcess::current()->io_task_runner()));
-
-  trace_event_agent_ = tracing::TraceEventAgent::Create(
-      GetConnector(), false /* request_clock_sync_marker_on_android */);
 }
 
 ChildThreadImpl::~ChildThreadImpl() {
@@ -651,22 +634,6 @@ mojom::FontCacheWin* ChildThreadImpl::GetFontCacheWin() {
                                   &font_cache_win_ptr_);
   }
   return font_cache_win_ptr_.get();
-}
-#elif defined(OS_MACOSX)
-bool ChildThreadImpl::LoadFont(const base::string16& font_name,
-                               float font_point_size,
-                               mojo::ScopedSharedBufferHandle* out_font_data,
-                               uint32_t* out_font_id) {
-  return GetFontLoaderMac()->LoadFont(font_name, font_point_size, out_font_data,
-                                      out_font_id);
-}
-
-mojom::FontLoaderMac* ChildThreadImpl::GetFontLoaderMac() {
-  if (!font_loader_mac_ptr_) {
-    GetConnector()->BindInterface(mojom::kBrowserServiceName,
-                                  &font_loader_mac_ptr_);
-  }
-  return font_loader_mac_ptr_.get();
 }
 #endif
 
@@ -743,9 +710,13 @@ void ChildThreadImpl::OnAssociatedInterfaceRequest(
 
 void ChildThreadImpl::StartServiceManagerConnection() {
   DCHECK(service_manager_connection_);
-  service_manager_connection_->Start();
   GetContentClient()->OnServiceManagerConnected(
       service_manager_connection_.get());
+
+  // NOTE: You must register any ConnectionFilter instances on
+  // |service_manager_connection_| *before* this call to |Start()|, otherwise
+  // incoming interface requests may race with the registration.
+  service_manager_connection_->Start();
 }
 
 bool ChildThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {

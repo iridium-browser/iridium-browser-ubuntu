@@ -63,8 +63,9 @@ metricsBase.call_ = function(methodName, args) {
     console.error(e.stack);
   }
   // Support writing metrics.log in manual testing to log method calls.
-  if (/** @type{{ log: (boolean|undefined) }} */ (metrics).log)
+  if (/** @type{{ log: (boolean|undefined) }} */ (metrics).log) {
     console.log('chrome.metricsPrivate.' + methodName, args);
+  }
 };
 
 /**
@@ -92,6 +93,15 @@ metricsBase.recordSmallCount = function(name, value) {
  */
 metricsBase.recordTime = function(name, time) {
   metrics.call_('recordTime', [metrics.convertName_(name), time]);
+};
+
+/**
+ * Records a boolean value to the given metric.
+ * @param {string} name Short metric name.
+ * @param {boolean} value The value to be recorded.
+ */
+metricsBase.recordBoolean = function(name, value) {
+  metrics.call_('recordBoolean', [metrics.convertName_(name), value]);
 };
 
 /**
@@ -154,8 +164,9 @@ metricsBase.recordEnum = function(name, value, opt_validValues) {
     boundaryValue = validValues;
   }
   // Collect invalid values in the overflow bucket at the end.
-  if (index < 0 || index >= boundaryValue)
+  if (index < 0 || index >= boundaryValue) {
     index = boundaryValue - 1;
+  }
 
   // Setting min to 1 looks strange but this is exactly the recommended way
   // of using histograms for enum-like types. Bucket #0 works as a regular

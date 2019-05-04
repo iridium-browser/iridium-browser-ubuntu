@@ -39,7 +39,7 @@ class SharedImageFactoryTest : public testing::Test {
     GpuDriverBugWorkarounds workarounds;
     workarounds.max_texture_size = INT_MAX - 1;
     factory_ = std::make_unique<SharedImageFactory>(
-        preferences, workarounds, GpuFeatureInfo(), &mailbox_manager_,
+        preferences, workarounds, GpuFeatureInfo(), nullptr, &mailbox_manager_,
         &shared_image_manager_, &image_factory_, nullptr);
   }
 
@@ -58,7 +58,7 @@ class SharedImageFactoryTest : public testing::Test {
 };
 
 TEST_F(SharedImageFactoryTest, Basic) {
-  auto mailbox = Mailbox::Generate();
+  auto mailbox = Mailbox::GenerateForSharedImage();
   auto format = viz::ResourceFormat::RGBA_8888;
   gfx::Size size(256, 256);
   auto color_space = gfx::ColorSpace::CreateSRGB();
@@ -74,7 +74,7 @@ TEST_F(SharedImageFactoryTest, Basic) {
 }
 
 TEST_F(SharedImageFactoryTest, DuplicateMailbox) {
-  auto mailbox = Mailbox::Generate();
+  auto mailbox = Mailbox::GenerateForSharedImage();
   auto format = viz::ResourceFormat::RGBA_8888;
   gfx::Size size(256, 256);
   auto color_space = gfx::ColorSpace::CreateSRGB();
@@ -83,10 +83,19 @@ TEST_F(SharedImageFactoryTest, DuplicateMailbox) {
       factory_->CreateSharedImage(mailbox, format, size, color_space, usage));
   EXPECT_FALSE(
       factory_->CreateSharedImage(mailbox, format, size, color_space, usage));
+
+  GpuPreferences preferences;
+  GpuDriverBugWorkarounds workarounds;
+  workarounds.max_texture_size = INT_MAX - 1;
+  auto other_factory = std::make_unique<SharedImageFactory>(
+      preferences, workarounds, GpuFeatureInfo(), nullptr, &mailbox_manager_,
+      &shared_image_manager_, &image_factory_, nullptr);
+  EXPECT_FALSE(other_factory->CreateSharedImage(mailbox, format, size,
+                                                color_space, usage));
 }
 
 TEST_F(SharedImageFactoryTest, DestroyInexistentMailbox) {
-  auto mailbox = Mailbox::Generate();
+  auto mailbox = Mailbox::GenerateForSharedImage();
   EXPECT_FALSE(factory_->DestroySharedImage(mailbox));
 }
 

@@ -59,7 +59,7 @@ void AppDownloadingScreenHandler::Bind(AppDownloadingScreen* screen) {
 
 void AppDownloadingScreenHandler::Show() {
   ShowScreen(kScreenId);
-  CallJS("updateNumberOfSelectedApps",
+  CallJS("login.AppDownloadingScreen.updateNumberOfSelectedApps",
          base::Value(GetNumberOfUserSelectedApps()));
 }
 

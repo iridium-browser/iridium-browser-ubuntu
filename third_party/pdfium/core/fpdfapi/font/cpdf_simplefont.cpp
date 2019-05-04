@@ -146,7 +146,7 @@ void CPDF_SimpleFont::LoadPDFEncoding(bool bEmbedded, bool bTrueType) {
 
   m_CharNames.resize(256);
   uint32_t cur_code = 0;
-  for (uint32_t i = 0; i < pDiffs->GetCount(); i++) {
+  for (uint32_t i = 0; i < pDiffs->size(); i++) {
     const CPDF_Object* pElement = pDiffs->GetDirectObjectAt(i);
     if (!pElement)
       continue;
@@ -202,8 +202,8 @@ bool CPDF_SimpleFont::LoadCommon() {
     size_t width_start = m_pFontDict->GetIntegerFor("FirstChar", 0);
     size_t width_end = m_pFontDict->GetIntegerFor("LastChar", 0);
     if (width_start <= 255) {
-      if (width_end == 0 || width_end >= width_start + pWidthArray->GetCount())
-        width_end = width_start + pWidthArray->GetCount() - 1;
+      if (width_end == 0 || width_end >= width_start + pWidthArray->size())
+        width_end = width_start + pWidthArray->size() - 1;
       if (width_end > 255)
         width_end = 255;
       for (size_t i = width_start; i <= width_end; i++)
@@ -225,7 +225,8 @@ bool CPDF_SimpleFont::LoadCommon() {
     return true;
 
   if (FontStyleIsAllCaps(m_Flags)) {
-    unsigned char kLowercases[][2] = {{'a', 'z'}, {0xe0, 0xf6}, {0xf8, 0xfd}};
+    static const unsigned char kLowercases[][2] = {
+        {'a', 'z'}, {0xe0, 0xf6}, {0xf8, 0xfd}};
     for (size_t range = 0; range < FX_ArraySize(kLowercases); ++range) {
       const auto& lower = kLowercases[range];
       for (int i = lower[0]; i <= lower[1]; ++i) {

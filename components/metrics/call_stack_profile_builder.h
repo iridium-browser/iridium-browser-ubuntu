@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_METRICS_CALL_STACK_PROFILE_BUILDER_H_
 #define COMPONENTS_METRICS_CALL_STACK_PROFILE_BUILDER_H_
 
+#include <limits>
 #include <map>
 #include <vector>
 
@@ -17,6 +18,23 @@
 #include "third_party/metrics_proto/sampled_profile.pb.h"
 
 namespace metrics {
+
+// Interface that allows the CallStackProfileBuilder to provide ids for distinct
+// work items. Samples with the same id are tagged as coming from the same work
+// item in the recorded samples.
+class WorkIdRecorder {
+ public:
+  WorkIdRecorder() = default;
+  virtual ~WorkIdRecorder() = default;
+
+  // This function is invoked on the profiler thread while the target thread is
+  // suspended so must not take any locks, including indirectly through use of
+  // heap allocation, LOG, CHECK, or DCHECK.
+  virtual unsigned int RecordWorkId() const = 0;
+
+  WorkIdRecorder(const WorkIdRecorder&) = delete;
+  WorkIdRecorder& operator=(const WorkIdRecorder&) = delete;
+};
 
 // An instance of the class is meant to be passed to base::StackSamplingProfiler
 // to collect profiles. The profiles collected are uploaded via the metrics log.
@@ -35,20 +53,17 @@ class CallStackProfileBuilder
   // thus the callback must be callable on any thread.
   explicit CallStackProfileBuilder(
       const CallStackProfileParams& profile_params,
+      const WorkIdRecorder* work_id_recorder = nullptr,
       base::OnceClosure completed_callback = base::OnceClosure());
 
   ~CallStackProfileBuilder() override;
 
   // base::StackSamplingProfiler::ProfileBuilder:
+  void RecordMetadata() override;
   void OnSampleCompleted(
       std::vector<base::StackSamplingProfiler::Frame> frames) override;
   void OnProfileCompleted(base::TimeDelta profile_duration,
                           base::TimeDelta sampling_period) override;
-
-  // The function is used by sampling heap profiler. Its samples already come
-  // with different counts.
-  void OnSampleCompleted(std::vector<base::StackSamplingProfiler::Frame> frames,
-                         size_t count);
 
   // Sets the callback to use for reporting browser process profiles. This
   // indirection is required to avoid a dependency on unnecessary metrics code
@@ -72,6 +87,10 @@ class CallStackProfileBuilder
     bool operator()(const CallStackProfile::Stack* stack1,
                     const CallStackProfile::Stack* stack2) const;
   };
+
+  unsigned int last_work_id_ = std::numeric_limits<unsigned int>::max();
+  bool is_continued_work_ = false;
+  const WorkIdRecorder* const work_id_recorder_;
 
   // The SampledProfile protobuf message which contains the collected stack
   // samples.

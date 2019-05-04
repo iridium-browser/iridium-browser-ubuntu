@@ -65,7 +65,7 @@ ConvolverHandler::~ConvolverHandler() {
   Uninitialize();
 }
 
-void ConvolverHandler::Process(size_t frames_to_process) {
+void ConvolverHandler::Process(uint32_t frames_to_process) {
   AudioBus* output_bus = Output(0).Bus();
   DCHECK(output_bus);
 
@@ -110,7 +110,7 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
   }
 
   unsigned number_of_channels = buffer->numberOfChannels();
-  size_t buffer_length = buffer->length();
+  uint32_t buffer_length = buffer->length();
 
   // The current implementation supports only 1-, 2-, or 4-channel impulse
   // responses, with the 4-channel response being interpreted as true-stereo
@@ -140,7 +140,7 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
 
   // Create the reverb with the given impulse response.
   std::unique_ptr<Reverb> reverb = std::make_unique<Reverb>(
-      buffer_bus.get(), AudioUtilities::kRenderQuantumFrames, MaxFFTSize,
+      buffer_bus.get(), audio_utilities::kRenderQuantumFrames, MaxFFTSize,
       Context() && Context()->HasRealtimeConstraint(), normalize_);
 
   {
@@ -202,7 +202,7 @@ unsigned ConvolverHandler::ComputeNumberOfOutputChannels(
   return clampTo(std::max(input_channels, response_channels), 1, 2);
 }
 
-void ConvolverHandler::SetChannelCount(unsigned long channel_count,
+void ConvolverHandler::SetChannelCount(unsigned channel_count,
                                        ExceptionState& exception_state) {
   DCHECK(IsMainThread());
   BaseAudioContext::GraphAutoLocker locker(Context());
@@ -273,11 +273,11 @@ ConvolverNode* ConvolverNode::Create(BaseAudioContext& context,
     return nullptr;
   }
 
-  return new ConvolverNode(context);
+  return MakeGarbageCollected<ConvolverNode>(context);
 }
 
 ConvolverNode* ConvolverNode::Create(BaseAudioContext* context,
-                                     const ConvolverOptions& options,
+                                     const ConvolverOptions* options,
                                      ExceptionState& exception_state) {
   ConvolverNode* node = Create(*context, exception_state);
 
@@ -288,9 +288,9 @@ ConvolverNode* ConvolverNode::Create(BaseAudioContext* context,
 
   // It is important to set normalize first because setting the buffer will
   // examing the normalize attribute to see if normalization needs to be done.
-  node->setNormalize(!options.disableNormalization());
-  if (options.hasBuffer())
-    node->setBuffer(options.buffer(), exception_state);
+  node->setNormalize(!options->disableNormalization());
+  if (options->hasBuffer())
+    node->setBuffer(options->buffer(), exception_state);
   return node;
 }
 

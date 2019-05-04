@@ -75,7 +75,7 @@ void FetchParameters::SetCrossOriginAccessControl(
   // Currently FetchParametersMode is only used when the request goes to
   // Service Worker.
   resource_request_.SetFetchRequestMode(
-      network::mojom::FetchRequestMode::kCORS);
+      network::mojom::FetchRequestMode::kCors);
   resource_request_.SetFetchCredentialsMode(credentials_mode);
 
   resource_request_.SetRequestorOrigin(origin);
@@ -121,6 +121,13 @@ void FetchParameters::SetLazyImagePlaceholder() {
   resource_request_.SetPreviewsState(resource_request_.GetPreviewsState() |
                                      WebURLRequest::kLazyImageLoadDeferred);
   SetAllowImagePlaceholder();
+}
+
+void FetchParameters::SetLazyImageDeferred() {
+  resource_request_.SetPreviewsState(resource_request_.GetPreviewsState() |
+                                     WebURLRequest::kLazyImageLoadDeferred);
+  DCHECK_EQ(kNone, image_request_optimization_);
+  image_request_optimization_ = kDeferImageLoad;
 }
 
 void FetchParameters::SetAllowImagePlaceholder() {

@@ -8,10 +8,10 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "components/variations/client_filterable_state.h"
@@ -100,6 +100,9 @@ class VariationsFieldTrialCreator {
   // Returns whether the map of the cached UI strings to override is empty.
   bool IsOverrideResourceMapEmpty();
 
+  // Returns the locale that was used for evaluating trials.
+  const std::string& application_locale() const { return application_locale_; }
+
   // Returns the short hardware class value used to evaluate variations hardware
   // class filters. Only implemented on CrOS - returns empty string on other
   // platforms.
@@ -171,7 +174,7 @@ class VariationsFieldTrialCreator {
 
   // Caches the UI strings which need to be overridden in the resource bundle.
   // These strings are cached before the resource bundle is initialized.
-  base::hash_map<int, base::string16> overridden_strings_map_;
+  std::unordered_map<int, base::string16> overridden_strings_map_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

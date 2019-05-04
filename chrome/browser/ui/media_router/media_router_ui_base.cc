@@ -8,9 +8,11 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "base/atomic_sequence_num.h"
 #include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -31,8 +33,10 @@
 #include "chrome/common/media_router/media_source.h"
 #include "chrome/common/media_router/media_source_helper.h"
 #include "chrome/common/media_router/route_request_result.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/url_formatter/elide_url.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/common/fullscreen_video_element.mojom.h"
 #include "extensions/browser/extension_registry.h"
@@ -45,15 +49,6 @@
 
 namespace media_router {
 namespace {
-
-std::string TruncateHost(const std::string& host) {
-  const std::string truncated =
-      net::registry_controlled_domains::GetDomainAndRegistry(
-          host, net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
-  // The truncation will be empty in some scenarios (e.g. host is
-  // simply an IP address). Fail gracefully.
-  return truncated.empty() ? host : truncated;
-}
 
 // Returns the first source in |sources| that can be connected to, or an empty
 // source if there is none.  This is used by the Media Router to find such a
@@ -261,7 +256,7 @@ bool MediaRouterUIBase::CreateRoute(const MediaSink::Id& sink_id,
     params = GetRouteParameters(sink_id, cast_mode);
   }
   if (!params) {
-    SendIssueForUnableToCast(cast_mode);
+    SendIssueForUnableToCast(cast_mode, sink_id);
     return false;
   }
 
@@ -295,25 +290,28 @@ std::vector<MediaSinkWithCastModes> MediaRouterUIBase::GetEnabledSinks() const {
   // provider-specific behavior, but we currently do not have a way to
   // communicate dialog-specific information to/from the
   // WiredDisplayMediaRouteProvider.
-  std::vector<MediaSinkWithCastModes> enabled_sinks;
+  std::vector<MediaSinkWithCastModes> enabled_sinks(sinks_);
   const std::string display_sink_id =
       WiredDisplayMediaRouteProvider::GetSinkIdForDisplay(
           display_observer_->GetCurrentDisplay());
-  for (const MediaSinkWithCastModes& sink : sinks_) {
-    if (sink.sink.id() != display_sink_id)
-      enabled_sinks.push_back(sink);
-  }
+  base::EraseIf(enabled_sinks,
+                [&display_sink_id](const MediaSinkWithCastModes& sink) {
+                  return sink.sink.id() == display_sink_id;
+                });
   return enabled_sinks;
 }
 
-std::string MediaRouterUIBase::GetTruncatedPresentationRequestSourceName()
-    const {
+base::string16 MediaRouterUIBase::GetPresentationRequestSourceName() const {
   GURL gurl = GetFrameURL();
   CHECK(initiator_);
+  // Presentation URLs are only possible on https: and other secure contexts,
+  // so we can omit http/https schemes here.
   return gurl.SchemeIs(extensions::kExtensionScheme)
-             ? GetExtensionName(gurl, extensions::ExtensionRegistry::Get(
-                                          initiator_->GetBrowserContext()))
-             : TruncateHost(GetHostFromURL(gurl));
+             ? base::UTF8ToUTF16(
+                   GetExtensionName(gurl, extensions::ExtensionRegistry::Get(
+                                              initiator_->GetBrowserContext())))
+             : url_formatter::FormatUrlForSecurityDisplay(
+                   gurl, url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS);
 }
 
 void MediaRouterUIBase::AddIssue(const IssueInfo& issue) {
@@ -411,6 +409,10 @@ void MediaRouterUIBase::OnRouteResponseReceived(
   }
 
   current_route_request_.reset();
+  if (result.result_code() == RouteRequestResult::TIMED_OUT) {
+    SendIssueForRouteTimeout(cast_mode, sink_id,
+                             presentation_request_source_name);
+  }
 }
 
 void MediaRouterUIBase::HandleCreateSessionRequestRouteResponse(
@@ -552,10 +554,10 @@ base::Optional<RouteParameters> MediaRouterUIBase::GetRouteParameters(
   //     treat subsequent route requests from a Presentation API-initiated
   //     dialogs as browser-initiated.
   // TODO(https://crbug.com/868186): Close the Views dialog in case (2).
-  params.route_result_callbacks.push_back(base::BindOnce(
-      &MediaRouterUIBase::OnRouteResponseReceived, weak_factory_.GetWeakPtr(),
-      current_route_request_->id, sink_id, cast_mode,
-      base::UTF8ToUTF16(GetTruncatedPresentationRequestSourceName())));
+  params.route_result_callbacks.push_back(
+      base::BindOnce(&MediaRouterUIBase::OnRouteResponseReceived,
+                     weak_factory_.GetWeakPtr(), current_route_request_->id,
+                     sink_id, cast_mode, GetPresentationRequestSourceName()));
   if (for_presentation_source) {
     if (start_presentation_context_) {
       // |start_presentation_context_| will be nullptr after this call, as the
@@ -587,6 +589,7 @@ GURL MediaRouterUIBase::GetFrameURL() const {
 
 void MediaRouterUIBase::SendIssueForRouteTimeout(
     MediaCastMode cast_mode,
+    const MediaSink::Id& sink_id,
     const base::string16& presentation_request_source_name) {
   std::string issue_title;
   switch (cast_mode) {
@@ -611,11 +614,14 @@ void MediaRouterUIBase::SendIssueForRouteTimeout(
       break;
   }
 
-  AddIssue(IssueInfo(issue_title, IssueInfo::Action::DISMISS,
-                     IssueInfo::Severity::NOTIFICATION));
+  IssueInfo issue_info(issue_title, IssueInfo::Action::DISMISS,
+                       IssueInfo::Severity::NOTIFICATION);
+  issue_info.sink_id = sink_id;
+  AddIssue(issue_info);
 }
 
-void MediaRouterUIBase::SendIssueForUnableToCast(MediaCastMode cast_mode) {
+void MediaRouterUIBase::SendIssueForUnableToCast(MediaCastMode cast_mode,
+                                                 const MediaSink::Id& sink_id) {
   // For a generic error, claim a tab error unless it was specifically desktop
   // mirroring.
   std::string issue_title =
@@ -624,8 +630,10 @@ void MediaRouterUIBase::SendIssueForUnableToCast(MediaCastMode cast_mode) {
                 IDS_MEDIA_ROUTER_ISSUE_UNABLE_TO_CAST_DESKTOP)
           : l10n_util::GetStringUTF8(
                 IDS_MEDIA_ROUTER_ISSUE_CREATE_ROUTE_TIMEOUT_FOR_TAB);
-  AddIssue(IssueInfo(issue_title, IssueInfo::Action::DISMISS,
-                     IssueInfo::Severity::WARNING));
+  IssueInfo issue_info(issue_title, IssueInfo::Action::DISMISS,
+                       IssueInfo::Severity::WARNING);
+  issue_info.sink_id = sink_id;
+  AddIssue(issue_info);
 }
 
 IssueManager* MediaRouterUIBase::GetIssueManager() {
@@ -691,7 +699,7 @@ base::Optional<RouteParameters> MediaRouterUIBase::GetLocalFileRouteParameters(
   params.route_result_callbacks.push_back(base::BindOnce(
       &MediaRouterUIBase::OnRouteResponseReceived, weak_factory_.GetWeakPtr(),
       request_id, sink_id, MediaCastMode::LOCAL_FILE,
-      base::UTF8ToUTF16(GetTruncatedPresentationRequestSourceName())));
+      GetPresentationRequestSourceName()));
 
   params.route_result_callbacks.push_back(
       base::BindOnce(&MediaRouterUIBase::MaybeReportCastingSource,
@@ -733,7 +741,8 @@ void MediaRouterUIBase::MaybeReportFileInformation(
 content::WebContents* MediaRouterUIBase::OpenTabWithUrl(const GURL& url) {
   // Check if the current page is a new tab. If so open file in current page.
   // If not then open a new page.
-  if (initiator_->GetVisibleURL() == chrome::kChromeUINewTabURL) {
+  if (initiator_->GetVisibleURL() == chrome::kChromeUINewTabURL ||
+      initiator_->GetVisibleURL() == chrome::kChromeSearchLocalNtpUrl) {
     content::NavigationController::LoadURLParams load_params(url);
     load_params.transition_type = ui::PAGE_TRANSITION_GENERATED;
     initiator_->GetController().LoadURLWithParams(load_params);

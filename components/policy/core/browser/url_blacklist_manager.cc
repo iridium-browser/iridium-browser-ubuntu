@@ -16,7 +16,6 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -128,7 +127,7 @@ void ProcessQueryToConditions(
 
 bool BypassBlacklistWildcardForURL(const GURL& url) {
   const std::string& scheme = url.scheme();
-  for (size_t i = 0; i < arraysize(kBypassBlacklistWildcardForSchemes); ++i) {
+  for (size_t i = 0; i < base::size(kBypassBlacklistWildcardForSchemes); ++i) {
     if (scheme == kBypassBlacklistWildcardForSchemes[i])
       return true;
   }
@@ -218,9 +217,8 @@ URLBlacklist::URLBlacklistState URLBlacklist::GetURLBlacklistState(
       url_matcher_->MatchURL(url);
 
   const FilterComponents* max = nullptr;
-  for (std::set<URLMatcherConditionSet::ID>::iterator id = matching_ids.begin();
-       id != matching_ids.end(); ++id) {
-    std::map<int, FilterComponents>::const_iterator it = filters_.find(*id);
+  for (auto id = matching_ids.begin(); id != matching_ids.end(); ++id) {
+    auto it = filters_.find(*id);
     DCHECK(it != filters_.end());
     const FilterComponents& filter = it->second;
     if (!max || FilterTakesPrecedence(filter, *max))

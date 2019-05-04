@@ -37,13 +37,14 @@ class BasicDesktopEnvironment : public DesktopEnvironment {
   ~BasicDesktopEnvironment() override;
 
   // DesktopEnvironment implementation.
+  std::unique_ptr<ActionExecutor> CreateActionExecutor() override;
   std::unique_ptr<AudioCapturer> CreateAudioCapturer() override;
   std::unique_ptr<InputInjector> CreateInputInjector() override;
   std::unique_ptr<ScreenControls> CreateScreenControls() override;
   std::unique_ptr<webrtc::DesktopCapturer> CreateVideoCapturer() override;
   std::unique_ptr<webrtc::MouseCursorMonitor> CreateMouseCursorMonitor()
       override;
-  std::unique_ptr<FileProxyWrapper> CreateFileProxyWrapper() override;
+  std::unique_ptr<FileOperations> CreateFileOperations() override;
   std::string GetCapabilities() const override;
   void SetCapabilities(const std::string& capabilities) override;
   uint32_t GetDesktopSessionId() const override;

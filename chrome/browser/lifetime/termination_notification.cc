@@ -12,7 +12,7 @@
 #include "content/public/browser/notification_service.h"
 
 #if defined(OS_CHROMEOS)
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_policy_controller.h"
 #include "chromeos/dbus/session_manager_client.h"
@@ -73,7 +73,7 @@ void NotifyAndTerminate(bool fast_path, RebootPolicy reboot_policy) {
       // If running the Chrome OS build, but we're not on the device, act
       // as if we received signal from SessionManager.
       base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                               base::Bind(&chrome::ExitCleanly));
+                               base::Bind(&chrome::ExitIgnoreUnloadHandlers));
     }
   }
 #endif

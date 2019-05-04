@@ -53,25 +53,19 @@ std::vector<Offset> FramebufferAttachment::GetDefaultViewportOffsetVector()
         FramebufferAttachment::kDefaultViewportOffsets, FramebufferAttachment::kDefaultNumViews);
 }
 
-FramebufferAttachment::Target::Target() : mBinding(GL_NONE), mTextureIndex()
-{
-}
+FramebufferAttachment::Target::Target() : mBinding(GL_NONE), mTextureIndex() {}
 
 FramebufferAttachment::Target::Target(GLenum binding, const ImageIndex &imageIndex)
-    : mBinding(binding),
-      mTextureIndex(imageIndex)
-{
-}
+    : mBinding(binding), mTextureIndex(imageIndex)
+{}
 
 FramebufferAttachment::Target::Target(const Target &other)
-    : mBinding(other.mBinding),
-      mTextureIndex(other.mTextureIndex)
-{
-}
+    : mBinding(other.mBinding), mTextureIndex(other.mTextureIndex)
+{}
 
 FramebufferAttachment::Target &FramebufferAttachment::Target::operator=(const Target &other)
 {
-    this->mBinding = other.mBinding;
+    this->mBinding      = other.mBinding;
     this->mTextureIndex = other.mTextureIndex;
     return *this;
 }
@@ -85,8 +79,7 @@ FramebufferAttachment::FramebufferAttachment()
       mMultiviewLayout(kDefaultMultiviewLayout),
       mBaseViewIndex(kDefaultBaseViewIndex),
       mViewportOffsets(GetDefaultViewportOffsetVector())
-{
-}
+{}
 
 FramebufferAttachment::FramebufferAttachment(const Context *context,
                                              GLenum type,
@@ -155,8 +148,8 @@ void FramebufferAttachment::attach(const Context *context,
         return;
     }
 
-    mType = type;
-    mTarget = Target(binding, textureIndex);
+    mType            = type;
+    mTarget          = Target(binding, textureIndex);
     mNumViews        = numViews;
     mBaseViewIndex   = baseViewIndex;
     mMultiviewLayout = multiviewLayout;
@@ -323,7 +316,7 @@ angle::Result FramebufferAttachment::initializeContents(const Context *context)
     ASSERT(mResource);
     ANGLE_TRY(mResource->initializeContents(context, mTarget.textureIndex()));
     setInitState(InitState::Initialized);
-    return angle::Result::Continue();
+    return angle::Result::Continue;
 }
 
 void FramebufferAttachment::setInitState(InitState initState) const
@@ -334,13 +327,9 @@ void FramebufferAttachment::setInitState(InitState initState) const
 
 ////// FramebufferAttachmentObject Implementation //////
 
-FramebufferAttachmentObject::FramebufferAttachmentObject()
-{
-}
+FramebufferAttachmentObject::FramebufferAttachmentObject() {}
 
-FramebufferAttachmentObject::~FramebufferAttachmentObject()
-{
-}
+FramebufferAttachmentObject::~FramebufferAttachmentObject() {}
 
 angle::Result FramebufferAttachmentObject::getAttachmentRenderTarget(
     const Context *context,
@@ -349,11 +338,6 @@ angle::Result FramebufferAttachmentObject::getAttachmentRenderTarget(
     rx::FramebufferAttachmentRenderTarget **rtOut) const
 {
     return getAttachmentImpl()->getAttachmentRenderTarget(context, binding, imageIndex, rtOut);
-}
-
-void FramebufferAttachmentObject::onStorageChange(const gl::Context *context) const
-{
-    return getAttachmentImpl()->onStateChange(context, angle::SubjectMessage::STORAGE_CHANGED);
 }
 
 angle::Result FramebufferAttachmentObject::initializeContents(const Context *context,

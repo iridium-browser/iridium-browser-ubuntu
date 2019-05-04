@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/i18n/timezone.h"
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "media/base/media_switches.h"
@@ -42,8 +42,8 @@ void VideoCaptureDevice::SetPhotoOptions(mojom::PhotoSettingsPtr settings,
 
 void VideoCaptureDevice::TakePhoto(TakePhotoCallback callback) {}
 
-PowerLineFrequency VideoCaptureDevice::GetPowerLineFrequencyForLocation()
-    const {
+// static
+PowerLineFrequency VideoCaptureDevice::GetPowerLineFrequencyForLocation() {
   const std::string current_country = base::CountryCodeForCurrentTimezone();
   if (current_country.empty())
     return PowerLineFrequency::FREQUENCY_DEFAULT;
@@ -55,7 +55,7 @@ PowerLineFrequency VideoCaptureDevice::GetPowerLineFrequencyForLocation()
       "KN", "KR", "KY", "MS", "MX", "NI", "PA", "PE", "PF", "PH", "PR",
       "PW", "SA", "SR", "SV", "TT", "TW", "UM", "US", "VG", "VI", "VE"};
   const char** countries_using_60Hz_end =
-      countries_using_60Hz + arraysize(countries_using_60Hz);
+      countries_using_60Hz + base::size(countries_using_60Hz);
   if (std::find(countries_using_60Hz, countries_using_60Hz_end,
                 current_country) == countries_using_60Hz_end) {
     return PowerLineFrequency::FREQUENCY_50HZ;
@@ -63,8 +63,9 @@ PowerLineFrequency VideoCaptureDevice::GetPowerLineFrequencyForLocation()
   return PowerLineFrequency::FREQUENCY_60HZ;
 }
 
+// static
 PowerLineFrequency VideoCaptureDevice::GetPowerLineFrequency(
-    const VideoCaptureParams& params) const {
+    const VideoCaptureParams& params) {
   switch (params.power_line_frequency) {
     case PowerLineFrequency::FREQUENCY_50HZ:  // fall through
     case PowerLineFrequency::FREQUENCY_60HZ:

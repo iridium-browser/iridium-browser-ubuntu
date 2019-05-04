@@ -15,6 +15,7 @@ class GpuIntegrationTest(
     serially_executed_browser_test_case.SeriallyExecutedBrowserTestCase):
 
   _cached_expectations = None
+  _also_run_disabled_tests = False
 
   # Several of the tests in this directory need to be able to relaunch
   # the browser on demand with a new set of command line arguments
@@ -36,6 +37,18 @@ class GpuIntegrationTest(
   def SetUpProcess(cls):
     super(GpuIntegrationTest, cls).SetUpProcess()
     cls._original_finder_options = cls._finder_options.Copy()
+
+  @classmethod
+  def AddCommandlineArgs(cls, parser):
+    """Adds command line arguments understood by the test harness.
+
+    Subclasses overriding this method must invoke the superclass's
+    version!"""
+    parser.add_option(
+      '--also-run-disabled-tests',
+      dest='also_run_disabled_tests',
+      action='store_true', default=False,
+      help='Run disabled tests, ignoring Skip and Fail expectations')
 
   @classmethod
   def CustomizeBrowserArgs(cls, browser_args):
@@ -60,7 +73,7 @@ class GpuIntegrationTest(
     cls.SetBrowserOptions(cls._finder_options)
 
   @classmethod
-  def RestartBrowserIfNecessaryWithArgs(cls, browser_args):
+  def RestartBrowserIfNecessaryWithArgs(cls, browser_args, force_restart=False):
     if not browser_args:
       browser_args = []
     elif '--disable-gpu' in browser_args:
@@ -70,16 +83,21 @@ class GpuIntegrationTest(
       os_name = cls.browser.platform.GetOSName()
       if os_name == 'android' or os_name == 'chromeos':
         browser_args.remove('--disable-gpu')
-    if set(browser_args) != cls._last_launched_browser_args:
+    if force_restart or set(browser_args) != cls._last_launched_browser_args:
       logging.info('Restarting browser with arguments: ' + str(browser_args))
       cls.StopBrowser()
       cls.CustomizeBrowserArgs(browser_args)
       cls.StartBrowser()
 
+  @classmethod
+  def RestartBrowserWithArgs(cls, browser_args):
+    cls.RestartBrowserIfNecessaryWithArgs(browser_args, force_restart=True)
+
   # The following is the rest of the framework for the GPU integration tests.
 
   @classmethod
   def GenerateTestCases__RunGpuTest(cls, options):
+    cls._also_run_disabled_tests = options.also_run_disabled_tests
     for test_name, url, args in cls.GenerateGpuTests(options):
       yield test_name, (url, test_name, args)
 
@@ -124,6 +142,9 @@ class GpuIntegrationTest(
     expectations = self.__class__.GetExpectations()
     expectation = expectations.GetExpectationForTest(
       self.browser, url, test_name)
+    if self.__class__._also_run_disabled_tests:
+      # Ignore test expectations if the user has requested it.
+      expectation = 'pass'
     if expectation == 'skip':
       # skipTest in Python's unittest harness raises an exception, so
       # aborts the control flow here.

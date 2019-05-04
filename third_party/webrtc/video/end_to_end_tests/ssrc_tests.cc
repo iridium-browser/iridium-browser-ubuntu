@@ -8,6 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "absl/memory/memory.h"
 #include "api/test/simulated_network.h"
 #include "call/fake_network_pipe.h"
 #include "call/simulated_network.h"
@@ -48,7 +49,7 @@ TEST_F(SsrcEndToEndTest, UnknownRtpPacketGivesUnknownSsrcReturnCode) {
   class PacketInputObserver : public PacketReceiver {
    public:
     explicit PacketInputObserver(PacketReceiver* receiver)
-        : receiver_(receiver), delivered_packet_(false, false) {}
+        : receiver_(receiver) {}
 
     bool Wait() { return delivered_packet_.Wait(kDefaultTimeoutMs); }
 

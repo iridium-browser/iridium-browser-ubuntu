@@ -22,7 +22,11 @@ constexpr int kFaviconsPerCategoryImage = 4;
 // Image data is not represented here because it is requested separately from
 // the UI layer.
 struct ExploreSitesSite {
-  ExploreSitesSite(int site_id, int category_id, GURL url, std::string title);
+  ExploreSitesSite(int site_id,
+                   int category_id,
+                   GURL url,
+                   std::string title,
+                   bool is_blacklisted);
   ExploreSitesSite(ExploreSitesSite&& other);
   virtual ~ExploreSitesSite();
 
@@ -30,6 +34,7 @@ struct ExploreSitesSite {
   int category_id;
   GURL url;
   std::string title;
+  bool is_blacklisted;
 
   DISALLOW_COPY_AND_ASSIGN(ExploreSitesSite);
 };
@@ -42,7 +47,9 @@ struct ExploreSitesCategory {
   ExploreSitesCategory(int category_id,
                        std::string version_token,
                        int category_type,
-                       std::string label);
+                       std::string label,
+                       int ntp_shown_count,
+                       int interaction_count);
   ExploreSitesCategory(ExploreSitesCategory&& other);
   virtual ~ExploreSitesCategory();
 
@@ -50,6 +57,9 @@ struct ExploreSitesCategory {
   std::string version_token;
   int category_type;
   std::string label;
+  int ntp_shown_count;  // Number of times this category was shown on NTP.
+  // Number of times sites within this category was interacted with.
+  int interaction_count;
 
   std::vector<ExploreSitesSite> sites;
 
@@ -84,6 +94,39 @@ enum class ExploreSitesRequestStatus {
   kShouldSuspendBlockedByAdministrator = 3,
   // kMaxValue should always be the last type.
   kMaxValue = kShouldSuspendBlockedByAdministrator
+};
+
+// This enum should be kept in sync with ExploreSitesCatalogUpdateRequestResult
+// in enums.xml.
+enum class ExploreSitesCatalogUpdateRequestResult {
+  // A new catalog was returned by the fetcher.
+  kNewCatalog = 0,
+  // The fetcher verified that the existing catalog is still current.
+  kExistingCatalogIsCurrent = 1,
+  // The fetcher failed.
+  kFailure = 2,
+  // kMaxValue should always be the last type.
+  kMaxValue = kFailure
+};
+
+// Must be kept in sync with ExploreSitesCatalogError enum in enums.xml.
+// This enum should be treated as append-only.
+enum class ExploreSitesCatalogError {
+  // Catalog parse from protobuf string failed.
+  kParseFailure = 0,
+  // Category with a missing title.
+  kCategoryMissingTitle = 1,
+  // Category with a type enum that this version does not support.
+  kCategoryWithUnknownType = 2,
+  // Category with no sites present.
+  kCategoryWithNoSites = 3,
+  // Site with a malformed or empty URL.
+  kSiteWithBadUrl = 4,
+  // Site with no title.
+  kSiteMissingTitle = 5,
+  // Site with a missing icon.
+  kSiteMissingIcon = 6,
+  kMaxValue = kSiteMissingIcon
 };
 }  // namespace explore_sites
 #endif  // CHROME_BROWSER_ANDROID_EXPLORE_SITES_EXPLORE_SITES_TYPES_H_

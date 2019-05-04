@@ -270,7 +270,6 @@ def _GenerateBaseBrowserFinderOptions(options_callback=None):
   options.max_failures = 100
   options.pause = None
   options.pageset_repeat = 1
-  options.smoke_test_mode = False
   options.output_formats = ['chartjson']
   options.run_disabled_tests = False
 
@@ -475,14 +474,14 @@ class StoryRunnerTest(unittest.TestCase):
     with self.assertRaises(TestOnlyException):
       story_runner.Run(DummyTest(), story_set, self.options, self.results)
 
-  def testUnknownExceptionIsFatal(self):
+  def testUnknownExceptionIsNotFatal(self):
     self.StubOutExceptionFormatting()
     story_set = story_module.StorySet()
 
     class UnknownException(Exception):
       pass
 
-    # This erroneous test is set up to raise exception for the 2nd story
+    # This erroneous test is set up to raise exception for the 1st story
     # run.
     class Test(legacy_page_test.LegacyPageTest):
       def __init__(self, *args):
@@ -492,7 +491,7 @@ class StoryRunnerTest(unittest.TestCase):
       def RunPage(self, *_):
         old_run_count = self.run_count
         self.run_count += 1
-        if old_run_count == 1:
+        if old_run_count == 0:
           raise UnknownException('FooBarzException')
 
       def ValidateAndMeasurePage(self, page, tab, results):
@@ -503,10 +502,9 @@ class StoryRunnerTest(unittest.TestCase):
     story_set.AddStory(s1)
     story_set.AddStory(s2)
     test = Test()
-    with self.assertRaises(UnknownException):
-      story_runner.Run(test, story_set, self.options, self.results)
-    self.assertEqual(set([s2]), self.results.pages_that_failed)
-    self.assertEqual(set([s1]), self.results.pages_that_succeeded)
+    story_runner.Run(test, story_set, self.options, self.results)
+    self.assertEqual(set([s1]), self.results.pages_that_failed)
+    self.assertEqual(set([s2]), self.results.pages_that_succeeded)
     self.assertIn('FooBarzException', self.fake_stdout.getvalue())
 
   def testRaiseBrowserGoneExceptionFromRunPage(self):
@@ -614,7 +612,7 @@ class StoryRunnerTest(unittest.TestCase):
     self.assertIn(green_value, values)
     self.assertIn(merged_value, values)
 
-  def testSmokeTestMode(self):
+  def testRepeatOnce(self):
     story_set = story_module.StorySet()
 
     blank_story = DummyLocalStory(TestSharedPageState, name='blank')
@@ -622,8 +620,7 @@ class StoryRunnerTest(unittest.TestCase):
     story_set.AddStory(blank_story)
     story_set.AddStory(green_story)
 
-    self.options.pageset_repeat = 2
-    self.options.smoke_test_mode = True
+    self.options.pageset_repeat = 1
     results = results_options.CreateResults(
         EmptyMetadataForTest(), self.options)
     story_runner.Run(_Measurement(), story_set, self.options, results)
@@ -813,63 +810,6 @@ class StoryRunnerTest(unittest.TestCase):
     self.assertIn(reserved_infos.ARCHITECTURES.name, first_histogram_diags)
     self.assertIn(reserved_infos.OS_NAMES.name, first_histogram_diags)
     self.assertIn(reserved_infos.OS_VERSIONS.name, first_histogram_diags)
-
-  def testRunStoryAddsTagMap(self):
-    story_set = story_module.StorySet()
-    story_set.AddStory(DummyLocalStory(FooStoryState, 'foo', ['bar']))
-    story_runner.Run(DummyTest(), story_set, self.options, self.results)
-
-    hs = histogram_set.HistogramSet()
-    hs.ImportDicts(self.results.AsHistogramDicts())
-    tagmap = None
-    for diagnostic in hs.shared_diagnostics:
-      if isinstance(diagnostic, histogram_module.TagMap):
-        tagmap = diagnostic
-        break
-
-    self.assertIsNotNone(tagmap)
-    self.assertListEqual(['bar'], tagmap.tags_to_story_names.keys())
-    self.assertSetEqual(set(['foo']), tagmap.tags_to_story_names['bar'])
-
-  def testRunStoryAddsTagMapEvenInFatalException(self):
-    self.StubOutExceptionFormatting()
-    story_set = story_module.StorySet()
-
-    class UnknownException(Exception):
-      pass
-
-    class Test(legacy_page_test.LegacyPageTest):
-      def __init__(self, *args):
-        super(Test, self).__init__(*args)
-
-      def RunPage(self, *_):
-        raise UnknownException('FooBarzException')
-
-      def ValidateAndMeasurePage(self, page, tab, results):
-        pass
-
-    s1 = DummyLocalStory(TestSharedPageState, name='foo', tags=['footag'])
-    s2 = DummyLocalStory(TestSharedPageState, name='bar', tags=['bartag'])
-    story_set.AddStory(s1)
-    story_set.AddStory(s2)
-    test = Test()
-    with self.assertRaises(UnknownException):
-      story_runner.Run(test, story_set, self.options, self.results)
-    self.assertIn('FooBarzException', self.fake_stdout.getvalue())
-
-    hs = histogram_set.HistogramSet()
-    hs.ImportDicts(self.results.AsHistogramDicts())
-    tagmap = None
-    for diagnostic in hs.shared_diagnostics:
-      if isinstance(diagnostic, histogram_module.TagMap):
-        tagmap = diagnostic
-        break
-
-    self.assertIsNotNone(tagmap)
-    self.assertSetEqual(
-        set(['footag', 'bartag']), set(tagmap.tags_to_story_names.keys()))
-    self.assertSetEqual(set(['foo']), tagmap.tags_to_story_names['footag'])
-    self.assertSetEqual(set(['bar']), tagmap.tags_to_story_names['bartag'])
 
   @decorators.Disabled('chromeos')  # crbug.com/483212
   def testUpdateAndCheckArchives(self):
@@ -1585,7 +1525,7 @@ class StoryRunnerTest(unittest.TestCase):
   def testRunBenchmarkReturnCodeUnCaughtException(self):
     class UnhandledFailureSharedState(TestSharedState):
       def RunStory(self, results):
-        raise Exception('Unexpected exception')
+        raise MemoryError('Unexpected exception')
 
     class TestBenchmark(benchmark.Benchmark):
       test = DummyTest
@@ -1656,7 +1596,7 @@ class BenchmarkJsonResultsTest(unittest.TestCase):
     class StoryFailureSharedState(TestSharedState):
       def RunStory(self, results):
         logging.warning('This will fail gracefully')
-        raise exceptions.Error('karma!')
+        raise exceptions.TimeoutException('karma!')
 
     class TestBenchmark(benchmark.Benchmark):
       test = DummyTest
@@ -1694,13 +1634,13 @@ class BenchmarkJsonResultsTest(unittest.TestCase):
     self.assertIn('This will fail gracefully', foo_log)
 
     # Also the python crash stack.
-    self.assertIn("raise exceptions.Error('karma!')", foo_log)
+    self.assertIn("raise exceptions.TimeoutException('karma!')", foo_log)
 
   def testArtifactLogsContainUnhandleableException(self):
     class UnhandledFailureSharedState(TestSharedState):
       def RunStory(self, results):
         logging.warning('This will fail badly')
-        raise Exception('this is an unexpected exception')
+        raise MemoryError('this is a fatal exception')
 
     class TestBenchmark(benchmark.Benchmark):
       test = DummyTest
@@ -1740,8 +1680,8 @@ class BenchmarkJsonResultsTest(unittest.TestCase):
     self.assertIn('This will fail badly', foo_log)
 
     # Also the python crash stack.
-    self.assertIn('Exception: this is an unexpected exception', foo_log)
-    self.assertIn("raise Exception('this is an unexpected exception')",
+    self.assertIn('MemoryError: this is a fatal exception', foo_log)
+    self.assertIn("raise MemoryError('this is a fatal exception')",
                   foo_log)
 
     # Assert that the second story got written as a SKIP as it failed
@@ -1754,7 +1694,7 @@ class BenchmarkJsonResultsTest(unittest.TestCase):
     class UnhandledFailureSharedState(TestSharedState):
       def RunStory(self, results):
         if results.current_page.name in stories_to_crash:
-          raise Exception('this is an unexpected exception')
+          raise MemoryError('this is an unexpected exception')
 
     class TestBenchmark(benchmark.Benchmark):
       test = DummyTest

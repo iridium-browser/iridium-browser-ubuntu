@@ -141,7 +141,18 @@ def nanobench_flags(api, bot):
     # Ensure that the bot framework does not think we have timed out.
     args.extend(['--keepAlive', 'true'])
 
-  if 'QuadroP400' in bot or 'Adreno540' in bot:
+  if ('QuadroP400' in bot or
+      'Adreno540' in bot or
+      'IntelHD2000' in bot or   # gen 6 - sandy bridge
+      'IntelHD4400' in bot or   # gen 7 - haswell
+      'IntelHD405' in bot or    # gen 8 - cherryview braswell
+      'IntelIris6100' in bot or # gen 8 - broadwell
+      'IntelIris540' in bot or  # gen 9 - skylake
+      'IntelIris640' in bot or  # gen 9 - kaby lake
+      'IntelIris655' in bot or  # gen 9 - coffee lake
+      'MaliT760' in bot or
+      'MaliT860' in bot or
+      'MaliT880' in bot):
     args.extend(['--reduceOpListSplitting'])
 
   # Some people don't like verbose output.
@@ -162,29 +173,6 @@ def nanobench_flags(api, bot):
     match.append('~keymobi')
     match.append('~path_hairline')
     match.append('~GLInstancedArraysBench') # skia:4714
-  if 'Vulkan' in bot and 'IntelIris540' in bot and 'Win' in bot:
-    # skia:6398
-    match.append('~GM_varied_text_clipped_lcd')
-    match.append('~GM_varied_text_ignorable_clip_lcd')
-    match.append('~blendmode_mask_DstATop')
-    match.append('~blendmode_mask_SrcIn')
-    match.append('~blendmode_mask_SrcOut')
-    match.append('~blendmode_mask_Src')
-    match.append('~fontscaler_lcd')
-    match.append('~rotated_rects_aa_changing_transparent_src')
-    match.append('~rotated_rects_aa_same_transparent_src')
-    match.append('~srcmode_rects_1')
-    if 'Release' in bot:
-      match.append('~rotated_rects_aa_alternating_transparent_and_opaque_src')
-      match.append('~shadermask_LCD_FF')
-      match.append('~text_16_LCD_88')
-      match.append('~text_16_LCD_BK')
-      match.append('~text_16_LCD_FF')
-      match.append('~text_16_LCD_WT')
-    # skia:6863
-    match.append('~desk_skbug6850overlay2')
-    match.append('~desk_googlespreadsheet')
-    match.append('~desk_carsvg')
   if 'MoltenVK' in bot:
     # skbug.com/7962
     match.append('~^path_text_clipped_uncached$')
@@ -195,21 +183,63 @@ def nanobench_flags(api, bot):
   if 'IntelHD405' in bot and api.vars.is_linux and 'Vulkan' in bot:
     # skia:7322
     match.append('~desk_carsvg.skp_1')
+    match.append('~desk_googlehome.skp')
     match.append('~desk_tiger8svg.skp_1')
     match.append('~desk_wowwiki.skp')
+    match.append('~desk_ynevsvg.skp_1.1')
+    match.append('~desk_nostroke_tiger8svg.skp')
     match.append('~keymobi_booking_com.skp_1')
     match.append('~keymobi_booking_com.skp_1_mpd')
+    match.append('~keymobi_cnn_article.skp_1')
+    match.append('~keymobi_cnn_article.skp_1_mpd')
+    match.append('~keymobi_forecast_io.skp_1')
+    match.append('~keymobi_forecast_io.skp_1_mpd')
     match.append('~keymobi_sfgate.skp_1')
     match.append('~keymobi_techcrunch_com.skp_1.1')
     match.append('~keymobi_techcrunch.skp_1.1')
     match.append('~keymobi_techcrunch.skp_1.1_mpd')
+    match.append('~svgparse_Seal_of_California.svg_1.1')
+    match.append('~svgparse_NewYork-StateSeal.svg_1.1')
+    match.append('~svgparse_Vermont_state_seal.svg_1')
     match.append('~tabl_gamedeksiam.skp_1.1')
     match.append('~tabl_pravda.skp_1')
     match.append('~top25desk_ebay_com.skp_1.1')
     match.append('~top25desk_ebay.skp_1.1')
     match.append('~top25desk_ebay.skp_1.1_mpd')
-    # skia:8408
-    match.append('~svgparse_Vermont_state_seal.svg_1')
+  if 'MacBook10.1' in bot and 'CommandBuffer' in bot:
+    match.append('~^desk_micrographygirlsvg.skp_1.1$')
+  if 'IntelIris655' in bot and 'Win10' in bot and 'Vulkan' in bot:
+    # skia:8587
+    match.append('~^GM_varied_text_clipped_lcd$')
+    match.append('~^GM_varied_text_ignorable_clip_lcd$')
+    match.append('~^fontscaler_lcd$')
+    match.append('~^rotated_rects_aa_changing_transparent_src$')
+    match.append('~^rotated_rects_aa_same_transparent_src$')
+    match.append('~^srcmode_rects_1_aa$')
+    match.append('~^desk_skbug6850overlay2.skp_1$')
+    match.append('~^desk_skbug6850overlay2.skp_1.1$')
+    match.append('~^desk_skbug6850overlay2.skp_1.1_mpd$')
+    match.append('~^desk_skbug6850overlay2.skp_1_mpd$')
+    # skia:8659
+    match.append('~^blendmode_mask_DstATop$')
+    match.append('~^blendmode_mask_Src$')
+    match.append('~^blendmode_mask_SrcIn$')
+    match.append('~^blendmode_mask_SrcOut$')
+    match.append('~^desk_carsvg.skp_1$')
+    match.append('~^desk_carsvg.skp_1.1$')
+    match.append('~^desk_carsvg.skp_1.1_mpd$')
+    match.append('~^desk_carsvg.skp_1_mpd$')
+    match.append('~^desk_googlespreadsheet.skp_1$')
+    match.append('~^desk_googlespreadsheet.skp_1.1$')
+    match.append('~^desk_googlespreadsheet.skp_1.1_mpd$')
+    match.append('~^desk_googlespreadsheet.skp_1_mpd$')
+    if 'Release' in bot:
+      match.append('~^rotated_rects_aa_alternating_transparent_and_opaque_src$')
+      match.append('~^shadermask_LCD_FF$')
+      match.append('~^text_16_LCD_88$')
+      match.append('~^text_16_LCD_BK$')
+      match.append('~^text_16_LCD_FF$')
+      match.append('~^text_16_LCD_WT$')
   if ('ASAN' in bot or 'UBSAN' in bot) and 'CPU' in bot:
     # floor2int_undef benches undefined behavior, so ASAN correctly complains.
     match.append('~^floor2int_undef$')
@@ -373,14 +403,14 @@ TEST_BUILDERS = [
   'Perf-Debian9-Clang-NUC5PPYH-GPU-IntelHD405-x86_64-Debug-All-Vulkan',
   'Perf-Debian9-Clang-NUC7i5BNK-GPU-IntelIris640-x86_64-Release-All',
   ('Perf-Mac-Clang-MacMini7.1-GPU-IntelIris5100-x86_64-Release-All-'
-    'CommandBuffer'),
+   'CommandBuffer'),
+  'Perf-Mac-Clang-MacBook10.1-GPU-IntelHD615-x86_64-Release-All-CommandBuffer',
   ('Perf-Mac-Clang-MacBookPro11.5-GPU-RadeonHD8870M-x86_64-Release-All-'
    'MoltenVK_Vulkan'),
   ('Perf-Ubuntu17-GCC-Golo-GPU-QuadroP400-x86_64-Release-All-'
     'Valgrind_AbandonGpuContext_SK_CPU_LIMIT_SSE41'),
   'Perf-Win10-Clang-Golo-GPU-QuadroP400-x86_64-Release-All-ANGLE',
-  'Perf-Win10-Clang-NUC6i5SYK-GPU-IntelIris540-x86_64-Release-All-ANGLE',
-  'Perf-Win10-Clang-NUC6i5SYK-GPU-IntelIris540-x86_64-Release-All-Vulkan',
+  'Perf-Win10-Clang-NUC8i5BEK-GPU-IntelIris655-x86_64-Release-All-Vulkan',
   'Perf-iOS-Clang-iPadPro-GPU-PowerVRGT7800-arm64-Release-All',
 ]
 

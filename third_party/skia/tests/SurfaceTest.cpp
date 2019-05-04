@@ -409,19 +409,6 @@ static void test_copy_on_write(skiatest::Reporter* reporter, SkSurface* surface)
     testRRect.setRectXY(testRect, SK_Scalar1, SK_Scalar1);
 
     SkString testText("Hello World");
-    const SkPoint testPoints2[] = {
-        { SkIntToScalar(0), SkIntToScalar(1) },
-        { SkIntToScalar(1), SkIntToScalar(1) },
-        { SkIntToScalar(2), SkIntToScalar(1) },
-        { SkIntToScalar(3), SkIntToScalar(1) },
-        { SkIntToScalar(4), SkIntToScalar(1) },
-        { SkIntToScalar(5), SkIntToScalar(1) },
-        { SkIntToScalar(6), SkIntToScalar(1) },
-        { SkIntToScalar(7), SkIntToScalar(1) },
-        { SkIntToScalar(8), SkIntToScalar(1) },
-        { SkIntToScalar(9), SkIntToScalar(1) },
-        { SkIntToScalar(10), SkIntToScalar(1) },
-    };
 
 #define EXPECT_COPY_ON_WRITE(command)                               \
     {                                                               \
@@ -444,9 +431,7 @@ static void test_copy_on_write(skiatest::Reporter* reporter, SkSurface* surface)
     EXPECT_COPY_ON_WRITE(drawBitmap(testBitmap, 0, 0))
     EXPECT_COPY_ON_WRITE(drawBitmapRect(testBitmap, testRect, nullptr))
     EXPECT_COPY_ON_WRITE(drawBitmapNine(testBitmap, testIRect, testRect, nullptr))
-    EXPECT_COPY_ON_WRITE(drawString(testText, 0, 1, testPaint))
-    EXPECT_COPY_ON_WRITE(drawPosText(testText.c_str(), testText.size(), testPoints2, \
-        testPaint))
+    EXPECT_COPY_ON_WRITE(drawString(testText, 0, 1, SkFont(), testPaint))
 }
 DEF_TEST(SurfaceCopyOnWrite, reporter) {
     test_copy_on_write(reporter, create_surface().get());
@@ -584,7 +569,6 @@ static void test_no_canvas1(skiatest::Reporter* reporter,
                             SkSurface::ContentChangeMode mode) {
     // Test passes by not asserting
     surface->notifyContentWillChange(mode);
-    SkDEBUGCODE(surface->validate();)
 }
 static void test_no_canvas2(skiatest::Reporter* reporter,
                             SkSurface* surface,
@@ -593,15 +577,9 @@ static void test_no_canvas2(skiatest::Reporter* reporter,
     // are made before a canvas is created.
     sk_sp<SkImage> image1 = surface->makeImageSnapshot();
     sk_sp<SkImage> aur_image1(image1);
-    SkDEBUGCODE(image1->validate();)
-    SkDEBUGCODE(surface->validate();)
     surface->notifyContentWillChange(mode);
-    SkDEBUGCODE(image1->validate();)
-    SkDEBUGCODE(surface->validate();)
     sk_sp<SkImage> image2 = surface->makeImageSnapshot();
     sk_sp<SkImage> aur_image2(image2);
-    SkDEBUGCODE(image2->validate();)
-    SkDEBUGCODE(surface->validate();)
     REPORTER_ASSERT(reporter, image1 != image2);
 }
 DEF_TEST(SurfaceNoCanvas, reporter) {
@@ -679,8 +657,29 @@ static sk_sp<SkSurface> create_gpu_surface_backend_texture(
     GrContext* context, int sampleCnt, uint32_t color, GrBackendTexture* outTexture) {
     GrGpu* gpu = context->contextPriv().getGpu();
 
+    // On Pixel and Pixel2XL's with Adreno 530 and 540s, setting width and height to 10s reliably
+    // triggers what appears to be a driver race condition where the 10x10 surface from the
+    // OverdrawSurface_gpu test is reused(?) for this surface created by the SurfacePartialDraw_gpu
+    // test.
+    //
+    // Immediately after creation of this surface, readback shows the correct initial solid color.
+    // However, sometime before content is rendered into the upper half of the surface, the driver
+    // presumably cleans up the OverdrawSurface_gpu's memory which corrupts this color buffer. The
+    // top half of the surface is fine after the partially-covering rectangle is drawn, but the
+    // untouched bottom half contains random pixel values that trigger asserts in the
+    // SurfacePartialDraw_gpu test for no longer matching the initial color. Running the
+    // SurfacePartialDraw_gpu test without the OverdrawSurface_gpu test completes successfully.
+    //
+    // Requesting a much larger backend texture size seems to prevent it from reusing the same
+    // memory and avoids the issue.
+#if defined(SK_BUILD_FOR_SKQP)
     const int kWidth = 10;
     const int kHeight = 10;
+#else
+    const int kWidth = 100;
+    const int kHeight = 100;
+#endif
+
     std::unique_ptr<uint32_t[]> pixels(new uint32_t[kWidth * kHeight]);
     sk_memset32(pixels.get(), color, kWidth * kHeight);
 
@@ -904,126 +903,6 @@ DEF_GPUTEST_FOR_GL_RENDERING_CONTEXTS(SurfaceAttachStencil_Gpu, reporter, ctxInf
     }
 }
 
-static void test_surface_creation_and_snapshot_with_color_space(
-    skiatest::Reporter* reporter,
-    const char* prefix,
-    bool supportsF16,
-    bool supportsF32,
-    bool supports1010102,
-    std::function<sk_sp<SkSurface>(const SkImageInfo&)> surfaceMaker) {
-
-    auto srgbColorSpace = SkColorSpace::MakeSRGB();
-    SkMatrix44 srgbMatrix;
-    srgbColorSpace->toXYZD50(&srgbMatrix);
-
-    SkColorSpaceTransferFn oddGamma;
-    oddGamma.fA = 1.0f;
-    oddGamma.fB = oddGamma.fC = oddGamma.fD = oddGamma.fE = oddGamma.fF = 0.0f;
-    oddGamma.fG = 4.0f;
-    auto oddColorSpace = SkColorSpace::MakeRGB(oddGamma, srgbMatrix);
-    auto linearColorSpace = SkColorSpace::MakeSRGBLinear();
-
-    const struct {
-        SkColorType         fColorType;
-        sk_sp<SkColorSpace> fColorSpace;
-        bool                fShouldWork;
-        const char*         fDescription;
-    } testConfigs[] = {
-        { kN32_SkColorType,       nullptr,                     true,  "N32-nullptr" },
-        { kN32_SkColorType,       linearColorSpace,            true,  "N32-linear"  },
-        { kN32_SkColorType,       srgbColorSpace,              true,  "N32-srgb"    },
-        { kN32_SkColorType,       oddColorSpace,               true,  "N32-odd"     },
-        { kRGBA_F16_SkColorType,  nullptr,              supportsF16,  "F16-nullptr" },
-        { kRGBA_F16_SkColorType,  linearColorSpace,     supportsF16,  "F16-linear"  },
-        { kRGBA_F16_SkColorType,  srgbColorSpace,       supportsF16,  "F16-srgb"    },
-        { kRGBA_F16_SkColorType,  oddColorSpace,        supportsF16,  "F16-odd"     },
-        { kRGBA_F32_SkColorType,  nullptr,              supportsF32,  "F32-nullptr" },
-        { kRGBA_F32_SkColorType,  linearColorSpace,     supportsF32,  "F32-linear"  },
-        { kRGBA_F32_SkColorType,  srgbColorSpace,       supportsF32,  "F32-srgb"    },
-        { kRGBA_F32_SkColorType,  oddColorSpace,        supportsF32,  "F32-odd"     },
-        { kRGB_565_SkColorType,   srgbColorSpace,             false,  "565-srgb"    },
-        { kAlpha_8_SkColorType,   srgbColorSpace,             false,  "A8-srgb"     },
-        { kRGBA_1010102_SkColorType, nullptr,       supports1010102,  "1010102-nullptr" },
-    };
-
-    for (auto& testConfig : testConfigs) {
-        SkString fullTestName = SkStringPrintf("%s-%s", prefix, testConfig.fDescription);
-        SkImageInfo info = SkImageInfo::Make(10, 10, testConfig.fColorType, kPremul_SkAlphaType,
-                                             testConfig.fColorSpace);
-
-        auto surface(surfaceMaker(info));
-        REPORTER_ASSERT(reporter,
-                SkToBool(surface) == testConfig.fShouldWork, fullTestName.c_str());
-
-        if (testConfig.fShouldWork && surface) {
-            sk_sp<SkImage> image(surface->makeImageSnapshot());
-            REPORTER_ASSERT(reporter, image, testConfig.fDescription);
-            SkColorSpace* imageColorSpace = as_IB(image)->onImageInfo().colorSpace();
-            REPORTER_ASSERT(reporter, imageColorSpace == testConfig.fColorSpace.get(),
-                            fullTestName.c_str());
-        }
-    }
-}
-
-DEF_TEST(SurfaceCreationWithColorSpace, reporter) {
-    auto surfaceMaker = [](const SkImageInfo& info) {
-        return SkSurface::MakeRaster(info);
-    };
-
-    test_surface_creation_and_snapshot_with_color_space(reporter, "raster",
-                                                        true, true, true,
-                                                        surfaceMaker);
-}
-
-DEF_GPUTEST_FOR_RENDERING_CONTEXTS(SurfaceCreationWithColorSpace_Gpu, reporter, ctxInfo) {
-    auto context = ctxInfo.grContext();
-
-    bool supportsF16 = context->contextPriv().caps()->isConfigRenderable(kRGBA_half_GrPixelConfig),
-         supportsF32 = context->contextPriv().caps()->isConfigRenderable(kRGBA_float_GrPixelConfig),
-         supports1010102 = context->contextPriv().caps()->isConfigRenderable(kRGBA_1010102_GrPixelConfig);
-
-    auto surfaceMaker = [context](const SkImageInfo& info) {
-        return SkSurface::MakeRenderTarget(context, SkBudgeted::kNo, info);
-    };
-
-    test_surface_creation_and_snapshot_with_color_space(reporter, "gpu",
-                                                        supportsF16, supportsF32, supports1010102,
-                                                        surfaceMaker);
-
-    std::vector<GrBackendTexture> backendTextures;
-    auto wrappedSurfaceMaker = [ context, &backendTextures ](const SkImageInfo& info) {
-        GrGpu* gpu = context->contextPriv().getGpu();
-
-        static const int kSize = 10;
-
-        GrBackendTexture backendTex = gpu->createTestingOnlyBackendTexture(
-                nullptr, kSize, kSize, info.colorType(), true, GrMipMapped::kNo);
-
-        if (!backendTex.isValid() ||
-            !gpu->isTestingOnlyBackendTexture(backendTex)) {
-            return sk_sp<SkSurface>(nullptr);
-        }
-        backendTextures.push_back(backendTex);
-
-        return SkSurface::MakeFromBackendTexture(context, backendTex,
-                                                 kTopLeft_GrSurfaceOrigin, 0,
-                                                 info.colorType(),
-                                                 sk_ref_sp(info.colorSpace()), nullptr);
-    };
-
-    test_surface_creation_and_snapshot_with_color_space(reporter, "wrapped",
-                                                        supportsF16, supportsF32, supports1010102,
-                                                        wrappedSurfaceMaker);
-
-    context->flush();
-
-    GrGpu* gpu = context->contextPriv().getGpu();
-    gpu->testingOnly_flushGpuAndSync();
-    for (auto backendTex : backendTextures) {
-        gpu->deleteTestingOnlyBackendTexture(backendTex);
-    }
-}
-
 static void test_overdraw_surface(skiatest::Reporter* r, SkSurface* surface) {
     SkOverdrawCanvas canvas(surface->getCanvas());
     canvas.drawPaint(SkPaint());
@@ -1085,16 +964,12 @@ DEF_TEST(surface_image_unity, reporter) {
         }
     };
 
-    const int32_t sizes[] = { 0, 1, 1 << 15, 1 << 16, 1 << 18, 1 << 28, 1 << 29, 1 << 30, -1 };
+    const int32_t sizes[] = { -1, 0, 1, 1 << 18 };
     for (int cti = 0; cti <= kLastEnum_SkColorType; ++cti) {
         SkColorType ct = static_cast<SkColorType>(cti);
         for (int ati = 0; ati <= kLastEnum_SkAlphaType; ++ati) {
             SkAlphaType at = static_cast<SkAlphaType>(ati);
             for (int32_t size : sizes) {
-                // Large allocations tend to make the 32-bit bots run out of virtual address space.
-                if (sizeof(size_t) == 4 && size > (1<<20)) {
-                    continue;
-                }
                 do_test(SkImageInfo::Make(1, size, ct, at));
                 do_test(SkImageInfo::Make(size, 1, ct, at));
             }

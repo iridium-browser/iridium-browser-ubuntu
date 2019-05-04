@@ -9,7 +9,8 @@
 
 #include "ash/components/quick_launch/public/mojom/constants.mojom.h"
 #include "ash/components/shortcut_viewer/public/mojom/shortcut_viewer.mojom.h"
-#include "ash/components/tap_visualizer/public/mojom/constants.mojom.h"
+#include "ash/components/tap_visualizer/public/mojom/tap_visualizer.mojom.h"
+#include "ash/keyboard/test_keyboard_ui.h"
 #include "ash/login_status.h"
 #include "ash/shell.h"
 #include "ash/shell/example_session_controller_client.h"
@@ -85,14 +86,17 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
   chromeos::PowerPolicyController::Initialize(
       chromeos::DBusThreadManager::Get()->GetPowerManagerClient());
 
+  service_manager::Connector* const connector =
+      content::ServiceManagerConnection::GetForProcess()->GetConnector();
+
   ui::MaterialDesignController::Initialize();
   ash::ShellInitParams init_params;
   init_params.delegate = std::make_unique<ash::shell::ShellDelegateImpl>();
   init_params.context_factory = content::GetContextFactory();
   init_params.context_factory_private = content::GetContextFactoryPrivate();
   init_params.gpu_interface_provider = content::CreateGpuInterfaceProvider();
-  init_params.connector =
-      content::ServiceManagerConnection::GetForProcess()->GetConnector();
+  init_params.connector = connector;
+  init_params.keyboard_ui_factory = std::make_unique<TestKeyboardUIFactory>();
   ash::Shell::CreateInstance(std::move(init_params));
 
   // Initialize session controller client and create fake user sessions. The
@@ -111,19 +115,17 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
 
   ash::Shell::GetPrimaryRootWindow()->GetHost()->Show();
 
-  content::ServiceManagerConnection::GetForProcess()
-      ->GetConnector()
-      ->StartService(test_ime_driver::mojom::kServiceName);
-  content::ServiceManagerConnection::GetForProcess()
-      ->GetConnector()
-      ->StartService(quick_launch::mojom::kServiceName);
-  content::ServiceManagerConnection::GetForProcess()
-      ->GetConnector()
-      ->StartService(tap_visualizer::mojom::kServiceName);
+  // TODO(https://crbug.com/904148): These should not use |WarmService()|.
+  connector->WarmService(service_manager::ServiceFilter::ByName(
+      test_ime_driver::mojom::kServiceName));
+  connector->WarmService(service_manager::ServiceFilter::ByName(
+      quick_launch::mojom::kServiceName));
+  connector->WarmService(service_manager::ServiceFilter::ByName(
+      tap_visualizer::mojom::kServiceName));
   shortcut_viewer::mojom::ShortcutViewerPtr shortcut_viewer;
-  content::ServiceManagerConnection::GetForProcess()
-      ->GetConnector()
-      ->BindInterface(shortcut_viewer::mojom::kServiceName, &shortcut_viewer);
+  connector->BindInterface(service_manager::ServiceFilter::ByName(
+                               shortcut_viewer::mojom::kServiceName),
+                           mojo::MakeRequest(&shortcut_viewer));
   shortcut_viewer->Toggle(base::TimeTicks::Now());
   ash::Shell::Get()->InitWaylandServer(nullptr);
 }

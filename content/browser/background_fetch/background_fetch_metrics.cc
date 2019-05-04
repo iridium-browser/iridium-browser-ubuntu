@@ -19,18 +19,6 @@ namespace background_fetch {
 // Exponential bucket spacing for UKM event data.
 const double kUkmEventDataBucketSpacing = 2.0;
 
-void RecordSchedulerFinishedError(blink::mojom::BackgroundFetchError error) {
-  UMA_HISTOGRAM_ENUMERATION("BackgroundFetch.SchedulerFinishedError", error);
-}
-
-void RecordRegistrationCreatedError(blink::mojom::BackgroundFetchError error) {
-  UMA_HISTOGRAM_ENUMERATION("BackgroundFetch.RegistrationCreatedError", error);
-}
-
-void RecordRegistrationDeletedError(blink::mojom::BackgroundFetchError error) {
-  UMA_HISTOGRAM_ENUMERATION("BackgroundFetch.RegistrationDeletedError", error);
-}
-
 void RecordRegistrationsOnStartup(int num_registrations) {
   UMA_HISTOGRAM_COUNTS_100("BackgroundFetch.IncompleteFetchesOnStartup",
                            num_registrations);
@@ -38,8 +26,8 @@ void RecordRegistrationsOnStartup(int num_registrations) {
 
 void RecordBackgroundFetchUkmEvent(
     const url::Origin& origin,
-    const std::vector<ServiceWorkerFetchRequest>& requests,
-    const BackgroundFetchOptions& options,
+    int requests_size,
+    blink::mojom::BackgroundFetchOptionsPtr options,
     const SkBitmap& icon,
     blink::mojom::BackgroundFetchUkmDataPtr ukm_data,
     int frame_tree_node_id,
@@ -60,13 +48,13 @@ void RecordBackgroundFetchUkmEvent(
                                 ->GetUkmSourceIdForLastCommittedSource();
 
   ukm::builders::BackgroundFetch(source_id)
-      .SetHasTitle(!options.title.empty())
-      .SetNumIcons(options.icons.size())
+      .SetHasTitle(!options->title.empty())
+      .SetNumIcons(options->icons.size())
       .SetRatioOfIdealToChosenIconSize(ukm_data->ideal_to_chosen_icon_size)
       .SetDownloadTotal(ukm::GetExponentialBucketMin(
-          options.download_total, kUkmEventDataBucketSpacing))
+          options->download_total, kUkmEventDataBucketSpacing))
       .SetNumRequestsInFetch(ukm::GetExponentialBucketMin(
-          requests.size(), kUkmEventDataBucketSpacing))
+          requests_size, kUkmEventDataBucketSpacing))
       .SetDeniedDueToPermissions(permission ==
                                  BackgroundFetchPermission::BLOCKED)
       .Record(ukm::UkmRecorder::Get());

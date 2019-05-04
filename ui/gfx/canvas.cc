@@ -140,12 +140,12 @@ void Canvas::Save() {
 }
 
 void Canvas::SaveLayerAlpha(uint8_t alpha) {
-  canvas_->saveLayerAlpha(NULL, alpha, false);
+  canvas_->saveLayerAlpha(NULL, alpha);
 }
 
 void Canvas::SaveLayerAlpha(uint8_t alpha, const Rect& layer_bounds) {
   SkRect bounds(RectToSkRect(layer_bounds));
-  canvas_->saveLayerAlpha(&bounds, alpha, false);
+  canvas_->saveLayerAlpha(&bounds, alpha);
 }
 
 void Canvas::SaveLayerWithFlags(const cc::PaintFlags& flags) {
@@ -439,6 +439,12 @@ void Canvas::DrawImageInPath(const ImageSkia& image,
       CreateImageRepShader(image_rep, SkShader::kRepeat_TileMode,
                            SkShader::kRepeat_TileMode, matrix));
   canvas_->drawPath(path, flags);
+}
+
+void Canvas::DrawSkottie(scoped_refptr<cc::SkottieWrapper> skottie,
+                         const Rect& dst,
+                         float t) {
+  canvas_->drawSkottie(std::move(skottie), RectToSkRect(dst), t);
 }
 
 void Canvas::DrawStringRect(const base::string16& text,

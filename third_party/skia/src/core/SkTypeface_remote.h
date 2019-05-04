@@ -27,7 +27,7 @@ public:
                          const SkDescriptor* desc,
                          sk_sp<SkStrikeClient::DiscardableHandleManager> manager);
 
-    void initCache(SkGlyphCache*, SkStrikeCache*);
+    void initCache(SkStrike*, SkStrikeCache*);
 
 protected:
     unsigned generateGlyphCount() override;
@@ -36,12 +36,12 @@ protected:
     void generateMetrics(SkGlyph* glyph) override;
     void generateImage(const SkGlyph& glyph) override;
     bool generatePath(SkGlyphID glyphID, SkPath* path) override;
-    void generateFontMetrics(SkPaint::FontMetrics* metrics) override;
+    void generateFontMetrics(SkFontMetrics* metrics) override;
     SkTypefaceProxy* getProxyTypeface() const;
 
 private:
     sk_sp<SkStrikeClient::DiscardableHandleManager> fDiscardableManager;
-    SkGlyphCache* fCache = nullptr;
+    SkStrike* fCache = nullptr;
     SkStrikeCache* fStrikeCache = nullptr;
     typedef SkScalerContext INHERITED;
 };

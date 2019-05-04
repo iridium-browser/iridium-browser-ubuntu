@@ -34,6 +34,7 @@ class MockDelegate : public QpackEncoderStreamReceiver::Delegate {
 class QpackEncoderStreamReceiverTest : public QuicTest {
  protected:
   QpackEncoderStreamReceiverTest() : stream_(&delegate_) {}
+  ~QpackEncoderStreamReceiverTest() override = default;
 
   void Decode(QuicStringPiece data) { stream_.Decode(data); }
   StrictMock<MockDelegate>* delegate() { return &delegate_; }
@@ -72,7 +73,8 @@ TEST_F(QpackEncoderStreamReceiverTest, InsertWithNameReferenceIndexTooLarge) {
 }
 
 TEST_F(QpackEncoderStreamReceiverTest, InsertWithNameReferenceValueTooLong) {
-  EXPECT_CALL(*delegate(), OnErrorDetected(Eq("ValueLen too large.")));
+  EXPECT_CALL(*delegate(),
+              OnErrorDetected(QuicStringPiece("Encoded integer too large.")));
 
   Decode(QuicTextUtils::HexDecode("c57fffffffffffffffffffff"));
 }
@@ -101,16 +103,37 @@ TEST_F(QpackEncoderStreamReceiverTest, InsertWithoutNameReference) {
       "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"));
 }
 
-TEST_F(QpackEncoderStreamReceiverTest, InsertWithoutNameReferenceNameTooLong) {
+// Name Length value is too large for varint decoder to decode.
+TEST_F(QpackEncoderStreamReceiverTest,
+       InsertWithoutNameReferenceNameTooLongForVarintDecoder) {
   EXPECT_CALL(*delegate(), OnErrorDetected(Eq("Encoded integer too large.")));
 
   Decode(QuicTextUtils::HexDecode("5fffffffffffffffffffff"));
 }
 
-TEST_F(QpackEncoderStreamReceiverTest, InsertWithoutNameReferenceValueTooLong) {
-  EXPECT_CALL(*delegate(), OnErrorDetected(Eq("ValueLen too large.")));
+// Name Length value can be decoded by varint decoder but exceeds 1 MB limit.
+TEST_F(QpackEncoderStreamReceiverTest,
+       InsertWithoutNameReferenceNameExceedsLimit) {
+  EXPECT_CALL(*delegate(),
+              OnErrorDetected(QuicStringPiece("String literal too long.")));
+
+  Decode(QuicTextUtils::HexDecode("5fffff7f"));
+}
+
+// Value Length value is too large for varint decoder to decode.
+TEST_F(QpackEncoderStreamReceiverTest,
+       InsertWithoutNameReferenceValueTooLongForVarintDecoder) {
+  EXPECT_CALL(*delegate(), OnErrorDetected(Eq("Encoded integer too large.")));
 
   Decode(QuicTextUtils::HexDecode("436261727fffffffffffffffffffff"));
+}
+
+// Value Length value can be decoded by varint decoder but exceeds 1 MB limit.
+TEST_F(QpackEncoderStreamReceiverTest,
+       InsertWithoutNameReferenceValueExceedsLimit) {
+  EXPECT_CALL(*delegate(), OnErrorDetected(Eq("String literal too long.")));
+
+  Decode(QuicTextUtils::HexDecode("436261727fffff7f"));
 }
 
 TEST_F(QpackEncoderStreamReceiverTest, Duplicate) {

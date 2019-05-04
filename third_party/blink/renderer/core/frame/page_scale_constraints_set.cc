@@ -33,7 +33,7 @@
 #include <algorithm>
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/length.h"
+#include "third_party/blink/renderer/platform/geometry/length.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
@@ -64,7 +64,7 @@ const PageScaleConstraints& PageScaleConstraintsSet::DefaultConstraints()
 
 void PageScaleConstraintsSet::UpdatePageDefinedConstraints(
     const ViewportDescription& description,
-    Length legacy_fallback_width) {
+    const Length& legacy_fallback_width) {
   page_defined_constraints_ =
       description.Resolve(FloatSize(icb_size_), legacy_fallback_width);
 

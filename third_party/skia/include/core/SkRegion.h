@@ -368,6 +368,19 @@ public:
 
     static const int kOpCnt = kLastOp + 1;
 
+    static const char* OpName(Op op) {
+        switch (op) {
+            case kDifference_Op: return "kDifference_Op";
+            case kIntersect_Op: return "kIntersect_Op";
+            case kUnion_Op: return "kUnion_Op";
+            case kXOR_Op: return "kXOR_Op";
+            case kReverseDifference_Op: return "kReverseDifference_Op";
+            case kReplace_Op: return "kReplace_Op";
+        }
+        SK_ABORT("Invalid Op");
+        return "unknown";
+    }
+
     /** Replaces SkRegion with the result of SkRegion op rect.
         Returns true if replaced SkRegion is not empty.
 
@@ -452,8 +465,8 @@ public:
     */
     bool op(const SkRegion& rgna, const SkRegion& rgnb, Op op);
 
-#ifdef SK_BUILD_FOR_ANDROID
-    /** Android framework only.
+#ifdef SK_BUILD_FOR_ANDROID_FRAMEWORK
+    /** Private. Android framework only.
 
         @return  string representation of SkRegion
     */
@@ -467,10 +480,11 @@ public:
     class SK_API Iterator {
     public:
 
-        /** Initializes SkRegion::Iterator with an empty SkRegion. done() on SkRegion::Iterator returns true.
+        /** Initializes SkRegion::Iterator with an empty SkRegion. done() on SkRegion::Iterator
+            returns true.
             Call reset() to initialized SkRegion::Iterator at a later time.
 
-            @return  empty SkRegion ierator
+            @return  empty SkRegion iterator
         */
         Iterator() : fRgn(nullptr), fDone(true) {}
 
@@ -549,8 +563,8 @@ public:
         */
         void  next();
 
-        /** Returns SkIRect element in SkRegion, intersected with clip passed to SkRegion::Cliperator
-            constructor. Does not return predictable results if SkRegion
+        /** Returns SkIRect element in SkRegion, intersected with clip passed to
+            SkRegion::Cliperator constructor. Does not return predictable results if SkRegion
             is empty.
 
             @return  part of SkRegion inside clip as SkIRect

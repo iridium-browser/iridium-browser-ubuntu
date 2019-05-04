@@ -28,6 +28,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_info.h"
@@ -43,6 +44,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loading_log.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
+#include "third_party/blink/renderer/platform/network/network_utils.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -107,11 +109,10 @@ class ImageResource::ImageResourceInfoImpl final
            resource_->ShouldReloadBrokenPlaceholder();
   }
   bool IsAccessAllowed(
-      const SecurityOrigin* security_origin,
       DoesCurrentFrameHaveSingleSecurityOrigin
           does_current_frame_has_single_security_origin) const override {
     return resource_->IsAccessAllowed(
-        security_origin, does_current_frame_has_single_security_origin);
+        does_current_frame_has_single_security_origin);
   }
   bool HasCacheControlNoStoreHeader() const override {
     return resource_->HasCacheControlNoStoreHeader();
@@ -158,10 +159,10 @@ class ImageResource::ImageResourceFactory : public NonTextResourceFactory {
 
   Resource* Create(const ResourceRequest& request,
                    const ResourceLoaderOptions& options) const override {
-    return new ImageResource(request, options,
-                             ImageResourceContent::CreateNotStarted(),
-                             fetch_params_->GetImageRequestOptimization() ==
-                                 FetchParameters::kAllowPlaceholder);
+    return MakeGarbageCollected<ImageResource>(
+        request, options, ImageResourceContent::CreateNotStarted(),
+        fetch_params_->GetImageRequestOptimization() ==
+            FetchParameters::kAllowPlaceholder);
   }
 
  private:
@@ -181,7 +182,8 @@ ImageResource* ImageResource::Fetch(FetchParameters& params,
 
   // If the fetch originated from user agent CSS we should mark it as a user
   // agent resource.
-  if (params.Options().initiator_info.name == FetchInitiatorTypeNames::uacss)
+  if (params.Options().initiator_info.name ==
+      fetch_initiator_type_names::kUacss)
     resource->FlagAsUserAgentResource();
   return resource;
 }
@@ -211,8 +213,8 @@ bool ImageResource::CanUseCacheValidator() const {
 
 ImageResource* ImageResource::Create(const ResourceRequest& request) {
   ResourceLoaderOptions options;
-  return new ImageResource(request, options,
-                           ImageResourceContent::CreateNotStarted(), false);
+  return MakeGarbageCollected<ImageResource>(
+      request, options, ImageResourceContent::CreateNotStarted(), false);
 }
 
 ImageResource* ImageResource::CreateForTest(const KURL& url) {
@@ -231,8 +233,10 @@ ImageResource::ImageResource(const ResourceRequest& resource_request,
           is_placeholder ? PlaceholderOption::kShowAndReloadPlaceholderAlways
                          : PlaceholderOption::kDoNotReloadPlaceholder) {
   DCHECK(GetContent());
-  RESOURCE_LOADING_DVLOG(1) << "new ImageResource(ResourceRequest) " << this;
-  GetContent()->SetImageResourceInfo(new ImageResourceInfoImpl(this));
+  RESOURCE_LOADING_DVLOG(1)
+      << "MakeGarbageCollected<ImageResource>(ResourceRequest) " << this;
+  GetContent()->SetImageResourceInfo(
+      MakeGarbageCollected<ImageResourceInfoImpl>(this));
 }
 
 ImageResource::~ImageResource() {
@@ -294,8 +298,9 @@ void ImageResource::DestroyDecodedDataIfPossible() {
   GetContent()->DestroyDecodedData();
   if (GetContent()->HasImage() && !IsUnusedPreload() &&
       GetContent()->IsRefetchableDataFromDiskCache()) {
-    UMA_HISTOGRAM_MEMORY_KB("Memory.Renderer.EstimatedDroppableEncodedSize",
-                            EncodedSize() / 1024);
+    UMA_HISTOGRAM_MEMORY_KB(
+        "Memory.Renderer.EstimatedDroppableEncodedSize",
+        base::saturated_cast<base::Histogram::Sample>(EncodedSize() / 1024));
   }
 }
 
@@ -308,16 +313,7 @@ void ImageResource::AllClientsAndObserversRemoved() {
   // TODO(hiroshige): Make the CHECK condition cleaner.
   CHECK(is_during_finish_as_error_ || !GetContent()->HasImage() ||
         !ErrorOccurred());
-  // If possible, delay the resetting until back at the event loop. Doing so
-  // after a conservative GC prevents resetAnimation() from upsetting ongoing
-  // animation updates (crbug.com/613709)
-  if (!ThreadHeap::WillObjectBeLazilySwept(this)) {
-    Platform::Current()->CurrentThread()->GetTaskRunner()->PostTask(
-        FROM_HERE, WTF::Bind(&ImageResourceContent::DoResetAnimation,
-                             WrapWeakPersistent(GetContent())));
-  } else {
-    GetContent()->DoResetAnimation();
-  }
+  GetContent()->DoResetAnimation();
   if (multipart_parser_)
     multipart_parser_->Cancel();
   Resource::AllClientsAndObserversRemoved();
@@ -332,7 +328,7 @@ scoped_refptr<const SharedBuffer> ImageResource::ResourceBuffer() const {
 void ImageResource::AppendData(const char* data, size_t length) {
   v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(length);
   if (multipart_parser_) {
-    multipart_parser_->AppendData(data, length);
+    multipart_parser_->AppendData(data, SafeCast<wtf_size_t>(length));
   } else {
     Resource::AppendData(data, length);
 
@@ -478,10 +474,14 @@ void ImageResource::ResponseReceived(
     std::unique_ptr<WebDataConsumerHandle> handle) {
   DCHECK(!handle);
   DCHECK(!multipart_parser_);
-  // If there's no boundary, just handle the request normally.
-  if (response.IsMultipart() && !response.MultipartBoundary().IsEmpty()) {
-    multipart_parser_ = new MultipartImageResourceParser(
-        response, response.MultipartBoundary(), this);
+  if (response.MimeType() == "multipart/x-mixed-replace") {
+    Vector<char> boundary = network_utils::ParseMultipartBoundary(
+        response.HttpHeaderField(http_names::kContentType));
+    // If there's no boundary, just handle the request normally.
+    if (!boundary.IsEmpty()) {
+      multipart_parser_ = MakeGarbageCollected<MultipartImageResourceParser>(
+          response, boundary, this);
+    }
   }
 
   // Notify the base class that a response has been received. Note that after
@@ -699,20 +699,13 @@ void ImageResource::MultipartDataReceived(const char* bytes, size_t size) {
 }
 
 bool ImageResource::IsAccessAllowed(
-    const SecurityOrigin* security_origin,
     ImageResourceInfo::DoesCurrentFrameHaveSingleSecurityOrigin
         does_current_frame_has_single_security_origin) const {
-  if (GetResponse().WasFetchedViaServiceWorker())
-    return GetResponse().IsCORSSameOrigin();
-
   if (does_current_frame_has_single_security_origin !=
       ImageResourceInfo::kHasSingleSecurityOrigin)
     return false;
 
-  if (GetResponse().IsCORSSameOrigin())
-    return true;
-
-  return security_origin->CanReadContent(GetResponse().Url());
+  return GetResponse().IsCorsSameOrigin();
 }
 
 ImageResourceContent* ImageResource::GetContent() {

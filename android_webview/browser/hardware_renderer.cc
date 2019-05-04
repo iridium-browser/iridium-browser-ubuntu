@@ -12,7 +12,6 @@
 #include "android_webview/browser/parent_compositor_draw_constraints.h"
 #include "android_webview/browser/render_thread_manager.h"
 #include "android_webview/browser/surfaces_instance.h"
-#include "android_webview/public/browser/draw_gl.h"
 #include "base/trace_event/trace_event.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
@@ -33,7 +32,8 @@ HardwareRenderer::HardwareRenderer(RenderThreadManager* state)
       last_committed_layer_tree_frame_sink_id_(0u),
       last_submitted_layer_tree_frame_sink_id_(0u) {
   DCHECK(last_egl_context_);
-  surfaces_->GetFrameSinkManager()->RegisterFrameSinkId(frame_sink_id_);
+  surfaces_->GetFrameSinkManager()->RegisterFrameSinkId(
+      frame_sink_id_, true /* report_activation */);
   surfaces_->GetFrameSinkManager()->SetFrameSinkDebugLabel(frame_sink_id_,
                                                            "HardwareRenderer");
   CreateNewCompositorFrameSinkSupport();
@@ -76,7 +76,7 @@ void HardwareRenderer::CommitFrame() {
   child_frame_queue_.emplace_back(std::move(child_frames.front()));
 }
 
-void HardwareRenderer::DrawGL(AwDrawGLInfo* draw_info) {
+void HardwareRenderer::DrawGL(HardwareRendererDrawParams* params) {
   TRACE_EVENT0("android_webview", "HardwareRenderer::DrawGL");
 
   for (auto& pruned_frame : WaitAndPruneFrameQueue(&child_frame_queue_))
@@ -136,15 +136,15 @@ void HardwareRenderer::DrawGL(AwDrawGLInfo* draw_info) {
   }
 
   gfx::Transform transform(gfx::Transform::kSkipInitialization);
-  transform.matrix().setColMajorf(draw_info->transform);
+  transform.matrix().setColMajorf(params->transform);
   transform.Translate(scroll_offset_.x(), scroll_offset_.y());
 
-  gfx::Size viewport(draw_info->width, draw_info->height);
+  gfx::Size viewport(params->width, params->height);
   // Need to post the new transform matrix back to child compositor
   // because there is no onDraw during a Render Thread animation, and child
   // compositor might not have the tiles rasterized as the animation goes on.
-  ParentCompositorDrawConstraints draw_constraints(
-      draw_info->is_layer, transform, viewport.IsEmpty());
+  ParentCompositorDrawConstraints draw_constraints(params->is_layer, transform,
+                                                   viewport.IsEmpty());
   if (!child_frame_.get() || draw_constraints.NeedUpdate(*child_frame_)) {
     render_thread_manager_->PostExternalDrawConstraintsToChildCompositorOnRT(
         draw_constraints);
@@ -153,9 +153,9 @@ void HardwareRenderer::DrawGL(AwDrawGLInfo* draw_info) {
   if (!child_id_.is_valid())
     return;
 
-  gfx::Rect clip(draw_info->clip_left, draw_info->clip_top,
-                 draw_info->clip_right - draw_info->clip_left,
-                 draw_info->clip_bottom - draw_info->clip_top);
+  gfx::Rect clip(params->clip_left, params->clip_top,
+                 params->clip_right - params->clip_left,
+                 params->clip_bottom - params->clip_top);
   surfaces_->DrawAndSwap(viewport, clip, transform, surface_size_,
                          viz::SurfaceId(frame_sink_id_, child_id_),
                          device_scale_factor_);
@@ -163,7 +163,10 @@ void HardwareRenderer::DrawGL(AwDrawGLInfo* draw_info) {
 
 void HardwareRenderer::AllocateSurface() {
   DCHECK(!child_id_.is_valid());
-  child_id_ = parent_local_surface_id_allocator_->GenerateId();
+  parent_local_surface_id_allocator_->GenerateId();
+  child_id_ =
+      parent_local_surface_id_allocator_->GetCurrentLocalSurfaceIdAllocation()
+          .local_surface_id();
   surfaces_->AddChildId(viz::SurfaceId(frame_sink_id_, child_id_));
 }
 
@@ -171,7 +174,7 @@ void HardwareRenderer::DestroySurface() {
   DCHECK(child_id_.is_valid());
 
   surfaces_->RemoveChildId(viz::SurfaceId(frame_sink_id_, child_id_));
-  support_->EvictLastActivatedSurface();
+  support_->EvictSurface(child_id_);
   child_id_ = viz::LocalSurfaceId();
   surfaces_->GetFrameSinkManager()->surface_manager()->GarbageCollectSurfaces();
 }
@@ -182,11 +185,9 @@ void HardwareRenderer::DidReceiveCompositorFrameAck(
                               last_submitted_layer_tree_frame_sink_id_);
 }
 
-void HardwareRenderer::DidPresentCompositorFrame(
-    uint32_t presentation_token,
-    const gfx::PresentationFeedback& feedback) {}
-
-void HardwareRenderer::OnBeginFrame(const viz::BeginFrameArgs& args) {
+void HardwareRenderer::OnBeginFrame(
+    const viz::BeginFrameArgs& args,
+    const base::flat_map<uint32_t, gfx::PresentationFeedback>& feedbacks) {
   // TODO(tansell): Hook this up.
 }
 

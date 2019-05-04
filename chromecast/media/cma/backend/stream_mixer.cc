@@ -14,6 +14,7 @@
 
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
+#include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -191,7 +192,7 @@ StreamMixer::StreamMixer(
       external_audio_pipeline_supported_(
           ExternalAudioPipelineShlib::IsSupported()),
       weak_factory_(this) {
-  VLOG(1) << __func__;
+  LOG(INFO) << __func__;
 
   volume_info_[AudioContentType::kOther].volume = 1.0f;
   volume_info_[AudioContentType::kOther].limit = 1.0f;
@@ -230,6 +231,7 @@ StreamMixer::StreamMixer(
 
   CreatePostProcessors([](bool, const std::string&) {},
                        "" /* override_config */);
+  mixer_pipeline_->SetPlayoutChannel(playout_channel_);
 
   // TODO(jyw): command line flag for filter frame alignment.
   DCHECK_EQ(filter_frame_alignment_ & (filter_frame_alignment_ - 1), 0)
@@ -335,7 +337,7 @@ void StreamMixer::SetNumOutputChannelsForTest(int num_output_channels) {
 }
 
 StreamMixer::~StreamMixer() {
-  VLOG(1) << __func__;
+  LOG(INFO) << __func__;
   if (shim_thread_) {
     shim_thread_->Stop();
   }
@@ -365,7 +367,7 @@ void StreamMixer::FinalizeOnMixerThread() {
 }
 
 void StreamMixer::Start() {
-  VLOG(1) << __func__;
+  LOG(INFO) << __func__;
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
   DCHECK(state_ == kStateStopped);
   DCHECK(inputs_.empty());
@@ -422,7 +424,7 @@ void StreamMixer::Start() {
 }
 
 void StreamMixer::Stop() {
-  VLOG(1) << __func__;
+  LOG(INFO) << __func__;
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
 
   weak_factory_.InvalidateWeakPtrs();
@@ -484,8 +486,6 @@ void StreamMixer::AddInputOnThread(MixerInput::Source* input_source) {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
   DCHECK(input_source);
 
-  LOG(INFO) << "Add input " << input_source;
-
   // If the new input is a primary one (or there were no inputs previously), we
   // may need to change the output sample rate to match the input sample rate.
   // We only change the output rate if it is not set to a fixed value.
@@ -504,6 +504,8 @@ void StreamMixer::AddInputOnThread(MixerInput::Source* input_source) {
       mixer_pipeline_->GetInputGroup(input_source->device_id());
   DCHECK(input_group) << "Could not find a processor for "
                       << input_source->device_id();
+
+  LOG(INFO) << "Add input " << input_source << " to " << input_group->name();
 
   auto input = std::make_unique<MixerInput>(
       input_source, output_samples_per_second_, frames_per_write_,
@@ -580,14 +582,15 @@ void StreamMixer::UpdatePlayoutChannel() {
           std::min(it.second->source()->playout_channel(), playout_channel);
     }
   }
+  if (playout_channel == playout_channel_) {
+    return;
+  }
 
   DCHECK(playout_channel == kChannelAll ||
          playout_channel >= 0 && playout_channel < kNumInputChannels);
   LOG(INFO) << "Update playout channel: " << playout_channel;
-
-  mixer_pipeline_->SetMixToMono(num_output_channels_ == 1 &&
-                                playout_channel == kChannelAll);
-  mixer_pipeline_->SetPlayoutChannel(playout_channel);
+  playout_channel_ = playout_channel;
+  mixer_pipeline_->SetPlayoutChannel(playout_channel_);
 }
 
 MediaPipelineBackend::AudioDecoder::RenderingDelay
@@ -655,13 +658,7 @@ void StreamMixer::WriteMixedPcm(int frames, int64_t expected_playback_time) {
 
   float* mixed_data = mixer_pipeline_->GetLoopbackOutput();
   if (num_output_channels_ == 1 && mix_channel_count != 1) {
-    for (int i = 0; i < frames; ++i) {
-      float sum = 0;
-      for (int c = 0; c < mix_channel_count; ++c) {
-        sum += mixed_data[i * mix_channel_count + c];
-      }
-      mixed_data[i] = sum / mix_channel_count;
-    }
+    MixToMono(mixed_data, frames, mix_channel_count);
     loopback_channel_count = 1;
   }
 
@@ -685,9 +682,7 @@ void StreamMixer::WriteMixedPcm(int frames, int64_t expected_playback_time) {
   float* linearized_data = mixer_pipeline_->GetOutput();
   int linearize_channel_count = mixer_pipeline_->GetOutputChannelCount();
   if (num_output_channels_ == 1 && linearize_channel_count != 1) {
-    for (int i = 0; i < frames; ++i) {
-      linearized_data[i] = linearized_data[i * linearize_channel_count];
-    }
+    MixToMono(linearized_data, frames, linearize_channel_count);
   }
 
   // Hard limit to [1.0, -1.0].
@@ -704,9 +699,26 @@ void StreamMixer::WriteMixedPcm(int frames, int64_t expected_playback_time) {
   }
 }
 
+void StreamMixer::MixToMono(float* data, int frames, int channels) {
+  DCHECK_EQ(num_output_channels_, 1);
+  if (playout_channel_ == kChannelAll) {
+    for (int i = 0; i < frames; ++i) {
+      float sum = 0;
+      for (int c = 0; c < channels; ++c) {
+        sum += data[i * channels + c];
+      }
+      data[i] = sum / channels;
+    }
+  } else {
+    for (int i = 0; i < frames; ++i) {
+      data[i] = data[i * channels + playout_channel_];
+    }
+  }
+}
+
 void StreamMixer::AddLoopbackAudioObserver(
     CastMediaShlib::LoopbackAudioObserver* observer) {
-  VLOG(1) << __func__;
+  LOG(INFO) << __func__;
   POST_TASK_TO_SHIM_THREAD(&StreamMixer::AddLoopbackAudioObserverOnShimThread,
                            observer);
 }
@@ -720,7 +732,7 @@ void StreamMixer::AddLoopbackAudioObserverOnShimThread(
 
 void StreamMixer::RemoveLoopbackAudioObserver(
     CastMediaShlib::LoopbackAudioObserver* observer) {
-  VLOG(1) << __func__;
+  LOG(INFO) << __func__;
   POST_TASK_TO_SHIM_THREAD(
       &StreamMixer::RemoveLoopbackAudioObserverOnShimThread, observer);
 }
@@ -734,7 +746,7 @@ void StreamMixer::RemoveLoopbackAudioObserverOnShimThread(
 
 void StreamMixer::AddAudioOutputRedirector(
     std::unique_ptr<AudioOutputRedirector> redirector) {
-  VLOG(1) << __func__;
+  LOG(INFO) << __func__;
   POST_THROUGH_INPUT_THREAD(&StreamMixer::AddAudioOutputRedirectorOnThread,
                             std::move(redirector));
 }
@@ -756,7 +768,7 @@ void StreamMixer::AddAudioOutputRedirectorOnThread(
 
 void StreamMixer::RemoveAudioOutputRedirector(
     AudioOutputRedirector* redirector) {
-  VLOG(1) << __func__;
+  LOG(INFO) << __func__;
   POST_THROUGH_INPUT_THREAD(&StreamMixer::RemoveAudioOutputRedirectorOnThread,
                             redirector);
 }

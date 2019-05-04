@@ -13,6 +13,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.RemoteException;
+import android.support.annotation.Nullable;
 
 import org.chromium.base.ChildBindingState;
 import org.chromium.base.Log;
@@ -26,7 +27,6 @@ import org.chromium.base.memory.MemoryPressureCallback;
 import java.util.Arrays;
 import java.util.List;
 
-import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 
 /**
@@ -103,14 +103,16 @@ public class ChildProcessConnection {
         private final Context mContext;
         private final Intent mBindIntent;
         private final int mBindFlags;
+        private final Handler mHandler;
         private final ChildServiceConnectionDelegate mDelegate;
         private boolean mBound;
 
         private ChildServiceConnectionImpl(Context context, Intent bindIntent, int bindFlags,
-                ChildServiceConnectionDelegate delegate) {
+                Handler handler, ChildServiceConnectionDelegate delegate) {
             mContext = context;
             mBindIntent = bindIntent;
             mBindFlags = bindFlags;
+            mHandler = handler;
             mDelegate = delegate;
         }
 
@@ -119,7 +121,8 @@ public class ChildProcessConnection {
             if (!mBound) {
                 try {
                     TraceEvent.begin("ChildProcessConnection.ChildServiceConnectionImpl.bind");
-                    mBound = mContext.bindService(mBindIntent, this, mBindFlags);
+                    mBound = BindService.doBindService(
+                            mContext, mBindIntent, this, mBindFlags, mHandler);
                 } finally {
                     TraceEvent.end("ChildProcessConnection.ChildServiceConnectionImpl.bind");
                 }
@@ -255,6 +258,10 @@ public class ChildProcessConnection {
 
     private MemoryPressureCallback mMemoryPressureCallback;
 
+    // Whether the process exited cleanly or not.
+    @GuardedBy("sBindingStateLock")
+    private boolean mCleanExit;
+
     public ChildProcessConnection(Context context, ComponentName serviceName, boolean bindToCaller,
             boolean bindAsExternalService, Bundle serviceBundle) {
         this(context, serviceName, bindToCaller, bindAsExternalService, serviceBundle,
@@ -277,30 +284,31 @@ public class ChildProcessConnection {
                 @Override
                 public ChildServiceConnection createConnection(
                         Intent bindIntent, int bindFlags, ChildServiceConnectionDelegate delegate) {
-                    return new ChildServiceConnectionImpl(context, bindIntent, bindFlags, delegate);
+                    return new ChildServiceConnectionImpl(
+                            context, bindIntent, bindFlags, mLauncherHandler, delegate);
                 }
             };
         }
 
+        // Methods on the delegate are can be called on launcher thread or UI thread, so need to
+        // handle both cases. See BindService for details.
         ChildServiceConnectionDelegate delegate = new ChildServiceConnectionDelegate() {
             @Override
             public void onServiceConnected(final IBinder service) {
-                mLauncherHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        onServiceConnectedOnLauncherThread(service);
-                    }
-                });
+                if (mLauncherHandler.getLooper() == Looper.myLooper()) {
+                    onServiceConnectedOnLauncherThread(service);
+                    return;
+                }
+                mLauncherHandler.post(() -> onServiceConnectedOnLauncherThread(service));
             }
 
             @Override
             public void onServiceDisconnected() {
-                mLauncherHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        onServiceDisconnectedOnLauncherThread();
-                    }
-                });
+                if (mLauncherHandler.getLooper() == Looper.myLooper()) {
+                    onServiceDisconnectedOnLauncherThread();
+                    return;
+                }
+                mLauncherHandler.post(() -> onServiceDisconnectedOnLauncherThread());
             }
         };
 
@@ -502,6 +510,10 @@ public class ChildProcessConnection {
     }
 
     private void onSetupConnectionResult(int pid) {
+        if (mPid != 0) {
+            Log.e(TAG, "sendPid was called more than once: pid=%d", mPid);
+            return;
+        }
         mPid = pid;
         assert mPid != 0 : "Child service claims to be run by a process of pid=0.";
 
@@ -522,9 +534,9 @@ public class ChildProcessConnection {
             assert mServiceConnectComplete && mService != null;
             assert mConnectionParams != null;
 
-            ICallbackInt pidCallback = new ICallbackInt.Stub() {
+            IParentProcess parentProcess = new IParentProcess.Stub() {
                 @Override
-                public void call(final int pid) {
+                public void sendPid(final int pid) {
                     mLauncherHandler.post(new Runnable() {
                         @Override
                         public void run() {
@@ -532,9 +544,22 @@ public class ChildProcessConnection {
                         }
                     });
                 }
+
+                @Override
+                public void reportCleanExit() {
+                    synchronized (sBindingStateLock) {
+                        mCleanExit = true;
+                    }
+                    mLauncherHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            unbind();
+                        }
+                    });
+                }
             };
             try {
-                mService.setupConnection(mConnectionParams.mConnectionBundle, pidCallback,
+                mService.setupConnection(mConnectionParams.mConnectionBundle, parentProcess,
                         mConnectionParams.mClientInterfaces);
             } catch (RemoteException re) {
                 Log.e(TAG, "Failed to setup connection.", re);
@@ -672,6 +697,15 @@ public class ChildProcessConnection {
         // preventable without changing the caller's API, short of blocking.
         synchronized (sBindingStateLock) {
             return mKilledByUs;
+        }
+    }
+
+    /**
+     * @return true if the process exited cleanly.
+     */
+    public boolean hasCleanExit() {
+        synchronized (sBindingStateLock) {
+            return mCleanExit;
         }
     }
 

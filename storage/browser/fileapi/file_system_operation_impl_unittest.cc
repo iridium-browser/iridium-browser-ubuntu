@@ -19,6 +19,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -177,10 +178,8 @@ class FileSystemOperationImplTest
   FileSystemOperation::StatusCallback RecordStatusCallback(
       const base::Closure& closure,
       base::File::Error* status) {
-    return base::Bind(&FileSystemOperationImplTest::DidFinish,
-                      weak_factory_.GetWeakPtr(),
-                      closure,
-                      status);
+    return base::BindOnce(&FileSystemOperationImplTest::DidFinish,
+                          weak_factory_.GetWeakPtr(), closure, status);
   }
 
   FileSystemOperation::ReadDirectoryCallback RecordReadDirectoryCallback(
@@ -194,10 +193,8 @@ class FileSystemOperationImplTest
   FileSystemOperation::GetMetadataCallback RecordMetadataCallback(
       const base::Closure& closure,
       base::File::Error* status) {
-    return base::Bind(&FileSystemOperationImplTest::DidGetMetadata,
-                      weak_factory_.GetWeakPtr(),
-                      closure,
-                      status);
+    return base::BindOnce(&FileSystemOperationImplTest::DidGetMetadata,
+                          weak_factory_.GetWeakPtr(), closure, status);
   }
 
   FileSystemOperation::SnapshotFileCallback RecordSnapshotFileCallback(
@@ -827,7 +824,7 @@ TEST_F(FileSystemOperationImplTest, TestCopyInForeignFileSuccess) {
   base::FilePath src_local_disk_file_path;
   base::CreateTemporaryFile(&src_local_disk_file_path);
   const char test_data[] = "foo";
-  int data_size = arraysize(test_data);
+  int data_size = base::size(test_data);
   base::WriteFile(src_local_disk_file_path, test_data, data_size);
 
   FileSystemURL dest_dir(CreateDirectory("dest"));
@@ -858,7 +855,7 @@ TEST_F(FileSystemOperationImplTest, TestCopyInForeignFileFailureByQuota) {
   base::FilePath src_local_disk_file_path;
   base::CreateTemporaryFile(&src_local_disk_file_path);
   const char test_data[] = "foo";
-  base::WriteFile(src_local_disk_file_path, test_data, arraysize(test_data));
+  base::WriteFile(src_local_disk_file_path, test_data, base::size(test_data));
 
   FileSystemURL dest_dir(CreateDirectory("dest"));
 

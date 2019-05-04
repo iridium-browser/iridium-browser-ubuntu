@@ -17,6 +17,9 @@ from chromite.lib import cros_build_lib
 from chromite.lib import osutils
 
 
+_SQUASHFS_TYPE = 'squashfs'
+_EXT4_TYPE = 'ext4'
+
 def HashFile(file_path):
   """Calculate the sha256 hash of a file.
 
@@ -45,12 +48,16 @@ class DLCGenerator(object):
   # Version of manifest file.
   _MANIFEST_VERSION = 1
 
-  def __init__(self, dest_dir, src_dir, fs_type, pre_allocated_blocks, version,
-               dlc_id, name):
+  # The DLC root path inside the DLC module.
+  _DLC_ROOT_DIR = 'root'
+
+  def __init__(self, img_dir, meta_dir, src_dir, fs_type, pre_allocated_blocks,
+               version, dlc_id, name):
     """Object initializer.
 
     Args:
-      dest_dir: (str) path to the DLC dest root directory.
+      img_dir: (str) path to the DLC image dest root directory.
+      meta_dir: (str) path to the DLC metadata dest root directory.
       src_dir: (str) path to the DLC source root directory.
       fs_type: (str) file system type.
       pre_allocated_blocks: (int) number of blocks pre-allocated on device.
@@ -65,9 +72,9 @@ class DLCGenerator(object):
     self.dlc_id = dlc_id
     self.name = name
     # Create path for all final artifacts.
-    self.dest_image = os.path.join(dest_dir, 'dlc.img')
-    self.dest_table = os.path.join(dest_dir, 'table')
-    self.dest_imageloader_json = os.path.join(dest_dir, 'imageloader.json')
+    self.dest_image = os.path.join(img_dir, 'dlc.img')
+    self.dest_table = os.path.join(meta_dir, 'table')
+    self.dest_imageloader_json = os.path.join(meta_dir, 'imageloader.json')
 
   def SquashOwnerships(self, path):
     """Squash the owernships & permissions for files.
@@ -95,9 +102,12 @@ class DLCGenerator(object):
       osutils.SafeMakedirs(mount_point)
       # Mount the ext4 image.
       osutils.MountDir(self.dest_image, mount_point, mount_opts=('loop', 'rw'))
+
+      dlc_root_dir = os.path.join(mount_point, self._DLC_ROOT_DIR)
+      osutils.SafeMakedirs(dlc_root_dir)
       try:
         # Copy DLC files over to the image.
-        cros_build_lib.SudoRunCommand(['cp', '-a', self.src_dir, mount_point])
+        cros_build_lib.SudoRunCommand(['cp', '-a', self.src_dir, dlc_root_dir])
         self.SquashOwnerships(mount_point)
       finally:
         # Unmount the ext4 image.
@@ -111,17 +121,26 @@ class DLCGenerator(object):
   def CreateSquashfsImage(self):
     """Create a squashfs image."""
     with osutils.TempDir(prefix='dlc_') as temp_dir:
-      cros_build_lib.SudoRunCommand(['cp', '-a', self.src_dir, temp_dir])
-      self.SquashOwnerships(temp_dir)
-      cros_build_lib.SudoRunCommand(
-          ['mksquashfs', temp_dir, self.dest_image, '-4k-align', '-noappend'],
-          capture_output=True)
+      squashfs_root = os.path.join(temp_dir, 'squashfs-root')
+      dlc_root_dir = os.path.join(squashfs_root, self._DLC_ROOT_DIR)
+      osutils.SafeMakedirs(dlc_root_dir)
+
+      cros_build_lib.SudoRunCommand(['cp', '-a', self.src_dir, dlc_root_dir])
+      self.SquashOwnerships(squashfs_root)
+
+      cros_build_lib.RunCommand(['mksquashfs', squashfs_root, self.dest_image,
+                                 '-4k-align', '-noappend'],
+                                capture_output=True)
+
+      # We changed the ownership and permissions of the squashfs_root
+      # directory. Now we need to remove it manually.
+      osutils.RmDir(squashfs_root, sudo=True)
 
   def CreateImage(self):
     """Create the image and copy the DLC files to it."""
-    if self.fs_type == 'ext4':
+    if self.fs_type == _EXT4_TYPE:
       self.CreateExt4Image()
-    elif self.fs_type == 'squashfs':
+    elif self.fs_type == _SQUASHFS_TYPE:
       self.CreateSquashfsImage()
     else:
       raise ValueError('Wrong fs type: %s used:' % self.fs_type)
@@ -197,12 +216,14 @@ def GetParser():
                         required=True,
                         help='Root directory path that contains all DLC files '
                         'to be packed.')
-  required.add_argument('--dest-dir', type='path', metavar='DEST_DIR_PATH',
+  required.add_argument('--img-dir', type='path', metavar='IMG_DIR_PATH',
                         required=True,
-                        help='Root directory path that contains output.')
-  required.add_argument('--fs-type', metavar='FS_TYPE', required=True,
-                        choices=['squashfs', 'ext4'],
-                        help='File system type of the image.')
+                        help='Root directory path that contains DLC image file '
+                        'output.')
+  required.add_argument('--meta-dir', type='path', metavar='META_DIR_PATH',
+                        required=True,
+                        help='Root directory path that contains DLC metadata '
+                        'output.')
   required.add_argument('--pre-allocated-blocks', type=int,
                         metavar='PREALLOCATEDBLOCKS', required=True,
                         help='Number of blocks (block size is 4k) that need to'
@@ -213,6 +234,12 @@ def GetParser():
                         help='DLC ID (unique per DLC).')
   required.add_argument('--name', metavar='NAME', required=True,
                         help='A human-readable name for the DLC.')
+
+  args = parser.add_argument_group('Arguments')
+  args.add_argument('--fs-type', metavar='FS_TYPE', default=_SQUASHFS_TYPE,
+                    choices=(_SQUASHFS_TYPE, _EXT4_TYPE),
+                    help='File system type of the image.')
+
   return parser
 
 
@@ -221,7 +248,7 @@ def main(argv):
   opts.Freeze()
 
   # Generate final DLC files.
-  dlc_generator = DLCGenerator(opts.dest_dir, opts.src_dir, opts.fs_type,
-                               opts.pre_allocated_blocks, opts.version, opts.id,
-                               opts.name)
+  dlc_generator = DLCGenerator(opts.img_dir, opts.meta_dir, opts.src_dir,
+                               opts.fs_type, opts.pre_allocated_blocks,
+                               opts.version, opts.id, opts.name)
   dlc_generator.GenerateDLC()

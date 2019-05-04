@@ -1,3 +1,4 @@
+jasmine.DEFAULT_TIMEOUT_INTERVAL = 20000;
 
 describe('PathKit\'s Path Behavior', function() {
     // Note, don't try to print the PathKit object - it can cause Karma/Jasmine to lock up.
@@ -8,7 +9,7 @@ describe('PathKit\'s Path Behavior', function() {
         } else {
             PathKitInit({
                 locateFile: (file) => '/pathkit/'+file,
-            }).then((_PathKit) => {
+            }).ready().then((_PathKit) => {
                 PathKit = _PathKit;
                 resolve();
             });
@@ -26,7 +27,7 @@ describe('PathKit\'s Path Behavior', function() {
         }
 
         it('supports.equals()', function(done) {
-            LoadPathKit.then(() => {
+            LoadPathKit.then(catchException(done, () => {
                 let path = drawSimplePath();
                 let otherPath = drawSimplePath();
                 let blank = PathKit.NewPath();
@@ -44,11 +45,11 @@ describe('PathKit\'s Path Behavior', function() {
                 otherPath.delete();
                 blank.delete();
                 done();
-            });
+            }));
         });
 
         it('has a copy constructor', function(done) {
-            LoadPathKit.then(() => {
+            LoadPathKit.then(catchException(done, () => {
                 let orig = drawSimplePath();
                 let copy = new PathKit.SkPath(orig);
 
@@ -58,11 +59,11 @@ describe('PathKit\'s Path Behavior', function() {
                 orig.delete();
                 copy.delete();
                 done();
-            });
+            }));
         });
 
         it('has a copy method', function(done) {
-            LoadPathKit.then(() => {
+            LoadPathKit.then(catchException(done, () => {
                 let orig = drawSimplePath();
                 let copy = orig.copy();
 
@@ -72,11 +73,11 @@ describe('PathKit\'s Path Behavior', function() {
                 orig.delete();
                 copy.delete();
                 done();
-            });
+            }));
         });
 
         it('can create a copy with MakePath', function(done) {
-            LoadPathKit.then(() => {
+            LoadPathKit.then(catchException(done, () => {
                 let orig = drawSimplePath();
                 let copy = PathKit.NewPath(orig);
 
@@ -86,7 +87,7 @@ describe('PathKit\'s Path Behavior', function() {
                 orig.delete();
                 copy.delete();
                 done();
-            });
+            }));
         });
     });
 
@@ -109,7 +110,7 @@ describe('PathKit\'s Path Behavior', function() {
 
     describe('bounds and rect', function(){
         it('dynamically updates getBounds()', function(done){
-            LoadPathKit.then(() => {
+            LoadPathKit.then(catchException(done, () => {
                 // Based on test_bounds_crbug_513799
                 let path = PathKit.NewPath();
                 expect(path.getBounds()).toEqual(PathKit.LTRBRect(0, 0, 0, 0));
@@ -121,11 +122,11 @@ describe('PathKit\'s Path Behavior', function() {
                 expect(path.getBounds()).toEqual(PathKit.LTRBRect(-5, -8, 3, 4));
                 path.delete();
                 done();
-            });
+            }));
         });
 
         it('has getBounds() and computeTightBounds()', function(done){
-            LoadPathKit.then(() => {
+            LoadPathKit.then(catchException(done, () => {
                 // Based on PathOpsTightBoundsIllBehaved
                 let path = PathKit.NewPath();
                 path.moveTo(1, 1);
@@ -138,7 +139,7 @@ describe('PathKit\'s Path Behavior', function() {
                 path.delete();
 
                 done();
-            });
+            }));
         });
     });
 
@@ -158,8 +159,8 @@ describe('PathKit\'s Path Behavior', function() {
     }
 
     describe('Command arrays', function(){
-        it('does NOT approximates conics when dumping as toCmds', function(done){
-            LoadPathKit.then(() => {
+        it('does NOT approximates conics when dumping as toCmds', function(done) {
+            LoadPathKit.then(catchException(done, () => {
                 let path = PathKit.NewPath();
                 path.moveTo(20, 120);
                 path.arc(20, 120, 18, 0, 1.75 * Math.PI);
@@ -178,7 +179,7 @@ describe('PathKit\'s Path Behavior', function() {
 
                 path.delete();
                 done();
-            });
+            }));
         });
     });
 

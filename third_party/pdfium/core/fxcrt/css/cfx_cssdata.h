@@ -11,20 +11,19 @@
 #include "core/fxcrt/css/cfx_cssnumbervalue.h"
 #include "core/fxcrt/css/cfx_cssvalue.h"
 #include "core/fxcrt/string_view_template.h"
+#include "core/fxge/fx_dib.h"
 
 class CFX_CSSData {
  public:
   struct Property {
     CFX_CSSProperty eName;
-    const wchar_t* pszName;
-    uint32_t dwHash;
+    uint32_t dwHash;  // Hashed as wide string.
     uint32_t dwType;
   };
 
   struct PropertyValue {
     CFX_CSSPropertyValue eName;
-    const wchar_t* pszName;
-    uint32_t dwHash;
+    uint32_t dwHash;  // Hashed as wide string.
   };
 
   struct LengthUnit {

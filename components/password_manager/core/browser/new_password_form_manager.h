@@ -14,6 +14,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "components/autofill/core/common/form_data.h"
+#include "components/autofill/core/common/signatures_util.h"
 #include "components/password_manager/core/browser/form_fetcher.h"
 #include "components/password_manager/core/browser/form_parsing/form_parser.h"
 #include "components/password_manager/core/browser/form_parsing/password_field_prediction.h"
@@ -21,10 +22,6 @@
 #include "components/password_manager/core/browser/password_form_metrics_recorder.h"
 #include "components/password_manager/core/browser/password_form_user_action.h"
 #include "components/password_manager/core/browser/votes_uploader.h"
-
-namespace autofill {
-class FormStructure;
-}
 
 namespace password_manager {
 
@@ -44,12 +41,15 @@ class NewPasswordFormManager : public PasswordFormManagerInterface,
   // |this| creates an instance of it itself (meant for production code). Once
   // the fetcher is shared between PasswordFormManager instances, it will be
   // required that |form_fetcher| is not null. |form_saver| is used to
-  // save/update the form.
-  NewPasswordFormManager(PasswordManagerClient* client,
-                         const base::WeakPtr<PasswordManagerDriver>& driver,
-                         const autofill::FormData& observed_form,
-                         FormFetcher* form_fetcher,
-                         std::unique_ptr<FormSaver> form_saver);
+  // save/update the form. |metrics_recorder| records metrics for |*this|. If
+  // null a new instance will be created.
+  NewPasswordFormManager(
+      PasswordManagerClient* client,
+      const base::WeakPtr<PasswordManagerDriver>& driver,
+      const autofill::FormData& observed_form,
+      FormFetcher* form_fetcher,
+      std::unique_ptr<FormSaver> form_saver,
+      scoped_refptr<PasswordFormMetricsRecorder> metrics_recorder);
 
   ~NewPasswordFormManager() override;
 
@@ -62,6 +62,12 @@ class NewPasswordFormManager : public PasswordFormManagerInterface,
   bool DoesManage(const autofill::FormData& form,
                   const PasswordManagerDriver* driver) const;
 
+  // Returns whether the form identified by |form_renderer_id| and |driver|
+  // is managed by this password form manager. Don't call this on iOS.
+  bool DoesManageAccordingToRendererId(
+      uint32_t form_renderer_id,
+      const PasswordManagerDriver* driver) const;
+
   // Check that |submitted_form_| is equal to |form| from the user point of
   // view. It is used for detecting that a form is reappeared after navigation
   // for success detection.
@@ -71,8 +77,8 @@ class NewPasswordFormManager : public PasswordFormManagerInterface,
   // |submitted_form| and |driver|) then saves |submitted_form| to
   // |submitted_form_| field, sets |is_submitted| = true and returns true.
   // Otherwise returns false.
-  bool SetSubmittedFormIfIsManaged(const autofill::FormData& submitted_form,
-                                   const PasswordManagerDriver* driver);
+  bool ProvisionallySave(const autofill::FormData& submitted_form,
+                         const PasswordManagerDriver* driver);
   bool is_submitted() { return is_submitted_; }
   void set_not_submitted() { is_submitted_ = false; }
 
@@ -84,10 +90,13 @@ class NewPasswordFormManager : public PasswordFormManagerInterface,
   // |observed_form_|, initiates filling and stores predictions in
   // |predictions_|.
   void ProcessServerPredictions(
-      const std::vector<autofill::FormStructure*>& predictions);
+      const std::map<autofill::FormSignature, FormPredictions>& predictions);
 
   // Sends fill data to the renderer.
   void Fill();
+
+  // Sends fill data to the renderer to fill |observed_form|.
+  void FillForm(const autofill::FormData& observed_form);
 
   // PasswordFormManagerForUI:
   FormFetcher* GetFormFetcher() override;
@@ -117,9 +126,15 @@ class NewPasswordFormManager : public PasswordFormManagerInterface,
   // PasswordFormManagerInterface:
   bool IsNewLogin() const override;
   bool IsPendingCredentialsPublicSuffixMatch() const override;
+  void PresaveGeneratedPassword(const autofill::PasswordForm& form) override;
+  void PasswordNoLongerGenerated() override;
   bool HasGeneratedPassword() const override;
+  void SetGenerationPopupWasShown(bool generation_popup_was_shown,
+                                  bool is_manual_generation) override;
+  void SetGenerationElement(const base::string16& generation_element) override;
   bool IsPossibleChangePasswordFormWithoutUsername() const override;
   bool RetryPasswordFormPasswordUpdate() const override;
+  bool IsPasswordUpdate() const override;
   std::vector<base::WeakPtr<PasswordManagerDriver>> GetDrivers() const override;
   const autofill::PasswordForm* GetSubmittedForm() const override;
 
@@ -192,9 +207,6 @@ class NewPasswordFormManager : public PasswordFormManagerInterface,
   const autofill::PasswordForm* FindBestSavedMatch(
       const autofill::PasswordForm* form) const;
 
-  // Sets |user_action_| and records some metrics.
-  void SetUserAction(UserAction user_action);
-
   void SetPasswordOverridden(bool password_overridden) {
     password_overridden_ = password_overridden;
     votes_uploader_.set_password_overridden(password_overridden);
@@ -217,12 +229,17 @@ class NewPasswordFormManager : public PasswordFormManagerInterface,
       const autofill::FormData& form,
       FormDataParser::Mode mode);
 
+  // Calculates FillingAssistance metric for |submitted_form|. The metric is
+  // recorded in case when the successful submission is detected.
+  void CalculateFillingAssistanceMetric(
+      const autofill::FormData& submitted_form);
+
   // The client which implements embedder-specific PasswordManager operations.
   PasswordManagerClient* client_;
 
   base::WeakPtr<PasswordManagerDriver> driver_;
 
-  const autofill::FormData observed_form_;
+  autofill::FormData observed_form_;
 
   // Set of nonblacklisted PasswordForms from the DB that best match the form
   // being managed by |this|, indexed by username. The PasswordForms are owned
@@ -286,8 +303,9 @@ class NewPasswordFormManager : public PasswordFormManagerInterface,
   // existing one.
   bool is_new_login_ = true;
 
-  // Whether this form has an auto generated password.
-  bool has_generated_password_ = false;
+  // Contains a generated password, empty if no password generation happened or
+  // a generated password removed by the user.
+  base::string16 generated_password_;
 
   // Whether the saved password was overridden.
   bool password_overridden_ = false;
@@ -299,15 +317,14 @@ class NewPasswordFormManager : public PasswordFormManagerInterface,
   // and it was entered on a retry password form.
   bool retry_password_form_password_update_ = false;
 
-  // Records the action the user has taken while interacting with the password
-  // form.
-  UserAction user_action_ = UserAction::kNone;
-
   // If Chrome has already autofilled a few times, it is probable that autofill
   // is triggered by programmatic changes in the page. We set a maximum number
   // of times that Chrome will autofill to avoid being stuck in an infinite
   // loop.
   int autofills_left_ = kMaxTimesAutofill;
+
+  // True until server predictions received or waiting for them timed out.
+  bool waiting_for_server_predictions_ = false;
 
   // Controls whether to wait or not server before filling. It is used in tests.
   static bool wait_for_server_predictions_for_filling_;

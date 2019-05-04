@@ -5,9 +5,11 @@
 #include "chrome/browser/task_manager/sampling/task_manager_impl.h"
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "base/command_line.h"
@@ -34,6 +36,7 @@
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/arc/process/arc_process_service.h"
 #include "chrome/browser/task_manager/providers/arc/arc_process_task_provider.h"
 #include "chrome/browser/task_manager/providers/crostini/crostini_process_task_provider.h"
 #include "components/arc/arc_util.h"
@@ -89,6 +92,7 @@ TaskManagerImpl::TaskManagerImpl()
   if (arc::IsArcAvailable())
     task_providers_.emplace_back(new ArcProcessTaskProvider());
   task_providers_.emplace_back(new CrostiniProcessTaskProvider());
+  arc_shared_sampler_ = std::make_unique<ArcSharedSampler>();
 #endif  // defined(OS_CHROMEOS)
 }
 
@@ -156,10 +160,6 @@ int64_t TaskManagerImpl::GetGpuMemoryUsage(TaskId task_id,
   return task_group->gpu_memory();
 }
 
-base::MemoryState TaskManagerImpl::GetMemoryState(TaskId task_id) const {
-  return GetTaskGroupByTaskId(task_id)->memory_state();
-}
-
 int TaskManagerImpl::GetIdleWakeupsPerSecond(TaskId task_id) const {
   return GetTaskGroupByTaskId(task_id)->idle_wakeups_per_second();
 }
@@ -207,11 +207,11 @@ void TaskManagerImpl::GetUSERHandles(TaskId task_id,
 }
 
 int TaskManagerImpl::GetOpenFdCount(TaskId task_id) const {
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_MACOSX)
   return GetTaskGroupByTaskId(task_id)->open_fd_count();
 #else
   return -1;
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
 }
 
 bool TaskManagerImpl::IsTaskOnBackgroundedProcess(TaskId task_id) const {
@@ -446,10 +446,15 @@ void TaskManagerImpl::TaskAdded(Task* task) {
   const TaskId task_id = task->task_id();
 
   std::unique_ptr<TaskGroup>& task_group = task_groups_by_proc_id_[proc_id];
-  if (!task_group)
+  if (!task_group) {
     task_group.reset(new TaskGroup(task->process_handle(), proc_id,
                                    on_background_data_ready_callback_,
                                    shared_sampler_, blocking_pool_runner_));
+#if defined(OS_CHROMEOS)
+    if (task->GetType() == Task::ARC)
+      task_group->SetArcSampler(arc_shared_sampler_.get());
+#endif
+  }
 
   task_group->AddTask(task);
 
@@ -605,6 +610,13 @@ void TaskManagerImpl::Refresh() {
                                GetCurrentRefreshTime(),
                                enabled_resources_flags());
   }
+
+#if defined(OS_CHROMEOS)
+  if (TaskManagerObserver::IsResourceRefreshEnabled(
+          REFRESH_TYPE_MEMORY_FOOTPRINT, enabled_resources_flags())) {
+    arc_shared_sampler_->Refresh();
+  }
+#endif  // defined(OS_CHROMEOS)
 
   NotifyObserversOnRefresh(GetTaskIdsList());
 }

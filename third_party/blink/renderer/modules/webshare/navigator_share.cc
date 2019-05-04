@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/fileapi/file.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
 #include "third_party/blink/renderer/modules/webshare/share_data.h"
@@ -33,6 +34,37 @@ String ErrorToString(mojom::blink::ShareError error) {
   }
   NOTREACHED();
   return String();
+}
+
+bool HasFiles(const ShareData& share_data) {
+  if (!RuntimeEnabledFeatures::WebShareV2Enabled() || !share_data.hasFiles())
+    return false;
+
+  const HeapVector<Member<File>>& files = share_data.files();
+  return !files.IsEmpty();
+}
+
+// Returns a message for a TypeError if share(share_data) would reject with
+// TypeError. https://wicg.github.io/web-share/level-2/#canshare-method
+// Otherwise returns an empty string.
+// Populates full_url with the result of running the URL parser on
+// share_data.url
+String CheckForTypeError(const Document& doc,
+                         const ShareData& share_data,
+                         KURL* full_url) {
+  if (!share_data.hasTitle() && !share_data.hasText() && !share_data.hasURL() &&
+      !HasFiles(share_data)) {
+    return "No known share data fields supplied. If using only new fields "
+           "(other than title, text and url), you must feature-detect "
+           "them first.";
+  }
+
+  *full_url = doc.CompleteURL(share_data.url());
+  if (!full_url->IsNull() && !full_url->IsValid()) {
+    return "Invalid URL";
+  }
+
+  return g_empty_string;
 }
 
 }  // namespace
@@ -85,7 +117,7 @@ NavigatorShare& NavigatorShare::From(Navigator& navigator) {
   NavigatorShare* supplement =
       Supplement<Navigator>::From<NavigatorShare>(navigator);
   if (!supplement) {
-    supplement = new NavigatorShare();
+    supplement = MakeGarbageCollected<NavigatorShare>();
     ProvideTo(navigator, supplement);
   }
   return *supplement;
@@ -100,22 +132,27 @@ NavigatorShare::NavigatorShare() = default;
 
 const char NavigatorShare::kSupplementName[] = "NavigatorShare";
 
-ScriptPromise NavigatorShare::share(ScriptState* script_state,
-                                    const ShareData& share_data) {
+bool NavigatorShare::canShare(ScriptState* script_state,
+                              const ShareData* share_data) {
   Document* doc = To<Document>(ExecutionContext::From(script_state));
+  KURL full_url;
+  return CheckForTypeError(*doc, *share_data, &full_url).IsEmpty();
+}
 
-  if (!share_data.hasTitle() && !share_data.hasText() && !share_data.hasURL()) {
-    v8::Local<v8::Value> error = V8ThrowException::CreateTypeError(
-        script_state->GetIsolate(),
-        "No known share data fields supplied. If using only new fields (other "
-        "than title, text and url), you must feature-detect them first.");
-    return ScriptPromise::Reject(script_state, error);
-  }
+bool NavigatorShare::canShare(ScriptState* script_state,
+                              Navigator& navigator,
+                              const ShareData* share_data) {
+  return From(navigator).canShare(script_state, share_data);
+}
 
-  KURL full_url = doc->CompleteURL(share_data.url());
-  if (!full_url.IsNull() && !full_url.IsValid()) {
+ScriptPromise NavigatorShare::share(ScriptState* script_state,
+                                    const ShareData* share_data) {
+  Document* doc = To<Document>(ExecutionContext::From(script_state));
+  KURL full_url;
+  String error_message = CheckForTypeError(*doc, *share_data, &full_url);
+  if (!error_message.IsEmpty()) {
     v8::Local<v8::Value> error = V8ThrowException::CreateTypeError(
-        script_state->GetIsolate(), "Invalid URL");
+        script_state->GetIsolate(), error_message);
     return ScriptPromise::Reject(script_state, error);
   }
 
@@ -136,20 +173,23 @@ ScriptPromise NavigatorShare::share(ScriptState* script_state,
       return ScriptPromise::RejectWithDOMException(script_state, error);
     }
 
-    frame->GetInterfaceProvider().GetInterface(mojo::MakeRequest(&service_));
+    // See https://bit.ly/2S0zRAS for task types.
+    frame->GetInterfaceProvider().GetInterface(mojo::MakeRequest(
+        &service_, frame->GetTaskRunner(TaskType::kMiscPlatformAPI)));
     service_.set_connection_error_handler(WTF::Bind(
         &NavigatorShare::OnConnectionError, WrapWeakPersistent(this)));
     DCHECK(service_);
   }
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
-  ShareClientImpl* client = new ShareClientImpl(this, resolver);
+  ShareClientImpl* client =
+      MakeGarbageCollected<ShareClientImpl>(this, resolver);
   clients_.insert(client);
   ScriptPromise promise = resolver->Promise();
 
   service_->Share(
-      share_data.hasTitle() ? share_data.title() : g_empty_string,
-      share_data.hasText() ? share_data.text() : g_empty_string, full_url,
+      share_data->hasTitle() ? share_data->title() : g_empty_string,
+      share_data->hasText() ? share_data->text() : g_empty_string, full_url,
       WTF::Bind(&ShareClientImpl::Callback, WrapPersistent(client)));
 
   return promise;
@@ -157,7 +197,7 @@ ScriptPromise NavigatorShare::share(ScriptState* script_state,
 
 ScriptPromise NavigatorShare::share(ScriptState* script_state,
                                     Navigator& navigator,
-                                    const ShareData& share_data) {
+                                    const ShareData* share_data) {
   return From(navigator).share(script_state, share_data);
 }
 

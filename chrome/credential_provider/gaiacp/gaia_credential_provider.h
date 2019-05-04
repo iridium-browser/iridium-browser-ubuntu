@@ -11,7 +11,7 @@
 
 #include "chrome/credential_provider/gaiacp/gaia_credential.h"
 #include "chrome/credential_provider/gaiacp/gaia_credential_provider_i.h"
-#include "chrome/credential_provider/gaiacp/grit/gaia_resources.h"
+#include "chrome/credential_provider/gaiacp/gaia_resources.h"
 
 namespace credential_provider {
 
@@ -44,11 +44,14 @@ class ATL_NO_VTABLE CGaiaCredentialProvider
   HRESULT FinalConstruct();
   void FinalRelease();
 
+  static bool IsUsageScenarioSupported(CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus);
+
  private:
   HRESULT CreateGaiaCredential();
   HRESULT DestroyCredentials();
   void ClearTransient();
   void CleanupStaleTokenHandles();
+  void CleanupOlderVersions();
 
   // Checks of any of the Google account users need to re-auth.
   static unsigned __stdcall CheckReauthStatus(void* param);
@@ -57,10 +60,13 @@ class ATL_NO_VTABLE CGaiaCredentialProvider
   IFACEMETHODIMP OnUserAuthenticated(IUnknown* credential,
                                      BSTR username,
                                      BSTR password,
-                                     BSTR sid) override;
+                                     BSTR sid,
+                                     BOOL fire_credentials_changed) override;
+  IFACEMETHODIMP HasInternetConnection() override;
 
   // IGaiaCredentialProviderForTesting
-  IFACEMETHODIMP SetReauthCheckDoneEvent([in] INT_PTR event) override;
+  IFACEMETHODIMP SetHasInternetConnection(
+      HasInternetConnectionCheckType has_internet_connection) override;
 
   // ICredentialProviderSetUserArray
   IFACEMETHODIMP SetUserArray(ICredentialProviderUserArray* users) override;
@@ -100,7 +106,10 @@ class ATL_NO_VTABLE CGaiaCredentialProvider
   // authentication.
   size_t index_ = std::numeric_limits<size_t>::max();
 
-  HANDLE reauth_check_done_event_ = INVALID_HANDLE_VALUE;
+  // Used during tests to force the credential provider to believe if an
+  // internet connection is possible or not.  In production the value is
+  // always set to HIC_CHECK_ALWAYS to perform a real check at runtime.
+  HasInternetConnectionCheckType has_internet_connection_ = kHicCheckAlways;
 };
 
 OBJECT_ENTRY_AUTO(__uuidof(GaiaCredentialProvider), CGaiaCredentialProvider)

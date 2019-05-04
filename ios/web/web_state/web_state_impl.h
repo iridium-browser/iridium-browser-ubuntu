@@ -45,8 +45,7 @@ namespace web {
 class BrowserState;
 struct ContextMenuParams;
 struct FaviconURL;
-struct LoadCommittedDetails;
-class NavigationContext;
+class NavigationContextImpl;
 class NavigationManager;
 class SessionCertificatePolicyCacheImpl;
 class WebInterstitialImpl;
@@ -78,21 +77,18 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   void SetWebController(CRWWebController* web_controller);
 
   // Notifies the observers that a navigation has started.
-  void OnNavigationStarted(web::NavigationContext* context);
+  void OnNavigationStarted(web::NavigationContextImpl* context);
 
   // Notifies the observers that a navigation has finished. For same-document
   // navigations notifies the observers about favicon URLs update using
   // candidates received in OnFaviconUrlUpdated.
-  void OnNavigationFinished(web::NavigationContext* context);
+  void OnNavigationFinished(web::NavigationContextImpl* context);
 
   // Called when current window's canGoBack / canGoForward state was changed.
   void OnBackForwardStateChanged();
 
   // Called when page title was changed.
   void OnTitleChanged();
-
-  // Called when a dialog or child window open request was suppressed.
-  void OnDialogSuppressed();
 
   // Notifies the observers that the render process was terminated.
   void OnRenderProcessGone();
@@ -189,8 +185,6 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   void SetDelegate(WebStateDelegate* delegate) override;
   bool IsWebUsageEnabled() const override;
   void SetWebUsageEnabled(bool enabled) override;
-  bool ShouldSuppressDialogs() const override;
-  void SetShouldSuppressDialogs(bool should_suppress) override;
   UIView* GetView() override;
   void WasShown() override;
   void WasHidden() override;
@@ -234,7 +228,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
       mojo::ScopedMessagePipeHandle interface_pipe) override;
   bool HasOpener() const override;
   void SetHasOpener(bool has_opener) override;
-  void TakeSnapshot(CGRect rect, SnapshotCallback callback) override;
+  void TakeSnapshot(const gfx::RectF& rect, SnapshotCallback callback) override;
   void AddObserver(WebStateObserver* observer) override;
   void RemoveObserver(WebStateObserver* observer) override;
 
@@ -287,9 +281,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   void LoadIfNecessary() override;
   void Reload() override;
   void OnNavigationItemsPruned(size_t pruned_item_count) override;
-  void OnNavigationItemChanged() override;
-  void OnNavigationItemCommitted(
-      const LoadCommittedDetails& load_details) override;
+  void OnNavigationItemCommitted(NavigationItem* item) override;
 
   // Updates the HTTP response headers for the main page using the headers
   // passed to the OnHttpResponseHeadersReceived() function below.
@@ -298,6 +290,10 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
 
   WebState* GetWebState() override;
   id<CRWWebViewNavigationProxy> GetWebViewNavigationProxy() const override;
+  void GoToBackForwardListItem(WKBackForwardListItem* wk_item,
+                               NavigationItem* item,
+                               NavigationInitiationType type,
+                               bool has_user_gesture) override;
   void RemoveWebView() override;
 
  protected:

@@ -19,19 +19,18 @@ namespace autofill_assistant {
 std::unique_ptr<ScriptPrecondition> ScriptPrecondition::FromProto(
     const std::string& script_path,
     const ScriptPreconditionProto& script_precondition_proto) {
-  std::vector<std::vector<std::string>> elements_exist;
+  std::vector<Selector> elements_exist;
   for (const auto& element : script_precondition_proto.elements_exist()) {
-    std::vector<std::string> selectors;
-    for (const auto& selector : element.selectors()) {
-      selectors.emplace_back(selector);
-    }
-    if (selectors.empty()) {
+    // TODO(crbug.com/806868): Check if we shouldn't skip the script when this
+    // happens.
+    if (element.selectors_size() == 0) {
       DLOG(WARNING)
           << "Empty selectors in script precondition for script path: "
           << script_path << ".";
       continue;
     }
-    elements_exist.emplace_back(selectors);
+
+    elements_exist.emplace_back(Selector(element));
   }
 
   std::set<std::string> domain_match;
@@ -98,24 +97,21 @@ void ScriptPrecondition::Check(
     base::OnceCallback<void(bool)> callback =
         base::BindOnce(&ScriptPrecondition::OnCheckElementExists,
                        weak_ptr_factory_.GetWeakPtr());
-    batch_checks->AddElementExistenceCheck(selector, std::move(callback));
+    batch_checks->AddElementCheck(kExistenceCheck, selector,
+                                  std::move(callback));
   }
-  for (const auto& value_match : form_value_match_) {
+  for (size_t i = 0; i < form_value_match_.size(); i++) {
+    const auto& value_match = form_value_match_[i];
     DCHECK(!value_match.element().selectors().empty());
-    std::vector<std::string> selectors;
-    for (const auto& selector : value_match.element().selectors()) {
-      selectors.emplace_back(selector);
-    }
-    DCHECK(!selectors.empty());
-
     batch_checks->AddFieldValueCheck(
-        selectors, base::BindOnce(&ScriptPrecondition::OnGetFieldValue,
-                                  weak_ptr_factory_.GetWeakPtr()));
+        Selector(value_match.element()),
+        base::BindOnce(&ScriptPrecondition::OnGetFieldValue,
+                       weak_ptr_factory_.GetWeakPtr(), i));
   }
 }
 
 ScriptPrecondition::ScriptPrecondition(
-    const std::vector<std::vector<std::string>>& elements_exist,
+    const std::vector<Selector>& elements_exist,
     const std::set<std::string>& domain_match,
     std::vector<std::unique_ptr<re2::RE2>> path_pattern,
     const std::vector<ScriptParameterMatchProto>& parameter_match,
@@ -149,7 +145,7 @@ bool ScriptPrecondition::MatchPath(const GURL& url) const {
                          ? base::StrCat({url.PathForRequest(), "#", url.ref()})
                          : url.PathForRequest();
   for (auto& regexp : path_pattern_) {
-    if (regexp->Match(path, 0, path.size(), re2::RE2::UNANCHORED, NULL, 0)) {
+    if (regexp->Match(path, 0, path.size(), re2::RE2::ANCHOR_BOTH, NULL, 0)) {
       return true;
     }
   }
@@ -205,8 +201,21 @@ void ScriptPrecondition::OnCheckElementExists(bool exists) {
   ReportCheckResult(exists);
 }
 
-void ScriptPrecondition::OnGetFieldValue(bool exists,
+void ScriptPrecondition::OnGetFieldValue(int index,
+                                         bool exists,
                                          const std::string& value) {
+  if (!exists) {
+    ReportCheckResult(false);
+    return;
+  }
+
+  // TODO(crbug.com/806868): Differentiate between empty value and failure.
+  const auto& value_match = form_value_match_[index];
+  if (value_match.has_value()) {
+    ReportCheckResult(value == value_match.value());
+    return;
+  }
+
   ReportCheckResult(!value.empty());
 }
 

@@ -164,10 +164,6 @@ base::FilePath HeadlessBrowserContextImpl::GetPath() const {
   return path_;
 }
 
-base::FilePath HeadlessBrowserContextImpl::GetCachePath() const {
-  return path_;
-}
-
 bool HeadlessBrowserContextImpl::IsOffTheRecord() const {
   return context_options_->incognito_mode();
 }
@@ -205,6 +201,11 @@ HeadlessBrowserContextImpl::GetSSLHostStateDelegate() {
 content::PermissionControllerDelegate*
 HeadlessBrowserContextImpl::GetPermissionControllerDelegate() {
   return permission_controller_delegate_.get();
+}
+
+content::ClientHintsControllerDelegate*
+HeadlessBrowserContextImpl::GetClientHintsControllerDelegate() {
+  return nullptr;
 }
 
 content::BackgroundFetchDelegate*
@@ -370,12 +371,6 @@ HeadlessBrowserContext::Builder::SetUserDataDir(
 HeadlessBrowserContext::Builder&
 HeadlessBrowserContext::Builder::SetIncognitoMode(bool incognito_mode) {
   options_->incognito_mode_ = incognito_mode;
-  return *this;
-}
-
-HeadlessBrowserContext::Builder&
-HeadlessBrowserContext::Builder::SetSitePerProcess(bool site_per_process) {
-  options_->site_per_process_ = site_per_process;
   return *this;
 }
 

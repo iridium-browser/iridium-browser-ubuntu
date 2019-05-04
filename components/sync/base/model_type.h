@@ -120,7 +120,7 @@ enum ModelType {
   APP_LIST,
   // WiFi credentials. Each item contains the information for connecting to one
   // WiFi network. This includes, e.g., network name and password.
-  WIFI_CREDENTIALS,
+  DEPRECATED_WIFI_CREDENTIALS,
   // Supervised user whitelists. Each item contains a CRX ID (like an extension
   // ID) and a name.
   SUPERVISED_USER_WHITELISTS,
@@ -136,6 +136,8 @@ enum ModelType {
   MOUNTAIN_SHARES,
   // Commit only user consents.
   USER_CONSENTS,
+  // Tabs sent between devices.
+  SEND_TAB_TO_SELF,
 
   // ---- Proxy types ----
   // Proxy types are excluded from the sync protocol, but are still considered
@@ -197,7 +199,7 @@ constexpr const char* kUserSelectableDataTypeNames[] = {
 #if BUILDFLAG(ENABLE_READING_LIST)
     "readingList",
 #endif
-    "userEvents",  "tabs"};
+    "tabs"};
 
 // Protocol types are those types that have actual protocol buffer
 // representations. This distinguishes them from Proxy types, which have no
@@ -212,9 +214,9 @@ constexpr ModelTypeSet ProtocolTypes() {
       FAVICON_IMAGES, FAVICON_TRACKING, DEVICE_INFO, PRIORITY_PREFERENCES,
       SUPERVISED_USER_SETTINGS, DEPRECATED_SUPERVISED_USERS,
       DEPRECATED_SUPERVISED_USER_SHARED_SETTINGS, DEPRECATED_ARTICLES, APP_LIST,
-      WIFI_CREDENTIALS, SUPERVISED_USER_WHITELISTS, ARC_PACKAGE, PRINTERS,
-      READING_LIST, USER_EVENTS, NIGORI, EXPERIMENTS, MOUNTAIN_SHARES,
-      USER_CONSENTS);
+      DEPRECATED_WIFI_CREDENTIALS, SUPERVISED_USER_WHITELISTS, ARC_PACKAGE,
+      PRINTERS, READING_LIST, USER_EVENTS, NIGORI, EXPERIMENTS, MOUNTAIN_SHARES,
+      USER_CONSENTS, SEND_TAB_TO_SELF);
 }
 
 // These are the normal user-controlled types. This is to distinguish from
@@ -226,7 +228,8 @@ constexpr ModelTypeSet UserTypes() {
 
 // User types, which are not user-controlled.
 constexpr ModelTypeSet AlwaysPreferredUserTypes() {
-  return ModelTypeSet(DEVICE_INFO, USER_CONSENTS);
+  return ModelTypeSet(DEVICE_INFO, USER_CONSENTS, SUPERVISED_USER_SETTINGS,
+                      SUPERVISED_USER_WHITELISTS);
 }
 
 // These are the user-selectable data types.
@@ -236,7 +239,7 @@ constexpr ModelTypeSet UserSelectableTypes() {
 #if BUILDFLAG(ENABLE_READING_LIST)
                       READING_LIST,
 #endif
-                      USER_EVENTS, PROXY_TABS);
+                      PROXY_TABS);
 }
 
 constexpr bool IsUserSelectableType(ModelType model_type) {
@@ -246,7 +249,8 @@ constexpr bool IsUserSelectableType(ModelType model_type) {
 // This is the subset of UserTypes() that have priority over other types.  These
 // types are synced before other user types and are never encrypted.
 constexpr ModelTypeSet PriorityUserTypes() {
-  return ModelTypeSet(DEVICE_INFO, PRIORITY_PREFERENCES);
+  return ModelTypeSet(DEVICE_INFO, PRIORITY_PREFERENCES,
+                      SUPERVISED_USER_SETTINGS, SUPERVISED_USER_WHITELISTS);
 }
 
 // Proxy types are placeholder types for handling implicitly enabling real
@@ -276,20 +280,6 @@ constexpr ModelTypeSet ControlTypes() {
 // See comment above for more information on what makes these types special.
 constexpr bool IsControlType(ModelType model_type) {
   return ControlTypes().Has(model_type);
-}
-
-// Core types are those data types used by sync's core functionality (i.e. not
-// user data types). These types are always enabled, and include ControlTypes().
-//
-// The set of all core types.
-constexpr ModelTypeSet CoreTypes() {
-  return ModelTypeSet(NIGORI, EXPERIMENTS, SUPERVISED_USER_SETTINGS,
-                      SYNCED_NOTIFICATIONS, SYNCED_NOTIFICATION_APP_INFO,
-                      SUPERVISED_USER_WHITELISTS);
-}
-// Those core types that have high priority (includes ControlTypes()).
-constexpr ModelTypeSet PriorityCoreTypes() {
-  return ModelTypeSet(NIGORI, EXPERIMENTS, SUPERVISED_USER_SETTINGS);
 }
 
 // Types that may commit data, but should never be included in a GetUpdates.

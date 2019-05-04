@@ -140,6 +140,15 @@ template<> struct SerializationUtils<SkPoint> {
     }
 };
 
+template<> struct SerializationUtils<SkPoint3> {
+    static void Write(SkWriteBuffer& writer, const SkPoint3* data) {
+        writer.writePoint3(*data);
+    }
+    static void Read(SkReadBuffer& reader, SkPoint3* data) {
+        reader.readPoint3(data);
+    }
+};
+
 template<> struct SerializationUtils<SkScalar> {
     static void Write(SkWriteBuffer& writer, SkScalar* data, uint32_t arraySize) {
         writer.writeScalarArray(data, arraySize);
@@ -332,11 +341,10 @@ static void compare_bitmaps(skiatest::Reporter* reporter,
 static void serialize_and_compare_typeface(sk_sp<SkTypeface> typeface, const char* text,
                                            skiatest::Reporter* reporter)
 {
-    // Create a paint with the typeface.
+    // Create a font with the typeface.
     SkPaint paint;
     paint.setColor(SK_ColorGRAY);
-    paint.setTextSize(SkIntToScalar(30));
-    paint.setTypeface(std::move(typeface));
+    SkFont font(std::move(typeface), 30);
 
     // Paint some text.
     SkPictureRecorder recorder;
@@ -345,7 +353,7 @@ static void serialize_and_compare_typeface(sk_sp<SkTypeface> typeface, const cha
                                                SkIntToScalar(canvasRect.height()),
                                                nullptr, 0);
     canvas->drawColor(SK_ColorWHITE);
-    canvas->drawText(text, 2, 24, 32, paint);
+    canvas->drawString(text, 24, 32, font, paint);
     sk_sp<SkPicture> picture(recorder.finishRecordingAsPicture());
 
     // Serlialize picture and create its clone from stream.
@@ -383,7 +391,7 @@ static void TestPictureTypefaceSerialization(skiatest::Reporter* reporter) {
             if (!typeface) {
                 INFOF(reporter, "Could not run fontstream test because Distortable.ttf not created.");
             } else {
-                serialize_and_compare_typeface(std::move(typeface), "abc", reporter);
+                serialize_and_compare_typeface(std::move(typeface), "ab", reporter);
             }
         }
     }
@@ -432,8 +440,10 @@ static void draw_something(SkCanvas* canvas) {
     paint.setColor(SK_ColorRED);
     canvas->drawCircle(SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/3), paint);
     paint.setColor(SK_ColorBLACK);
-    paint.setTextSize(SkIntToScalar(kBitmapSize/3));
-    canvas->drawString("Picture", SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/4), paint);
+
+    SkFont font;
+    font.setSize(kBitmapSize/3);
+    canvas->drawString("Picture", SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/4), font, paint);
 }
 
 DEF_TEST(Serialization, reporter) {
@@ -441,6 +451,12 @@ DEF_TEST(Serialization, reporter) {
     {
         SkMatrix matrix = SkMatrix::I();
         TestObjectSerialization(&matrix, reporter);
+    }
+
+    // Test point3 serialization
+    {
+        SkPoint3 point;
+        TestObjectSerializationNoAlign<SkPoint3, false>(&point, reporter);
     }
 
     // Test path serialization
@@ -730,8 +746,7 @@ DEF_TEST(WriteBuffer_storage, reporter) {
 }
 
 DEF_TEST(WriteBuffer_external_memory_textblob, reporter) {
-    SkPaint font;
-    font.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+    SkFont font;
     font.setTypeface(SkTypeface::MakeDefault());
 
     SkTextBlobBuilder builder;

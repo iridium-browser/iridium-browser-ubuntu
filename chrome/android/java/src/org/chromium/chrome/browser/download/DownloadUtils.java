@@ -35,12 +35,14 @@ import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.FileProviderHelper;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.UrlConstants;
+import org.chromium.chrome.browser.download.home.metrics.FileExtensions;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorFactory;
 import org.chromium.chrome.browser.download.ui.DownloadFilter;
 import org.chromium.chrome.browser.download.ui.DownloadHistoryItemWrapper;
 import org.chromium.chrome.browser.download.ui.DownloadHistoryItemWrapper.OfflineItemWrapper;
 import org.chromium.chrome.browser.feature_engagement.ScreenshotTabObserver;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
+import org.chromium.chrome.browser.init.ServiceManagerStartupUtils;
 import org.chromium.chrome.browser.media.MediaViewerUtils;
 import org.chromium.chrome.browser.offlinepages.DownloadUiActionFlags;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
@@ -49,11 +51,12 @@ import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadBridge;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
+import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
 import org.chromium.chrome.browser.util.ConversionUtils;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.components.download.DownloadState;
+import org.chromium.components.download.ResumeMode;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.Tracker;
 import org.chromium.components.offline_items_collection.ContentId;
@@ -79,9 +82,11 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -387,8 +392,7 @@ public class DownloadUtils {
             if (wrappedItem.getFilterType() == DownloadFilter.Type.OTHER) {
                 RecordHistogram.recordEnumeratedHistogram(
                         "Android.DownloadManager.OtherExtensions.Share",
-                        wrappedItem.getFileExtensionType(),
-                        DownloadHistoryItemWrapper.FileExtension.NUM_ENTRIES);
+                        wrappedItem.getFileExtensionType(), FileExtensions.Type.NUM_ENTRIES);
             }
 
             // If a mime type was not retrieved from the backend or could not be normalized,
@@ -947,6 +951,18 @@ public class DownloadUtils {
     }
 
     /**
+     * Get the resume mode based on the current fail state, to distinguish the case where download
+     * cannot be resumed at all or can be resumed in the middle, or should be restarted from the
+     * beginning.
+     * @param url URL of the download.
+     * @param failState Why the download failed.
+     * @return The resume mode for the current fail state.
+     */
+    public static @ResumeMode int getResumeMode(String url, @FailState int failState) {
+        return nativeGetResumeMode(url, failState);
+    }
+
+    /**
      * Query the Download backends about whether a download is paused.
      *
      * The Java-side contains more information about the status of a download than is persisted
@@ -984,6 +1000,14 @@ public class DownloadUtils {
                 helper.getDownloadSharedPreferenceEntry(item.getContentId());
         return entry != null && item.getDownloadInfo().state() == DownloadState.INTERRUPTED
                 && entry.isAutoResumable;
+    }
+
+    /** @return Whether we should start service manager only, based off the features enabled. */
+    public static boolean shouldStartServiceManagerOnly() {
+        Set<String> features = new HashSet<String>();
+        features.add(ChromeFeatureList.SERVICE_MANAGER_FOR_DOWNLOAD);
+        features.add(ChromeFeatureList.NETWORK_SERVICE);
+        return ServiceManagerStartupUtils.canStartServiceManager(features);
     }
 
     /**
@@ -1174,4 +1198,5 @@ public class DownloadUtils {
     }
 
     private static native String nativeGetFailStateMessage(@FailState int failState);
+    private static native int nativeGetResumeMode(String url, @FailState int failState);
 }

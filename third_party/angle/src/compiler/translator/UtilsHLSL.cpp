@@ -812,7 +812,7 @@ const char *RWTextureTypeSuffix(const TBasicType type,
         }
         default:
             // All other types are identified by their group suffix
-            return TextureGroupSuffix(type, imageInternalFormat);
+            return RWTextureGroupSuffix(type, imageInternalFormat);
     }
 #if !UNREACHABLE_IS_NORETURN
     UNREACHABLE();
@@ -967,7 +967,8 @@ TString TypeString(const TType &type)
             case EbtSamplerExternalOES:
                 return "sampler2D";
             case EbtAtomicCounter:
-                return "atomic_uint";
+                // Multiple atomic_uints will be implemented as a single RWByteAddressBuffer
+                return "RWByteAddressBuffer";
             default:
                 break;
         }

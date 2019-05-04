@@ -101,7 +101,7 @@ class CONTENT_EXPORT WebMediaPlayerMS
   blink::WebMediaPlayer::LoadTiming Load(
       LoadType load_type,
       const blink::WebMediaPlayerSource& source,
-      CORSMode cors_mode) override;
+      CorsMode cors_mode) override;
 
   // WebSurfaceLayerBridgeObserver implementation.
   void OnWebLayerUpdated() override;
@@ -123,8 +123,9 @@ class CONTENT_EXPORT WebMediaPlayerMS
       const std::vector<blink::PictureInPictureControlInfo>&) override;
   void RegisterPictureInPictureWindowResizeCallback(
       blink::WebMediaPlayer::PipWindowResizedCallback) override;
-  void SetSinkId(const blink::WebString& sink_id,
-                 blink::WebSetSinkIdCallbacks* web_callback) override;
+  void SetSinkId(
+      const blink::WebString& sink_id,
+      std::unique_ptr<blink::WebSetSinkIdCallbacks> web_callback) override;
   void SetPreload(blink::WebMediaPlayer::Preload preload) override;
   blink::WebTimeRanges Buffered() const override;
   blink::WebTimeRanges Seekable() const override;
@@ -189,6 +190,11 @@ class CONTENT_EXPORT WebMediaPlayerMS
   void OnPictureInPictureModeEnded() override;
   void OnPictureInPictureControlClicked(const std::string& control_id) override;
 
+  void OnFirstFrameReceived(media::VideoRotation video_rotation,
+                            bool is_opaque);
+  void OnOpacityChanged(bool is_opaque);
+  void OnRotationChanged(media::VideoRotation video_rotation);
+
   bool CopyVideoTextureToPlatformTexture(
       gpu::gles2::GLES2Interface* gl,
       unsigned target,
@@ -242,16 +248,6 @@ class CONTENT_EXPORT WebMediaPlayerMS
 #if defined(OS_WIN)
   static const gfx::Size kUseGpuMemoryBufferVideoFramesMinResolution;
 #endif  // defined(OS_WIN)
-
-  // When we lose the context_provider, we destroy the CompositorFrameSink to
-  // prevent frames from being submitted. The current surface_ids become
-  // invalid.
-  void OnFrameSinkDestroyed();
-
-  void OnFirstFrameReceived(media::VideoRotation video_rotation,
-                            bool is_opaque);
-  void OnOpacityChanged(bool is_opaque);
-  void OnRotationChanged(media::VideoRotation video_rotation, bool is_opaque);
 
   bool IsInPictureInPicture() const;
 
@@ -330,7 +326,7 @@ class CONTENT_EXPORT WebMediaPlayerMS
   media::GpuVideoAcceleratorFactories* gpu_factories_;
 
   // Used for DCHECKs to ensure methods calls executed in the correct thread.
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   scoped_refptr<WebMediaPlayerMSCompositor> compositor_;
 

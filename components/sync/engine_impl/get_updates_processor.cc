@@ -40,7 +40,7 @@ SyncerError HandleGetEncryptionKeyResponse(
   bool success = false;
   if (update_response.get_updates().encryption_keys_size() == 0) {
     LOG(ERROR) << "Failed to receive encryption key from server.";
-    return SERVER_RESPONSE_VALIDATION_FAILED;
+    return SyncerError(SyncerError::SERVER_RESPONSE_VALIDATION_FAILED);
   }
   syncable::ReadTransaction trans(FROM_HERE, dir);
   syncable::NigoriHandler* nigori_handler = dir->GetNigoriHandler();
@@ -51,7 +51,9 @@ SyncerError HandleGetEncryptionKeyResponse(
            << update_response.get_updates().encryption_keys_size()
            << "encryption keys. Nigori keystore key " << (success ? "" : "not ")
            << "updated.";
-  return (success ? SYNCER_OK : SERVER_RESPONSE_VALIDATION_FAILED);
+  return (success
+              ? SyncerError(SyncerError::SYNCER_OK)
+              : SyncerError(SyncerError::SERVER_RESPONSE_VALIDATION_FAILED));
 }
 
 // Given a GetUpdates response, iterates over all the returned items and
@@ -134,7 +136,6 @@ void PartitionContextMutationsByType(
 // other of the message-building functions to make the rest of the code easier
 // to test.
 void InitDownloadUpdatesContext(SyncCycle* cycle,
-                                bool create_mobile_bookmarks_folder,
                                 sync_pb::ClientToServerMessage* message) {
   message->set_share(cycle->context()->account_name());
   message->set_message_contents(sync_pb::ClientToServerMessage::GET_UPDATES);
@@ -146,8 +147,10 @@ void InitDownloadUpdatesContext(SyncCycle* cycle,
   // (e.g. Bookmark URLs but not their containing folders).
   get_updates->set_fetch_folders(true);
 
-  get_updates->set_create_mobile_bookmarks_folder(
-      create_mobile_bookmarks_folder);
+  // This is a deprecated field that should be cleaned up after server's
+  // behavior is updated.
+  get_updates->set_create_mobile_bookmarks_folder(true);
+
   bool need_encryption_key = ShouldRequestEncryptionKey(cycle->context());
   get_updates->set_need_encryption_key(need_encryption_key);
 
@@ -163,14 +166,12 @@ GetUpdatesProcessor::GetUpdatesProcessor(UpdateHandlerMap* update_handler_map,
 
 GetUpdatesProcessor::~GetUpdatesProcessor() {}
 
-SyncerError GetUpdatesProcessor::DownloadUpdates(
-    ModelTypeSet* request_types,
-    SyncCycle* cycle,
-    bool create_mobile_bookmarks_folder) {
+SyncerError GetUpdatesProcessor::DownloadUpdates(ModelTypeSet* request_types,
+                                                 SyncCycle* cycle) {
   TRACE_EVENT0("sync", "DownloadUpdates");
 
   sync_pb::ClientToServerMessage message;
-  InitDownloadUpdatesContext(cycle, create_mobile_bookmarks_folder, &message);
+  InitDownloadUpdatesContext(cycle, &message);
   PrepareGetUpdates(*request_types, &message);
 
   SyncerError result = ExecuteDownloadUpdates(request_types, cycle, &message);
@@ -229,7 +230,7 @@ SyncerError GetUpdatesProcessor::ExecuteDownloadUpdates(
     request_types->RemoveAll(partial_failure_data_types);
   }
 
-  if (result != SYNCER_OK) {
+  if (result.value() != SyncerError::SYNCER_OK) {
     GetUpdatesResponseEvent response_event(base::Time::Now(), update_response,
                                            result);
     cycle->SendProtocolEvent(response_event);
@@ -238,7 +239,7 @@ SyncerError GetUpdatesProcessor::ExecuteDownloadUpdates(
     // appear every 60 minutes, and then sync services will refresh the
     // authorization. Therefore SYNC_AUTH_ERROR is excluded here to reduce the
     // ERROR messages in the log.
-    if (result != SYNC_AUTH_ERROR) {
+    if (result.value() != SyncerError::SYNC_AUTH_ERROR) {
       LOG(ERROR) << "PostClientToServerMessage() failed during GetUpdates";
     }
 
@@ -268,7 +269,7 @@ SyncerError GetUpdatesProcessor::ExecuteDownloadUpdates(
                                          process_result);
   cycle->SendProtocolEvent(response_event);
 
-  DVLOG(1) << "GetUpdates result: " << process_result;
+  DVLOG(1) << "GetUpdates result: " << process_result.ToString();
 
   return process_result;
 }
@@ -282,18 +283,18 @@ SyncerError GetUpdatesProcessor::ProcessResponse(
   // The changes remaining field is used to prevent the client from looping.  If
   // that field is being set incorrectly, we're in big trouble.
   if (!gu_response.has_changes_remaining()) {
-    return SERVER_RESPONSE_VALIDATION_FAILED;
+    return SyncerError(SyncerError::SERVER_RESPONSE_VALIDATION_FAILED);
   }
 
   SyncerError result =
       ProcessGetUpdatesResponse(request_types, gu_response, status);
-  if (result != SYNCER_OK)
+  if (result.value() != SyncerError::SYNCER_OK)
     return result;
 
   if (gu_response.changes_remaining() == 0) {
-    return SYNCER_OK;
+    return SyncerError(SyncerError::SYNCER_OK);
   } else {
-    return SERVER_MORE_TO_DOWNLOAD;
+    return SyncerError(SyncerError::SERVER_MORE_TO_DOWNLOAD);
   }
 }
 
@@ -310,7 +311,7 @@ SyncerError GetUpdatesProcessor::ProcessGetUpdatesResponse(
                                  &progress_index_by_type);
   if (gu_types.Size() != progress_index_by_type.size()) {
     NOTREACHED() << "Missing progress markers in GetUpdates response.";
-    return SERVER_RESPONSE_VALIDATION_FAILED;
+    return SyncerError(SyncerError::SERVER_RESPONSE_VALIDATION_FAILED);
   }
 
   TypeToIndexMap context_by_type;
@@ -337,7 +338,7 @@ SyncerError GetUpdatesProcessor::ProcessGetUpdatesResponse(
           update_handler_iter->second->ProcessGetUpdatesResponse(
               gu_response.new_progress_marker(progress_marker_iter->second),
               context, updates_iter->second, status_controller);
-      if (result != SYNCER_OK)
+      if (result.value() != SyncerError::SYNCER_OK)
         return result;
     } else {
       DLOG(WARNING) << "Ignoring received updates of a type we can't handle.  "
@@ -348,7 +349,7 @@ SyncerError GetUpdatesProcessor::ProcessGetUpdatesResponse(
   DCHECK(progress_marker_iter == progress_index_by_type.end() &&
          updates_iter == updates_by_type.end());
 
-  return SYNCER_OK;
+  return SyncerError(SyncerError::SYNCER_OK);
 }
 
 void GetUpdatesProcessor::ApplyUpdates(const ModelTypeSet& gu_types,

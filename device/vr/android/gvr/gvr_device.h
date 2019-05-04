@@ -11,6 +11,7 @@
 
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
+#include "device/vr/android/gvr/vr_module_delegate.h"
 #include "device/vr/vr_device_base.h"
 #include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_types.h"
 
@@ -30,7 +31,9 @@ class DEVICE_VR_EXPORT GvrDevice : public VRDeviceBase,
       mojom::XRRuntime::RequestSessionCallback callback) override;
   void PauseTracking() override;
   void ResumeTracking() override;
-  void EnsureInitialized(EnsureInitializedCallback callback) override;
+  void EnsureInitialized(int render_process_id,
+                         int render_frame_id,
+                         EnsureInitializedCallback callback) override;
 
   void OnDisplayConfigurationChanged(
       JNIEnv* env,
@@ -42,19 +45,27 @@ class DEVICE_VR_EXPORT GvrDevice : public VRDeviceBase,
  private:
   // VRDeviceBase
   void OnListeningForActivate(bool listening) override;
-  void OnMagicWindowFrameDataRequest(
+  void OnGetInlineFrameData(
       mojom::XRFrameDataProvider::GetFrameDataCallback callback) override;
 
-  void OnStartPresentResult(mojom::XRRuntime::RequestSessionCallback callback,
-                            mojom::XRSessionPtr session);
+  void OnStartPresentResult(mojom::XRSessionPtr session);
 
   // XRSessionController
   void SetFrameDataRestricted(bool restricted) override;
 
   void OnPresentingControllerMojoConnectionError();
   void StopPresenting();
-  void EnsureGvrReady();
   GvrDelegateProvider* GetGvrDelegateProvider();
+
+  void Init(int render_process_id,
+            int render_frame_id,
+            base::OnceCallback<void(bool)> on_finished);
+  void OnVrModuleInstalled(base::OnceCallback<void(bool)> on_finished,
+                           bool success);
+  void CreateNonPresentingContext();
+  void OnInitRequestSessionFinished(
+      mojom::XRRuntimeSessionOptionsPtr options,
+      bool success);
 
   base::android::ScopedJavaGlobalRef<jobject> non_presenting_context_;
   std::unique_ptr<gvr::GvrApi> gvr_api_;
@@ -62,6 +73,10 @@ class DEVICE_VR_EXPORT GvrDevice : public VRDeviceBase,
   bool paused_ = true;
 
   mojo::Binding<mojom::XRSessionController> exclusive_controller_binding_;
+
+  std::unique_ptr<VrModuleDelegate> module_delegate_;
+
+  mojom::XRRuntime::RequestSessionCallback pending_request_session_callback_;
 
   base::WeakPtrFactory<GvrDevice> weak_ptr_factory_;
 

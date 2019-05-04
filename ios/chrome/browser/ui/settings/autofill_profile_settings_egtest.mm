@@ -10,6 +10,7 @@
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/autofill/personal_data_manager_factory.h"
+#import "ios/chrome/browser/ui/settings/autofill_profile_edit_table_view_controller.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/app/web_view_interaction_test_util.h"
@@ -84,6 +85,13 @@ NSString* GetTextFieldForID(int categoryId) {
       stringWithFormat:@"%@_textField", l10n_util::GetNSString(categoryId)];
 }
 
+// Return the edit button from the navigation bar.
+id<GREYMatcher> NavigationBarEditButton() {
+  return grey_allOf(
+      ButtonWithAccessibilityLabelId(IDS_IOS_NAVIGATION_BAR_EDIT_BUTTON),
+      grey_not(grey_accessibilityTrait(UIAccessibilityTraitNotEnabled)), nil);
+}
+
 }  // namespace
 
 // Various tests for the Autofill profiles section of the settings.
@@ -155,18 +163,23 @@ NSString* GetTextFieldForID(int categoryId) {
 }
 
 // Test that the page for viewing Autofill profile details is as expected.
-- (void)testAutofillProfileViewPage {
+// TODO(crbug.com/922117): Reenable test.
+- (void)FLAKY_testAutofillProfileViewPage {
   autofill::AutofillProfile profile = [self addAutofillProfile];
   [self openEditProfile:kProfileLabel];
 
   // Check that all fields and values match the expectations.
   for (const DisplayStringIDToExpectedResult& expectation : kExpectedFields) {
-    [[EarlGrey selectElementWithMatcher:
-                   grey_accessibilityLabel([NSString
-                       stringWithFormat:@"%@, %@",
-                                        l10n_util::GetNSString(
-                                            expectation.display_string_id),
-                                        expectation.expected_result])]
+    id<GREYMatcher> elementMatcher = grey_accessibilityLabel([NSString
+        stringWithFormat:@"%@, %@",
+                         l10n_util::GetNSString(expectation.display_string_id),
+                         expectation.expected_result]);
+    [[[EarlGrey
+        selectElementWithMatcher:grey_allOf(elementMatcher,
+                                            grey_sufficientlyVisible(), nil)]
+           usingSearchAction:grey_scrollInDirection(kGREYDirectionDown, 150)
+        onElementWithMatcher:grey_accessibilityID(
+                                 kAutofillProfileEditTableViewId)]
         assertWithMatcher:grey_notNil()];
   }
 
@@ -186,8 +199,7 @@ NSString* GetTextFieldForID(int categoryId) {
   // Keep editing the Country field and verify that validation works.
   for (const UserTypedCountryExpectedResultPair& expectation : kCountryTests) {
     // Switch on edit mode.
-    [[EarlGrey selectElementWithMatcher:ButtonWithAccessibilityLabelId(
-                                            IDS_IOS_NAVIGATION_BAR_EDIT_BUTTON)]
+    [[EarlGrey selectElementWithMatcher:NavigationBarEditButton()]
         performAction:grey_tap()];
 
     // Replace the text field with the user-version of the country.
@@ -236,8 +248,7 @@ NSString* GetTextFieldForID(int categoryId) {
   [self openEditProfile:kProfileLabel];
 
   // Switch on edit mode.
-  [[EarlGrey selectElementWithMatcher:ButtonWithAccessibilityLabelId(
-                                          IDS_IOS_NAVIGATION_BAR_EDIT_BUTTON)]
+  [[EarlGrey selectElementWithMatcher:NavigationBarEditButton()]
       performAction:grey_tap()];
   chrome_test_util::VerifyAccessibilityForCurrentScreen();
 
@@ -255,8 +266,7 @@ NSString* GetTextFieldForID(int categoryId) {
   [self openAutofillProfilesSettings];
 
   // Switch on edit mode.
-  [[EarlGrey selectElementWithMatcher:ButtonWithAccessibilityLabelId(
-                                          IDS_IOS_NAVIGATION_BAR_EDIT_BUTTON)]
+  [[EarlGrey selectElementWithMatcher:NavigationBarEditButton()]
       performAction:grey_tap()];
 
   // Check the Autofill profile switch is disabled.

@@ -23,19 +23,19 @@
 #include "call/rtp_payload_params.h"
 #include "call/rtp_transport_controller_send_interface.h"
 #include "call/rtp_video_sender_interface.h"
-#include "common_types.h"  // NOLINT(build/include)
 #include "logging/rtc_event_log/rtc_event_log.h"
 #include "modules/rtp_rtcp/include/flexfec_sender.h"
 #include "modules/rtp_rtcp/source/rtp_video_header.h"
 #include "modules/utility/include/process_thread.h"
-#include "rtc_base/constructormagic.h"
-#include "rtc_base/criticalsection.h"
+#include "rtc_base/constructor_magic.h"
+#include "rtc_base/critical_section.h"
 #include "rtc_base/rate_limiter.h"
 #include "rtc_base/thread_annotations.h"
 #include "rtc_base/thread_checker.h"
 
 namespace webrtc {
 
+class FrameEncryptorInterface;
 class RTPFragmentationHeader;
 class RtpRtcp;
 class RtpTransportControllerSendInterface;
@@ -49,17 +49,18 @@ class RtpVideoSender : public RtpVideoSenderInterface,
  public:
   // Rtp modules are assumed to be sorted in simulcast index order.
   RtpVideoSender(
-      const std::vector<uint32_t>& ssrcs,
       std::map<uint32_t, RtpState> suspended_ssrcs,
       const std::map<uint32_t, RtpPayloadState>& states,
       const RtpConfig& rtp_config,
-      const RtcpConfig& rtcp_config,
+      int rtcp_report_interval_ms,
       Transport* send_transport,
       const RtpSenderObservers& observers,
       RtpTransportControllerSendInterface* transport,
       RtcEventLog* event_log,
       RateLimiter* retransmission_limiter,  // move inside RtpTransport
-      std::unique_ptr<FecController> fec_controller);
+      std::unique_ptr<FecController> fec_controller,
+      FrameEncryptorInterface* frame_encryptor,
+      const CryptoOptions& crypto_options);  // move inside RtpTransport
   ~RtpVideoSender() override;
 
   // RegisterProcessThread register |module_process_thread| with those objects
@@ -124,10 +125,13 @@ class RtpVideoSender : public RtpVideoSenderInterface,
   void UpdateModuleSendingState() RTC_EXCLUSIVE_LOCKS_REQUIRED(crit_);
   void ConfigureProtection(const RtpConfig& rtp_config);
   void ConfigureSsrcs(const RtpConfig& rtp_config);
+  void ConfigureRids(const RtpConfig& rtp_config);
   bool FecEnabled() const;
   bool NackEnabled() const;
+  uint32_t GetPacketizationOverheadRate() const;
 
   const bool send_side_bwe_with_overhead_;
+  const bool account_for_packetization_overhead_;
 
   // TODO(holmer): Remove crit_ once RtpVideoSender runs on the
   // transport task queue.

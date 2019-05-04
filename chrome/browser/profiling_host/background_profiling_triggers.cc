@@ -13,6 +13,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiling_host/profiling_process_host.h"
+#include "chrome/browser/ui/browser_otr_state.h"
 #include "components/heap_profiling/supervisor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/process_type.h"
@@ -31,6 +32,7 @@ const int kControlPopulationSamplingRate = 300;
 const size_t kBrowserProcessMallocTriggerKb = 100 * 1024;    // 100 MB
 const size_t kGPUProcessMallocTriggerKb = 40 * 1024;         // 40 MB
 const size_t kRendererProcessMallocTriggerKb = 125 * 1024;   // 125 MB
+const size_t kUtilityProcessMallocTriggerKb = 40 * 1024;     // 40 MB
 
 // If memory usage has increased by 50MB since the last report, send another.
 const uint32_t kHighWaterMarkThresholdKb = 50 * 1024;  // 50 MB
@@ -43,6 +45,7 @@ const int kControlPopulationSamplingRate = 100;
 const size_t kBrowserProcessMallocTriggerKb = 400 * 1024;    // 400 MB
 const size_t kGPUProcessMallocTriggerKb = 400 * 1024;        // 400 MB
 const size_t kRendererProcessMallocTriggerKb = 500 * 1024;   // 500 MB
+const size_t kUtilityProcessMallocTriggerKb = 250 * 1024;    // 250 MB
 
 // If memory usage has increased by 500MB since the last report, send another.
 const uint32_t kHighWaterMarkThresholdKb = 500 * 1024;  // 500 MB
@@ -68,6 +71,7 @@ int GetContentProcessType(
     case ProcessType::PLUGIN:
       return content::ProcessType::PROCESS_TYPE_PLUGIN_DEPRECATED;
 
+    case ProcessType::ARC:
     case ProcessType::OTHER:
       return content::ProcessType::PROCESS_TYPE_UNKNOWN;
   }
@@ -99,7 +103,10 @@ void BackgroundProfilingTriggers::StartTimer() {
 }
 
 bool BackgroundProfilingTriggers::IsAllowedToUpload() const {
-  return ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
+  if (!ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled())
+    return false;
+
+  return !chrome::IsIncognitoSessionActive();
 }
 
 bool BackgroundProfilingTriggers::IsOverTriggerThreshold(
@@ -114,6 +121,9 @@ bool BackgroundProfilingTriggers::IsOverTriggerThreshold(
 
     case content::ProcessType::PROCESS_TYPE_RENDERER:
       return private_footprint_kb > kRendererProcessMallocTriggerKb;
+
+    case content::ProcessType::PROCESS_TYPE_UTILITY:
+      return private_footprint_kb > kUtilityProcessMallocTriggerKb;
 
     default:
       return false;

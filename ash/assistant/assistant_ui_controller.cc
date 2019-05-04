@@ -10,6 +10,9 @@
 #include "ash/assistant/ui/assistant_container_view.h"
 #include "ash/assistant/ui/assistant_ui_constants.h"
 #include "ash/assistant/util/deep_link_util.h"
+#include "ash/assistant/util/histogram_util.h"
+#include "ash/multi_user/multi_user_window_manager.h"
+#include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/system/toast/toast_data.h"
@@ -75,13 +78,14 @@ void AssistantUiController::OnWidgetActivationChanged(views::Widget* widget,
                                                       bool active) {
   if (active) {
     container_view_->RequestFocus();
-  } else {
-    // When the Assistant widget is deactivated we should hide Assistant UI.
-    // We already handle press events happening outside of the UI container but
-    // this will also handle the case where we are deactivated without a press
-    // event occurring. This happens, for example, when launching Chrome OS
-    // feedback using keyboard shortcuts.
-    HideUi(AssistantSource::kUnspecified);
+  } else if (model_.ui_mode() != AssistantUiMode::kMiniUi) {
+    // When the Assistant widget is deactivated we should hide Assistant UI. We
+    // don't do this when in mini UI mode since Assistant in that state should
+    // not be obstructing much content. Note that we already handle press events
+    // happening outside of the UI container but this will also handle the case
+    // where we are deactivated without a press event occurring. This happens,
+    // for example, when launching Chrome OS feedback using keyboard shortcuts.
+    HideUi(AssistantExitPoint::kUnspecified);
   }
 }
 
@@ -94,8 +98,7 @@ void AssistantUiController::OnWidgetDestroying(views::Widget* widget) {
   // We need to update the model when the widget is destroyed as this may have
   // happened outside our control. This can occur as the result of pressing the
   // ESC key, for example.
-  model_.SetVisibility(AssistantVisibility::kClosed,
-                       AssistantSource::kUnspecified);
+  model_.SetClosed(AssistantExitPoint::kUnspecified);
 
   ResetContainerView();
 }
@@ -112,8 +115,8 @@ void AssistantUiController::OnInteractionStateChanged(
 
   // If there is an active interaction, we need to show Assistant UI if it is
   // not already showing. We don't have enough information here to know what
-  // the interaction source is, but at the moment we have no need to know.
-  ShowUi(AssistantSource::kUnspecified);
+  // the interaction source is.
+  ShowUi(AssistantEntryPoint::kUnspecified);
 }
 
 void AssistantUiController::OnMicStateChanged(MicState mic_state) {
@@ -146,24 +149,28 @@ void AssistantUiController::OnAssistantMiniViewPressed() {
     UpdateUiMode(AssistantUiMode::kMainUi);
 }
 
-bool AssistantUiController::OnCaptionButtonPressed(CaptionButtonId id) {
+bool AssistantUiController::OnCaptionButtonPressed(AssistantButtonId id) {
   switch (id) {
-    case CaptionButtonId::kBack:
+    case AssistantButtonId::kBack:
       UpdateUiMode(AssistantUiMode::kMainUi);
       return true;
-    case CaptionButtonId::kClose:
-      return false;
-    case CaptionButtonId::kMinimize:
+    case AssistantButtonId::kClose:
+      CloseUi(AssistantExitPoint::kCloseButton);
+      return true;
+    case AssistantButtonId::kMinimize:
       UpdateUiMode(AssistantUiMode::kMiniUi);
       return true;
+    default:
+      // No action necessary.
+      break;
   }
   return false;
 }
 
 // TODO(dmblack): This event doesn't need to be handled here anymore. Move it
 // out of AssistantUiController.
-void AssistantUiController::OnDialogPlateButtonPressed(DialogPlateButtonId id) {
-  if (id != DialogPlateButtonId::kSettings)
+void AssistantUiController::OnDialogPlateButtonPressed(AssistantButtonId id) {
+  if (id != AssistantButtonId::kSettings)
     return;
 
   // Launch Assistant Settings via deep link.
@@ -176,11 +183,11 @@ void AssistantUiController::OnHighlighterEnabledChanged(
   switch (state) {
     case HighlighterEnabledState::kEnabled:
       if (model_.visibility() != AssistantVisibility::kVisible)
-        ShowUi(AssistantSource::kStylus);
+        ShowUi(AssistantEntryPoint::kStylus);
       break;
     case HighlighterEnabledState::kDisabledByUser:
       if (model_.visibility() == AssistantVisibility::kVisible)
-        HideUi(AssistantSource::kStylus);
+        HideUi(AssistantExitPoint::kStylus);
       break;
     case HighlighterEnabledState::kDisabledBySessionComplete:
     case HighlighterEnabledState::kDisabledBySessionAbort:
@@ -211,7 +218,7 @@ void AssistantUiController::OnDeepLinkReceived(
   if (!assistant::util::IsWebDeepLinkType(type))
     return;
 
-  ShowUi(AssistantSource::kDeepLink);
+  ShowUi(AssistantEntryPoint::kDeepLink);
   UpdateUiMode(AssistantUiMode::kWebUi);
 }
 
@@ -224,15 +231,16 @@ void AssistantUiController::OnUrlOpened(const GURL& url, bool from_server) {
   // was user initiated so we only hide the UI to retain session state. That way
   // the user can choose to resume their session if they are so inclined.
   if (from_server)
-    CloseUi(AssistantSource::kUnspecified);
+    CloseUi(AssistantExitPoint::kNewBrowserTabFromServer);
   else
-    HideUi(AssistantSource::kUnspecified);
+    HideUi(AssistantExitPoint::kNewBrowserTabFromUser);
 }
 
 void AssistantUiController::OnUiVisibilityChanged(
     AssistantVisibility new_visibility,
     AssistantVisibility old_visibility,
-    AssistantSource source) {
+    base::Optional<AssistantEntryPoint> entry_point,
+    base::Optional<AssistantExitPoint> exit_point) {
   Shell::Get()->voice_interaction_controller()->NotifyStatusChanged(
       new_visibility == AssistantVisibility::kVisible
           ? mojom::VoiceInteractionState::RUNNING
@@ -253,7 +261,7 @@ void AssistantUiController::OnUiVisibilityChanged(
           FROM_HERE, kAutoCloseThreshold,
           base::BindRepeating(&AssistantUiController::CloseUi,
                               weak_factory_.GetWeakPtr(),
-                              AssistantSource::kUnspecified));
+                              AssistantExitPoint::kUnspecified));
 
       // Because the UI is not visible we needn't monitor events.
       event_monitor_.reset();
@@ -268,19 +276,45 @@ void AssistantUiController::OnUiVisibilityChanged(
       // behaves in a multi-display environment.
       gfx::NativeWindow root_window =
           container_view_->GetWidget()->GetNativeWindow()->GetRootWindow();
-      event_monitor_ =
-          views::EventMonitor::CreateWindowMonitor(this, root_window);
+      event_monitor_ = views::EventMonitor::CreateWindowMonitor(
+          this, root_window, {ui::ET_MOUSE_PRESSED, ui::ET_TOUCH_PRESSED});
+
+      // We also want to associate the window for Assistant UI with the active
+      // user so that we don't leak across user sessions.
+      auto* window_manager = MultiUserWindowManager::Get();
+      if (window_manager) {
+        const mojom::UserSession* user_session =
+            Shell::Get()->session_controller()->GetUserSession(0);
+        if (user_session) {
+          window_manager->SetWindowOwner(
+              container_view_->GetWidget()->GetNativeWindow(),
+              user_session->user_info->account_id,
+              /*show_for_current_user=*/true);
+        }
+      }
+
+      // Only record the entry point when Assistant UI becomes visible.
+      assistant::util::RecordAssistantEntryPoint(entry_point.value());
       break;
   }
 
   // Metalayer should not be sticky. Disable when the UI is no longer visible.
-  if (old_visibility == AssistantVisibility::kVisible)
+  if (old_visibility == AssistantVisibility::kVisible) {
     Shell::Get()->highlighter_controller()->AbortSession();
+
+    // Only record the exit point when Assistant UI becomes invisible to
+    // avoid duplicate happens (e.g., pressing ESC key).
+    assistant::util::RecordAssistantExitPoint(exit_point.value());
+  }
 }
 
-void AssistantUiController::ShowUi(AssistantSource source) {
-  if (!Shell::Get()->voice_interaction_controller()->settings_enabled())
+void AssistantUiController::ShowUi(AssistantEntryPoint entry_point) {
+  if (!Shell::Get()
+           ->voice_interaction_controller()
+           ->settings_enabled()
+           .value_or(false)) {
     return;
+  }
 
   // TODO(dmblack): Show a more helpful message to the user.
   if (Shell::Get()->voice_interaction_controller()->voice_interaction_state() ==
@@ -307,24 +341,24 @@ void AssistantUiController::ShowUi(AssistantSource source) {
   // necessary due to limitations imposed by retrieving screen context. Once we
   // have finished retrieving screen context, the Assistant widget is activated.
   container_view_->GetWidget()->ShowInactive();
-  model_.SetVisibility(AssistantVisibility::kVisible, source);
+  model_.SetVisible(entry_point);
 }
 
-void AssistantUiController::HideUi(AssistantSource source) {
-  if (model_.visibility() == AssistantVisibility::kHidden)
+void AssistantUiController::HideUi(AssistantExitPoint exit_point) {
+  if (model_.visibility() != AssistantVisibility::kVisible)
     return;
+
+  model_.SetHidden(exit_point);
 
   if (container_view_)
     container_view_->GetWidget()->Hide();
-
-  model_.SetVisibility(AssistantVisibility::kHidden, source);
 }
 
-void AssistantUiController::CloseUi(AssistantSource source) {
+void AssistantUiController::CloseUi(AssistantExitPoint exit_point) {
   if (model_.visibility() == AssistantVisibility::kClosed)
     return;
 
-  model_.SetVisibility(AssistantVisibility::kClosed, source);
+  model_.SetClosed(exit_point);
 
   if (container_view_) {
     container_view_->GetWidget()->CloseNow();
@@ -332,10 +366,13 @@ void AssistantUiController::CloseUi(AssistantSource source) {
   }
 }
 
-void AssistantUiController::ToggleUi(AssistantSource source) {
+void AssistantUiController::ToggleUi(
+    base::Optional<AssistantEntryPoint> entry_point,
+    base::Optional<AssistantExitPoint> exit_point) {
   // When not visible, toggling will show the UI.
   if (model_.visibility() != AssistantVisibility::kVisible) {
-    ShowUi(source);
+    DCHECK(entry_point.has_value());
+    ShowUi(entry_point.value());
     return;
   }
 
@@ -346,7 +383,8 @@ void AssistantUiController::ToggleUi(AssistantSource source) {
   }
 
   // In all other cases, toggling closes the UI.
-  CloseUi(source);
+  DCHECK(exit_point.has_value());
+  CloseUi(exit_point.value());
 }
 
 void AssistantUiController::UpdateUiMode(
@@ -415,23 +453,21 @@ void AssistantUiController::OnDisplayMetricsChanged(
   }
 }
 
-void AssistantUiController::OnMouseEvent(ui::MouseEvent* event) {
-  if (event->type() == ui::ET_MOUSE_PRESSED)
-    OnPressedEvent(*event);
-}
-
-void AssistantUiController::OnTouchEvent(ui::TouchEvent* event) {
-  if (event->type() == ui::ET_TOUCH_PRESSED)
-    OnPressedEvent(*event);
-}
-
-void AssistantUiController::OnPressedEvent(const ui::LocatedEvent& event) {
+void AssistantUiController::OnEvent(const ui::Event& event) {
   DCHECK(event.type() == ui::ET_MOUSE_PRESSED ||
          event.type() == ui::ET_TOUCH_PRESSED);
 
+  // We're going to perform some checks below to see if the user has pressed
+  // outside of the Assistant or virtual keyboard bounds to hide UI for the
+  // user's convenience. When Assistant is in mini UI state, we shouldn't be
+  // obstructing much content so we can remain visible and quit early.
+  if (model_.ui_mode() == AssistantUiMode::kMiniUi)
+    return;
+
+  const ui::LocatedEvent* located_event = event.AsLocatedEvent();
   const gfx::Point screen_location =
-      event.target() ? event.target()->GetScreenLocation(event)
-                     : event.root_location();
+      event.target() ? event.target()->GetScreenLocation(*located_event)
+                     : located_event->root_location();
 
   const gfx::Rect screen_bounds =
       container_view_->GetWidget()->GetWindowBoundsInScreen();
@@ -445,7 +481,7 @@ void AssistantUiController::OnPressedEvent(const ui::LocatedEvent& event) {
   // enforce logic to prevent hiding when using the stylus.
   if (!screen_bounds.Contains(screen_location) &&
       !keyboard_bounds.Contains(screen_location)) {
-    HideUi(AssistantSource::kUnspecified);
+    HideUi(AssistantExitPoint::kOutsidePress);
   }
 }
 
@@ -478,7 +514,8 @@ AssistantContainerView* AssistantUiController::GetViewForTest() {
 }
 
 void AssistantUiController::CreateContainerView() {
-  container_view_ = new AssistantContainerView(assistant_controller_);
+  container_view_ =
+      new AssistantContainerView(assistant_controller_->view_delegate());
   container_view_->GetWidget()->AddObserver(this);
 
   // To save resources, only watch these events while Assistant UI exists.

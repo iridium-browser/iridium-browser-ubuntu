@@ -32,10 +32,13 @@ TEST_F(DataPipeBytesConsumerTest, TwoPhaseRead) {
   // completion is signaled below.
   pipe.producer_handle.reset();
 
-  DataPipeBytesConsumer* consumer = new DataPipeBytesConsumer(
-      &GetDocument(), std::move(pipe.consumer_handle));
-  consumer->SignalComplete();
-  auto result = (new BytesConsumerTestUtil::TwoPhaseReader(consumer))->Run();
+  DataPipeBytesConsumer::CompletionNotifier* notifier = nullptr;
+  DataPipeBytesConsumer* consumer = MakeGarbageCollected<DataPipeBytesConsumer>(
+      &GetDocument(), std::move(pipe.consumer_handle), &notifier);
+  notifier->SignalComplete();
+  auto result =
+      (MakeGarbageCollected<BytesConsumerTestUtil::TwoPhaseReader>(consumer))
+          ->Run();
   EXPECT_EQ(Result::kDone, result.first);
   EXPECT_EQ(
       kData,
@@ -56,14 +59,17 @@ TEST_F(DataPipeBytesConsumerTest, TwoPhaseRead_SignalError) {
 
   pipe.producer_handle.reset();
 
-  DataPipeBytesConsumer* consumer = new DataPipeBytesConsumer(
-      &GetDocument(), std::move(pipe.consumer_handle));
+  DataPipeBytesConsumer::CompletionNotifier* notifier = nullptr;
+  DataPipeBytesConsumer* consumer = MakeGarbageCollected<DataPipeBytesConsumer>(
+      &GetDocument(), std::move(pipe.consumer_handle), &notifier);
 
   // Then explicitly signal an error.  This should override the pipe completion
   // and result in kError.
-  consumer->SignalError();
+  notifier->SignalError(BytesConsumer::Error());
 
-  auto result = (new BytesConsumerTestUtil::TwoPhaseReader(consumer))->Run();
+  auto result =
+      (MakeGarbageCollected<BytesConsumerTestUtil::TwoPhaseReader>(consumer))
+          ->Run();
   EXPECT_EQ(Result::kError, result.first);
   EXPECT_TRUE(result.second.IsEmpty());
 }
@@ -75,8 +81,9 @@ TEST_F(DataPipeBytesConsumerTest, EndOfPipeBeforeComplete) {
   mojo::DataPipe pipe;
   ASSERT_TRUE(pipe.producer_handle.is_valid());
 
-  DataPipeBytesConsumer* consumer = new DataPipeBytesConsumer(
-      &GetDocument(), std::move(pipe.consumer_handle));
+  DataPipeBytesConsumer::CompletionNotifier* notifier = nullptr;
+  DataPipeBytesConsumer* consumer = MakeGarbageCollected<DataPipeBytesConsumer>(
+      &GetDocument(), std::move(pipe.consumer_handle), &notifier);
 
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
@@ -91,7 +98,7 @@ TEST_F(DataPipeBytesConsumerTest, EndOfPipeBeforeComplete) {
   EXPECT_EQ(Result::kShouldWait, rv);
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
-  consumer->SignalComplete();
+  notifier->SignalComplete();
   EXPECT_EQ(PublicState::kClosed, consumer->GetPublicState());
 
   rv = consumer->BeginRead(&buffer, &available);
@@ -102,8 +109,9 @@ TEST_F(DataPipeBytesConsumerTest, CompleteBeforeEndOfPipe) {
   mojo::DataPipe pipe;
   ASSERT_TRUE(pipe.producer_handle.is_valid());
 
-  DataPipeBytesConsumer* consumer = new DataPipeBytesConsumer(
-      &GetDocument(), std::move(pipe.consumer_handle));
+  DataPipeBytesConsumer::CompletionNotifier* notifier = nullptr;
+  DataPipeBytesConsumer* consumer = MakeGarbageCollected<DataPipeBytesConsumer>(
+      &GetDocument(), std::move(pipe.consumer_handle), &notifier);
 
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
@@ -113,7 +121,7 @@ TEST_F(DataPipeBytesConsumerTest, CompleteBeforeEndOfPipe) {
   Result rv = consumer->BeginRead(&buffer, &available);
   EXPECT_EQ(Result::kShouldWait, rv);
 
-  consumer->SignalComplete();
+  notifier->SignalComplete();
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
   rv = consumer->BeginRead(&buffer, &available);
@@ -132,8 +140,9 @@ TEST_F(DataPipeBytesConsumerTest, EndOfPipeBeforeError) {
   mojo::DataPipe pipe;
   ASSERT_TRUE(pipe.producer_handle.is_valid());
 
-  DataPipeBytesConsumer* consumer = new DataPipeBytesConsumer(
-      &GetDocument(), std::move(pipe.consumer_handle));
+  DataPipeBytesConsumer::CompletionNotifier* notifier = nullptr;
+  DataPipeBytesConsumer* consumer = MakeGarbageCollected<DataPipeBytesConsumer>(
+      &GetDocument(), std::move(pipe.consumer_handle), &notifier);
 
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
@@ -148,7 +157,7 @@ TEST_F(DataPipeBytesConsumerTest, EndOfPipeBeforeError) {
   EXPECT_EQ(Result::kShouldWait, rv);
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
-  consumer->SignalError();
+  notifier->SignalError(BytesConsumer::Error());
   EXPECT_EQ(PublicState::kErrored, consumer->GetPublicState());
 
   rv = consumer->BeginRead(&buffer, &available);
@@ -159,8 +168,9 @@ TEST_F(DataPipeBytesConsumerTest, ErrorBeforeEndOfPipe) {
   mojo::DataPipe pipe;
   ASSERT_TRUE(pipe.producer_handle.is_valid());
 
-  DataPipeBytesConsumer* consumer = new DataPipeBytesConsumer(
-      &GetDocument(), std::move(pipe.consumer_handle));
+  DataPipeBytesConsumer::CompletionNotifier* notifier = nullptr;
+  DataPipeBytesConsumer* consumer = MakeGarbageCollected<DataPipeBytesConsumer>(
+      &GetDocument(), std::move(pipe.consumer_handle), &notifier);
 
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
@@ -170,7 +180,7 @@ TEST_F(DataPipeBytesConsumerTest, ErrorBeforeEndOfPipe) {
   Result rv = consumer->BeginRead(&buffer, &available);
   EXPECT_EQ(Result::kShouldWait, rv);
 
-  consumer->SignalError();
+  notifier->SignalError(BytesConsumer::Error());
   EXPECT_EQ(PublicState::kErrored, consumer->GetPublicState());
 
   rv = consumer->BeginRead(&buffer, &available);
@@ -188,8 +198,9 @@ TEST_F(DataPipeBytesConsumerTest, DrainPipeBeforeComplete) {
   mojo::DataPipe pipe;
   ASSERT_TRUE(pipe.producer_handle.is_valid());
 
-  DataPipeBytesConsumer* consumer = new DataPipeBytesConsumer(
-      &GetDocument(), std::move(pipe.consumer_handle));
+  DataPipeBytesConsumer::CompletionNotifier* notifier = nullptr;
+  DataPipeBytesConsumer* consumer = MakeGarbageCollected<DataPipeBytesConsumer>(
+      &GetDocument(), std::move(pipe.consumer_handle), &notifier);
 
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
@@ -206,7 +217,7 @@ TEST_F(DataPipeBytesConsumerTest, DrainPipeBeforeComplete) {
   EXPECT_EQ(Result::kShouldWait, rv);
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
-  consumer->SignalComplete();
+  notifier->SignalComplete();
   EXPECT_EQ(PublicState::kClosed, consumer->GetPublicState());
 
   rv = consumer->BeginRead(&buffer, &available);
@@ -217,8 +228,9 @@ TEST_F(DataPipeBytesConsumerTest, CompleteBeforeDrainPipe) {
   mojo::DataPipe pipe;
   ASSERT_TRUE(pipe.producer_handle.is_valid());
 
-  DataPipeBytesConsumer* consumer = new DataPipeBytesConsumer(
-      &GetDocument(), std::move(pipe.consumer_handle));
+  DataPipeBytesConsumer::CompletionNotifier* notifier = nullptr;
+  DataPipeBytesConsumer* consumer = MakeGarbageCollected<DataPipeBytesConsumer>(
+      &GetDocument(), std::move(pipe.consumer_handle), &notifier);
 
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
@@ -228,7 +240,7 @@ TEST_F(DataPipeBytesConsumerTest, CompleteBeforeDrainPipe) {
   Result rv = consumer->BeginRead(&buffer, &available);
   EXPECT_EQ(Result::kShouldWait, rv);
 
-  consumer->SignalComplete();
+  notifier->SignalComplete();
   EXPECT_EQ(PublicState::kReadableOrWaiting, consumer->GetPublicState());
 
   rv = consumer->BeginRead(&buffer, &available);

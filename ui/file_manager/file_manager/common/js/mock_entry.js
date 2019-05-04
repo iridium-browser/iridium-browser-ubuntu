@@ -34,7 +34,9 @@ function MockFileSystem(volumeId, opt_rootURL) {
 }
 
 MockFileSystem.prototype = {
-  get root() { return this.entries['/']; }
+  get root() {
+    return this.entries['/'];
+  }
 };
 
 /**
@@ -50,8 +52,9 @@ MockFileSystem.prototype = {
  *     populating.
  */
 MockFileSystem.prototype.populate = function(entries, opt_clear) {
-  if (opt_clear)
+  if (opt_clear) {
     this.entries = {'/': new MockDirectoryEntry(this, '/')};
+  }
   entries.forEach(function(entry) {
     var path = entry.fullPath || entry;
     var metadata = entry.metadata || {size: 0};
@@ -59,13 +62,15 @@ MockFileSystem.prototype.populate = function(entries, opt_clear) {
     var pathElements = path.split('/');
     pathElements.forEach(function(_, i) {
       var subpath = pathElements.slice(0, i).join('/');
-      if (subpath && !(subpath in this.entries))
+      if (subpath && !(subpath in this.entries)) {
         this.entries[subpath] = new MockDirectoryEntry(this, subpath, metadata);
+      }
     }.bind(this));
 
     // If the path doesn't end in a slash, create a file.
-    if (!/\/$/.test(path))
+    if (!/\/$/.test(path)) {
       this.entries[path] = new MockFileEntry(this, path, metadata, content);
+    }
   }.bind(this));
 };
 
@@ -137,10 +142,11 @@ MockEntry.prototype = {
  * @param {function(!FileError)=} onError
  */
 MockEntry.prototype.getMetadata = function(onSuccess, onError) {
-  if (this.filesystem.entries[this.fullPath])
+  if (this.filesystem.entries[this.fullPath]) {
     onSuccess(this.metadata);
-  else
+  } else {
     onError(/** @type {!FileError} */ ({name: util.FileError.NOT_FOUND_ERR}));
+  }
 };
 
 /**
@@ -167,10 +173,11 @@ MockEntry.prototype.toURL = function() {
  */
 MockEntry.prototype.getParent = function(onSuccess, onError) {
   var path = this.fullPath.replace(/\/[^\/]+$/, '') || '/';
-  if (this.filesystem.entries[path])
+  if (this.filesystem.entries[path]) {
     onSuccess(this.filesystem.entries[path]);
-  else
+  } else {
     onError(/** @type {!FileError} */ ({name: util.FileError.NOT_FOUND_ERR}));
+  }
 };
 
 /**
@@ -227,11 +234,30 @@ MockEntry.prototype.remove = function(onSuccess, onError) {
 };
 
 /**
+ * Removes the entry and any children.
+ *
+ * @param {function()} onSuccess Success callback.
+ * @param {function(!FileError)=} onError Callback invoked with an error object.
+ */
+MockEntry.prototype.removeRecursively = function(onSuccess, onError) {
+  this.removed_ = true;
+  Promise.resolve().then(() => {
+    for (let path in this.filesystem.entries) {
+      if (path.startsWith(this.fullPath)) {
+        delete this.filesystem.entries[path];
+      }
+    }
+    onSuccess();
+  });
+};
+
+/**
  * Asserts that the entry was removed.
  */
 MockEntry.prototype.assertRemoved = function() {
-  if (!this.removed_)
+  if (!this.removed_) {
     throw new Error('expected removed for file ' + this.name);
+  }
 };
 
 /** @override */
@@ -296,14 +322,19 @@ MockFileEntry.prototype.asMock = function() {
  * @param {FileSystem} filesystem File system where the entry is localed.
  * @param {string} fullPath Full path for the entry.
  * @param {Metadata=} opt_metadata Metadata.
- * @extends {MockEntry}
+ * @extends {DirectoryEntry} MockDirectoryEntry is used to mock the implement
+ *   DirectoryEntry for testing.
+ * @implements {MockEntryInterface}
  * @constructor
  */
 function MockDirectoryEntry(filesystem, fullPath, opt_metadata) {
-  var metadata = opt_metadata || /** @type {!Metadata} */ ({});
-  metadata.size = metadata.size || 0;
-  metadata.modificationTime = metadata.modificationTime || new Date();
-  MockEntry.call(this, filesystem, fullPath, metadata);
+  filesystem.entries[fullPath] = this;
+  this.filesystem = filesystem;
+  this.fullPath = fullPath;
+  this.metadata = opt_metadata || /** @type {!Metadata} */ ({});
+  this.metadata.size = this.metadata.size || 0;
+  this.metadata.modificationTime = this.metadata.modificationTime || new Date();
+  this.removed_ = false;
   this.isFile = false;
   this.isDirectory = true;
 }
@@ -329,44 +360,56 @@ MockDirectoryEntry.prototype.getAllChildren = function() {
  * Returns a file under the directory.
  *
  * @param {string} path Path.
- * @param {Object} option Option.
- * @param {function(!FileEntry)} onSuccess Success callback.
- * @param {function(!FileError)} onError Failure callback;
+ * @param {!FileSystemFlags=} option Options
+ * @param {function(!FileEntry)=} onSuccess Success callback.
+ * @param {function(!FileError)=} onError Failure callback;
  */
 MockDirectoryEntry.prototype.getFile = function(
     path, option, onSuccess, onError) {
+  // As onSuccess and onError are optional, if they are not supplied we default
+  // them to be no-ops to save on checking their validity later.
+  onSuccess = onSuccess || (entry => {});  // no-op
+  onError = onError || (error => {});      // no-op
   var fullPath = path[0] === '/' ? path : joinPath(this.fullPath, path);
-  if (!this.filesystem.entries[fullPath])
+  if (!this.filesystem.entries[fullPath]) {
     onError(/** @type {!FileError} */ ({name: util.FileError.NOT_FOUND_ERR}));
-  else if (!(this.filesystem.entries[fullPath] instanceof MockFileEntry))
+  } else if (!(this.filesystem.entries[fullPath] instanceof MockFileEntry)) {
     onError(
         /** @type {!FileError} */ ({name: util.FileError.TYPE_MISMATCH_ERR}));
-  else
+  } else {
     onSuccess(this.filesystem.entries[fullPath]);
+  }
 };
 
 /**
  * Returns a directory under the directory.
  *
  * @param {string} path Path.
- * @param {Object} option Option.
- * @param {function(!MockDirectoryEntry)} onSuccess Success callback.
- * @param {function(Object)} onError Failure callback;
+ * @param {!FileSystemFlags=} option Options
+ * @param {function(!DirectoryEntry)=} onSuccess Success callback.
+ * @param {function(!FileError)=} onError Failure callback;
  */
-MockDirectoryEntry.prototype.getDirectory =
-    function(path, option, onSuccess, onError) {
+MockDirectoryEntry.prototype.getDirectory = function(
+    path, option, onSuccess, onError) {
+  // As onSuccess and onError are optional, if they are not supplied we default
+  // them to be no-ops to save on checking their validity later.
+  onSuccess = onSuccess || (entry => {});  // no-op
+  onError = onError || (error => {});      // no-op
   var fullPath = path[0] === '/' ? path : joinPath(this.fullPath, path);
   var result = this.filesystem.entries[fullPath];
   if (result) {
-    if (!(result instanceof MockDirectoryEntry))
-      onError({name: util.FileError.TYPE_MISMATCH_ERR});
-    else if (option['create'] && option['exclusive'])
-      onError({name: util.FileError.PATH_EXISTS_ERR});
-    else
+    if (!(result instanceof MockDirectoryEntry)) {
+      onError(
+          /** @type {!FileError} */ ({name: util.FileError.TYPE_MISMATCH_ERR}));
+    } else if (option['create'] && option['exclusive']) {
+      onError(
+          /** @type {!FileError} */ ({name: util.FileError.PATH_EXISTS_ERR}));
+    } else {
       onSuccess(result);
+    }
   } else {
     if (!option['create']) {
-      onError({name: util.FileError.NOT_FOUND_ERR});
+      onError(/** @type {!FileError} */ ({name: util.FileError.NOT_FOUND_ERR}));
     } else {
       var newEntry = new MockDirectoryEntry(this.filesystem, fullPath);
       this.filesystem.entries[fullPath] = newEntry;

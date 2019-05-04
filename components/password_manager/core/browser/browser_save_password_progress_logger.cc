@@ -12,11 +12,13 @@
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/autofill/core/common/signatures_util.h"
 #include "components/password_manager/core/browser/log_manager.h"
 #include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_manager.h"
 
 using autofill::AutofillUploadContents;
+using base::NumberToString;
 using base::UintToString;
 
 namespace password_manager {
@@ -202,7 +204,7 @@ void BrowserSavePasswordProgressLogger::LogString(StringID label,
 }
 
 void BrowserSavePasswordProgressLogger::LogSuccessfulSubmissionIndicatorEvent(
-    autofill::PasswordForm::SubmissionIndicatorEvent event) {
+    autofill::SubmissionIndicatorEvent event) {
   std::ostringstream submission_event_string_stream;
   submission_event_string_stream << event;
   std::string message =
@@ -215,6 +217,8 @@ void BrowserSavePasswordProgressLogger::LogFormData(
     StringID label,
     const autofill::FormData& form) {
   std::string message = GetStringFromID(label) + ": {\n";
+  message += GetStringFromID(STRING_FORM_SIGNATURE) + ": " +
+             NumberToString(autofill::CalculateFormSignature(form)) + "\n";
   message +=
       GetStringFromID(STRING_ORIGIN) + ": " + ScrubURL(form.origin) + "\n";
   message +=

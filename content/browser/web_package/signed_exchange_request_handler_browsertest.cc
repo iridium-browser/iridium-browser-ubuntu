@@ -14,8 +14,10 @@
 #include "content/browser/frame_host/navigation_handle_impl.h"
 #include "content/browser/web_package/signed_exchange_handler.h"
 #include "content/browser/web_package/signed_exchange_utils.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
@@ -31,6 +33,7 @@
 #include "content/public/test/test_navigation_throttle.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "content/shell/browser/shell.h"
+#include "content/shell/browser/shell_download_manager_delegate.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/dns/mock_host_resolver.h"
@@ -46,6 +49,7 @@
 #include "services/network/public/cpp/features.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/service_worker/service_worker_utils.h"
 
 namespace content {
 
@@ -55,7 +59,7 @@ const uint64_t kSignatureHeaderDate = 1520834000;  // 2018-03-12T05:53:20Z
 const uint64_t kSignatureHeaderExpires = 1520837600;  // 2018-03-12T06:53:20Z
 
 constexpr char kExpectedSXGEnabledAcceptHeaderForPrefetch[] =
-    "application/signed-exchange;v=b2;q=0.9,*/*;q=0.8";
+    "application/signed-exchange;v=b3;q=0.9,*/*;q=0.8";
 
 class RedirectObserver : public WebContentsObserver {
  public:
@@ -266,6 +270,42 @@ IN_PROC_BROWSER_TEST_P(SignedExchangeRequestHandlerBrowserTest, Simple) {
   histogram_tester_.ExpectTotalCount(
       "SignedExchange.Time.CertificateFetch.Success",
       PrefetchIsEnabled() ? 2 : 1);
+  if (PrefetchIsEnabled()) {
+    histogram_tester_.ExpectUniqueSample("SignedExchange.Prefetch.LoadResult",
+                                         SignedExchangeLoadResult::kSuccess, 1);
+    histogram_tester_.ExpectUniqueSample(
+        "SignedExchange.Prefetch.Recall.30Seconds", true, 1);
+    histogram_tester_.ExpectUniqueSample(
+        "SignedExchange.Prefetch.Precision.30Seconds", true, 1);
+  } else {
+    histogram_tester_.ExpectUniqueSample(
+        "SignedExchange.Prefetch.Recall.30Seconds", false, 1);
+  }
+}
+
+IN_PROC_BROWSER_TEST_P(SignedExchangeRequestHandlerBrowserTest,
+                       MissingNosniff) {
+  InstallUrlInterceptor(GURL("https://test.example.org/test/"),
+                        "content/test/data/sxg/fallback.html");
+  InstallMockCert();
+
+  embedded_test_server()->ServeFilesFromSourceDirectory("content/test/data");
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url = embedded_test_server()->GetURL(
+      "/sxg/test.example.org_test_missing_nosniff.sxg");
+  if (PrefetchIsEnabled())
+    TriggerPrefetch(url, false);
+
+  base::string16 title = base::ASCIIToUTF16("Fallback URL response");
+  TitleWatcher title_watcher(shell()->web_contents(), title);
+  RedirectObserver redirect_observer(shell()->web_contents());
+  NavigateToURL(shell(), url);
+  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
+  EXPECT_EQ(303, redirect_observer.response_code());
+  histogram_tester_.ExpectUniqueSample(
+      "SignedExchange.LoadResult",
+      SignedExchangeLoadResult::kSXGServedWithoutNosniff,
+      PrefetchIsEnabled() ? 2 : 1);
 }
 
 IN_PROC_BROWSER_TEST_P(SignedExchangeRequestHandlerBrowserTest,
@@ -395,6 +435,102 @@ INSTANTIATE_TEST_CASE_P(
         SignedExchangeRequestHandlerBrowserTestPrefetchParam::
             kPrefetchEnabled));
 
+class SignedExchangeRequestHandlerDownloadBrowserTest
+    : public SignedExchangeRequestHandlerBrowserTestBase {
+ public:
+  SignedExchangeRequestHandlerDownloadBrowserTest() = default;
+  ~SignedExchangeRequestHandlerDownloadBrowserTest() override = default;
+
+ protected:
+  class DownloadObserver : public DownloadManager::Observer {
+   public:
+    DownloadObserver(DownloadManager* manager) : manager_(manager) {
+      manager_->AddObserver(this);
+    }
+    ~DownloadObserver() override { manager_->RemoveObserver(this); }
+
+    void WaitUntilDownloadCreated() { run_loop_.Run(); }
+
+    const GURL& observed_url() const { return url_; }
+    const std::string& observed_content_disposition() const {
+      return content_disposition_;
+    }
+
+    // content::DownloadManager::Observer implementation.
+    void OnDownloadCreated(content::DownloadManager* manager,
+                           download::DownloadItem* item) override {
+      url_ = item->GetURL();
+      content_disposition_ = item->GetContentDisposition();
+      run_loop_.Quit();
+    }
+
+   private:
+    DownloadManager* manager_;
+    base::RunLoop run_loop_;
+    GURL url_;
+    std::string content_disposition_;
+  };
+
+  void SetUpOnMainThread() override {
+    SignedExchangeRequestHandlerBrowserTestBase::SetUpOnMainThread();
+    ASSERT_TRUE(downloads_directory_.CreateUniqueTempDir());
+    ShellDownloadManagerDelegate* delegate =
+        static_cast<ShellDownloadManagerDelegate*>(
+            shell()
+                ->web_contents()
+                ->GetBrowserContext()
+                ->GetDownloadManagerDelegate());
+    delegate->SetDownloadBehaviorForTesting(downloads_directory_.GetPath());
+  }
+
+ private:
+  base::ScopedTempDir downloads_directory_;
+};
+
+IN_PROC_BROWSER_TEST_F(SignedExchangeRequestHandlerDownloadBrowserTest,
+                       Download) {
+  std::unique_ptr<DownloadObserver> observer =
+      std::make_unique<DownloadObserver>(BrowserContext::GetDownloadManager(
+          shell()->web_contents()->GetBrowserContext()));
+
+  embedded_test_server()->ServeFilesFromSourceDirectory("content/test/data");
+  ASSERT_TRUE(embedded_test_server()->Start());
+  NavigateToURL(shell(), embedded_test_server()->GetURL("/empty.html"));
+
+  const std::string load_sxg =
+      "const iframe = document.createElement('iframe');"
+      "iframe.src = './sxg/test.example.org_test_download.sxg';"
+      "document.body.appendChild(iframe);";
+  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), load_sxg));
+  observer->WaitUntilDownloadCreated();
+  EXPECT_EQ(
+      embedded_test_server()->GetURL("/sxg/test.example.org_test_download.sxg"),
+      observer->observed_url());
+  EXPECT_EQ("attachment; filename=test.sxg",
+            observer->observed_content_disposition());
+}
+
+IN_PROC_BROWSER_TEST_F(SignedExchangeRequestHandlerDownloadBrowserTest,
+                       DataURLDownload) {
+  const GURL sxg_url = GURL("data:application/signed-exchange,");
+  std::unique_ptr<DownloadObserver> observer =
+      std::make_unique<DownloadObserver>(BrowserContext::GetDownloadManager(
+          shell()->web_contents()->GetBrowserContext()));
+
+  embedded_test_server()->ServeFilesFromSourceDirectory("content/test/data");
+  ASSERT_TRUE(embedded_test_server()->Start());
+  NavigateToURL(shell(), embedded_test_server()->GetURL("/empty.html"));
+
+  const std::string load_sxg = base::StringPrintf(
+      "const iframe = document.createElement('iframe');"
+      "iframe.src = '%s';"
+      "document.body.appendChild(iframe);",
+      sxg_url.spec().c_str());
+  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), load_sxg));
+  observer->WaitUntilDownloadCreated();
+  EXPECT_EQ(sxg_url, observer->observed_url());
+}
+
 class SignedExchangeRequestHandlerRealCertVerifierBrowserTest
     : public SignedExchangeRequestHandlerBrowserTestBase {
  public:
@@ -433,7 +569,8 @@ IN_PROC_BROWSER_TEST_F(SignedExchangeRequestHandlerRealCertVerifierBrowserTest,
 
 enum class SignedExchangeRequestHandlerWithServiceWorkerBrowserTestParam {
   kLegacy,
-  kServiceWorkerServicification
+  kServiceWorkerServicification,
+  kNetworkService
 };
 
 class SignedExchangeRequestHandlerWithServiceWorkerBrowserTest
@@ -443,14 +580,23 @@ class SignedExchangeRequestHandlerWithServiceWorkerBrowserTest
  public:
   SignedExchangeRequestHandlerWithServiceWorkerBrowserTest() = default;
   void SetUp() override {
-    if (GetParam() ==
-        SignedExchangeRequestHandlerWithServiceWorkerBrowserTestParam ::
-            kServiceWorkerServicification) {
-      feature_list_.InitWithFeatures(
-          {blink::features::kServiceWorkerServicification}, {});
-    } else {
-      feature_list_.InitWithFeatures(
-          {}, {blink::features::kServiceWorkerServicification});
+    switch (GetParam()) {
+      case SignedExchangeRequestHandlerWithServiceWorkerBrowserTestParam::
+          kLegacy:
+        feature_list_.InitWithFeatures(
+            {}, {blink::features::kServiceWorkerServicification,
+                 network::features::kNetworkService});
+        break;
+      case SignedExchangeRequestHandlerWithServiceWorkerBrowserTestParam::
+          kServiceWorkerServicification:
+        feature_list_.InitWithFeatures(
+            {blink::features::kServiceWorkerServicification},
+            {network::features::kNetworkService});
+        break;
+      case SignedExchangeRequestHandlerWithServiceWorkerBrowserTestParam::
+          kNetworkService:
+        feature_list_.InitAndEnableFeature(network::features::kNetworkService);
+        break;
     }
     SignedExchangeRequestHandlerBrowserTestBase::SetUp();
   }
@@ -462,16 +608,11 @@ class SignedExchangeRequestHandlerWithServiceWorkerBrowserTest
       SignedExchangeRequestHandlerWithServiceWorkerBrowserTest);
 };
 
-INSTANTIATE_TEST_CASE_P(
-    SignedExchangeRequestHandlerWithServiceWorkerBrowserTest,
-    SignedExchangeRequestHandlerWithServiceWorkerBrowserTest,
-    testing::Values(
-        SignedExchangeRequestHandlerWithServiceWorkerBrowserTestParam::kLegacy,
-        SignedExchangeRequestHandlerWithServiceWorkerBrowserTestParam::
-            kServiceWorkerServicification));
-
 IN_PROC_BROWSER_TEST_P(SignedExchangeRequestHandlerWithServiceWorkerBrowserTest,
-                       Simple) {
+                       LogicalUrlInServiceWorkerScope) {
+  // SW-scope: https://test.example.org/test/
+  // SXG physical URL: http://127.0.0.1:PORT/sxg/test.example.org_test.sxg
+  // SXG logical URL: https://test.example.org/test/
   InstallUrlInterceptor(
       GURL("https://cert.example.org/cert.msg"),
       "content/test/data/sxg/test.example.org.public.pem.cbor");
@@ -500,8 +641,133 @@ IN_PROC_BROWSER_TEST_P(SignedExchangeRequestHandlerWithServiceWorkerBrowserTest,
   TitleWatcher title_watcher(shell()->web_contents(), title);
   title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("Generated"));
   NavigateToURL(shell(), url);
+  // The page content shoud be served from the signed exchange.
   EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
 }
+
+IN_PROC_BROWSER_TEST_P(SignedExchangeRequestHandlerWithServiceWorkerBrowserTest,
+                       NotControlledByDistributorsSW) {
+  // SW-scope: http://127.0.0.1:PORT/sxg/
+  // SXG physical URL: http://127.0.0.1:PORT/sxg/test.example.org_test.sxg
+  // SXG logical URL: https://test.example.org/test/
+  InstallUrlInterceptor(
+      GURL("https://cert.example.org/cert.msg"),
+      "content/test/data/sxg/test.example.org.public.pem.cbor");
+  InstallMockCert();
+  embedded_test_server()->ServeFilesFromSourceDirectory("content/test/data");
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  const GURL install_sw_url = embedded_test_server()->GetURL(
+      "/sxg/no-respond-with-service-worker.html");
+
+  {
+    base::string16 title = base::ASCIIToUTF16("Done");
+    TitleWatcher title_watcher(shell()->web_contents(), title);
+    NavigateToURL(shell(), install_sw_url);
+    EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
+  }
+
+  base::string16 title = base::ASCIIToUTF16("https://test.example.org/test/");
+  TitleWatcher title_watcher(shell()->web_contents(), title);
+  NavigateToURL(shell(), embedded_test_server()->GetURL(
+                             "/sxg/test.example.org_test.sxg"));
+  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
+
+  // The page must not be controlled by the service worker of the physical URL.
+  EXPECT_EQ(false, EvalJs(shell(), "!!navigator.serviceWorker.controller"));
+}
+
+IN_PROC_BROWSER_TEST_P(SignedExchangeRequestHandlerWithServiceWorkerBrowserTest,
+                       NotControlledBySameOriginDistributorsSW) {
+  // SW-scope: https://test.example.org/scope/
+  // SXG physical URL: https://test.example.org/scope/test.example.org_test.sxg
+  // SXG logical URL: https://test.example.org/test/
+  InstallUrlInterceptor(
+      GURL("https://cert.example.org/cert.msg"),
+      "content/test/data/sxg/test.example.org.public.pem.cbor");
+  InstallMockCert();
+
+  InstallUrlInterceptor(GURL("https://test.example.org/scope/test.sxg"),
+                        "content/test/data/sxg/test.example.org_test.sxg");
+
+  const GURL install_sw_url = GURL(
+      "https://test.example.org/scope/no-respond-with-service-worker.html");
+
+  InstallUrlInterceptor(
+      install_sw_url,
+      "content/test/data/sxg/no-respond-with-service-worker.html");
+  InstallUrlInterceptor(
+      GURL("https://test.example.org/scope/no-respond-with-service-worker.js"),
+      "content/test/data/sxg/no-respond-with-service-worker.js");
+
+  {
+    base::string16 title = base::ASCIIToUTF16("Done");
+    TitleWatcher title_watcher(shell()->web_contents(), title);
+    NavigateToURL(shell(), install_sw_url);
+    EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
+  }
+
+  base::string16 title = base::ASCIIToUTF16("https://test.example.org/test/");
+  TitleWatcher title_watcher(shell()->web_contents(), title);
+  NavigateToURL(shell(), GURL("https://test.example.org/scope/test.sxg"));
+  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
+
+  // The page must not be controlled by the service worker of the physical URL.
+  EXPECT_EQ(false, EvalJs(shell(), "!!navigator.serviceWorker.controller"));
+}
+
+IN_PROC_BROWSER_TEST_P(SignedExchangeRequestHandlerWithServiceWorkerBrowserTest,
+                       RegisterServiceWorkerFromSignedExchange) {
+  // SXG physical URL: http://127.0.0.1:PORT/sxg/test.example.org_test.sxg
+  // SXG logical URL: https://test.example.org/test/
+  InstallUrlInterceptor(
+      GURL("https://cert.example.org/cert.msg"),
+      "content/test/data/sxg/test.example.org.public.pem.cbor");
+  InstallMockCert();
+
+  InstallUrlInterceptor(
+      GURL("https://test.example.org/test/publisher-service-worker.js"),
+      "content/test/data/sxg/publisher-service-worker.js");
+
+  embedded_test_server()->ServeFilesFromSourceDirectory("content/test/data");
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  GURL url = embedded_test_server()->GetURL("/sxg/test.example.org_test.sxg");
+
+  {
+    base::string16 title = base::ASCIIToUTF16("https://test.example.org/test/");
+    TitleWatcher title_watcher(shell()->web_contents(), title);
+    NavigateToURL(shell(), url);
+    EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
+  }
+
+  const std::string register_sw_script =
+      "(async function() {"
+      "  try {"
+      "    const registration = await navigator.serviceWorker.register("
+      "        'publisher-service-worker.js', {scope: './'});"
+      "    window.domAutomationController.send(true);"
+      "  } catch (e) {"
+      "    window.domAutomationController.send(false);"
+      "  }"
+      "})();";
+  bool result = false;
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(shell()->web_contents(),
+                                          register_sw_script, &result));
+  // serviceWorker.register() fails because the document URL of
+  // ServiceWorkerProviderHost is empty.
+  EXPECT_FALSE(result);
+}
+
+INSTANTIATE_TEST_CASE_P(
+    SignedExchangeRequestHandlerWithServiceWorkerBrowserTest,
+    SignedExchangeRequestHandlerWithServiceWorkerBrowserTest,
+    testing::Values(
+        SignedExchangeRequestHandlerWithServiceWorkerBrowserTestParam::kLegacy,
+        SignedExchangeRequestHandlerWithServiceWorkerBrowserTestParam::
+            kServiceWorkerServicification,
+        SignedExchangeRequestHandlerWithServiceWorkerBrowserTestParam::
+            kNetworkService));
 
 struct SignedExchangeAcceptHeaderBrowserTestParam {
   SignedExchangeAcceptHeaderBrowserTestParam(

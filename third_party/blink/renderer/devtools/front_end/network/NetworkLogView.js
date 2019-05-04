@@ -592,20 +592,31 @@ Network.NetworkLogView = class extends UI.VBox {
     this._hideRecordingHint();
     this._recordingHint = this.element.createChild('div', 'network-status-pane fill');
     const hintText = this._recordingHint.createChild('div', 'recording-hint');
-    const reloadShortcutNode = this._recordingHint.createChild('b');
-    reloadShortcutNode.textContent = UI.shortcutRegistry.shortcutDescriptorsForAction('inspector_main.reload')[0].name;
+
+    let reloadShortcutNode = null;
+    const reloadShortcutDescriptor = UI.shortcutRegistry.shortcutDescriptorsForAction('inspector_main.reload')[0];
+    if (reloadShortcutDescriptor) {
+      reloadShortcutNode = this._recordingHint.createChild('b');
+      reloadShortcutNode.textContent = reloadShortcutDescriptor.name;
+    }
 
     if (this._recording) {
       const recordingText = hintText.createChild('span');
       recordingText.textContent = Common.UIString('Recording network activity\u2026');
-      hintText.createChild('br');
-      hintText.appendChild(
-          UI.formatLocalized('Perform a request or hit %s to record the reload.', [reloadShortcutNode]));
+      if (reloadShortcutNode) {
+        hintText.createChild('br');
+        hintText.appendChild(
+            UI.formatLocalized('Perform a request or hit %s to record the reload.', [reloadShortcutNode]));
+      }
     } else {
       const recordNode = hintText.createChild('b');
       recordNode.textContent = UI.shortcutRegistry.shortcutTitleForAction('network.toggle-recording');
-      hintText.appendChild(UI.formatLocalized(
-          'Record (%s) or reload (%s) to display network activity.', [recordNode, reloadShortcutNode]));
+      if (reloadShortcutNode) {
+        hintText.appendChild(UI.formatLocalized(
+            'Record (%s) or reload (%s) to display network activity.', [recordNode, reloadShortcutNode]));
+      } else {
+        hintText.appendChild(UI.formatLocalized('Record (%s) to display network activity.', [recordNode]));
+      }
     }
   }
 
@@ -685,8 +696,10 @@ Network.NetworkLogView = class extends UI.VBox {
     this._hideRecordingHint();
 
     let transferSize = 0;
+    let resourceSize = 0;
     let selectedNodeNumber = 0;
     let selectedTransferSize = 0;
+    let selectedResourceSize = 0;
     let baseTime = -1;
     let maxTime = -1;
 
@@ -698,9 +711,12 @@ Network.NetworkLogView = class extends UI.VBox {
       nodeCount++;
       const requestTransferSize = request.transferSize;
       transferSize += requestTransferSize;
+      const requestResourceSize = request.resourceSize;
+      resourceSize += requestResourceSize;
       if (!node[Network.NetworkLogView._isFilteredOutSymbol]) {
         selectedNodeNumber++;
         selectedTransferSize += requestTransferSize;
+        selectedResourceSize += requestResourceSize;
       }
       const networkManager = SDK.NetworkManager.forRequest(request);
       // TODO(allada) inspectedURL should be stored in PageLoad used instead of target so HAR requests can have an
@@ -737,24 +753,30 @@ Network.NetworkLogView = class extends UI.VBox {
       appendChunk(separator);
       appendChunk(Common.UIString(
           '%s / %s transferred', Number.bytesToString(selectedTransferSize), Number.bytesToString(transferSize)));
+      appendChunk(separator);
+      appendChunk(Common.UIString(
+          '%s / %s resources', Number.bytesToString(selectedResourceSize), Number.bytesToString(resourceSize)));
     } else {
       appendChunk(Common.UIString('%d requests', nodeCount));
       appendChunk(separator);
       appendChunk(Common.UIString('%s transferred', Number.bytesToString(transferSize)));
+      appendChunk(separator);
+      appendChunk(Common.UIString('%s resources', Number.bytesToString(resourceSize)));
     }
+
     if (baseTime !== -1 && maxTime !== -1) {
       appendChunk(separator);
       appendChunk(Common.UIString('Finish: %s', Number.secondsToString(maxTime - baseTime)));
       if (this._mainRequestDOMContentLoadedTime !== -1 && this._mainRequestDOMContentLoadedTime > baseTime) {
         appendChunk(separator);
-        const domContentLoadedText = Common.UIString(
-            'DOMContentLoaded: %s', Number.secondsToString(this._mainRequestDOMContentLoadedTime - baseTime));
-        appendChunk(domContentLoadedText).classList.add('summary-blue');
+        const domContentLoadedText =
+            ls`DOMContentLoaded: ${Number.secondsToString(this._mainRequestDOMContentLoadedTime - baseTime)}`;
+        appendChunk(domContentLoadedText).classList.add('summary-dcl-event');
       }
       if (this._mainRequestLoadTime !== -1) {
         appendChunk(separator);
-        const loadText = Common.UIString('Load: %s', Number.secondsToString(this._mainRequestLoadTime - baseTime));
-        appendChunk(loadText).classList.add('summary-red');
+        const loadText = ls`Load: ${Number.secondsToString(this._mainRequestLoadTime - baseTime)}`;
+        appendChunk(loadText).classList.add('summary-load-event');
       }
     }
     summaryBar.title = text;
@@ -849,7 +871,7 @@ Network.NetworkLogView = class extends UI.VBox {
     const time = /** @type {number} */ (event.data.loadTime);
     if (time) {
       this._mainRequestLoadTime = time;
-      this._columns.addEventDividers([time], 'network-red-divider');
+      this._columns.addEventDividers([time], 'network-load-divider');
     }
   }
 
@@ -862,7 +884,7 @@ Network.NetworkLogView = class extends UI.VBox {
     const data = /** @type {number} */ (event.data);
     if (data) {
       this._mainRequestDOMContentLoadedTime = data;
-      this._columns.addEventDividers([data], 'network-blue-divider');
+      this._columns.addEventDividers([data], 'network-dcl-divider');
     }
   }
 
@@ -1174,7 +1196,7 @@ Network.NetworkLogView = class extends UI.VBox {
     }
     footerSection.appendItem(Common.UIString('Copy all as HAR'), this._copyAll.bind(this));
 
-    contextMenu.saveSection().appendItem(Common.UIString('Save as HAR with content'), this._exportAll.bind(this));
+    contextMenu.saveSection().appendItem(Common.UIString('Save all as HAR with content'), this._exportAll.bind(this));
 
     contextMenu.editSection().appendItem(Common.UIString('Clear browser cache'), this._clearBrowserCache.bind(this));
     contextMenu.editSection().appendItem(

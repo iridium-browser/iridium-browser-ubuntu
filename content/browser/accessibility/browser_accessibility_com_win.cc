@@ -18,6 +18,7 @@
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/browser/accessibility/browser_accessibility_win.h"
 #include "content/common/accessibility_messages.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/accessibility/ax_mode.h"
@@ -93,7 +94,7 @@ IFACEMETHODIMP BrowserAccessibilityComWin::get_appName(BSTR* app_name) {
   // GetProduct() returns a string like "Chrome/aa.bb.cc.dd", split out
   // the part before the "/".
   std::vector<std::string> product_components =
-      base::SplitString(GetContentClient()->GetProduct(), "/",
+      base::SplitString(GetContentClient()->browser()->GetProduct(), "/",
                         base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   // |GetProduct| will return an empty string if we are running the content
   // shell instead of Chrome.
@@ -113,7 +114,7 @@ IFACEMETHODIMP BrowserAccessibilityComWin::get_appVersion(BSTR* app_version) {
   // GetProduct() returns a string like "Chrome/aa.bb.cc.dd", split out
   // the part after the "/".
   std::vector<std::string> product_components =
-      base::SplitString(GetContentClient()->GetProduct(), "/",
+      base::SplitString(GetContentClient()->browser()->GetProduct(), "/",
                         base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   // |GetProduct| will return an empty string if we are running the content
   // shell instead of Chrome.
@@ -144,7 +145,7 @@ IFACEMETHODIMP BrowserAccessibilityComWin::get_toolkitVersion(
   if (!toolkit_version)
     return E_INVALIDARG;
 
-  std::string user_agent = GetContentClient()->GetUserAgent();
+  std::string user_agent = GetContentClient()->browser()->GetUserAgent();
   *toolkit_version = SysAllocString(base::UTF8ToUTF16(user_agent).c_str());
   DCHECK(*toolkit_version);
   return *toolkit_version ? S_OK : E_FAIL;
@@ -1593,7 +1594,7 @@ STDMETHODIMP BrowserAccessibilityComWin::InternalQueryInterface(
       return E_NOINTERFACE;
     }
   } else if (iid == IID_IAccessibleTableCell) {
-    if (!ui::IsCellOrTableHeaderRole(accessibility->owner()->GetRole())) {
+    if (!ui::IsCellOrTableHeader(accessibility->owner()->GetRole())) {
       *object = nullptr;
       return E_NOINTERFACE;
     }
@@ -1966,25 +1967,16 @@ std::vector<base::string16> BrowserAccessibilityComWin::ComputeTextAttributes()
 
   int32_t text_style =
       owner()->GetIntAttribute(ax::mojom::IntAttribute::kTextStyle);
-  if (text_style != static_cast<int32_t>(ax::mojom::TextStyle::kNone)) {
-    if (text_style &
-        static_cast<int32_t>(ax::mojom::TextStyle::kTextStyleItalic)) {
-      attributes.push_back(L"font-style:italic");
-    }
-
-    if (text_style &
-        static_cast<int32_t>(ax::mojom::TextStyle::kTextStyleBold)) {
+  if (text_style) {
+    if (GetData().HasTextStyle(ax::mojom::TextStyle::kBold))
       attributes.push_back(L"font-weight:bold");
-    }
-
-    if (text_style &
-        static_cast<int32_t>(ax::mojom::TextStyle::kTextStyleLineThrough)) {
+    if (GetData().HasTextStyle(ax::mojom::TextStyle::kItalic))
+      attributes.push_back(L"font-style:italic");
+    if (GetData().HasTextStyle(ax::mojom::TextStyle::kLineThrough)) {
       // TODO(nektar): Figure out a more specific value.
       attributes.push_back(L"text-line-through-style:solid");
     }
-
-    if (text_style &
-        static_cast<int32_t>(ax::mojom::TextStyle::kTextStyleUnderline)) {
+    if (GetData().HasTextStyle(ax::mojom::TextStyle::kUnderline)) {
       // TODO(nektar): Figure out a more specific value.
       attributes.push_back(L"text-underline-style:solid");
     }

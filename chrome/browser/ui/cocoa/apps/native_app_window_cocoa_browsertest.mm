@@ -5,6 +5,7 @@
 #include "extensions/browser/app_window/native_app_window.h"
 
 #import <Cocoa/Cocoa.h>
+#include <memory>
 
 #import "base/mac/foundation_util.h"
 #import "base/mac/mac_util.h"
@@ -12,6 +13,8 @@
 #import "base/mac/scoped_nsobject.h"
 #import "base/mac/sdk_forward_declarations.h"
 #include "base/macros.h"
+#include "chrome/browser/apps/app_shim/app_shim_host_bootstrap_mac.h"
+#include "chrome/browser/apps/app_shim/app_shim_host_mac.h"
 #include "chrome/browser/apps/app_shim/extension_app_shim_handler_mac.h"
 #include "chrome/browser/apps/app_shim/test/app_shim_host_manager_test_api_mac.h"
 #include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
@@ -30,6 +33,7 @@
 #import "testing/gtest_mac.h"
 #import "ui/base/test/nswindow_fullscreen_notification_waiter.h"
 #import "ui/base/test/scoped_fake_nswindow_focus.h"
+#include "ui/base/test/scoped_fake_nswindow_fullscreen.h"
 #import "ui/base/test/windowed_nsnotification_observer.h"
 #import "ui/gfx/mac/nswindow_frame_controls.h"
 
@@ -78,12 +82,13 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, HideShowWithApp) {
 
   AppWindow* app_window = windows.front();
   extensions::NativeAppWindow* native_window = app_window->GetBaseWindow();
-  NSWindow* ns_window = native_window->GetNativeWindow();
+  NSWindow* ns_window = native_window->GetNativeWindow().GetNativeNSWindow();
 
   AppWindow* other_app_window = windows.back();
   extensions::NativeAppWindow* other_native_window =
       other_app_window->GetBaseWindow();
-  NSWindow* other_ns_window = other_native_window->GetNativeWindow();
+  NSWindow* other_ns_window =
+      other_native_window->GetNativeWindow().GetNativeNSWindow();
 
   // Normal Hide/Show.
   app_window->Hide();
@@ -138,19 +143,22 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, HideShowWithApp) {
 
 namespace {
 
-class MockAppShimHost : public apps::AppShimHandler::Host {
+class MockAppShimHost : public AppShimHost {
  public:
-  MockAppShimHost() {}
+  MockAppShimHost()
+      : AppShimHost("app",
+                    base::FilePath("Profile"),
+                    false /* uses_remote_views */),
+        weak_factory_(this) {}
   ~MockAppShimHost() override {}
 
-  MOCK_METHOD1(OnAppLaunchComplete, void(apps::AppShimLaunchResult));
-  MOCK_METHOD0(OnAppClosed, void());
-  MOCK_METHOD0(OnAppHide, void());
   MOCK_METHOD0(OnAppUnhideWithoutActivation, void());
-  MOCK_METHOD1(OnAppRequestUserAttention, void(apps::AppShimAttentionType));
-  MOCK_CONST_METHOD0(GetProfilePath, base::FilePath());
-  MOCK_CONST_METHOD0(GetAppId, std::string());
-  MOCK_CONST_METHOD0(GetViewsBridgeFactoryHost, views::BridgeFactoryHost*());
+  base::WeakPtr<MockAppShimHost> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
+
+ private:
+  base::WeakPtrFactory<MockAppShimHost> weak_factory_;
 };
 
 class MockExtensionAppShimHandler : public apps::ExtensionAppShimHandler {
@@ -161,7 +169,7 @@ class MockExtensionAppShimHandler : public apps::ExtensionAppShimHandler {
   }
   ~MockExtensionAppShimHandler() override {}
 
-  MOCK_METHOD2(FindHost, AppShimHandler::Host*(Profile*, const std::string&));
+  MOCK_METHOD2(FindHost, AppShimHost*(Profile*, const std::string&));
 };
 
 }  // namespace
@@ -175,7 +183,8 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest,
   test_api.SetExtensionAppShimHandler(
       std::unique_ptr<apps::ExtensionAppShimHandler>(
           mock));  // Takes ownership.
-  MockAppShimHost mock_host;
+  base::WeakPtr<MockAppShimHost> mock_host =
+      (new MockAppShimHost)->GetWeakPtr();
 
   SetUpAppWithWindows(1);
   extensions::AppWindowRegistry::AppWindowList windows =
@@ -183,31 +192,35 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest,
 
   extensions::AppWindow* app_window = windows.front();
   extensions::NativeAppWindow* native_window = app_window->GetBaseWindow();
-  NSWindow* ns_window = native_window->GetNativeWindow();
+  NSWindow* ns_window = native_window->GetNativeWindow().GetNativeNSWindow();
 
   // HideWithApp.
   native_window->HideWithApp();
   EXPECT_FALSE([ns_window isVisible]);
 
   // Show notifies the shim to unhide.
-  EXPECT_CALL(mock_host, OnAppUnhideWithoutActivation());
-  EXPECT_CALL(*mock, FindHost(_, _)).WillOnce(Return(&mock_host));
+  EXPECT_CALL(*mock_host, OnAppUnhideWithoutActivation());
+  EXPECT_CALL(*mock, FindHost(_, _)).WillOnce(Return(mock_host.get()));
   app_window->Show(extensions::AppWindow::SHOW_ACTIVE);
   EXPECT_TRUE([ns_window isVisible]);
   testing::Mock::VerifyAndClearExpectations(mock);
-  testing::Mock::VerifyAndClearExpectations(&mock_host);
+  testing::Mock::VerifyAndClearExpectations(mock_host.get());
 
   // HideWithApp
   native_window->HideWithApp();
   EXPECT_FALSE([ns_window isVisible]);
 
   // Activate does the same.
-  EXPECT_CALL(mock_host, OnAppUnhideWithoutActivation());
-  EXPECT_CALL(*mock, FindHost(_, _)).WillOnce(Return(&mock_host));
+  EXPECT_CALL(*mock_host, OnAppUnhideWithoutActivation());
+  EXPECT_CALL(*mock, FindHost(_, _)).WillOnce(Return(mock_host.get()));
   native_window->Activate();
   EXPECT_TRUE([ns_window isVisible]);
   testing::Mock::VerifyAndClearExpectations(mock);
-  testing::Mock::VerifyAndClearExpectations(&mock_host);
+  testing::Mock::VerifyAndClearExpectations(mock_host.get());
+
+  // Ensure that the mock object be deleted.
+  mock_host->OnAppClosed();
+  DCHECK(!mock_host);
 }
 
 // Test that NativeAppWindow and AppWindow fullscreen state is updated when
@@ -216,7 +229,7 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, Fullscreen) {
   extensions::AppWindow* app_window =
       CreateTestAppWindow("{\"alwaysOnTop\": true }");
   extensions::NativeAppWindow* window = app_window->GetBaseWindow();
-  NSWindow* ns_window = app_window->GetNativeWindow();
+  NSWindow* ns_window = app_window->GetNativeWindow().GetNativeNSWindow();
   base::scoped_nsobject<NSWindowFullscreenNotificationWaiter> waiter(
       [[NSWindowFullscreenNotificationWaiter alloc] initWithWindow:ns_window]);
 
@@ -268,7 +281,7 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, Minimize) {
   SetUpAppWithWindows(1);
   AppWindow* app_window = GetFirstAppWindow();
   extensions::NativeAppWindow* window = app_window->GetBaseWindow();
-  NSWindow* ns_window = app_window->GetNativeWindow();
+  NSWindow* ns_window = app_window->GetNativeWindow().GetNativeNSWindow();
 
   NSRect initial_frame = [ns_window frame];
 
@@ -303,7 +316,7 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, Maximize) {
   SetUpAppWithWindows(1);
   AppWindow* app_window = GetFirstAppWindow();
   extensions::NativeAppWindow* window = app_window->GetBaseWindow();
-  NSWindow* ns_window = app_window->GetNativeWindow();
+  NSWindow* ns_window = app_window->GetNativeWindow().GetNativeNSWindow();
   base::scoped_nsobject<WindowedNSNotificationObserver> watcher;
 
   gfx::Rect initial_restored_bounds = window->GetRestoredBounds();
@@ -359,7 +372,7 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, MaximizeConstrained) {
   AppWindow* app_window = CreateTestAppWindow(
       "{\"outerBounds\": {\"maxWidth\":200, \"maxHeight\":300}}");
   extensions::NativeAppWindow* window = app_window->GetBaseWindow();
-  NSWindow* ns_window = app_window->GetNativeWindow();
+  NSWindow* ns_window = app_window->GetNativeWindow().GetNativeNSWindow();
   base::scoped_nsobject<WindowedNSNotificationObserver> watcher;
 
   gfx::Rect initial_restored_bounds = window->GetRestoredBounds();
@@ -395,7 +408,7 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, MinimizeMaximize) {
   SetUpAppWithWindows(1);
   AppWindow* app_window = GetFirstAppWindow();
   extensions::NativeAppWindow* window = app_window->GetBaseWindow();
-  NSWindow* ns_window = app_window->GetNativeWindow();
+  NSWindow* ns_window = app_window->GetNativeWindow().GetNativeNSWindow();
   base::scoped_nsobject<WindowedNSNotificationObserver> watcher;
 
   NSRect initial_frame = [ns_window frame];
@@ -442,10 +455,12 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, MinimizeMaximize) {
 
 // Test Maximize, Fullscreen, Restore combinations.
 IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, MaximizeFullscreen) {
+  ui::test::ScopedFakeNSWindowFullscreen fake_fullscreen;
+
   SetUpAppWithWindows(1);
   AppWindow* app_window = GetFirstAppWindow();
   extensions::NativeAppWindow* window = app_window->GetBaseWindow();
-  NSWindow* ns_window = app_window->GetNativeWindow();
+  NSWindow* ns_window = app_window->GetNativeWindow().GetNativeNSWindow();
   base::scoped_nsobject<WindowedNSNotificationObserver> watcher;
   base::scoped_nsobject<NSWindowFullscreenNotificationWaiter> waiter(
       [[NSWindowFullscreenNotificationWaiter alloc] initWithWindow:ns_window]);
@@ -502,8 +517,9 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, MaximizeFullscreen) {
 // window.
 IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, Frameless) {
   AppWindow* app_window = CreateTestAppWindow("{\"frame\": \"none\"}");
-  NSWindow* ns_window = app_window->GetNativeWindow();
-  NSView* web_contents = app_window->web_contents()->GetNativeView();
+  NSWindow* ns_window = app_window->GetNativeWindow().GetNativeNSWindow();
+  NSView* web_contents =
+      app_window->web_contents()->GetNativeView().GetNativeNSView();
   EXPECT_TRUE(NSEqualSizes(NSMakeSize(512, 384), [web_contents frame].size));
   // Move and resize the window.
   NSRect new_frame = NSMakeRect(50, 50, 200, 200);
@@ -527,7 +543,7 @@ namespace {
 
 // Test that resize and fullscreen controls are correctly enabled/disabled.
 void TestControls(AppWindow* app_window) {
-  NSWindow* ns_window = app_window->GetNativeWindow();
+  NSWindow* ns_window = app_window->GetNativeWindow().GetNativeNSWindow();
 
   // The window is resizable.
   EXPECT_TRUE([ns_window styleMask] & NSResizableWindowMask);
@@ -545,7 +561,8 @@ void TestControls(AppWindow* app_window) {
   app_window->SetContentSizeConstraints(gfx::Size(), gfx::Size(200, 201));
   EXPECT_EQ(200, [ns_window contentMaxSize].width);
   EXPECT_EQ(201, [ns_window contentMaxSize].height);
-  NSView* web_contents = app_window->web_contents()->GetNativeView();
+  NSView* web_contents =
+      app_window->web_contents()->GetNativeView().GetNativeNSView();
   EXPECT_EQ(200, [web_contents frame].size.width);
   EXPECT_EQ(201, [web_contents frame].size.height);
 
@@ -619,7 +636,7 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, FrameColor) {
   // components are CGFloats in the range [0, 1].
   extensions::AppWindow* app_window = CreateTestAppWindow(
       "{\"frame\": {\"color\": \"#FF0000\", \"inactiveColor\": \"#0000FF\"}}");
-  NSWindow* ns_window = app_window->GetNativeWindow();
+  NSWindow* ns_window = app_window->GetNativeWindow().GetNativeNSWindow();
   // No color correction in the default case.
   [ns_window setColorSpace:[NSColorSpace sRGBColorSpace]];
 

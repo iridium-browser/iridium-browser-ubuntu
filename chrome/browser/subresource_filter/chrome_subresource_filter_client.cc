@@ -28,7 +28,7 @@
 #include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "components/subresource_filter/core/common/activation_decision.h"
 #include "components/subresource_filter/core/common/activation_scope.h"
-#include "components/subresource_filter/mojom/subresource_filter.mojom.h"
+#include "components/subresource_filter/core/mojom/subresource_filter.mojom.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
@@ -46,10 +46,10 @@ ChromeSubresourceFilterClient::ChromeSubresourceFilterClient(
           Profile::FromBrowserContext(web_contents->GetBrowserContext()));
   settings_manager_ = context->settings_manager();
 
-  subresource_filter::ContentRulesetService* ruleset_service =
+  subresource_filter::RulesetService* ruleset_service =
       g_browser_process->subresource_filter_ruleset_service();
   subresource_filter::VerifiedRulesetDealer::Handle* dealer =
-      ruleset_service ? ruleset_service->ruleset_dealer() : nullptr;
+      ruleset_service ? ruleset_service->GetRulesetDealer() : nullptr;
   throttle_manager_ = std::make_unique<
       subresource_filter::ContentSubresourceFilterThrottleManager>(
       this, dealer, web_contents);
@@ -167,3 +167,5 @@ void ChromeSubresourceFilterClient::ShowUI(const GURL& url) {
   did_show_ui_for_navigation_ = true;
   settings_manager_->OnDidShowUI(url);
 }
+
+WEB_CONTENTS_USER_DATA_KEY_IMPL(ChromeSubresourceFilterClient)

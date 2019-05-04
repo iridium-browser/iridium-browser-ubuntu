@@ -5,6 +5,9 @@
 #ifndef MEDIA_GPU_ANDROID_MOCK_TEXTURE_OWNER_H_
 #define MEDIA_GPU_ANDROID_MOCK_TEXTURE_OWNER_H_
 
+#include <memory>
+
+#include "base/android/scoped_hardware_buffer_fence_sync.h"
 #include "media/gpu/android/texture_owner.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -32,9 +35,10 @@ class MockTextureOwner : public TextureOwner {
   MOCK_METHOD0(IgnorePendingRelease, void());
   MOCK_METHOD0(IsExpectingFrameAvailable, bool());
   MOCK_METHOD0(WaitForFrameAvailable, void());
+  MOCK_METHOD1(OnTextureDestroyed, void(gpu::gles2::AbstractTexture*));
 
-  std::unique_ptr<gl::GLImage::ScopedHardwareBuffer> GetAHardwareBuffer()
-      override {
+  std::unique_ptr<base::android::ScopedHardwareBufferFenceSync>
+  GetAHardwareBuffer() override {
     get_a_hardware_buffer_count++;
     return nullptr;
   }
@@ -45,7 +49,6 @@ class MockTextureOwner : public TextureOwner {
   bool FakeIsExpectingFrameAvailable() { return expecting_frame_available; }
   void FakeWaitForFrameAvailable() { expecting_frame_available = false; }
 
-  GLuint fake_texture_id;
   gl::GLContext* fake_context;
   gl::GLSurface* fake_surface;
   bool expecting_frame_available;

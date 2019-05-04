@@ -24,14 +24,11 @@ using content::BrowserThread;
 namespace chrome {
 namespace android {
 
-int64_t JNI_ProcessIdFeedbackSource_GetCurrentPid(
-    JNIEnv* env,
-    const JavaParamRef<jclass>& clazz) {
+int64_t JNI_ProcessIdFeedbackSource_GetCurrentPid(JNIEnv* env) {
   return base::GetCurrentProcId();
 }
 
 void JNI_ProcessIdFeedbackSource_Start(JNIEnv* env,
-                                       const JavaParamRef<jclass>& clazz,
                                        const JavaParamRef<jobject>& obj) {
   scoped_refptr<ProcessIdFeedbackSource> source =
       new ProcessIdFeedbackSource(env, obj);
@@ -68,7 +65,7 @@ void ProcessIdFeedbackSource::PrepareProcessIdsOnIOThread() {
 
   for (content::BrowserChildProcessHostIterator iter; !iter.Done(); ++iter)
     process_ids_[iter.GetData().process_type].push_back(
-        iter.GetData().GetHandle());
+        iter.GetData().GetProcess().Handle());
 
   base::PostTaskWithTraits(
       FROM_HERE, {BrowserThread::UI},

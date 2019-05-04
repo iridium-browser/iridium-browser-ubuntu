@@ -56,13 +56,9 @@ def compile_fn(api, checkout_root, out_dir):
   os            = api.vars.builder_cfg.get('os',            '')
   target_arch   = api.vars.builder_cfg.get('target_arch',   '')
 
-  clang_linux        = str(api.vars.slave_dir.join('clang_linux'))
-  linux_vulkan_sdk   = str(api.vars.slave_dir.join('linux_vulkan_sdk'))
-  win_toolchain = str(api.vars.slave_dir.join(
-    't', 'depot_tools', 'win_toolchain', 'vs_files',
-    '5454e45bf3764c03d3fc1024b3bf5bc41e3ab62c'))
-  win_vulkan_sdk = str(api.vars.slave_dir.join('win_vulkan_sdk'))
-  moltenvk = str(api.vars.slave_dir.join('moltenvk'))
+  clang_linux      = str(api.vars.slave_dir.join('clang_linux'))
+  win_toolchain    = str(api.vars.slave_dir.join('win_toolchain'))
+  moltenvk         = str(api.vars.slave_dir.join('moltenvk'))
 
   cc, cxx = None, None
   extra_cflags = []
@@ -134,6 +130,11 @@ def compile_fn(api, checkout_root, out_dir):
     else:
       cc, cxx = 'gcc', 'g++'
 
+  if 'Tidy' in extra_tokens:
+    # Swap in clang-tidy.sh for clang++, but update PATH so it can find clang++.
+    cxx = skia_dir.join("tools/clang-tidy.sh")
+    env['PATH'] = '%s:%%(PATH)s' % (clang_linux + '/bin')
+
   if 'Coverage' in extra_tokens:
     # See https://clang.llvm.org/docs/SourceBasedCodeCoverage.html for
     # more info on using llvm to gather coverage information.
@@ -187,26 +188,12 @@ def compile_fn(api, checkout_root, out_dir):
     args['skia_use_fontconfig'] = 'false'
   if 'ASAN' in extra_tokens or 'UBSAN' in extra_tokens:
     args['skia_enable_spirv_validation'] = 'false'
-  if 'Mini' in extra_tokens:
-    args.update({
-      'is_component_build':     'true',   # Proves we can link a coherent .so.
-      'is_official_build':      'true',   # No debug symbols, no tools.
-      'skia_enable_effects':    'false',
-      'skia_enable_gpu':        'true',
-      'skia_enable_pdf':        'false',
-      'skia_use_expat':         'false',
-      'skia_use_libjpeg_turbo': 'false',
-      'skia_use_libpng':        'false',
-      'skia_use_libwebp':       'false',
-      'skia_use_zlib':          'false',
-    })
   if 'NoDEPS' in extra_tokens:
     args.update({
       'is_official_build':         'true',
       'skia_enable_fontmgr_empty': 'true',
       'skia_enable_gpu':           'true',
 
-      'skia_enable_effects':    'false',
       'skia_enable_pdf':        'false',
       'skia_use_expat':         'false',
       'skia_use_freetype':      'false',
@@ -221,11 +208,8 @@ def compile_fn(api, checkout_root, out_dir):
   if 'Shared' in extra_tokens:
     args['is_component_build'] = 'true'
   if 'Vulkan' in extra_tokens and not 'Android' in extra_tokens:
+    args['skia_use_vulkan'] = 'true'
     args['skia_enable_vulkan_debug_layers'] = 'false'
-    if api.vars.is_linux:
-      args['skia_vulkan_sdk'] = '"%s"' % linux_vulkan_sdk
-    if 'Win' in os:
-      args['skia_vulkan_sdk'] = '"%s"' % win_vulkan_sdk
     if 'MoltenVK' in extra_tokens:
       args['skia_moltenvk_path'] = '"%s"' % moltenvk
   if 'Metal' in extra_tokens:

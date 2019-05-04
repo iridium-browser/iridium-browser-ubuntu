@@ -12,20 +12,15 @@
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
-#include "net/third_party/quic/core/quic_types.h"
-#include "third_party/webrtc/rtc_base/scoped_ref_ptr.h"
-
-namespace rtc {
-class RTCCertificate;
-struct SSLFingerprint;
-}  // namespace rtc
+#include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_transport_factory.h"
+#include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_transport_stats.h"
+#include "third_party/webrtc/api/scoped_refptr.h"
 
 namespace blink {
 
 class IceTransportProxy;
 class QuicStreamProxy;
 class QuicTransportHost;
-class P2PQuicTransportFactory;
 
 // This class allows the QUIC implementation (P2PQuicTransport) to run on a
 // thread different from the thread from which it is controlled. All
@@ -54,6 +49,11 @@ class QuicTransportProxy final {
                                     bool from_remote) {}
     // Called when the remote side has created a new stream.
     virtual void OnStream(QuicStreamProxy* stream_proxy) {}
+
+    // Called after the stats have been gathered on the host thread. The
+    // |request_id| maps to |request_id| used in GetStats().
+    virtual void OnStats(uint32_t request_id,
+                         const P2PQuicTransportStats& stats) {}
   };
 
   // Construct a Proxy with the underlying QUIC implementation running on the
@@ -66,19 +66,22 @@ class QuicTransportProxy final {
   QuicTransportProxy(
       Delegate* delegate,
       IceTransportProxy* ice_transport_proxy,
-      quic::Perspective perspective,
-      const std::vector<rtc::scoped_refptr<rtc::RTCCertificate>>& certificates,
-      std::unique_ptr<P2PQuicTransportFactory> quic_transport_factory);
+      std::unique_ptr<P2PQuicTransportFactory> quic_transport_factory,
+      const P2PQuicTransportConfig& config);
   ~QuicTransportProxy();
 
   scoped_refptr<base::SingleThreadTaskRunner> proxy_thread() const;
   scoped_refptr<base::SingleThreadTaskRunner> host_thread() const;
 
-  void Start(
-      std::vector<std::unique_ptr<rtc::SSLFingerprint>> remote_fingerprints);
+  void Start(P2PQuicTransport::StartConfig config);
   void Stop();
 
   QuicStreamProxy* CreateStream();
+
+  // Gathers stats on the host thread, then returns them asynchronously with
+  // Delegate::OnStats. The |request_id| is used to map the GetStats call to the
+  // returned stats.
+  void GetStats(uint32_t request_id);
 
   // QuicStreamProxy callbacks.
   void OnRemoveStream(QuicStreamProxy* stream_proxy);
@@ -90,6 +93,7 @@ class QuicTransportProxy final {
   void OnRemoteStopped();
   void OnConnectionFailed(const std::string& error_details, bool from_remote);
   void OnStream(std::unique_ptr<QuicStreamProxy> stream_proxy);
+  void OnStats(uint32_t request_id, const P2PQuicTransportStats& stats);
 
   // Since the Host is deleted on the host thread (Via OnTaskRunnerDeleter), as
   // long as this is alive it is safe to post tasks to it (using unretained).

@@ -35,7 +35,6 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/IR/TypeBuilder.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Object/Archive.h"
@@ -114,6 +113,11 @@ namespace {
       cl::desc("Performs lazy compilation on whole module boundaries "
                "rather than individual functions"),
       cl::init(false));
+
+  cl::list<std::string>
+      JITDylibs("jd",
+                cl::desc("Specifies the JITDylib to be used for any subsequent "
+                         "-extra-module arguments."));
 
   // The MCJIT supports building for a target address space separate from
   // the JIT compilation process. Use a forked process and a copying
@@ -312,23 +316,18 @@ static void addCygMingExtraModule(ExecutionEngine &EE, LLVMContext &Context,
   M->setTargetTriple(TargetTripleStr);
 
   // Create an empty function named "__main".
-  Function *Result;
-  if (TargetTriple.isArch64Bit()) {
-    Result = Function::Create(
-      TypeBuilder<int64_t(void), false>::get(Context),
-      GlobalValue::ExternalLinkage, "__main", M.get());
-  } else {
-    Result = Function::Create(
-      TypeBuilder<int32_t(void), false>::get(Context),
-      GlobalValue::ExternalLinkage, "__main", M.get());
-  }
+  Type *ReturnTy;
+  if (TargetTriple.isArch64Bit())
+    ReturnTy = Type::getInt64Ty(Context);
+  else
+    ReturnTy = Type::getInt32Ty(Context);
+  Function *Result =
+      Function::Create(FunctionType::get(ReturnTy, {}, false),
+                       GlobalValue::ExternalLinkage, "__main", M.get());
+
   BasicBlock *BB = BasicBlock::Create(Context, "__main", Result);
   Builder.SetInsertPoint(BB);
-  Value *ReturnVal;
-  if (TargetTriple.isArch64Bit())
-    ReturnVal = ConstantInt::get(Context, APInt(64, 0));
-  else
-    ReturnVal = ConstantInt::get(Context, APInt(32, 0));
+  Value *ReturnVal = ConstantInt::get(ReturnTy, 0);
   Builder.CreateRet(ReturnVal);
 
   // Add this new module to the ExecutionEngine.
@@ -506,7 +505,7 @@ int main(int argc, char **argv, char * const *envp) {
     if (!ArOrErr) {
       std::string Buf;
       raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(ArOrErr.takeError(), OS, "");
+      logAllUnhandledErrors(ArOrErr.takeError(), OS);
       OS.flush();
       errs() << Buf;
       exit(1);
@@ -696,7 +695,7 @@ int main(int argc, char **argv, char * const *envp) {
   return Result;
 }
 
-static orc::IRTransformLayer2::TransformFunction createDebugDumper() {
+static orc::IRTransformLayer::TransformFunction createDebugDumper() {
   switch (OrcDumpKind) {
   case DumpKind::NoDump:
     return [](orc::ThreadSafeModule TSM,
@@ -749,6 +748,8 @@ static orc::IRTransformLayer2::TransformFunction createDebugDumper() {
   llvm_unreachable("Unknown DumpKind");
 }
 
+static void exitOnLazyCallThroughFailure() { exit(1); }
+
 int runOrcLazyJIT(const char *ProgName) {
   // Start setting up the JIT environment.
 
@@ -778,10 +779,14 @@ int runOrcLazyJIT(const char *ProgName) {
                         : None);
 
   DataLayout DL = ExitOnErr(JTMB.getDefaultDataLayoutForTarget());
-  auto J = ExitOnErr(orc::LLLazyJIT::Create(std::move(JTMB), DL, LazyJITCompileThreads));
+
+  auto J = ExitOnErr(orc::LLLazyJIT::Create(
+      std::move(JTMB), DL,
+      pointerToJITTargetAddress(exitOnLazyCallThroughFailure),
+      LazyJITCompileThreads));
 
   if (PerModuleLazy)
-    J->setPartitionFunction(orc::CompileOnDemandLayer2::compileWholeModule);
+    J->setPartitionFunction(orc::CompileOnDemandLayer::compileWholeModule);
 
   auto Dump = createDebugDumper();
 
@@ -793,23 +798,42 @@ int runOrcLazyJIT(const char *ProgName) {
     }
     return Dump(std::move(TSM), R);
   });
-  J->getMainJITDylib().setFallbackDefinitionGenerator(ExitOnErr(
-      orc::DynamicLibraryFallbackGenerator::CreateForCurrentProcess(DL)));
+  J->getMainJITDylib().setGenerator(
+      ExitOnErr(orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(DL)));
 
   orc::MangleAndInterner Mangle(J->getExecutionSession(), DL);
-  orc::LocalCXXRuntimeOverrides2 CXXRuntimeOverrides;
+  orc::LocalCXXRuntimeOverrides CXXRuntimeOverrides;
   ExitOnErr(CXXRuntimeOverrides.enable(J->getMainJITDylib(), Mangle));
 
   // Add the main module.
   ExitOnErr(J->addLazyIRModule(std::move(MainModule)));
 
-  // Add any extra modules.
-  for (auto &ModulePath : ExtraModules) {
-    auto M = parseIRFile(ModulePath, Err, *TSCtx.getContext());
-    if (!M)
-      reportError(Err, ProgName);
+  // Create JITDylibs and add any extra modules.
+  {
+    // Create JITDylibs, keep a map from argument index to dylib. We will use
+    // -extra-module argument indexes to determine what dylib to use for each
+    // -extra-module.
+    std::map<unsigned, orc::JITDylib *> IdxToDylib;
+    IdxToDylib[0] = &J->getMainJITDylib();
+    for (auto JDItr = JITDylibs.begin(), JDEnd = JITDylibs.end();
+         JDItr != JDEnd; ++JDItr) {
+      IdxToDylib[JITDylibs.getPosition(JDItr - JITDylibs.begin())] =
+          &J->createJITDylib(*JDItr);
+    }
 
-    ExitOnErr(J->addLazyIRModule(orc::ThreadSafeModule(std::move(M), TSCtx)));
+    for (auto EMItr = ExtraModules.begin(), EMEnd = ExtraModules.end();
+         EMItr != EMEnd; ++EMItr) {
+      auto M = parseIRFile(*EMItr, Err, *TSCtx.getContext());
+      if (!M)
+        reportError(Err, ProgName);
+
+      auto EMIdx = ExtraModules.getPosition(EMItr - ExtraModules.begin());
+      assert(EMIdx != 0 && "ExtraModule should have index > 0");
+      auto JDItr = std::prev(IdxToDylib.lower_bound(EMIdx));
+      auto &JD = *JDItr->second;
+      ExitOnErr(
+          J->addLazyIRModule(JD, orc::ThreadSafeModule(std::move(M), TSCtx)));
+    }
   }
 
   // Add the objects.
@@ -836,6 +860,8 @@ int runOrcLazyJIT(const char *ProgName) {
       reinterpret_cast<EntryPointPtr>(static_cast<uintptr_t>(EntryPointSym.getAddress()));
     AltEntryThreads.push_back(std::thread([EntryPoint]() { EntryPoint(); }));
   }
+
+  J->getExecutionSession().dump(llvm::dbgs());
 
   // Run main.
   auto MainSym = ExitOnErr(J->lookup("main"));

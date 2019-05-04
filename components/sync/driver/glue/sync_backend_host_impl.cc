@@ -12,6 +12,8 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/task_runner_util.h"
+#include "build/build_config.h"
+#include "components/invalidation/impl/invalidation_switches.h"
 #include "components/invalidation/public/invalidation_service.h"
 #include "components/invalidation/public/object_id_invalidation_map.h"
 #include "components/sync/base/experiments.h"
@@ -114,12 +116,12 @@ void SyncBackendHostImpl::StartSyncingWithServer() {
                                 last_poll_time));
 }
 
-void SyncBackendHostImpl::SetEncryptionPassphrase(const std::string& passphrase,
-                                                  bool is_explicit) {
+void SyncBackendHostImpl::SetEncryptionPassphrase(
+    const std::string& passphrase) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   sync_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&SyncBackendHostCore::DoSetEncryptionPassphrase,
-                                core_, passphrase, is_explicit));
+                                core_, passphrase));
 }
 
 void SyncBackendHostImpl::SetDecryptionPassphrase(
@@ -157,6 +159,7 @@ void SyncBackendHostImpl::Shutdown(ShutdownReason reason) {
     invalidator_->UnregisterInvalidationHandler(this);
     invalidator_ = nullptr;
   }
+  last_enabled_types_.Clear();
   invalidation_handler_registered_ = false;
 
   model_type_connector_.reset();
@@ -239,12 +242,6 @@ void SyncBackendHostImpl::HasUnsyncedItemsForTest(
       std::move(cb));
 }
 
-bool SyncBackendHostImpl::IsCryptographerReady(
-    const BaseTransaction* trans) const {
-  return initialized() && trans->GetCryptographer() &&
-         trans->GetCryptographer()->is_ready();
-}
-
 void SyncBackendHostImpl::GetModelSafeRoutingInfo(
     ModelSafeRoutingInfo* out) const {
   if (initialized()) {
@@ -297,9 +294,23 @@ void SyncBackendHostImpl::FinishConfigureDataTypesOnFrontendLoop(
     const ModelTypeSet succeeded_configuration_types,
     const ModelTypeSet failed_configuration_types,
     const base::Callback<void(ModelTypeSet, ModelTypeSet)>& ready_task) {
+  last_enabled_types_ = enabled_types;
   if (invalidator_) {
+    ModelTypeSet invalidation_enabled_types(enabled_types);
+#if defined(OS_ANDROID)
+    // TODO(melandory): On Android, we should call
+    // SetInvalidationsForSessionsEnabled(falls) on start-up when feature is
+    // enabled. Once it's dome remove checking of the feature from here.
+    if (base::FeatureList::IsEnabled(
+            invalidation::switches::kFCMInvalidations) &&
+        !sessions_invalidation_enabled_) {
+      invalidation_enabled_types.Remove(syncer::SESSIONS);
+      invalidation_enabled_types.Remove(syncer::FAVICON_IMAGES);
+      invalidation_enabled_types.Remove(syncer::FAVICON_TRACKING);
+    }
+#endif
     bool success = invalidator_->UpdateRegisteredInvalidationIds(
-        this, ModelTypeSetToObjectIdSet(enabled_types));
+        this, ModelTypeSetToObjectIdSet(invalidation_enabled_types));
     DCHECK(success);
   }
 
@@ -320,7 +331,9 @@ void SyncBackendHostImpl::HandleInitializationSuccessOnFrontendLoop(
     const WeakHandle<DataTypeDebugInfoListener> debug_info_listener,
     std::unique_ptr<ModelTypeConnector> model_type_connector,
     const std::string& cache_guid,
-    const std::string& session_name) {
+    const std::string& session_name,
+    const std::string& birthday,
+    const std::string& bag_of_chips) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   model_type_connector_ = std::move(model_type_connector);
@@ -341,14 +354,17 @@ void SyncBackendHostImpl::HandleInitializationSuccessOnFrontendLoop(
   // the host to ensure they're visible in the customize screen.
   AddExperimentalTypes();
   host_->OnEngineInitialized(initial_types, js_backend, debug_info_listener,
-                             cache_guid, session_name, true);
+                             cache_guid, session_name, birthday, bag_of_chips,
+                             /*success=*/true);
 }
 
 void SyncBackendHostImpl::HandleInitializationFailureOnFrontendLoop() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   host_->OnEngineInitialized(ModelTypeSet(), WeakHandle<JsBackend>(),
                              WeakHandle<DataTypeDebugInfoListener>(),
-                             /*cache_guid=*/"", /*session_name=*/"", false);
+                             /*cache_guid=*/"", /*session_name=*/"",
+                             /*birthday=*/"", /*bag_of_chips=*/"",
+                             /*success=*/false);
 }
 
 void SyncBackendHostImpl::HandleSyncCycleCompletedOnFrontendLoop(
@@ -361,12 +377,6 @@ void SyncBackendHostImpl::HandleSyncCycleCompletedOnFrontendLoop(
     AddExperimentalTypes();
     host_->OnSyncCycleCompleted(snapshot);
   }
-}
-
-void SyncBackendHostImpl::RetryConfigurationOnFrontendLoop(
-    const base::Closure& retry_callback) {
-  SDVLOG(1) << "Failed to complete configuration, informing of retry.";
-  retry_callback.Run();
 }
 
 void SyncBackendHostImpl::HandleActionableErrorEventOnFrontendLoop(
@@ -453,6 +463,30 @@ void SyncBackendHostImpl::OnCookieJarChanged(bool account_mismatch,
   sync_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&SyncBackendHostCore::DoOnCookieJarChanged,
                                 core_, account_mismatch, empty_jar, callback));
+}
+
+void SyncBackendHostImpl::SetInvalidationsForSessionsEnabled(bool enabled) {
+  sessions_invalidation_enabled_ = enabled;
+  // |last_enabled_types_| contains all datatypes, for which user
+  // has enabled Sync. So by construction, it cointains also noisy datatypes
+  // if nessesary.
+  ModelTypeSet enabled_for_invalidation(last_enabled_types_);
+  if (!enabled) {
+    enabled_for_invalidation.Remove(syncer::SESSIONS);
+    enabled_for_invalidation.Remove(syncer::FAVICON_IMAGES);
+    enabled_for_invalidation.Remove(syncer::FAVICON_TRACKING);
+  }
+  bool success = invalidator_->UpdateRegisteredInvalidationIds(
+      this, ModelTypeSetToObjectIdSet(enabled_for_invalidation));
+  DCHECK(success);
+}
+
+void SyncBackendHostImpl::OnInvalidatorClientIdChange(
+    const std::string& client_id) {
+  sync_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&SyncBackendHostCore::DoOnInvalidatorClientIdChange, core_,
+                     client_id));
 }
 
 void SyncBackendHostImpl::ClearServerDataDoneOnFrontendLoop(

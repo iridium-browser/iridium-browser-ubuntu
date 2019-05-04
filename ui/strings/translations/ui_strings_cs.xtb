@@ -5,6 +5,7 @@
 <translation id="1127811143501539442">{DAYS,plural, =1{Před 1 dnem}few{Před # dny}many{Před # dne}other{Před # dny}}</translation>
 <translation id="1156623771253174079">{SECONDS,plural, =1{před minutou}few{před # minutami}many{před # minuty}other{před # minutami}}</translation>
 <translation id="1169783199079129864">{MINUTES,plural, =1{1 min}few{# min}many{# min}other{# min}}</translation>
+<translation id="1181037720776840403">Odebrat</translation>
 <translation id="1243314992276662751">Nahrát</translation>
 <translation id="1269641567813814718">Win</translation>
 <translation id="1293699935367580298">Klávesa Esc</translation>
@@ -30,16 +31,19 @@
 <translation id="1871244248791675517">Klávesa Ins</translation>
 <translation id="1884435127456172652"><ph name="NUMBER" /> %</translation>
 <translation id="1901303067676059328">&amp;Vybrat vše</translation>
+<translation id="1938451708255335766">Chcete-li upravit kompaktnost zobrazení okna, restartujte aplikaci.</translation>
 <translation id="2141853158323869627">{DAYS,plural, =1{1 d}few{# d}many{# d}other{# d}}</translation>
 <translation id="2148716181193084225">Dnes</translation>
 <translation id="2168039046890040389">Klávesa PageUp</translation>
 <translation id="2190355936436201913">(prázdné)</translation>
+<translation id="2192232475740621500">Použít nízkou hustotu</translation>
 <translation id="219905428774326614">Spouštěč, všechny aplikace</translation>
 <translation id="2267918077332197517">Blokovat všechna oznámení z tohoto webu</translation>
 <translation id="2289052229480071835">Klepněte na cíle klepnutí na obrazovce.</translation>
 <translation id="2295140143284145483">Průzkum</translation>
 <translation id="2297836609126180313"><ph name="QUANTITY" /> TB/s</translation>
 <translation id="24452542372838207">Rozbalit oznámení</translation>
+<translation id="2445449901874883781">Použít vysokou hustotu</translation>
 <translation id="2482878487686419369">Oznámení</translation>
 <translation id="2497284189126895209">Všechny soubory</translation>
 <translation id="2515586267016047495">Alt</translation>
@@ -60,7 +64,10 @@
 <translation id="3234408098842461169">Klávesa šipka dolů</translation>
 <translation id="3291688615589870984">{DAYS,plural, =1{1 den}few{# dny}many{# dne}other{# dnů}}</translation>
 <translation id="335581015389089642">Řeč</translation>
+<translation id="3462241349431650993">Pokud tento návrh skryjete, již se vám ve vašem účtu na žádném z vašich zařízení znovu nezobrazí.</translation>
+<translation id="3479552764303398839">Teď ne</translation>
 <translation id="3600566671520689681">{DAYS,plural, =1{Zbývá 1 den}few{Zbývají # dny}many{Zbývá # dne}other{Zbývá # dnů}}</translation>
+<translation id="3608915363409716668">&gt; <ph name="MAXIMUM_VALUE" /></translation>
 <translation id="3618849550573277856">Vyhledat „<ph name="LOOKUP_STRING" />“</translation>
 <translation id="364720409959344976">Vyberte složku pro nahrávání</translation>
 <translation id="3660179305079774227">Klávesa šipka nahoru</translation>
@@ -99,6 +106,7 @@
 <translation id="5613020302032141669">Klávesa šipka vlevo</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{1 min}few{# min}many{# min}other{# min}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{1 den a  }few{# dny a  }many{# dne a  }other{# dnů a  }}</translation>
+<translation id="5895138241574237353">Restartovat</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{Zbývá 1 sekunda}few{Zbývají # sekundy}many{Zbývá # sekundy}other{Zbývá # sekund}}</translation>
 <translation id="5941711191222866238">Minimalizovat</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 hodina}few{# hodiny}many{# hodiny}other{# hodin}}</translation>
@@ -120,6 +128,7 @@
 <translation id="6483402905448010557">{SECONDS,plural, =1{před sekundou}few{před # sekundami}many{před # sekundy}other{před # sekundami}}</translation>
 <translation id="654149438358937226">Blokovat všechna oznámení</translation>
 <translation id="6567071839949112727">kliknutí na nadřazený prvek</translation>
+<translation id="6578407462441924264">Bez názvu</translation>
 <translation id="6612467943526193239">Kalibraci ukončíte stisknutím klávesy Esc.</translation>
 <translation id="6620110761915583480">Uložit soubor</translation>
 <translation id="6699343763173986273">Média – další skladba</translation>
@@ -154,6 +163,7 @@
 <translation id="8087772101393322318"><ph name="KEY_MODIFIER_NAME" />+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{Před 1 hodinou}few{Před # hodinami}many{Před # hodiny}other{Před # hodinami}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{Zbývá 1 s}few{Zbývají # s}many{Zbývá # s}other{Zbývá # s}}</translation>
+<translation id="8152264887680882389"><ph name="TEXT" />, automatické doplnění</translation>
 <translation id="815598010540052116">Posuv dolů</translation>
 <translation id="8179976553408161302">Enter</translation>
 <translation id="8210608804940886430">Klávesa PageDown</translation>
@@ -165,6 +175,7 @@
 <translation id="838869780401515933">zaškrtnout</translation>
 <translation id="8393700583063109961">Odeslat zprávu</translation>
 <translation id="8394908167088220973">Média – přehrát/pozastavit</translation>
+<translation id="8420205633584771378">Odstranit tento návrh?</translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1 r}few{# r}many{# r}other{# r}}</translation>
 <translation id="8602707065186045623">Soubor <ph name="SAVEAS_EXTENSION_TYPE" /> (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> kB/s</translation>
@@ -177,7 +188,6 @@
 <translation id="8841375032071747811">Tlačítko Zpět</translation>
 <translation id="8901569739625249689"><ph name="QUANTITY" /> kB</translation>
 <translation id="9002566407876343676">otevřít</translation>
-<translation id="9038489124413477075">Nepojmenovaná složka</translation>
 <translation id="9044832324875206639">{SECONDS,plural, =1{1 s}few{# s}many{# s}other{# s}}</translation>
 <translation id="9059834730836941392">Sbalit oznámení</translation>
 <translation id="9150735707954472829">Karta</translation>

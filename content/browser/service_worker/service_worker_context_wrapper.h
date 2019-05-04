@@ -107,7 +107,7 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
 
   // ServiceWorkerContextCoreObserver implementation:
   void OnRegistrationCompleted(int64_t registration_id,
-                               const GURL& pattern) override;
+                               const GURL& scope) override;
   void OnNoControllees(int64_t version_id, const GURL& scope) override;
   void OnVersionStateChanged(int64_t version_id,
                              const GURL& scope,
@@ -131,15 +131,20 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
       CountExternalRequestsCallback callback) override;
   void GetAllOriginsInfo(GetUsageInfoCallback callback) override;
   void DeleteForOrigin(const GURL& origin, ResultCallback callback) override;
+  void PerformStorageCleanup(base::OnceClosure callback) override;
   void CheckHasServiceWorker(const GURL& url,
                              const GURL& other_url,
                              CheckHasServiceWorkerCallback callback) override;
   void ClearAllServiceWorkersForTest(base::OnceClosure callback) override;
-  void StartWorkerForPattern(const GURL& pattern,
-                             StartWorkerCallback info_callback,
-                             base::OnceClosure failure_callback) override;
+  void StartWorkerForScope(const GURL& scope,
+                           StartWorkerCallback info_callback,
+                           base::OnceClosure failure_callback) override;
+  void StartServiceWorkerAndDispatchMessage(
+      const GURL& scope,
+      blink::TransferableMessage message,
+      ResultCallback result_callback) override;
   void StartServiceWorkerAndDispatchLongRunningMessage(
-      const GURL& pattern,
+      const GURL& scope,
       blink::TransferableMessage message,
       ResultCallback result_callback) override;
   void StartServiceWorkerForNavigationHint(
@@ -187,14 +192,14 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   //    activated.
   //
   // Must be called from the IO thread.
-  void FindReadyRegistrationForPattern(const GURL& scope,
-                                       FindRegistrationCallback callback);
+  void FindReadyRegistrationForScope(const GURL& scope,
+                                     FindRegistrationCallback callback);
 
-  // Similar to FindReadyRegistrationForPattern, but in the case no waiting or
+  // Similar to FindReadyRegistrationForScope, but in the case no waiting or
   // active worker is found (i.e., there is only an installing worker),
   // |callback| is called without waiting for the worker to reach active.
-  void FindRegistrationForPattern(const GURL& scope,
-                                  FindRegistrationCallback callback);
+  void FindRegistrationForScope(const GURL& scope,
+                                FindRegistrationCallback callback);
 
   // Returns the registration for |registration_id|. It is guaranteed that the
   // returned registration has the activated worker.
@@ -264,11 +269,11 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
 
   // This function can be called from any thread, but the callback will always
   // be called on the UI thread.
-  void StartServiceWorker(const GURL& pattern, StatusCallback callback);
+  void StartServiceWorker(const GURL& scope, StatusCallback callback);
 
   // These methods can be called from any thread.
-  void SkipWaitingWorker(const GURL& pattern);
-  void UpdateRegistration(const GURL& pattern);
+  void SkipWaitingWorker(const GURL& scope);
+  void UpdateRegistration(const GURL& scope);
   void SetForceUpdateOnPageLoad(bool force_update_on_page_load);
   // Different from AddObserver/RemoveObserver(ServiceWorkerContextObserver*).
   // But we must keep the same name, or else base::ScopedObserver breaks.
@@ -286,7 +291,8 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   // Must be called on the IO thread.
   base::WeakPtr<ServiceWorkerProviderHost> PreCreateHostForSharedWorker(
       int process_id,
-      mojom::ServiceWorkerProviderInfoForSharedWorkerPtr* out_provider_info);
+      blink::mojom::ServiceWorkerProviderInfoForSharedWorkerPtr*
+          out_provider_info);
 
  private:
   friend class BackgroundSyncManagerTest;
@@ -294,6 +300,7 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   friend class EmbeddedWorkerTestHelper;
   friend class EmbeddedWorkerBrowserTest;
   friend class FakeServiceWorkerContextWrapper;
+  friend class ServiceWorkerClientsApiBrowserTest;
   friend class ServiceWorkerDispatcherHost;
   friend class ServiceWorkerInternalsUI;
   friend class ServiceWorkerNavigationHandleCore;
@@ -314,9 +321,9 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
 
   // If |include_installing_version| is true, |callback| is called if there is
   // an installing version with no waiting or active version.
-  void FindRegistrationForPatternImpl(const GURL& scope,
-                                      bool include_installing_version,
-                                      FindRegistrationCallback callback);
+  void FindRegistrationForScopeImpl(const GURL& scope,
+                                    bool include_installing_version,
+                                    FindRegistrationCallback callback);
 
   void DidFindRegistrationForFindReady(
       FindRegistrationCallback callback,
@@ -358,7 +365,7 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
       scoped_refptr<ServiceWorkerRegistration> registration);
 
   void DidStartServiceWorkerForNavigationHint(
-      const GURL& pattern,
+      const GURL& scope,
       StartServiceWorkerForNavigationHintCallback callback,
       blink::ServiceWorkerStatusCode code);
 
@@ -370,18 +377,20 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
       base::OnceClosure callback,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner_for_callback);
 
-  void DidFindRegistrationForLongRunningMessage(
+  void DidFindRegistrationForMessageDispatch(
       blink::TransferableMessage message,
       const GURL& source_origin,
       ResultCallback result_callback,
+      bool is_long_running_message,
       blink::ServiceWorkerStatusCode service_worker_status,
       scoped_refptr<ServiceWorkerRegistration> registration);
 
-  void DidStartServiceWorkerForLongRunningMessage(
+  void DidStartServiceWorkerForMessageDispatch(
       blink::TransferableMessage message,
       const GURL& source_origin,
       scoped_refptr<ServiceWorkerRegistration> registration,
       ServiceWorkerContext::ResultCallback result_callback,
+      bool is_long_running_message,
       blink::ServiceWorkerStatusCode service_worker_status);
 
   void SendActiveWorkerMessage(

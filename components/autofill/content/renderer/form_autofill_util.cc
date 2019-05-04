@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -19,6 +20,7 @@
 #include "base/no_destructor.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -28,6 +30,7 @@
 #include "components/autofill/core/common/autofill_regexes.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/autofill_util.h"
+#include "components/autofill/core/common/button_title_type.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "third_party/blink/public/platform/url_conversion.h"
@@ -67,6 +70,18 @@ namespace form_util {
 const size_t kMaxParseableFields = 200;
 
 namespace {
+
+// Maximal length of a button's title.
+const int kMaxLengthForSingleButtonTitle = 30;
+// Maximal length of all button titles.
+const int kMaxLengthForAllButtonTitles = 200;
+
+// Text features to detect form submission buttons. Features are selected based
+// on analysis of real forms and their buttons.
+// TODO(crbug.com/910546): Consider to add more features (e.g. non-English
+// features).
+const char* const kButtonFeatures[] = {"button", "btn", "submit",
+                                       "boton" /* "button" in Spanish */};
 
 // A bit field mask for FillForm functions to not fill some fields.
 enum FieldFilterMask {
@@ -117,7 +132,8 @@ bool IsElementInControlElementSet(
   return base::ContainsValue(control_elements, form_control_element);
 }
 
-bool IsElementInsideFormOrFieldSet(const WebElement& element) {
+bool IsElementInsideFormOrFieldSet(const WebElement& element,
+                                   bool consider_fieldset_tags) {
   for (WebNode parent_node = element.ParentNode(); !parent_node.IsNull();
        parent_node = parent_node.ParentNode()) {
     if (!parent_node.IsElementNode())
@@ -125,7 +141,7 @@ bool IsElementInsideFormOrFieldSet(const WebElement& element) {
 
     WebElement cur_element = parent_node.To<WebElement>();
     if (cur_element.HasHTMLTagName("form") ||
-        cur_element.HasHTMLTagName("fieldset")) {
+        (consider_fieldset_tags && cur_element.HasHTMLTagName("fieldset"))) {
       return true;
     }
   }
@@ -354,6 +370,68 @@ bool InferLabelFromSibling(const WebFormControlElement& element,
     return true;
   }
   return false;
+}
+
+// Helper function to add a button's |title| to the |list|.
+void AddButtonTitleToList(base::string16 title,
+                          ButtonTitleType button_type,
+                          ButtonTitleList* list) {
+  title = base::CollapseWhitespace(std::move(title), false);
+  if (title.empty())
+    return;
+  TruncateString(&title, kMaxLengthForSingleButtonTitle);
+  list->push_back(std::make_pair(std::move(title), button_type));
+}
+
+// Returns true iff |attribute| contains one of |kButtonFeatures|.
+bool AttributeHasButtonFeature(const WebString& attribute) {
+  if (attribute.IsNull())
+    return false;
+  std::string value = attribute.Utf8();
+  std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+  for (const char* const button_feature : kButtonFeatures) {
+    if (value.find(button_feature, 0) != std::string::npos)
+      return true;
+  }
+  return false;
+}
+
+// Returns true if |element|'s id, name or css class contain |kButtonFeatures|.
+bool ElementAttributesHasButtonFeature(const WebElement& element) {
+  return AttributeHasButtonFeature(element.GetAttribute("id")) ||
+         AttributeHasButtonFeature(element.GetAttribute("name")) ||
+         AttributeHasButtonFeature(element.GetAttribute("class"));
+}
+
+// Finds elements from |elements| that contains |kButtonFeatures|, adds them to
+// |list| and updates the |total_length| of the |list|'s items.
+// If |extract_value_attribute|, the "value" attribute is extracted as a button
+// title. Otherwise, |WebElement::TextContent| (aka innerText in Javascript) is
+// extracted as a title.
+void FindElementsWithButtonFeatures(const WebElementCollection& elements,
+                                    bool only_formless_elements,
+                                    ButtonTitleType button_type,
+                                    bool extract_value_attribute,
+                                    ButtonTitleList* list) {
+  static base::NoDestructor<WebString> kValue("value");
+  for (WebElement item = elements.FirstItem(); !item.IsNull();
+       item = elements.NextItem()) {
+    if (!ElementAttributesHasButtonFeature(item))
+      continue;
+    if (only_formless_elements &&
+        IsElementInsideFormOrFieldSet(item,
+                                      false /* consider_fieldset_tags */)) {
+      continue;
+    }
+    base::string16 title =
+        extract_value_attribute
+            ? (item.HasAttribute(*kValue) ? item.GetAttribute(*kValue).Utf16()
+                                          : base::string16())
+            : item.TextContent().Utf16();
+    if (extract_value_attribute && title.empty())
+      title = item.TextContent().Utf16();
+    AddButtonTitleToList(std::move(title), button_type, list);
+  }
 }
 
 // Helper for |InferLabelForElement()| that infers a label, if possible, from
@@ -779,6 +857,109 @@ bool InferLabelForElement(const WebFormControlElement& element,
   return false;
 }
 
+// Removes the duplicate titles and limits totals length. The order of the list
+// is preserved as first elements are more reliable features than following
+// ones.
+void RemoveDuplicatesAndLimitTotalLength(ButtonTitleList* result) {
+  std::set<ButtonTitleInfo> already_added;
+  ButtonTitleList unique_titles;
+  int total_length = 0;
+  for (auto title : *result) {
+    if (already_added.find(title) != already_added.end())
+      continue;
+    already_added.insert(title);
+
+    total_length += title.first.length();
+    if (total_length > kMaxLengthForAllButtonTitles) {
+      int new_length =
+          title.first.length() - (total_length - kMaxLengthForAllButtonTitles);
+      TruncateString(&title.first, new_length);
+    }
+    unique_titles.push_back(std::move(title));
+
+    if (total_length >= kMaxLengthForAllButtonTitles)
+      break;
+  }
+  *result = std::move(unique_titles);
+}
+
+// Infer button titles enclosed by |root_element|. |root_element| may be a
+// <form> or a <body> if there are <input>s that are not enclosed in a <form>
+// element.
+ButtonTitleList InferButtonTitlesForForm(const WebElement& root_element) {
+  static base::NoDestructor<WebString> kA("a");
+  static base::NoDestructor<WebString> kButton("button");
+  static base::NoDestructor<WebString> kDiv("div");
+  static base::NoDestructor<WebString> kForm("form");
+  static base::NoDestructor<WebString> kInput("input");
+  static base::NoDestructor<WebString> kSpan("span");
+  static base::NoDestructor<WebString> kSubmit("submit");
+
+  // If the |root_element| is not a <form>, ignore the elements inclosed in a
+  // <form>.
+  bool only_formless_elements = !root_element.HasHTMLTagName(*kForm);
+
+  ButtonTitleList result;
+  WebElementCollection input_elements =
+      root_element.GetElementsByHTMLTagName(*kInput);
+  int total_length = 0;
+  for (WebElement item = input_elements.FirstItem();
+       !item.IsNull() && total_length < kMaxLengthForAllButtonTitles;
+       item = input_elements.NextItem()) {
+    DCHECK(item.IsFormControlElement());
+    WebFormControlElement control_element =
+        item.ToConst<WebFormControlElement>();
+    if (only_formless_elements && !control_element.Form().IsNull())
+      continue;
+    bool is_submit_input =
+        control_element.FormControlTypeForAutofill() == *kSubmit;
+    bool is_button_input =
+        control_element.FormControlTypeForAutofill() == *kButton;
+    if (!is_submit_input && !is_button_input)
+      continue;
+    base::string16 title = control_element.Value().Utf16();
+    AddButtonTitleToList(std::move(title),
+                         is_submit_input
+                             ? ButtonTitleType::INPUT_ELEMENT_SUBMIT_TYPE
+                             : ButtonTitleType::INPUT_ELEMENT_BUTTON_TYPE,
+                         &result);
+  }
+  WebElementCollection buttons =
+      root_element.GetElementsByHTMLTagName(*kButton);
+  for (WebElement item = buttons.FirstItem(); !item.IsNull();
+       item = buttons.NextItem()) {
+    WebString type_attribute = item.GetAttribute("type");
+    if (!type_attribute.IsNull() && type_attribute != *kButton &&
+        type_attribute != *kSubmit) {
+      // Neither type='submit' nor type='button'. Skip this button.
+      continue;
+    }
+    if (only_formless_elements &&
+        IsElementInsideFormOrFieldSet(item,
+                                      false /* consider_fieldset_tags */)) {
+      continue;
+    }
+    bool is_submit_type = type_attribute.IsNull() || type_attribute == *kSubmit;
+    base::string16 title = item.TextContent().Utf16();
+    AddButtonTitleToList(std::move(title),
+                         is_submit_type
+                             ? ButtonTitleType::BUTTON_ELEMENT_SUBMIT_TYPE
+                             : ButtonTitleType::BUTTON_ELEMENT_BUTTON_TYPE,
+                         &result);
+  }
+  FindElementsWithButtonFeatures(
+      root_element.GetElementsByHTMLTagName(*kA), only_formless_elements,
+      ButtonTitleType::HYPERLINK, true /* extract_value_attribute */, &result);
+  FindElementsWithButtonFeatures(root_element.GetElementsByHTMLTagName(*kDiv),
+                                 only_formless_elements, ButtonTitleType::DIV,
+                                 false /* extract_value_attribute */, &result);
+  FindElementsWithButtonFeatures(root_element.GetElementsByHTMLTagName(*kSpan),
+                                 only_formless_elements, ButtonTitleType::SPAN,
+                                 false /* extract_value_attribute */, &result);
+  RemoveDuplicatesAndLimitTotalLength(&result);
+  return result;
+}
+
 // Fills |option_strings| with the values of the <option> elements present in
 // |select_element|.
 void GetOptionStringsFromElement(const WebSelectElement& select_element,
@@ -845,6 +1026,8 @@ void ForEachMatchingFormFieldCommon(
   // are appended to the end of the form and are not visible.
   for (size_t i = 0; i < control_elements->size(); ++i) {
     WebFormControlElement* element = &(*control_elements)[i];
+    element->SetAutofillSection(WebString::FromUTF8(data.fields[i].section));
+
     bool is_initiating_element = (*element == initiating_element);
 
     // Only autofill empty fields (or those with the field's default value
@@ -963,7 +1146,6 @@ void FillFormField(const FormFieldData& data,
     return;
 
   field->SetAutofillState(WebAutofillState::kAutofilled);
-  field->SetAutofillSection(WebString::FromUTF8(data.section));
 
   if (is_initiating_node &&
       ((IsTextInput(input_element) || IsMonthInput(input_element)) ||
@@ -1422,7 +1604,7 @@ bool IsWebElementVisible(const blink::WebElement& element) {
   return element.IsFocusable();
 }
 
-const base::string16 GetFormIdentifier(const WebFormElement& form) {
+base::string16 GetFormIdentifier(const WebFormElement& form) {
   base::string16 identifier = form.GetName().Utf16();
   static base::NoDestructor<WebString> kId("id");
   if (identifier.empty())
@@ -1475,6 +1657,7 @@ void WebFormControlElementToFormField(
   DCHECK(!element.IsNull());
   static base::NoDestructor<WebString> kAutocomplete("autocomplete");
   static base::NoDestructor<WebString> kId("id");
+  static base::NoDestructor<WebString> kName("name");
   static base::NoDestructor<WebString> kRole("role");
   static base::NoDestructor<WebString> kPlaceholder("placeholder");
   static base::NoDestructor<WebString> kClass("class");
@@ -1482,10 +1665,8 @@ void WebFormControlElementToFormField(
   // Save both id and name attributes, if present. If there is only one of them,
   // it will be saved to |name|. See HTMLFormControlElement::nameForAutofill.
   field->name = element.NameForAutofill().Utf16();
-  base::string16 id = element.GetAttribute(*kId).Utf16();
-  if (id != field->name)
-    field->id = id;
-
+  field->id_attribute = element.GetAttribute(*kId).Utf16();
+  field->name_attribute = element.GetAttribute(*kName).Utf16();
   field->unique_renderer_id = element.UniqueRendererFormControlId();
   field->form_control_type = element.FormControlTypeForAutofill().Utf8();
   field->autocomplete_attribute = element.GetAttribute(*kAutocomplete).Utf8();
@@ -1508,6 +1689,9 @@ void WebFormControlElementToFormField(
     field->properties_mask = field_data_manager->GetFieldPropertiesMask(
         element.UniqueRendererFormControlId());
   }
+
+  field->aria_label = GetAriaLabel(element.GetDocument(), element);
+  field->aria_description = GetAriaDescription(element.GetDocument(), element);
 
   if (!IsAutofillableElement(element))
     return;
@@ -1640,7 +1824,8 @@ std::vector<WebFormControlElement> GetUnownedFormFieldElements(
     }
 
     if (fieldsets && element.HasHTMLTagName("fieldset") &&
-        !IsElementInsideFormOrFieldSet(element)) {
+        !IsElementInsideFormOrFieldSet(element,
+                                       true /* consider_fieldset_tags */)) {
       fieldsets->push_back(element);
     }
   }
@@ -1976,6 +2161,10 @@ bool InferLabelForElementForTesting(const WebFormControlElement& element,
   return InferLabelForElement(element, stop_words, label, label_source);
 }
 
+ButtonTitleList InferButtonTitlesForTesting(const WebElement& form_element) {
+  return InferButtonTitlesForForm(form_element);
+}
+
 WebFormElement FindFormByUniqueRendererId(WebDocument doc,
                                           uint32_t form_renderer_id) {
   blink::WebVector<WebFormElement> forms;
@@ -1986,6 +2175,23 @@ WebFormElement FindFormByUniqueRendererId(WebDocument doc,
       return form;
   }
   return WebFormElement();
+}
+
+WebFormControlElement FindFormControlElementsByUniqueRendererId(
+    WebDocument doc,
+    uint32_t form_control_renderer_id) {
+  WebElementCollection elements = doc.All();
+
+  for (WebElement element = elements.FirstItem(); !element.IsNull();
+       element = elements.NextItem()) {
+    if (!element.IsFormControlElement())
+      continue;
+    WebFormControlElement control = element.To<WebFormControlElement>();
+    if (form_control_renderer_id == control.UniqueRendererFormControlId())
+      return control;
+  }
+
+  return WebFormControlElement();
 }
 
 std::vector<WebFormControlElement> FindFormControlElementsByUniqueRendererId(
@@ -2038,5 +2244,73 @@ std::vector<WebFormControlElement> FindFormControlElementsByUniqueRendererId(
   return result;
 }
 
+namespace {
+
+// Returns the coalesced child of the elements who's ids are founc in |id_list|.
+//
+// For example, given this document...
+//
+//      <div id="billing">Billing</div>
+//      <div>
+//        <div id="name">Name</div>
+//        <input id="field1" type="text" aria-labelledby="billing name"/>
+//     </div>
+//     <div>
+//       <div id="address">Address</div>
+//       <input id="field2" type="text" aria-labelledby="billing address"/>
+//     </div>
+//
+// The coalesced text by the id_list found in the aria-labelledby attribute
+// of the field1 input element would be "Billing Name" and for field2 it would
+// be "Billing Address".
+base::string16 CoalesceTextByIdList(const WebDocument& document,
+                                    const WebString& id_list) {
+  const base::string16 kSpace = base::ASCIIToUTF16(" ");
+
+  base::string16 text;
+  base::string16 id_list_utf16 = id_list.Utf16();
+  for (const auto& id : base::SplitStringPiece(
+           id_list_utf16, base::kWhitespaceUTF16, base::KEEP_WHITESPACE,
+           base::SPLIT_WANT_NONEMPTY)) {
+    auto node = document.GetElementById(WebString(id.data(), id.length()));
+    if (!node.IsNull()) {
+      base::string16 child_text = FindChildText(node);
+      if (!child_text.empty()) {
+        if (!text.empty())
+          text.append(kSpace);
+        text.append(child_text);
+      }
+    }
+  }
+  base::TrimWhitespace(text, base::TRIM_ALL, &text);
+  return text;
+}
+
+}  // namespace
+
+base::string16 GetAriaLabel(const blink::WebDocument& document,
+                            const WebFormControlElement& element) {
+  static const base::NoDestructor<WebString> kAriaLabelledBy("aria-labelledby");
+  if (element.HasAttribute(*kAriaLabelledBy)) {
+    base::string16 text =
+        CoalesceTextByIdList(document, element.GetAttribute(*kAriaLabelledBy));
+    if (!text.empty())
+      return text;
+  }
+
+  static const base::NoDestructor<WebString> kAriaLabel("aria-label");
+  if (element.HasAttribute(*kAriaLabel))
+    return element.GetAttribute(*kAriaLabel).Utf16();
+
+  return base::string16();
+}
+
+base::string16 GetAriaDescription(const blink::WebDocument& document,
+                                  const WebFormControlElement& element) {
+  static const base::NoDestructor<WebString> kAriaDescribedBy(
+      "aria-describedby");
+  return CoalesceTextByIdList(document,
+                              element.GetAttribute(*kAriaDescribedBy));
+}
 }  // namespace form_util
 }  // namespace autofill

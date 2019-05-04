@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.tasks;
 import org.chromium.base.Log;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 
 import java.util.ArrayList;
@@ -46,6 +47,67 @@ public class TasksUma {
         }
 
         recordParentChildrenTabStatistic(tabInGroupsCount, tabGroupCount, model.getCount());
+    }
+
+    /**
+     * This method collects the tab creation statistics based on the input {@link TabModel} in the
+     * Tab Switcher mode, and records the statistics.
+     * @param model The model to be used for collecting statistics.
+     */
+    public static void recordTabLaunchType(TabModel model) {
+        int manuallyCreatedCount = 0;
+        int targetBlankCreatedCount = 0;
+        int externalAppCreatedCount = 0;
+        int othersCreatedCount = 0;
+        int totalTabCount = model.getCount();
+
+        if (totalTabCount == 0) return;
+
+        for (int i = 0; i < totalTabCount; i++) {
+            Integer tabLaunchType = model.getTabAt(i).getLaunchTypeAtInitialTabCreation();
+            if (tabLaunchType == null) {
+                // This should not happen. Because @{link Tab#TabLaunchType} is never null, except
+                // for testing purpose or in the document-mode which it's deprecated.
+                othersCreatedCount++;
+                continue;
+            }
+            if (tabLaunchType == TabLaunchType.FROM_CHROME_UI
+                    || tabLaunchType == TabLaunchType.FROM_LONGPRESS_BACKGROUND
+                    || tabLaunchType == TabLaunchType.FROM_LAUNCHER_SHORTCUT) {
+                manuallyCreatedCount++;
+            } else if (tabLaunchType == TabLaunchType.FROM_LONGPRESS_FOREGROUND) {
+                targetBlankCreatedCount++;
+            } else if (tabLaunchType == TabLaunchType.FROM_EXTERNAL_APP) {
+                externalAppCreatedCount++;
+            } else {
+                othersCreatedCount++;
+            }
+        }
+
+        RecordHistogram.recordCountHistogram(
+                "Tabs.Tasks.TabCreated.Count.FromManuallyCreated", manuallyCreatedCount);
+
+        RecordHistogram.recordCountHistogram(
+                "Tabs.Tasks.TabCreated.Count.FromTargetBlank", targetBlankCreatedCount);
+
+        RecordHistogram.recordCountHistogram(
+                "Tabs.Tasks.TabCreated.Count.FromExternalApp", externalAppCreatedCount);
+
+        RecordHistogram.recordCountHistogram(
+                "Tabs.Tasks.TabCreated.Count.FromOthers", othersCreatedCount);
+
+        RecordHistogram.recordPercentageHistogram(
+                "Tabs.Tasks.TabCreated.Percent.FromManuallyCreated",
+                manuallyCreatedCount * 100 / totalTabCount);
+
+        RecordHistogram.recordPercentageHistogram("Tabs.Tasks.TabCreated.Percent.FromTargetBlank",
+                targetBlankCreatedCount * 100 / totalTabCount);
+
+        RecordHistogram.recordPercentageHistogram("Tabs.Tasks.TabCreated.Percent.FromExternalApp",
+                externalAppCreatedCount * 100 / totalTabCount);
+
+        RecordHistogram.recordPercentageHistogram("Tabs.Tasks.TabCreated.Percent.FromOthers",
+                othersCreatedCount * 100 / totalTabCount);
     }
 
     private static int getTabsInOneGroupCount(

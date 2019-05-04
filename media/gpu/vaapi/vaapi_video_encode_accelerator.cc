@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <type_traits>
 #include <utility>
 
 #include <va/va.h>
@@ -24,17 +25,22 @@
 #include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/unaligned_shared_memory.h"
 #include "media/base/video_bitrate_allocation.h"
+#include "media/gpu/format_utils.h"
 #include "media/gpu/h264_dpb.h"
+#include "media/gpu/macros.h"
 #include "media/gpu/vaapi/h264_encoder.h"
 #include "media/gpu/vaapi/vaapi_common.h"
+#include "media/gpu/vaapi/vaapi_picture_factory.h"
 #include "media/gpu/vaapi/vp8_encoder.h"
 #include "media/gpu/vp8_reference_frame_vector.h"
 
-#define VLOGF(level) VLOG(level) << __func__ << "(): "
-#define DVLOGF(level) DVLOG(level) << __func__ << "(): "
+#if defined(OS_POSIX)
+#include "media/gpu/vaapi/vaapi_picture_native_pixmap.h"
+#endif
 
 #define NOTIFY_ERROR(error, msg)                        \
   do {                                                  \
@@ -50,10 +56,6 @@ namespace {
 // Minimum number of frames in flight for pipeline depth, adjust to this number
 // if encoder requests less.
 constexpr size_t kMinNumFramesInFlight = 4;
-
-// Need 2 surfaces for each frame: one for input data and one for
-// reconstructed picture, which is later used for reference.
-constexpr size_t kNumSurfacesPerFrame = 2;
 
 // Percentage of bitrate set to be targeted by the HW encoder.
 constexpr unsigned int kTargetBitratePercentage = 90;
@@ -84,6 +86,7 @@ class VaapiEncodeJob : public AcceleratedVideoEncoder::EncodeJob {
                  base::OnceClosure execute_cb,
                  scoped_refptr<VASurface> input_surface,
                  scoped_refptr<VASurface> reconstructed_surface,
+                 std::unique_ptr<VaapiPicture> va_picture,
                  VABufferID coded_buffer_id);
 
   VaapiEncodeJob* AsVaapiEncodeJob() override { return this; }
@@ -105,6 +108,10 @@ class VaapiEncodeJob : public AcceleratedVideoEncoder::EncodeJob {
   // Surface for the reconstructed picture, used for reference
   // for subsequent frames.
   const scoped_refptr<VASurface> reconstructed_surface_;
+
+  // VAPicture associated with |input_surface_|. This member value is to just
+  // keep VAPicture alive as long as input_surface_ is alive, but not used.
+  const std::unique_ptr<VaapiPicture> va_picture_;
 
   // Buffer that will contain the output bitstream data for this frame.
   VABufferID coded_buffer_id_;
@@ -220,16 +227,29 @@ bool VaapiVideoEncodeAccelerator::Initialize(const Config& config,
     return false;
   }
 
-  if (codec_ == kCodecVP8 &&
-      config.content_type == Config::ContentType::kDisplay) {
-    VLOGF(1) << "Vaapi VP8 encoder does not currently support screen content.";
-    return false;
+  switch (config.input_format) {
+    case PIXEL_FORMAT_I420:
+    case PIXEL_FORMAT_NV12:
+      break;
+    default:
+      VLOGF(1) << "Unsupported input format: " << config.input_format;
+      return false;
   }
 
-  if (config.input_format != PIXEL_FORMAT_I420) {
-    VLOGF(1) << "Unsupported input format: "
-             << VideoPixelFormatToString(config.input_format);
+  if (config.storage_type.value_or(Config::StorageType::kShmem) ==
+      Config::StorageType::kDmabuf) {
+#if !defined(USE_OZONE)
+    VLOGF(1) << "Native mode is only available on OZONE platform.";
     return false;
+#else
+    if (config.input_format != PIXEL_FORMAT_NV12) {
+      // TODO(crbug.com/894381): Support other formats.
+      VLOGF(1) << "Unsupported format for native input mode: "
+               << VideoPixelFormatToString(config.input_format);
+      return false;
+    }
+    native_input_mode_ = true;
+#endif  // USE_OZONE
   }
 
   const SupportedProfiles& profiles = GetSupportedProfiles();
@@ -242,6 +262,12 @@ bool VaapiVideoEncodeAccelerator::Initialize(const Config& config,
     VLOGF(1) << "Unsupported output profile "
              << GetProfileName(config.output_profile);
     return false;
+  }
+
+  if (native_input_mode_) {
+    VLOGF(2) << "DMABuf mode: VaapiVEA will accept DMABuf-backed VideoFrame on "
+             << "Encode()";
+    vaapi_picture_factory_ = std::make_unique<VaapiPictureFactory>();
   }
 
   if (config.input_visible_size.width() > profile->max_resolution.width() ||
@@ -305,20 +331,25 @@ void VaapiVideoEncodeAccelerator::InitializeTask(const Config& config) {
   coded_size_ = encoder_->GetCodedSize();
   output_buffer_byte_size_ = encoder_->GetBitstreamBufferSize();
   const size_t max_ref_frames = encoder_->GetMaxNumOfRefFrames();
+
   // Use at least kMinNumFramesInFlight if encoder requested less for
   // pipeline depth.
   const size_t num_frames_in_flight =
       std::max(kMinNumFramesInFlight, max_ref_frames);
-  const size_t num_surfaces = (num_frames_in_flight + 1) * kNumSurfacesPerFrame;
   DVLOGF(1) << "Frames in flight: " << num_frames_in_flight;
 
   va_surface_release_cb_ = BindToCurrentLoop(
       base::Bind(&VaapiVideoEncodeAccelerator::RecycleVASurfaceID,
                  base::Unretained(this)));
 
-  if (!vaapi_wrapper_->CreateSurfaces(VA_RT_FORMAT_YUV420, coded_size_,
-                                      num_surfaces,
-                                      &available_va_surface_ids_)) {
+  va_surfaces_per_video_frame_ =
+      kNumSurfacesForOutputPicture +
+      (native_input_mode_ ? 0 : kNumSurfacesPerInputVideoFrame);
+
+  if (!vaapi_wrapper_->CreateContextAndSurfaces(
+          VA_RT_FORMAT_YUV420, coded_size_,
+          (num_frames_in_flight + 1) * va_surfaces_per_video_frame_,
+          &available_va_surface_ids_)) {
     NOTIFY_ERROR(kPlatformFailureError, "Failed creating VASurfaces");
     return;
   }
@@ -349,6 +380,7 @@ void VaapiVideoEncodeAccelerator::ExecuteEncode(VASurfaceID va_surface_id) {
 void VaapiVideoEncodeAccelerator::UploadFrame(scoped_refptr<VideoFrame> frame,
                                               VASurfaceID va_surface_id) {
   DCHECK(encoder_thread_task_runner_->BelongsToCurrentThread());
+  DVLOGF(4) << "frame is uploading: " << va_surface_id;
   if (!vaapi_wrapper_->UploadVideoFrameToSurface(frame, va_surface_id))
     NOTIFY_ERROR(kPlatformFailureError, "Failed to upload frame");
 }
@@ -415,7 +447,7 @@ void VaapiVideoEncodeAccelerator::ReturnBitstreamBuffer(
   uint8_t* target_data = static_cast<uint8_t*>(buffer->shm->memory());
   size_t data_size = 0;
 
-  if (!vaapi_wrapper_->DownloadAndDestroyCodedBuffer(
+  if (!vaapi_wrapper_->DownloadAndDestroyVABuffer(
           encode_job->coded_buffer_id(), encode_job->input_surface()->id(),
           target_data, buffer->shm->size(), &data_size)) {
     NOTIFY_ERROR(kPlatformFailureError, "Failed downloading coded buffer");
@@ -455,24 +487,65 @@ scoped_refptr<VaapiEncodeJob> VaapiVideoEncodeAccelerator::CreateEncodeJob(
     scoped_refptr<VideoFrame> frame,
     bool force_keyframe) {
   DCHECK(encoder_thread_task_runner_->BelongsToCurrentThread());
+  if (native_input_mode_ != frame->HasDmaBufs()) {
+    NOTIFY_ERROR(kPlatformFailureError, "Unexpected storage");
+    return nullptr;
+  }
 
-  if (available_va_surface_ids_.size() < kNumSurfacesPerFrame) {
+  if (available_va_surface_ids_.size() < va_surfaces_per_video_frame_) {
     DVLOGF(4) << "Not enough surfaces available";
     return nullptr;
   }
 
   VABufferID coded_buffer_id;
-  if (!vaapi_wrapper_->CreateCodedBuffer(output_buffer_byte_size_,
-                                         &coded_buffer_id)) {
+  if (!vaapi_wrapper_->CreateVABuffer(output_buffer_byte_size_,
+                                      &coded_buffer_id)) {
     NOTIFY_ERROR(kPlatformFailureError, "Failed creating coded buffer");
     return nullptr;
   }
 
-  static_assert(kNumSurfacesPerFrame == 2, "kNumSurfacesPerFrame must be 2");
+  VASurfaceID va_input_surface_id = VA_INVALID_ID;
+  std::unique_ptr<VaapiPicture> va_picture;
+  if (native_input_mode_) {
+    DCHECK(vaapi_picture_factory_);
+    if (frame->format() != PIXEL_FORMAT_NV12) {
+      NOTIFY_ERROR(kPlatformFailureError, "Unexpected format, expected NV12");
+      return nullptr;
+    }
+    constexpr int32_t kDummyPictureBufferId = 0;
+    // Passing empty callbacks is ok, because given PictureBuffer doesn't have
+    // texture id and thus these callbacks will never called.
+    va_picture = vaapi_picture_factory_->Create(
+        vaapi_wrapper_, MakeGLContextCurrentCallback(), BindGLImageCallback(),
+        PictureBuffer(kDummyPictureBufferId, frame->coded_size()));
+    gfx::GpuMemoryBufferHandle gmb_handle;
+#if defined(OS_POSIX)
+    gmb_handle =
+        VaapiPictureNativePixmap::CreateGpuMemoryBufferHandleFromVideoFrame(
+            frame.get());
+#endif
+    if (gmb_handle.is_null()) {
+      NOTIFY_ERROR(kPlatformFailureError,
+                   "Failed to create GMB handle from video frame");
+      return nullptr;
+    }
+    if (!va_picture->ImportGpuMemoryBufferHandle(
+            VideoPixelFormatToGfxBufferFormat(frame->format()),
+            std::move(gmb_handle))) {
+      NOTIFY_ERROR(kPlatformFailureError,
+                   "Failed in ImportGpuMemoryBufferHandle");
+      return nullptr;
+    }
+
+    va_input_surface_id = va_picture->va_surface_id();
+  } else {
+    va_input_surface_id = available_va_surface_ids_.back();
+    available_va_surface_ids_.pop_back();
+  }
+
   scoped_refptr<VASurface> input_surface = new VASurface(
-      available_va_surface_ids_.back(), coded_size_,
-      vaapi_wrapper_->va_surface_format(), va_surface_release_cb_);
-  available_va_surface_ids_.pop_back();
+      va_input_surface_id, coded_size_, vaapi_wrapper_->va_surface_format(),
+      native_input_mode_ ? base::DoNothing() : va_surface_release_cb_);
 
   scoped_refptr<VASurface> reconstructed_surface = new VASurface(
       available_va_surface_ids_.back(), coded_size_,
@@ -483,11 +556,14 @@ scoped_refptr<VaapiEncodeJob> VaapiVideoEncodeAccelerator::CreateEncodeJob(
       frame, force_keyframe,
       base::BindOnce(&VaapiVideoEncodeAccelerator::ExecuteEncode,
                      base::Unretained(this), input_surface->id()),
-      input_surface, reconstructed_surface, coded_buffer_id);
+      input_surface, reconstructed_surface, std::move(va_picture),
+      coded_buffer_id);
 
-  job->AddSetupCallback(
-      base::BindOnce(&VaapiVideoEncodeAccelerator::UploadFrame,
-                     base::Unretained(this), frame, input_surface->id()));
+  if (!native_input_mode_) {
+    job->AddSetupCallback(
+        base::BindOnce(&VaapiVideoEncodeAccelerator::UploadFrame,
+                       base::Unretained(this), frame, input_surface->id()));
+  }
 
   return job;
 }
@@ -697,10 +773,12 @@ VaapiEncodeJob::VaapiEncodeJob(scoped_refptr<VideoFrame> input_frame,
                                base::OnceClosure execute_cb,
                                scoped_refptr<VASurface> input_surface,
                                scoped_refptr<VASurface> reconstructed_surface,
+                               std::unique_ptr<VaapiPicture> va_picture,
                                VABufferID coded_buffer_id)
     : EncodeJob(input_frame, keyframe, std::move(execute_cb)),
       input_surface_(input_surface),
       reconstructed_surface_(reconstructed_surface),
+      va_picture_(std::move(va_picture)),
       coded_buffer_id_(coded_buffer_id) {
   DCHECK(input_surface_);
   DCHECK(reconstructed_surface_);
@@ -1013,16 +1091,17 @@ bool VaapiVideoEncodeAccelerator::VP8Accelerator::SubmitFrameParameters(
   if (frame_header->IsKeyframe())
     pic_param.pic_flags.bits.forced_lf_adjustment = true;
 
-  static_assert(
-      arraysize(pic_param.loop_filter_level) ==
-              arraysize(pic_param.ref_lf_delta) &&
-          arraysize(pic_param.ref_lf_delta) ==
-              arraysize(pic_param.mode_lf_delta) &&
-          arraysize(pic_param.ref_lf_delta) ==
-              arraysize(frame_header->loopfilter_hdr.ref_frame_delta) &&
-          arraysize(pic_param.mode_lf_delta) ==
-              arraysize(frame_header->loopfilter_hdr.mb_mode_delta),
-      "Invalid loop filter array sizes");
+  static_assert(std::extent<decltype(pic_param.loop_filter_level)>() ==
+                        std::extent<decltype(pic_param.ref_lf_delta)>() &&
+                    std::extent<decltype(pic_param.ref_lf_delta)>() ==
+                        std::extent<decltype(pic_param.mode_lf_delta)>() &&
+                    std::extent<decltype(pic_param.ref_lf_delta)>() ==
+                        std::extent<decltype(
+                            frame_header->loopfilter_hdr.ref_frame_delta)>() &&
+                    std::extent<decltype(pic_param.mode_lf_delta)>() ==
+                        std::extent<decltype(
+                            frame_header->loopfilter_hdr.mb_mode_delta)>(),
+                "Invalid loop filter array sizes");
 
   for (size_t i = 0; i < base::size(pic_param.loop_filter_level); ++i) {
     pic_param.loop_filter_level[i] = frame_header->loopfilter_hdr.level;

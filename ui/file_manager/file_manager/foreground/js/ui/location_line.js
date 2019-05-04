@@ -28,8 +28,9 @@ LocationLine.prototype.__proto__ = cr.EventTarget.prototype;
  * @param {!Entry|!FakeEntry} entry Target entry or fake entry.
  */
 LocationLine.prototype.show = function(entry) {
-  if (entry === this.entry_)
+  if (entry === this.entry_) {
     return;
+  }
 
   this.update_(this.getComponents_(entry));
 };
@@ -68,8 +69,9 @@ LocationLine.prototype.getComponents_ = function(entry) {
   var components = [];
   var locationInfo = this.volumeManager_.getLocationInfo(entry);
 
-  if (!locationInfo)
+  if (!locationInfo) {
     return components;
+  }
 
   if (util.isFakeEntry(entry)) {
     components.push(new LocationLine.PathComponent(
@@ -108,6 +110,11 @@ LocationLine.prototype.getComponents_ = function(entry) {
         displayRootUrl, VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_PATH);
     components.push(new LocationLine.PathComponent(
         util.getRootTypeLabel(locationInfo), displayRootUrl));
+  } else if (locationInfo.rootType === VolumeManagerCommon.RootType.COMPUTER) {
+    displayRootUrl = this.replaceRootName_(
+        displayRootUrl, VolumeManagerCommon.COMPUTERS_DIRECTORY_PATH);
+    components.push(new LocationLine.PathComponent(
+        util.getRootTypeLabel(locationInfo), displayRootUrl));
   } else {
     components.push(new LocationLine.PathComponent(
         util.getRootTypeLabel(locationInfo), displayRootUrl));
@@ -119,12 +126,17 @@ LocationLine.prototype.getComponents_ = function(entry) {
           VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_PATH)) {
     relativePath = entry.fullPath.slice(
         VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_PATH.length);
+  } else if (entry.fullPath.startsWith(
+                 VolumeManagerCommon.COMPUTERS_DIRECTORY_PATH)) {
+    relativePath = entry.fullPath.slice(
+        VolumeManagerCommon.COMPUTERS_DIRECTORY_PATH.length);
   }
   if (relativePath.indexOf('/') === 0) {
     relativePath = relativePath.slice(1);
   }
-  if (relativePath.length === 0)
+  if (relativePath.length === 0) {
     return components;
+  }
 
   // currentUrl should be without trailing slash.
   var currentUrl = /^.+\/$/.test(displayRootUrl) ?
@@ -171,8 +183,9 @@ LocationLine.prototype.update_ = function(components) {
     button.appendChild(ripple);
 
     // If this is the last component, break here.
-    if (i === components.length - 1)
+    if (i === components.length - 1) {
       break;
+    }
 
     // Add a separator.
     var separator = document.createElement('span');
@@ -222,8 +235,9 @@ LocationLine.prototype.update_ = function(components) {
  * Updates breadcrumbs widths in order to truncate it properly.
  */
 LocationLine.prototype.truncate = function() {
-  if (!this.breadcrumbs_.firstChild)
+  if (!this.breadcrumbs_.firstChild) {
     return;
+  }
 
   // Assume style.width == clientWidth (items have no margins).
 
@@ -247,8 +261,9 @@ LocationLine.prototype.truncate = function() {
       currentWidth += item.getBoundingClientRect().width;
     }
   }
-  if (pathWidth + currentWidth <= containerWidth)
+  if (pathWidth + currentWidth <= containerWidth) {
     return;
+  }
   if (!lastSeparator) {
     this.breadcrumbs_.lastChild.style.width =
         Math.min(currentWidth, containerWidth) + 'px';
@@ -279,12 +294,14 @@ LocationLine.prototype.truncate = function() {
     collapsedWidth = Math.min(maxPathWidth,
                               parentCrumb.getBoundingClientRect().width);
     maxPathWidth -= collapsedWidth;
-    if (parentCrumb.getBoundingClientRect().width != collapsedWidth)
+    if (parentCrumb.getBoundingClientRect().width != collapsedWidth) {
       parentCrumb.style.width = collapsedWidth + 'px';
+    }
 
     lastSeparator = parentCrumb.previousSibling;
-    if (!lastSeparator)
+    if (!lastSeparator) {
       return;
+    }
     collapsedWidth += lastSeparator.clientWidth;
     maxPathWidth = Math.max(0, maxPathWidth - lastSeparator.clientWidth);
   }
@@ -340,15 +357,18 @@ LocationLine.prototype.hide = function() {
  * @private
  */
 LocationLine.prototype.onClick_ = function(index, event) {
-  if (index >= this.components_.length - 1)
+  if (index >= this.components_.length - 1) {
     return;
+  }
 
   // Remove 'focused' state from the clicked button.
   var button = event.target;
-  while (button && !button.classList.contains('breadcrumb-path'))
+  while (button && !button.classList.contains('breadcrumb-path')) {
     button = button.parentElement;
-  if (button)
+  }
+  if (button) {
     button.blur();
+  }
 
   var pathComponent = this.components_[index];
   pathComponent.resolveEntry().then(function(entry) {
@@ -380,10 +400,11 @@ LocationLine.PathComponent = function(name, url, opt_fakeEntry) {
  *     resolved with an entry.
  */
 LocationLine.PathComponent.prototype.resolveEntry = function() {
-  if (this.fakeEntry_)
+  if (this.fakeEntry_) {
     return /** @type {!Promise<!Entry|!FilesAppEntry>} */ (
         Promise.resolve(this.fakeEntry_));
-  else
+  } else {
     return new Promise(
         window.webkitResolveLocalFileSystemURL.bind(null, this.url_));
+  }
 };

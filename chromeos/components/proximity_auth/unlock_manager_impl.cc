@@ -7,13 +7,11 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/location.h"
 #include "base/logging.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/time/default_tick_clock.h"
 #include "base/time/time.h"
-#include "build/build_config.h"
-#include "chromeos/components/proximity_auth/logging/logging.h"
+#include "chromeos/components/multidevice/logging/logging.h"
+#include "chromeos/components/multidevice/remote_device_ref.h"
 #include "chromeos/components/proximity_auth/messenger.h"
 #include "chromeos/components/proximity_auth/metrics.h"
 #include "chromeos/components/proximity_auth/proximity_auth_client.h"
@@ -21,8 +19,6 @@
 #include "chromeos/components/proximity_auth/proximity_monitor_impl.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/services/secure_channel/public/cpp/client/client_channel.h"
-#include "components/cryptauth/remote_device_ref.h"
-#include "components/cryptauth/secure_context.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 
 using chromeos::DBusThreadManager;
@@ -78,6 +74,29 @@ metrics::RemoteSecuritySettingsState GetRemoteSecuritySettingsState(
   return metrics::RemoteSecuritySettingsState::UNKNOWN;
 }
 
+void RecordGetRemoteStatusResultFailure(
+    ProximityAuthSystem::ScreenlockType screenlock_type,
+    SmartLockMetricsRecorder::SmartLockGetRemoteStatusResultFailureReason
+        failure_reason) {
+  if (screenlock_type == ProximityAuthSystem::SESSION_LOCK) {
+    SmartLockMetricsRecorder::RecordGetRemoteStatusResultUnlockFailure(
+        failure_reason);
+  } else if (screenlock_type == ProximityAuthSystem::SIGN_IN) {
+    SmartLockMetricsRecorder::RecordGetRemoteStatusResultSignInFailure(
+        failure_reason);
+  }
+}
+
+void RecordAuthResultFailure(
+    ProximityAuthSystem::ScreenlockType screenlock_type,
+    SmartLockMetricsRecorder::SmartLockAuthResultFailureReason failure_reason) {
+  if (screenlock_type == ProximityAuthSystem::SESSION_LOCK) {
+    SmartLockMetricsRecorder::RecordAuthResultUnlockFailure(failure_reason);
+  } else if (screenlock_type == ProximityAuthSystem::SIGN_IN) {
+    SmartLockMetricsRecorder::RecordAuthResultSignInFailure(failure_reason);
+  }
+}
+
 }  // namespace
 
 class ProximityAuthPrefManager;
@@ -90,25 +109,20 @@ UnlockManagerImpl::UnlockManagerImpl(
       life_cycle_(nullptr),
       proximity_auth_client_(proximity_auth_client),
       pref_manager_(pref_manager),
-      is_locked_(false),
       is_attempting_auth_(false),
       is_waking_up_(false),
       screenlock_state_(ScreenlockState::INACTIVE),
       clear_waking_up_state_weak_ptr_factory_(this),
       reject_auth_attempt_weak_ptr_factory_(this),
       weak_ptr_factory_(this) {
-  ScreenlockBridge* screenlock_bridge = ScreenlockBridge::Get();
-  screenlock_bridge->AddObserver(this);
-  OnScreenLockedOrUnlocked(screenlock_bridge->IsLocked());
-
   DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
 
   SetWakingUpState(true /* is_waking_up */);
 
   if (device::BluetoothAdapterFactory::IsBluetoothSupported()) {
     device::BluetoothAdapterFactory::GetAdapter(
-        base::Bind(&UnlockManagerImpl::OnBluetoothAdapterInitialized,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindOnce(&UnlockManagerImpl::OnBluetoothAdapterInitialized,
+                       weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -116,7 +130,8 @@ UnlockManagerImpl::~UnlockManagerImpl() {
   if (GetMessenger())
     GetMessenger()->RemoveObserver(this);
 
-  ScreenlockBridge::Get()->RemoveObserver(this);
+  if (proximity_monitor_)
+    proximity_monitor_->RemoveObserver(this);
 
   DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
 
@@ -145,6 +160,8 @@ void UnlockManagerImpl::SetRemoteDeviceLifeCycle(
     AttemptToStartRemoteDeviceLifecycle();
     SetWakingUpState(true /* is_waking_up */);
   } else {
+    if (proximity_monitor_)
+      proximity_monitor_->RemoveObserver(this);
     proximity_monitor_.reset();
   }
 
@@ -156,10 +173,18 @@ void UnlockManagerImpl::OnLifeCycleStateChanged() {
 
   remote_screenlock_state_.reset();
   if (state == RemoteDeviceLifeCycle::State::SECURE_CHANNEL_ESTABLISHED) {
-    DCHECK(life_cycle_->GetConnection() || life_cycle_->GetChannel());
+    DCHECK(life_cycle_->GetChannel());
     DCHECK(GetMessenger());
-    proximity_monitor_ = CreateProximityMonitor(life_cycle_, pref_manager_);
+    if (!proximity_monitor_) {
+      proximity_monitor_ = CreateProximityMonitor(life_cycle_, pref_manager_);
+      proximity_monitor_->AddObserver(this);
+      proximity_monitor_->Start();
+    }
     GetMessenger()->AddObserver(this);
+  } else if (proximity_monitor_) {
+    proximity_monitor_->RemoveObserver(this);
+    proximity_monitor_->Stop();
+    proximity_monitor_.reset();
   }
 
   if (state == RemoteDeviceLifeCycle::State::AUTHENTICATION_FAILED)
@@ -171,19 +196,25 @@ void UnlockManagerImpl::OnLifeCycleStateChanged() {
 void UnlockManagerImpl::OnUnlockEventSent(bool success) {
   if (!is_attempting_auth_) {
     PA_LOG(ERROR) << "Sent easy_unlock event, but no auth attempted.";
-    return;
+    FinalizeAuthAttempt(
+        SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
+            kUnlockEventSentButNotAttemptingAuth);
+  } else if (success) {
+    FinalizeAuthAttempt(base::nullopt /* failure_reason */);
+  } else {
+    FinalizeAuthAttempt(
+        SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
+            kFailedtoNotifyHostDeviceThatSmartLockWasUsed);
   }
-
-  AcceptAuthAttempt(success);
 }
 
 void UnlockManagerImpl::OnRemoteStatusUpdate(
     const RemoteStatusUpdate& status_update) {
-  PA_LOG(INFO) << "Status Update: ("
-               << "user_present=" << status_update.user_presence << ", "
-               << "secure_screen_lock="
-               << status_update.secure_screen_lock_state << ", "
-               << "trust_agent=" << status_update.trust_agent_state << ")";
+  PA_LOG(VERBOSE) << "Status Update: ("
+                  << "user_present=" << status_update.user_presence << ", "
+                  << "secure_screen_lock="
+                  << status_update.secure_screen_lock_state << ", "
+                  << "trust_agent=" << status_update.trust_agent_state << ")";
   metrics::RecordRemoteSecuritySettingsState(
       GetRemoteSecuritySettingsState(status_update));
 
@@ -202,7 +233,9 @@ void UnlockManagerImpl::OnDecryptResponse(const std::string& decrypted_bytes) {
 
   if (decrypted_bytes.empty()) {
     PA_LOG(WARNING) << "Failed to decrypt sign-in challenge.";
-    AcceptAuthAttempt(false);
+    FinalizeAuthAttempt(
+        SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
+            kFailedToDecryptSignInChallenge);
   } else {
     sign_in_secret_.reset(new std::string(decrypted_bytes));
     if (GetMessenger())
@@ -212,46 +245,45 @@ void UnlockManagerImpl::OnDecryptResponse(const std::string& decrypted_bytes) {
 
 void UnlockManagerImpl::OnUnlockResponse(bool success) {
   if (!is_attempting_auth_) {
-    PA_LOG(ERROR) << "Unlock response received but not attempting auth.";
+    FinalizeAuthAttempt(
+        SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
+            kUnlockRequestSentButNotAttemptingAuth);
+    PA_LOG(ERROR) << "Unlock request sent but not attempting auth.";
     return;
   }
 
-  PA_LOG(INFO) << "Unlock response from remote device: "
-               << (success ? "success" : "failure");
-  if (success && GetMessenger())
+  PA_LOG(INFO) << "Received unlock response from device: "
+               << (success ? "yes" : "no") << ".";
+
+  if (success && GetMessenger()) {
     GetMessenger()->DispatchUnlockEvent();
-  else
-    AcceptAuthAttempt(false);
+  } else {
+    FinalizeAuthAttempt(
+        SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
+            kFailedToSendUnlockRequest);
+  }
 }
 
 void UnlockManagerImpl::OnDisconnected() {
+  if (is_attempting_auth_) {
+    RecordAuthResultFailure(
+        screenlock_type_,
+        SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
+            kAuthenticatedChannelDropped);
+  } else {
+    RecordGetRemoteStatusResultFailure(
+        screenlock_type_,
+        SmartLockMetricsRecorder::SmartLockGetRemoteStatusResultFailureReason::
+            kAuthenticatedChannelDropped);
+  }
+
   if (GetMessenger())
     GetMessenger()->RemoveObserver(this);
 }
 
 void UnlockManagerImpl::OnProximityStateChanged() {
-  PA_LOG(INFO) << "Proximity state changed.";
+  PA_LOG(VERBOSE) << "Proximity state changed.";
   UpdateLockScreen();
-}
-
-void UnlockManagerImpl::OnScreenDidLock(
-    ScreenlockBridge::LockHandler::ScreenType screen_type) {
-  OnScreenLockedOrUnlocked(true);
-}
-
-void UnlockManagerImpl::OnScreenDidUnlock(
-    ScreenlockBridge::LockHandler::ScreenType screen_type) {
-  OnScreenLockedOrUnlocked(false);
-}
-
-void UnlockManagerImpl::OnFocusedUserChanged(const AccountId& account_id) {}
-
-void UnlockManagerImpl::OnScreenLockedOrUnlocked(bool is_locked) {
-  if (is_locked && IsBluetoothPresentAndPowered() && life_cycle_)
-    SetWakingUpState(true /* is_waking_up */);
-
-  is_locked_ = is_locked;
-  UpdateProximityMonitorState();
 }
 
 void UnlockManagerImpl::OnBluetoothAdapterInitialized(
@@ -291,7 +323,7 @@ void UnlockManagerImpl::AttemptToStartRemoteDeviceLifecycle() {
 
 void UnlockManagerImpl::OnAuthAttempted(mojom::AuthType auth_type) {
   if (is_attempting_auth_) {
-    PA_LOG(INFO) << "Already attempting auth.";
+    PA_LOG(VERBOSE) << "Already attempting auth.";
     return;
   }
 
@@ -301,22 +333,29 @@ void UnlockManagerImpl::OnAuthAttempted(mojom::AuthType auth_type) {
   is_attempting_auth_ = true;
 
   if (!life_cycle_ || !GetMessenger()) {
-    PA_LOG(ERROR) << "No life_cycle active when auth is attempted";
-    AcceptAuthAttempt(false);
+    PA_LOG(ERROR) << "No life_cycle active when auth was attempted";
+    FinalizeAuthAttempt(
+        SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
+            kNoPendingOrActiveHost);
     UpdateLockScreen();
     return;
   }
 
   if (!IsUnlockAllowed()) {
-    AcceptAuthAttempt(false);
+    FinalizeAuthAttempt(
+        SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
+            kUnlockNotAllowed);
     UpdateLockScreen();
     return;
   }
 
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
-      base::BindOnce(&UnlockManagerImpl::AcceptAuthAttempt,
-                     reject_auth_attempt_weak_ptr_factory_.GetWeakPtr(), false),
+      base::BindOnce(
+          &UnlockManagerImpl::FinalizeAuthAttempt,
+          reject_auth_attempt_weak_ptr_factory_.GetWeakPtr(),
+          SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
+              kAuthAttemptTimedOut),
       base::TimeDelta::FromSeconds(kAuthAttemptTimeoutSecs));
 
   if (screenlock_type_ == ProximityAuthSystem::SIGN_IN) {
@@ -325,24 +364,22 @@ void UnlockManagerImpl::OnAuthAttempted(mojom::AuthType auth_type) {
     if (GetMessenger()->SupportsSignIn()) {
       GetMessenger()->RequestUnlock();
     } else {
-      PA_LOG(INFO) << "Protocol v3.1 not supported, skipping request_unlock.";
+      PA_LOG(VERBOSE)
+          << "Protocol v3.1 not supported, skipping request_unlock.";
       GetMessenger()->DispatchUnlockEvent();
     }
   }
+}
+
+void UnlockManagerImpl::CancelConnectionAttempt() {
+  SetWakingUpState(false /* is_waking_up */);
 }
 
 std::unique_ptr<ProximityMonitor> UnlockManagerImpl::CreateProximityMonitor(
     RemoteDeviceLifeCycle* life_cycle,
     ProximityAuthPrefManager* pref_manager) {
   return std::make_unique<ProximityMonitorImpl>(
-      life_cycle->GetRemoteDevice(),
-      base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi)
-          ? life_cycle->GetChannel()
-          : nullptr,
-      base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi)
-          ? nullptr
-          : life_cycle->GetConnection(),
-      pref_manager);
+      life_cycle->GetRemoteDevice(), life_cycle->GetChannel(), pref_manager);
 }
 
 void UnlockManagerImpl::SendSignInChallenge() {
@@ -351,36 +388,21 @@ void UnlockManagerImpl::SendSignInChallenge() {
     return;
   }
 
-  if (base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi)) {
-    if (!GetMessenger()->GetChannel()) {
-      PA_LOG(ERROR) << "Channel is not ready to send sign-in challenge.";
-      return;
-    }
-
-    GetMessenger()->GetChannel()->GetConnectionMetadata(
-        base::BindOnce(&UnlockManagerImpl::OnGetConnectionMetadata,
-                       weak_ptr_factory_.GetWeakPtr()));
-  } else {
-    if (!GetMessenger()->GetSecureContext()) {
-      PA_LOG(ERROR) << "SecureContext is not ready to send sign-in challenge.";
-      return;
-    }
-
-    cryptauth::RemoteDeviceRef remote_device = life_cycle_->GetRemoteDevice();
-    proximity_auth_client_->GetChallengeForUserAndDevice(
-        remote_device.user_id(), remote_device.public_key(),
-        GetMessenger()->GetSecureContext()->GetChannelBindingData(),
-        base::Bind(&UnlockManagerImpl::OnGotSignInChallenge,
-                   weak_ptr_factory_.GetWeakPtr()));
+  if (!GetMessenger()->GetChannel()) {
+    PA_LOG(ERROR) << "Channel is not ready to send sign-in challenge.";
+    return;
   }
+
+  GetMessenger()->GetChannel()->GetConnectionMetadata(
+      base::BindOnce(&UnlockManagerImpl::OnGetConnectionMetadata,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void UnlockManagerImpl::OnGetConnectionMetadata(
     chromeos::secure_channel::mojom::ConnectionMetadataPtr
         connection_metadata_ptr) {
-  DCHECK(base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi));
-
-  cryptauth::RemoteDeviceRef remote_device = life_cycle_->GetRemoteDevice();
+  chromeos::multidevice::RemoteDeviceRef remote_device =
+      life_cycle_->GetRemoteDevice();
   proximity_auth_client_->GetChallengeForUserAndDevice(
       remote_device.user_id(), remote_device.public_key(),
       connection_metadata_ptr->channel_binding_data,
@@ -389,7 +411,7 @@ void UnlockManagerImpl::OnGetConnectionMetadata(
 }
 
 void UnlockManagerImpl::OnGotSignInChallenge(const std::string& challenge) {
-  PA_LOG(INFO) << "Got sign-in challenge, sending for decryption...";
+  PA_LOG(VERBOSE) << "Got sign-in challenge, sending for decryption...";
   if (GetMessenger())
     GetMessenger()->RequestDecryption(challenge);
 }
@@ -425,7 +447,7 @@ ScreenlockState UnlockManagerImpl::GetScreenlockState() {
   // If the RSSI is too low, then the remote device is nowhere near the local
   // device. This message should take priority over messages about screen lock
   // states.
-  if (!proximity_monitor_->IsUnlockAllowed()) {
+  if (proximity_monitor_ && !proximity_monitor_->IsUnlockAllowed()) {
     if (remote_screenlock_state_ &&
         *remote_screenlock_state_ == RemoteScreenlockState::UNLOCKED) {
       return ScreenlockState::RSSI_TOO_LOW;
@@ -457,8 +479,6 @@ ScreenlockState UnlockManagerImpl::GetScreenlockState() {
 void UnlockManagerImpl::UpdateLockScreen() {
   AttemptToStartRemoteDeviceLifecycle();
 
-  UpdateProximityMonitorState();
-
   ScreenlockState new_state = GetScreenlockState();
   if (screenlock_state_ == new_state)
     return;
@@ -469,20 +489,6 @@ void UnlockManagerImpl::UpdateLockScreen() {
   screenlock_state_ = new_state;
 }
 
-void UnlockManagerImpl::UpdateProximityMonitorState() {
-  if (!proximity_monitor_)
-    return;
-
-  if (is_locked_ && life_cycle_ &&
-      life_cycle_->GetState() ==
-          RemoteDeviceLifeCycle::State::SECURE_CHANNEL_ESTABLISHED) {
-    proximity_monitor_->AddObserver(this);
-    proximity_monitor_->Start();
-  } else {
-    proximity_monitor_->Stop();
-  }
-}
-
 void UnlockManagerImpl::SetWakingUpState(bool is_waking_up) {
   is_waking_up_ = is_waking_up;
 
@@ -491,32 +497,64 @@ void UnlockManagerImpl::SetWakingUpState(bool is_waking_up) {
   if (is_waking_up_) {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
-        base::BindOnce(&UnlockManagerImpl::SetWakingUpState,
-                       clear_waking_up_state_weak_ptr_factory_.GetWeakPtr(),
-                       false),
+        base::BindOnce(&UnlockManagerImpl::OnConnectionAttemptTimeOut,
+                       clear_waking_up_state_weak_ptr_factory_.GetWeakPtr()),
         base::TimeDelta::FromSeconds(kWakingUpDurationSecs));
   }
 
   UpdateLockScreen();
 }
 
-void UnlockManagerImpl::AcceptAuthAttempt(bool should_accept) {
+void UnlockManagerImpl::OnConnectionAttemptTimeOut() {
+  if (IsBluetoothPresentAndPowered()) {
+    if (life_cycle_ &&
+        life_cycle_->GetState() ==
+            RemoteDeviceLifeCycle::State::SECURE_CHANNEL_ESTABLISHED) {
+      RecordGetRemoteStatusResultFailure(
+          screenlock_type_, SmartLockMetricsRecorder::
+                                SmartLockGetRemoteStatusResultFailureReason::
+                                    kTimedOutDidNotReceiveRemoteStatusUpdate);
+    } else {
+      RecordGetRemoteStatusResultFailure(
+          screenlock_type_,
+          SmartLockMetricsRecorder::
+              SmartLockGetRemoteStatusResultFailureReason::
+                  kTimedOutCouldNotEstablishAuthenticatedChannel);
+    }
+  } else {
+    RecordGetRemoteStatusResultFailure(
+        screenlock_type_,
+        SmartLockMetricsRecorder::SmartLockGetRemoteStatusResultFailureReason::
+            kTimedOutBluetoothDisabled);
+  }
+
+  SetWakingUpState(false /* is_waking_up */);
+}
+
+void UnlockManagerImpl::FinalizeAuthAttempt(
+    const base::Optional<
+        SmartLockMetricsRecorder::SmartLockAuthResultFailureReason>& error) {
+  if (error) {
+    RecordAuthResultFailure(screenlock_type_, *error);
+  }
+
   if (!is_attempting_auth_)
     return;
 
   // Cancel the pending task to time out the auth attempt.
   reject_auth_attempt_weak_ptr_factory_.InvalidateWeakPtrs();
 
-  if (should_accept)
+  bool should_accept = !error;
+  if (should_accept && proximity_monitor_)
     proximity_monitor_->RecordProximityMetricsOnAuthSuccess();
 
   is_attempting_auth_ = false;
   if (screenlock_type_ == ProximityAuthSystem::SIGN_IN) {
-    PA_LOG(INFO) << "Finalizing sign-in...";
+    PA_LOG(VERBOSE) << "Finalizing sign-in...";
     proximity_auth_client_->FinalizeSignin(
         should_accept && sign_in_secret_ ? *sign_in_secret_ : std::string());
   } else {
-    PA_LOG(INFO) << "Finalizing unlock...";
+    PA_LOG(VERBOSE) << "Finalizing unlock...";
     proximity_auth_client_->FinalizeUnlock(should_accept);
   }
 }

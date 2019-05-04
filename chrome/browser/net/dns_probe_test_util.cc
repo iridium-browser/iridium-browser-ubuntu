@@ -5,11 +5,12 @@
 #include "chrome/browser/net/dns_probe_test_util.h"
 
 #include <stdint.h>
+#include <utility>
 
 #include "chrome/browser/net/dns_probe_runner.h"
 #include "net/base/ip_address.h"
 #include "net/dns/dns_config.h"
-#include "net/dns/dns_protocol.h"
+#include "net/dns/public/dns_protocol.h"
 
 using net::DnsClient;
 using net::DnsConfig;
@@ -30,7 +31,8 @@ std::unique_ptr<DnsClient> CreateMockDnsClientForProbes(
   rules.push_back(MockDnsClientRule(DnsProbeRunner::kKnownGoodHostname, kTypeA,
                                     MockDnsClientRule::Result(result), false));
 
-  return std::unique_ptr<DnsClient>(new net::MockDnsClient(config, rules));
+  return std::unique_ptr<DnsClient>(
+      new net::MockDnsClient(config, std::move(rules)));
 }
 
 }  // namespace chrome_browser_net

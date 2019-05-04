@@ -15,7 +15,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/time/clock.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/offline_pages/core/model/clear_storage_task.h"
 #include "components/offline_pages/core/offline_page_archiver.h"
@@ -29,6 +28,8 @@ class GURL;
 namespace base {
 class FilePath;
 class SequencedTaskRunner;
+class Time;
+class TimeDelta;
 }  // namespace base
 
 namespace offline_pages {
@@ -69,8 +70,7 @@ class OfflinePageModelTaskified : public OfflinePageModel,
       std::unique_ptr<OfflinePageMetadataStore> store,
       std::unique_ptr<ArchiveManager> archive_manager,
       std::unique_ptr<SystemDownloadManager> download_manager,
-      const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      base::Clock* clock);
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner);
   ~OfflinePageModelTaskified() override;
 
   // TaskQueue::Delegate implementation.
@@ -139,7 +139,6 @@ class OfflinePageModelTaskified : public OfflinePageModel,
 
   // Methods for testing only:
   OfflinePageMetadataStore* GetStoreForTesting() { return store_.get(); }
-  void SetClockForTesting(base::Clock* clock) { clock_ = clock; }
   void SetSkipClearingOriginalUrlForTesting() {
     skip_clearing_original_url_for_testing_ = true;
   }
@@ -158,11 +157,12 @@ class OfflinePageModelTaskified : public OfflinePageModel,
                           int64_t offline_id);
   void OnAddPageForSavePageDone(SavePageCallback callback,
                                 const OfflinePageItem& page_attempted,
+                                base::Time add_page_start_time,
                                 AddPageResult add_page_result,
                                 int64_t offline_id);
   void OnCreateArchiveDone(const SavePageParams& save_page_params,
                            int64_t offline_id,
-                           const base::Time& start_time,
+                           base::Time start_time,
                            std::unique_ptr<OfflinePageArchiver> archiver,
                            SavePageCallback callback,
                            OfflinePageArchiver::ArchiverResult archiver_result,
@@ -189,7 +189,7 @@ class OfflinePageModelTaskified : public OfflinePageModel,
   // Methods for clearing temporary pages and performing consistency checks. The
   // latter are executed only once per Chrome session.
   void ScheduleMaintenanceTasks();
-  void RunMaintenanceTasks(const base::Time now, bool first_run);
+  void RunMaintenanceTasks(base::Time now, bool first_run);
   void OnClearCachedPagesDone(size_t deleted_page_count,
                               ClearStorageTask::ClearStorageResult result);
   void OnPersistentPageConsistencyCheckDone(
@@ -205,6 +205,7 @@ class OfflinePageModelTaskified : public OfflinePageModel,
   // Callback for when PublishArchive has completd.
   void PublishArchiveDone(std::unique_ptr<OfflinePageArchiver> archiver,
                           SavePageCallback save_page_callback,
+                          base::Time publish_start_time,
                           const OfflinePageItem& offline_page,
                           PublishArchiveResult publish_results);
 
@@ -222,7 +223,6 @@ class OfflinePageModelTaskified : public OfflinePageModel,
   // Other utility methods.
   void RemovePagesMatchingUrlAndNamespace(const OfflinePageItem& page);
   void CreateArchivesDirectoryIfNeeded();
-  base::Time GetCurrentTime();
 
   // Persistent store for offline page metadata.
   std::unique_ptr<OfflinePageMetadataStore> store_;
@@ -238,9 +238,6 @@ class OfflinePageModelTaskified : public OfflinePageModel,
 
   // The observers.
   base::ObserverList<Observer>::Unchecked observers_;
-
-  // Clock for testing only.
-  base::Clock* clock_ = nullptr;
 
   // Logger to facilitate recording of events.
   OfflinePageModelEventLogger offline_event_logger_;

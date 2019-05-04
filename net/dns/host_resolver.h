@@ -21,6 +21,7 @@
 #include "net/dns/dns_config.h"
 #include "net/dns/host_cache.h"
 #include "net/dns/host_resolver_source.h"
+#include "net/dns/public/dns_query_type.h"
 
 namespace base {
 class Value;
@@ -88,13 +89,26 @@ class NET_EXPORT HostResolver {
     // If cancelled before |callback| is invoked, it will never be invoked.
     virtual int Start(CompletionOnceCallback callback) = 0;
 
-    // Result of the request. Should only be called after Start() signals
-    // completion, either by invoking the callback or by returning a result
-    // other than |ERR_IO_PENDING|.
-    //
-    // TODO(crbug.com/821021): Implement other GetResults() methods for requests
-    // that return other data (eg DNS TXT requests).
+    // Address record (A or AAAA) results of the request. Should only be called
+    // after Start() signals completion, either by invoking the callback or by
+    // returning a result other than |ERR_IO_PENDING|.
     virtual const base::Optional<AddressList>& GetAddressResults() const = 0;
+
+    // Text record (TXT) results of the request. Should only be called after
+    // Start() signals completion, either by invoking the callback or by
+    // returning a result other than |ERR_IO_PENDING|.
+    virtual const base::Optional<std::vector<std::string>>& GetTextResults()
+        const = 0;
+
+    // Hostname record (SRV or PTR) results of the request. For SRV results,
+    // hostnames are ordered acording to their priorities and weights. See RFC
+    // 2782.
+    //
+    // Should only be called after Start() signals completion, either by
+    // invoking the callback or by returning a result other than
+    // |ERR_IO_PENDING|.
+    virtual const base::Optional<std::vector<HostPortPair>>&
+    GetHostnameResults() const = 0;
   };
 
   // |max_concurrent_resolves| is how many resolve requests will be allowed to
@@ -112,6 +126,17 @@ class NET_EXPORT HostResolver {
     size_t max_concurrent_resolves;
     size_t max_retry_attempts;
     bool enable_caching;
+  };
+
+  // Factory class. Useful for classes that need to inject and override resolver
+  // creation for tests.
+  class NET_EXPORT Factory {
+   public:
+    virtual ~Factory() = default;
+
+    // See HostResolver::CreateSystemResolver.
+    virtual std::unique_ptr<HostResolver> CreateResolver(const Options& options,
+                                                         NetLog* net_log);
   };
 
   // The parameters for doing a Resolve(). A hostname and port are
@@ -174,18 +199,9 @@ class NET_EXPORT HostResolver {
 
     // Indicates a request for myIpAddress (to differentiate from other requests
     // for localhost, currently used by Chrome OS).
+    //
+    // TODO(https://crbug.com/827533): Remove.
     bool is_my_ip_address_;
-  };
-
-  // DNS query type for a ResolveHostRequest.
-  // See:
-  // https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-4
-  //
-  // TODO(crbug.com/846423): Add support for non-address types.
-  enum class DnsQueryType {
-    UNSPECIFIED,
-    A,
-    AAAA,
   };
 
   // Parameter-grouping struct for additional optional parameters for
@@ -224,6 +240,45 @@ class NET_EXPORT HostResolver {
     // will receive special logging/observer treatment, and the result addresses
     // will always be |base::nullopt|.
     bool is_speculative = false;
+  };
+
+  // Handler for an ongoing MDNS listening operation. Created by
+  // HostResolver::CreateMdnsListener().
+  class MdnsListener {
+   public:
+    // Delegate type for result update notifications from MdnsListener. All
+    // methods have a |result_type| field to allow a single delegate to be
+    // passed to multiple MdnsListeners and be used to listen for updates for
+    // multiple types for the same host.
+    class Delegate {
+     public:
+      enum class UpdateType { ADDED, CHANGED, REMOVED };
+
+      virtual ~Delegate() {}
+
+      virtual void OnAddressResult(UpdateType update_type,
+                                   DnsQueryType result_type,
+                                   IPEndPoint address) = 0;
+      virtual void OnTextResult(UpdateType update_type,
+                                DnsQueryType result_type,
+                                std::vector<std::string> text_records) = 0;
+      virtual void OnHostnameResult(UpdateType update_type,
+                                    DnsQueryType result_type,
+                                    HostPortPair host) = 0;
+
+      // For results which may be valid MDNS but are not handled/parsed by
+      // HostResolver, e.g. pointers to the root domain.
+      virtual void OnUnhandledResult(UpdateType update_type,
+                                     DnsQueryType result_type) = 0;
+    };
+
+    // Destruction cancels the listening operation.
+    virtual ~MdnsListener() {}
+
+    // Begins the listening operation, invoking |delegate| whenever results are
+    // updated. |delegate| will no longer be called once the listening operation
+    // is cancelled (via destruction of |this|).
+    virtual int Start(Delegate* delegate) = 0;
   };
 
   // Set Options.max_concurrent_resolves to this to select a default level
@@ -304,6 +359,11 @@ class NET_EXPORT HostResolver {
                                     HostCache::EntryStaleness* stale_info,
                                     const NetLogWithSource& source_net_log) = 0;
 
+  // Create a listener to watch for updates to an MDNS result.
+  virtual std::unique_ptr<MdnsListener> CreateMdnsListener(
+      const HostPortPair& host,
+      DnsQueryType query_type);
+
   // Enable or disable the built-in asynchronous DnsClient.
   virtual void SetDnsClientEnabled(bool enabled);
 
@@ -368,7 +428,6 @@ class NET_EXPORT HostResolver {
   //
   // TODO(crbug.com/821021): Delete these methods once all usage has been
   // converted to the new CreateRequest() API.
-  static DnsQueryType AddressFamilyToDnsQueryType(AddressFamily address_family);
   static ResolveHostParameters RequestInfoToResolveHostParameters(
       const RequestInfo& request_info,
       RequestPriority priority);

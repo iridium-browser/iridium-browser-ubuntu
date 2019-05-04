@@ -115,7 +115,11 @@ void BookmarkModelTypeProcessor::ConnectSync(
 
 void BookmarkModelTypeProcessor::DisconnectSync() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(worker_);
+
+  if (!worker_) {
+    return;
+  }
+
   DVLOG(1) << "Disconnecting sync for Bookmarks";
   worker_.reset();
 }
@@ -171,6 +175,26 @@ void BookmarkModelTypeProcessor::OnUpdateReceived(
                           bookmark_tracker_.get())
           .Merge();
     }
+
+    // If any of the permanent nodes is missing, we treat it as failure.
+    // TODO(mamir): Revisit if this is too aggressive since it may influence
+    // the USS migrator case on desktop (which wouldn't usually have mobile
+    // bookmarks).
+    if (!bookmark_tracker_->GetEntityForBookmarkNode(
+            bookmark_model_->bookmark_bar_node()) ||
+        !bookmark_tracker_->GetEntityForBookmarkNode(
+            bookmark_model_->other_node()) ||
+        !bookmark_tracker_->GetEntityForBookmarkNode(
+            bookmark_model_->mobile_node())) {
+      StopTrackingMetadata();
+      bookmark_tracker_.reset();
+      error_handler_.Run(
+          syncer::ModelError(FROM_HERE, "Permanent bookmark entities missing"));
+      return;
+    }
+
+    bookmark_tracker_->CheckAllNodesTracked(bookmark_model_);
+
     schedule_save_closure_.Run();
     NudgeForCommitIfNeeded();
     return;
@@ -179,9 +203,12 @@ void BookmarkModelTypeProcessor::OnUpdateReceived(
       bookmark_model_, bookmark_undo_service_, bookmark_model_observer_.get());
   BookmarkRemoteUpdatesHandler updates_handler(
       bookmark_model_, favicon_service_, bookmark_tracker_.get());
-  updates_handler.Process(updates);
+  const bool got_new_encryption_requirements =
+      bookmark_tracker_->model_type_state().encryption_key_name() !=
+      model_type_state.encryption_key_name();
   bookmark_tracker_->set_model_type_state(
       std::make_unique<sync_pb::ModelTypeState>(model_type_state));
+  updates_handler.Process(updates, got_new_encryption_requirements);
   // Schedule save just in case one is needed.
   schedule_save_closure_.Run();
 }
@@ -189,6 +216,10 @@ void BookmarkModelTypeProcessor::OnUpdateReceived(
 const SyncedBookmarkTracker* BookmarkModelTypeProcessor::GetTrackerForTest()
     const {
   return bookmark_tracker_.get();
+}
+
+bool BookmarkModelTypeProcessor::IsConnectedForTest() const {
+  return worker_ != nullptr;
 }
 
 std::string BookmarkModelTypeProcessor::EncodeSyncMetadata() const {
@@ -216,10 +247,9 @@ void BookmarkModelTypeProcessor::ModelReadyToSync(
   sync_pb::BookmarkModelMetadata model_metadata;
   model_metadata.ParseFromString(metadata_str);
 
-  auto model_type_state = std::make_unique<sync_pb::ModelTypeState>();
-  model_type_state->Swap(model_metadata.mutable_model_type_state());
-
-  if (model_type_state->initial_sync_done()) {
+  if (model_metadata.model_type_state().initial_sync_done() &&
+      SyncedBookmarkTracker::BookmarkModelMatchesMetadata(model,
+                                                          model_metadata)) {
     std::vector<NodeMetadataPair> nodes_metadata;
     for (sync_pb::BookmarkMetadata& bookmark_metadata :
          *model_metadata.mutable_bookmarks_metadata()) {
@@ -227,35 +257,21 @@ void BookmarkModelTypeProcessor::ModelReadyToSync(
       // all nodes and store in a map keyed by id instead of doing a lookup for
       // every id.
       const bookmarks::BookmarkNode* node = nullptr;
-      if (bookmark_metadata.metadata().is_deleted()) {
-        if (bookmark_metadata.has_id()) {
-          DLOG(ERROR) << "Error when decoding sync metadata: Tombstones "
-                         "shouldn't have a bookmark id.";
-          continue;
-        }
-      } else {
-        if (!bookmark_metadata.has_id()) {
-          DLOG(ERROR)
-              << "Error when decoding sync metadata: Bookmark id is missing.";
-          continue;
-        }
+      if (!bookmark_metadata.metadata().is_deleted()) {
         node = GetBookmarkNodeByID(bookmark_model_, bookmark_metadata.id());
-        if (node == nullptr) {
-          DLOG(ERROR) << "Error when decoding sync metadata: Cannot find the "
-                         "bookmark node.";
-          continue;
-        }
+        DCHECK(node);
       }
       auto metadata = std::make_unique<sync_pb::EntityMetadata>();
       metadata->Swap(bookmark_metadata.mutable_metadata());
       nodes_metadata.emplace_back(node, std::move(metadata));
     }
-    // TODO(crbug.com/516866): Handle local nodes that don't have a
-    // corresponding
-    // metadata.
+    auto model_type_state = std::make_unique<sync_pb::ModelTypeState>();
+    model_type_state->Swap(model_metadata.mutable_model_type_state());
     StartTrackingMetadata(std::move(nodes_metadata),
                           std::move(model_type_state));
-  } else if (!model_metadata.bookmarks_metadata().empty()) {
+    bookmark_tracker_->CheckAllNodesTracked(bookmark_model_);
+  } else if (!model_metadata.model_type_state().initial_sync_done() &&
+             !model_metadata.bookmarks_metadata().empty()) {
     DLOG(ERROR)
         << "Persisted Metadata not empty while initial sync is not done.";
   }
@@ -271,7 +287,9 @@ void BookmarkModelTypeProcessor::SetFaviconService(
 size_t BookmarkModelTypeProcessor::EstimateMemoryUsage() const {
   using base::trace_event::EstimateMemoryUsage;
   size_t memory_usage = 0;
-  memory_usage += bookmark_tracker_->EstimateMemoryUsage();
+  if (bookmark_tracker_) {
+    memory_usage += bookmark_tracker_->EstimateMemoryUsage();
+  }
   memory_usage += EstimateMemoryUsage(cache_guid_);
   return memory_usage;
 }
@@ -293,6 +311,8 @@ void BookmarkModelTypeProcessor::OnSyncStarting(
 
   cache_guid_ = request.cache_guid;
   start_callback_ = std::move(start_callback);
+  error_handler_ = request.error_handler;
+
   DCHECK(!cache_guid_.empty());
   ConnectIfReady();
 }
@@ -311,11 +331,13 @@ void BookmarkModelTypeProcessor::ConnectIfReady() {
 
   if (bookmark_tracker_ &&
       bookmark_tracker_->model_type_state().cache_guid() != cache_guid_) {
-    // TODO(crbug.com/820049): Properly handle a mismatch between the loaded
-    // cache guid stored in |bookmark_tracker_.model_type_state_| at
-    // DecodeSyncMetadata() and the one received from sync at OnSyncStarting()
-    // stored in |cache_guid_|.
-    return;
+    // TODO(crbug.com/820049): Add basic unit testing  consider using
+    // StopTrackingMetadata().
+    // In case of a cache guid mismatch, treat it as a corrupted metadata and
+    // start clean.
+    bookmark_model_->RemoveObserver(bookmark_model_observer_.get());
+    bookmark_model_observer_.reset();
+    bookmark_tracker_.reset();
   }
 
   auto activation_context =
@@ -385,6 +407,12 @@ void BookmarkModelTypeProcessor::NudgeForCommitIfNeeded() {
   }
 }
 
+void BookmarkModelTypeProcessor::OnBookmarkModelBeingDeleted() {
+  DCHECK(bookmark_model_);
+  DCHECK(bookmark_model_observer_);
+  StopTrackingMetadata();
+}
+
 void BookmarkModelTypeProcessor::StartTrackingMetadata(
     std::vector<NodeMetadataPair> nodes_metadata,
     std::unique_ptr<sync_pb::ModelTypeState> model_type_state) {
@@ -394,8 +422,20 @@ void BookmarkModelTypeProcessor::StartTrackingMetadata(
   bookmark_model_observer_ = std::make_unique<BookmarkModelObserverImpl>(
       base::BindRepeating(&BookmarkModelTypeProcessor::NudgeForCommitIfNeeded,
                           base::Unretained(this)),
+      base::BindOnce(&BookmarkModelTypeProcessor::OnBookmarkModelBeingDeleted,
+                     base::Unretained(this)),
       bookmark_tracker_.get());
   bookmark_model_->AddObserver(bookmark_model_observer_.get());
+}
+
+void BookmarkModelTypeProcessor::StopTrackingMetadata() {
+  DCHECK(bookmark_model_observer_);
+
+  bookmark_model_->RemoveObserver(bookmark_model_observer_.get());
+  bookmark_model_ = nullptr;
+  bookmark_model_observer_.reset();
+
+  DisconnectSync();
 }
 
 void BookmarkModelTypeProcessor::GetAllNodesForDebugging(
@@ -435,8 +475,7 @@ void BookmarkModelTypeProcessor::AppendNodeAndChildrenForDebugging(
       bookmark_tracker_->GetEntityForBookmarkNode(node);
   // Include only tracked nodes. Newly added nodes are tracked even before being
   // sent to the server. Managed bookmarks (that are installed by a policy)
-  // aren't syncable and hence not tracked. In addition, Mobile Bookmarks folder
-  // is only synced after it's been created on the server.
+  // aren't syncable and hence not tracked.
   if (!entity) {
     return;
   }
@@ -497,21 +536,27 @@ void BookmarkModelTypeProcessor::AppendNodeAndChildrenForDebugging(
 void BookmarkModelTypeProcessor::GetStatusCountersForDebugging(
     StatusCountersCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(bookmark_tracker_);
   syncer::StatusCounters counters;
-  counters.num_entries = bookmark_tracker_->TrackedBookmarksCountForDebugging();
-  counters.num_entries_and_tombstones =
-      counters.num_entries +
-      bookmark_tracker_->TrackedUncommittedTombstonesCountForDebugging();
+  if (bookmark_tracker_) {
+    counters.num_entries =
+        bookmark_tracker_->TrackedBookmarksCountForDebugging();
+    counters.num_entries_and_tombstones =
+        counters.num_entries +
+        bookmark_tracker_->TrackedUncommittedTombstonesCountForDebugging();
+  }
   std::move(callback).Run(syncer::BOOKMARKS, counters);
 }
 
 void BookmarkModelTypeProcessor::RecordMemoryUsageAndCountsHistograms() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   SyncRecordModelTypeMemoryHistogram(syncer::BOOKMARKS, EstimateMemoryUsage());
-  SyncRecordModelTypeCountHistogram(
-      syncer::BOOKMARKS,
-      bookmark_tracker_->TrackedBookmarksCountForDebugging());
+  if (bookmark_tracker_) {
+    SyncRecordModelTypeCountHistogram(
+        syncer::BOOKMARKS,
+        bookmark_tracker_->TrackedBookmarksCountForDebugging());
+  } else {
+    SyncRecordModelTypeCountHistogram(syncer::BOOKMARKS, 0);
+  }
 }
 
 }  // namespace sync_bookmarks

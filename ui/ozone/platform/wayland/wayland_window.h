@@ -5,6 +5,7 @@
 #ifndef UI_OZONE_PLATFORM_WAYLAND_WAYLAND_WINDOW_H_
 #define UI_OZONE_PLATFORM_WAYLAND_WAYLAND_WINDOW_H_
 
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/geometry/rect.h"
@@ -12,6 +13,7 @@
 #include "ui/ozone/platform/wayland/wayland_object.h"
 #include "ui/platform_window/platform_window.h"
 #include "ui/platform_window/platform_window_delegate.h"
+#include "ui/platform_window/platform_window_handler/wm_drag_handler.h"
 #include "ui/platform_window/platform_window_handler/wm_move_resize_handler.h"
 
 namespace gfx {
@@ -35,7 +37,8 @@ class XDGShellObjectFactory;
 
 class WaylandWindow : public PlatformWindow,
                       public PlatformEventDispatcher,
-                      public WmMoveResizeHandler {
+                      public WmMoveResizeHandler,
+                      public WmDragHandler {
  public:
   WaylandWindow(PlatformWindowDelegate* delegate,
                 WaylandConnection* connection);
@@ -48,6 +51,8 @@ class WaylandWindow : public PlatformWindow,
   wl_surface* surface() const { return surface_.get(); }
   XDGSurfaceWrapper* xdg_surface() const { return xdg_surface_.get(); }
   XDGPopupWrapper* xdg_popup() const { return xdg_popup_.get(); }
+
+  gfx::AcceleratedWidget GetWidget() const;
 
   // Apply the bounds specified in the most recent configure event. This should
   // be called after processing all pending events in the wayland connection.
@@ -80,6 +85,12 @@ class WaylandWindow : public PlatformWindow,
   void DispatchHostWindowDragMovement(
       int hittest,
       const gfx::Point& pointer_location) override;
+
+  // WmDragHandler
+  void StartDrag(const ui::OSExchangeData& data,
+                 int operation,
+                 gfx::NativeCursor cursor,
+                 base::OnceCallback<void(int)> callback) override;
 
   // PlatformWindow
   void Show() override;
@@ -129,6 +140,8 @@ class WaylandWindow : public PlatformWindow,
   bool IsMaximized() const;
   bool IsFullscreen() const;
 
+  void MaybeTriggerPendingStateChange();
+
   // Creates a popup window, which is visible as a menu window.
   void CreateXdgPopup();
   // Creates a surface window, which is visible as a main window.
@@ -160,6 +173,8 @@ class WaylandWindow : public PlatformWindow,
   // The current cursor bitmap (immutable).
   scoped_refptr<BitmapCursorOzone> bitmap_;
 
+  base::OnceCallback<void(int)> drag_closed_callback_;
+
   gfx::Rect bounds_;
   gfx::Rect pending_bounds_;
   // The bounds of our window before we were maximized or fullscreen.
@@ -171,6 +186,9 @@ class WaylandWindow : public PlatformWindow,
 
   // Stores current states of the window.
   ui::PlatformWindowState state_;
+  // Stores a pending state of the window, which is used before the surface is
+  // activated.
+  ui::PlatformWindowState pending_state_;
 
   bool is_active_ = false;
   bool is_minimizing_ = false;

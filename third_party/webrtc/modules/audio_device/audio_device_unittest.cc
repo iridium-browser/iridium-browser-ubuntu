@@ -13,13 +13,14 @@
 #include <memory>
 #include <numeric>
 
+#include "absl/memory/memory.h"
 #include "absl/types/optional.h"
 #include "api/array_view.h"
 #include "modules/audio_device/audio_device_impl.h"
 #include "modules/audio_device/include/audio_device.h"
 #include "modules/audio_device/include/mock_audio_transport.h"
 #include "rtc_base/buffer.h"
-#include "rtc_base/criticalsection.h"
+#include "rtc_base/critical_section.h"
 #include "rtc_base/event.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
@@ -27,7 +28,7 @@
 #include "rtc_base/scoped_ref_ptr.h"
 #include "rtc_base/thread_annotations.h"
 #include "rtc_base/thread_checker.h"
-#include "rtc_base/timeutils.h"
+#include "rtc_base/time_utils.h"
 #include "system_wrappers/include/sleep.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
@@ -509,7 +510,7 @@ class MockAudioTransport : public test::MockAudioTransport {
 class AudioDeviceTest
     : public ::testing::TestWithParam<webrtc::AudioDeviceModule::AudioLayer> {
  protected:
-  AudioDeviceTest() : audio_layer_(GetParam()), event_(false, false) {
+  AudioDeviceTest() : audio_layer_(GetParam()) {
 // TODO(webrtc:9778): Re-enable on THREAD_SANITIZER?
 #if !defined(ADDRESS_SANITIZER) && !defined(MEMORY_SANITIZER) && \
     !defined(WEBRTC_DUMMY_AUDIO_BUILD) && !defined(THREAD_SANITIZER)

@@ -81,9 +81,11 @@ class WebSocketManager::Delegate final : public network::WebSocket::Delegate {
     OnLostConnectionToClient(impl);
   }
 
-  bool CanReadRawCookies() override {
-    return ChildProcessSecurityPolicyImpl::GetInstance()->CanReadRawCookies(
-        manager_->process_id_);
+  bool CanReadRawCookies(const GURL& url) override {
+    ChildProcessSecurityPolicyImpl* impl =
+        ChildProcessSecurityPolicyImpl::GetInstance();
+    return impl->CanReadRawCookies(manager_->process_id_) &&
+           impl->CanAccessDataForWebSocket(manager_->process_id_, url);
   }
 
   void OnCreateURLRequest(int child_id,

@@ -19,6 +19,7 @@
 #include "ipc/ipc_message_macros.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/constants.h"
+#include "remoting/host/action_executor.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/chromoting_messages.h"
 #include "remoting/host/desktop_environment.h"
@@ -27,6 +28,7 @@
 #include "remoting/host/remote_input_filter.h"
 #include "remoting/host/screen_controls.h"
 #include "remoting/host/screen_resolution.h"
+#include "remoting/proto/action.pb.h"
 #include "remoting/proto/audio.pb.h"
 #include "remoting/proto/control.pb.h"
 #include "remoting/proto/event.pb.h"
@@ -165,6 +167,7 @@ DesktopSessionAgent::DesktopSessionAgent(
       caller_task_runner_(caller_task_runner),
       input_task_runner_(input_task_runner),
       io_task_runner_(io_task_runner),
+      desktop_display_info_(new DesktopDisplayInfo()),
       current_process_stats_("DesktopSessionAgent"),
       weak_factory_(this) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
@@ -178,6 +181,8 @@ bool DesktopSessionAgent::OnMessageReceived(const IPC::Message& message) {
     IPC_BEGIN_MESSAGE_MAP(DesktopSessionAgent, message)
       IPC_MESSAGE_HANDLER(ChromotingNetworkDesktopMsg_CaptureFrame,
                           OnCaptureFrame)
+      IPC_MESSAGE_HANDLER(ChromotingNetworkDesktopMsg_SelectSource,
+                          OnSelectSource)
       IPC_MESSAGE_HANDLER(ChromotingNetworkDesktopMsg_InjectClipboardEvent,
                           OnInjectClipboardEvent)
       IPC_MESSAGE_HANDLER(ChromotingNetworkDesktopMsg_InjectKeyEvent,
@@ -188,8 +193,22 @@ bool DesktopSessionAgent::OnMessageReceived(const IPC::Message& message) {
                           OnInjectMouseEvent)
       IPC_MESSAGE_HANDLER(ChromotingNetworkDesktopMsg_InjectTouchEvent,
                           OnInjectTouchEvent)
+      IPC_MESSAGE_HANDLER(ChromotingNetworkDesktopMsg_ExecuteActionRequest,
+                          OnExecuteActionRequestEvent)
       IPC_MESSAGE_HANDLER(ChromotingNetworkDesktopMsg_SetScreenResolution,
                           SetScreenResolution)
+      IPC_MESSAGE_FORWARD(ChromotingNetworkDesktopMsg_WriteFile,
+                          &*session_file_operations_handler_,
+                          SessionFileOperationsHandler::WriteFile)
+      IPC_MESSAGE_FORWARD(ChromotingNetworkDesktopMsg_WriteFileChunk,
+                          &*session_file_operations_handler_,
+                          SessionFileOperationsHandler::WriteChunk)
+      IPC_MESSAGE_FORWARD(ChromotingNetworkDesktopMsg_CloseFile,
+                          &*session_file_operations_handler_,
+                          SessionFileOperationsHandler::Close)
+      IPC_MESSAGE_FORWARD(ChromotingNetworkDesktopMsg_CancelFile,
+                          &*session_file_operations_handler_,
+                          SessionFileOperationsHandler::Cancel)
       IPC_MESSAGE_HANDLER(ChromotingNetworkToAnyMsg_StartProcessStatsReport,
                           StartProcessStatsReport)
       IPC_MESSAGE_HANDLER(ChromotingNetworkToAnyMsg_StopProcessStatsReport,
@@ -232,6 +251,7 @@ DesktopSessionAgent::~DesktopSessionAgent() {
   DCHECK(!screen_controls_);
   DCHECK(!video_capturer_);
   DCHECK(!stats_sender_);
+  DCHECK(!session_file_operations_handler_);
 }
 
 const std::string& DesktopSessionAgent::client_jid() const {
@@ -257,6 +277,9 @@ void DesktopSessionAgent::SetDisableInputs(bool disable_inputs) {
   NOTREACHED();
 }
 
+void DesktopSessionAgent::OnDesktopDisplayChanged(
+    std::unique_ptr<protocol::VideoLayout> layout) {}
+
 void DesktopSessionAgent::OnProcessStats(
     const protocol::AggregatedProcessResourceUsage& usage) {
   SendToNetwork(
@@ -274,6 +297,7 @@ void DesktopSessionAgent::OnStartSessionAgent(
   DCHECK(!input_injector_);
   DCHECK(!screen_controls_);
   DCHECK(!video_capturer_);
+  DCHECK(!session_file_operations_handler_);
 
   started_ = true;
   client_jid_ = authenticated_jid;
@@ -288,6 +312,8 @@ void DesktopSessionAgent::OnStartSessionAgent(
 
   // Create the input injector.
   input_injector_ = desktop_environment_->CreateInputInjector();
+
+  action_executor_ = desktop_environment_->CreateActionExecutor();
 
   // Hook up the input filter.
   input_tracker_.reset(new protocol::InputEventTracker(input_injector_.get()));
@@ -319,6 +345,10 @@ void DesktopSessionAgent::OnStartSessionAgent(
           base::Bind(&DesktopSessionAgent::SendToNetwork, this))));
   mouse_cursor_monitor_ = desktop_environment_->CreateMouseCursorMonitor();
   mouse_cursor_monitor_->Init(this, webrtc::MouseCursorMonitor::SHAPE_ONLY);
+
+  // Set up the message handler for file transfers.
+  session_file_operations_handler_.emplace(
+      this, desktop_environment_->CreateFileOperations());
 }
 
 void DesktopSessionAgent::OnCaptureResult(
@@ -345,6 +375,26 @@ void DesktopSessionAgent::OnCaptureResult(
 
   SendToNetwork(std::make_unique<ChromotingDesktopNetworkMsg_CaptureResult>(
       result, serialized_frame));
+
+  auto info = std::make_unique<DesktopDisplayInfo>();
+  info->LoadCurrentDisplayInfo();
+  if (*desktop_display_info_ != *info) {
+    desktop_display_info_ = std::move(info);
+    // Generate and send VideoLayout message.
+    protocol::VideoLayout layout;
+    for (auto display : desktop_display_info_->displays()) {
+      protocol::VideoTrackLayout* track = layout.add_video_track();
+      track->set_position_x(display.x);
+      track->set_position_y(display.y);
+      track->set_width(display.width);
+      track->set_height(display.height);
+      track->set_x_dpi(display.dpi);
+      track->set_y_dpi(display.dpi);
+    }
+
+    SendToNetwork(
+        std::make_unique<ChromotingDesktopNetworkMsg_DisplayChanged>(layout));
+  }
 }
 
 void DesktopSessionAgent::OnMouseCursor(webrtc::MouseCursor* cursor) {
@@ -392,6 +442,15 @@ void DesktopSessionAgent::ProcessAudioPacket(
       serialized_packet));
 }
 
+void DesktopSessionAgent::OnResult(
+    uint64_t file_id,
+    protocol::FileTransferResult<Monostate> result) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  SendToNetwork(std::make_unique<ChromotingDesktopNetworkMsg_FileResult>(
+      file_id, std::move(result)));
+}
+
 mojo::ScopedMessagePipeHandle DesktopSessionAgent::Start(
     const base::WeakPtr<Delegate>& delegate) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
@@ -426,11 +485,14 @@ void DesktopSessionAgent::Stop() {
 
     remote_input_filter_.reset();
 
+    session_file_operations_handler_.reset();
+
     // Ensure that any pressed keys or buttons are released.
     input_tracker_->ReleaseAll();
     input_tracker_.reset();
 
     desktop_environment_.reset();
+    action_executor_.reset();
     input_injector_.reset();
     screen_controls_.reset();
 
@@ -456,6 +518,11 @@ void DesktopSessionAgent::OnCaptureFrame() {
   // requests, pixel data in captured frames will likely be corrupted but
   // stability of webrtc::DesktopCapturer will not be affected.
   video_capturer_->CaptureFrame();
+}
+
+void DesktopSessionAgent::OnSelectSource(int id) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+  video_capturer_->SelectSource(id);
 }
 
 void DesktopSessionAgent::OnInjectClipboardEvent(
@@ -539,6 +606,13 @@ void DesktopSessionAgent::OnInjectTouchEvent(
   }
 
   remote_input_filter_->InjectTouchEvent(event);
+}
+
+void DesktopSessionAgent::OnExecuteActionRequestEvent(
+    const protocol::ActionRequest& request) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  action_executor_->ExecuteAction(request);
 }
 
 void DesktopSessionAgent::SetScreenResolution(

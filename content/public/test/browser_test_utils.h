@@ -83,6 +83,7 @@ struct FrameVisualProperties;
 class FrameTreeNode;
 class InterstitialPage;
 class NavigationHandle;
+class NavigationHandleImpl;
 class RenderWidgetHost;
 class RenderWidgetHostView;
 class WebContents;
@@ -212,6 +213,12 @@ void SimulateMouseWheelCtrlZoomEvent(WebContents* web_contents,
                                      const gfx::Point& point,
                                      bool zoom_in,
                                      blink::WebMouseWheelEvent::Phase phase);
+
+void SimulateTouchscreenPinch(WebContents* web_contents,
+                              const gfx::PointF& anchor,
+                              float scale_change,
+                              base::OnceClosure on_complete);
+
 #endif  // !defined(OS_MACOSX)
 
 // Sends a GesturePinch Begin/Update/End sequence.
@@ -818,7 +825,7 @@ void WaitForInterstitialDetach(content::WebContents* web_contents);
 // destroyed by the time WaitForInterstitialDetach is called (e.g. when waiting
 // for an interstitial detach after closing a tab).
 void RunTaskAndWaitForInterstitialDetach(content::WebContents* web_contents,
-                                         const base::Closure& task);
+                                         base::OnceClosure task);
 
 // Waits until all resources have loaded in the given RenderFrameHost.
 // When the load completes, this function sends a "pageLoadComplete" message
@@ -878,6 +885,10 @@ void CancelKeyboardLock(WebContents* web_contents);
 // Returns true if inner |interstitial_page| is connected to an outer
 // WebContents.
 bool IsInnerInterstitialPageConnected(InterstitialPage* interstitial_page);
+
+// Returns the screen orientation provider that's been set via
+// WebContents::SetScreenOrientationDelegate(). May return null.
+ScreenOrientationDelegate* GetScreenOrientationDelegate();
 
 // Returns all the RenderWidgetHostViews inside the |web_contents| that are
 // registered in the RenderWidgetHostInputEventRouter.
@@ -1106,6 +1117,16 @@ class RenderFrameSubmissionObserver
   // Blocks the browser ui thread until the next
   // OnRenderFrameMetadataChangedAfterActivation.
   void WaitForMetadataChange();
+
+  // Blocks the browser ui thread until RenderFrameMetadata arrives with
+  // page scale factor matching |expected_page_scale_factor|.
+  void WaitForPageScaleFactor(float expected_page_scale_factor,
+                              const float tolerance);
+
+  // Blocks the browser ui thread until RenderFrameMetadata arrives with
+  // external page scale factor matching |expected_external_page_scale_factor|.
+  void WaitForExternalPageScaleFactor(float expected_external_page_scale_factor,
+                                      const float tolerance);
 
   // Blocks the browser ui thread until RenderFrameMetadata arrives where its
   // scroll offset matches |expected_offset|.
@@ -1381,7 +1402,7 @@ class TestNavigationManager : public WebContentsObserver {
   void OnNavigationStateChanged();
 
   const GURL url_;
-  NavigationHandle* handle_;
+  NavigationHandleImpl* handle_;
   bool navigation_paused_;
   NavigationState current_state_;
   NavigationState desired_state_;
@@ -1575,14 +1596,12 @@ class SynchronizeVisualPropertiesMessageFilter
 
  private:
   void OnSynchronizeFrameHostVisualProperties(
-      const viz::SurfaceId& surface_id,
+      const viz::FrameSinkId& frame_sink_id,
       const FrameVisualProperties& visual_properties);
   void OnSynchronizeBrowserPluginVisualProperties(
       int browser_plugin_guest_instance_id,
-      viz::LocalSurfaceId surface_id,
       FrameVisualProperties visual_properties);
   void OnSynchronizeVisualProperties(
-      const viz::LocalSurfaceId& surface_id,
       const viz::FrameSinkId& frame_sink_id,
       const FrameVisualProperties& visual_properties);
   // |rect| is in DIPs.

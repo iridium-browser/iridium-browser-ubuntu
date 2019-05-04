@@ -12,6 +12,7 @@
 #include "cc/paint/render_surface_filters.h"
 #include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
+#include "components/viz/common/frame_sinks/copy_output_util.h"
 #include "components/viz/common/quads/debug_border_draw_quad.h"
 #include "components/viz/common/quads/picture_draw_quad.h"
 #include "components/viz/common/quads/render_pass_draw_quad.h"
@@ -36,6 +37,7 @@
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkOverdrawCanvas.h"
 #include "third_party/skia/include/core/SkPath.h"
+#include "third_party/skia/include/core/SkPixelRef.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "third_party/skia/include/effects/SkOverdrawColorFilter.h"
 #include "third_party/skia/include/effects/SkShaderMaskFilter.h"
@@ -51,13 +53,14 @@ struct SkiaRenderer::DrawRenderPassDrawQuadParams {
   // The "in" parameters that will be used when apply filters.
   const cc::FilterOperations* filters = nullptr;
 
-  // The "out" parameters returned by filters.
-  // A Skia image that should be sampled from instead of the original
-  // contents.
-  sk_sp<SkImage> filter_image;
-  gfx::Point src_offset;
-  gfx::RectF dst_rect;
-  gfx::RectF tex_coord_rect;
+  // The "out" parameters returned by CalculateRPDQParams.
+  // Root of the calculated image filter DAG to be applied to the render pass.
+  sk_sp<SkImageFilter> image_filter;
+  // Non-null |color_filter| should be applied when render pass is drawn. It is
+  // a portion of the image filter DAG that was separated out because direct
+  // color filter drawing is much faster than a colorFilterImageFilter drawing.
+  // TODO(skbug.com/8700): Delete this after Skia side implementation is done.
+  sk_sp<SkColorFilter> color_filter;
 };
 
 namespace {
@@ -65,6 +68,10 @@ namespace {
 bool IsTextureResource(DisplayResourceProvider* resource_provider,
                        ResourceId resource_id) {
   return !resource_provider->IsResourceSoftwareBacked(resource_id);
+}
+
+bool ApplyTransformAndScissorToTileRect(const gfx::Transform& transform) {
+  return transform.IsPositiveScaleOrTranslation();
 }
 
 }  // namespace
@@ -102,12 +109,9 @@ SkiaRenderer::ScopedSkImageBuilder::ScopedSkImageBuilder(
     // to store the new created image later.
     auto& image = skia_renderer->promise_images_[resource_id];
     if (!image) {
-      auto metadata =
-          skia_renderer->lock_set_for_external_use_.LockResource(resource_id);
-      DCHECK(!metadata.mailbox.IsZero());
-      image = skia_renderer->skia_output_surface_->MakePromiseSkImage(
-          std::move(metadata));
-      DCHECK(image);
+      image = skia_renderer->lock_set_for_external_use_
+                  ->LockResourceAndCreateSkImage(resource_id);
+      LOG_IF(ERROR, !image) << "Failed to create the promise sk image.";
     }
     sk_image_ = image.get();
   }
@@ -136,30 +140,35 @@ class SkiaRenderer::ScopedYUVSkImageBuilder {
       auto yuv_color_space = kRec601_SkYUVColorSpace;
       quad->video_color_space.ToSkYUVColorSpace(&yuv_color_space);
 
+      const bool is_i420 =
+          quad->u_plane_resource_id() != quad->v_plane_resource_id();
+      const bool has_alpha = quad->a_plane_resource_id() != kInvalidResourceId;
+      const size_t number_of_textures = (is_i420 ? 3 : 2) + (has_alpha ? 1 : 0);
       std::vector<ResourceMetadata> metadatas;
-      bool is_yuv = quad->u_plane_resource_id() != quad->v_plane_resource_id();
-      metadatas.reserve(is_yuv ? 3 : 2);
-      auto y_metadata = skia_renderer->lock_set_for_external_use_.LockResource(
+      metadatas.reserve(number_of_textures);
+      auto y_metadata = skia_renderer->lock_set_for_external_use_->LockResource(
           quad->y_plane_resource_id());
       metadatas.push_back(std::move(y_metadata));
-      auto u_metadata = skia_renderer->lock_set_for_external_use_.LockResource(
+      auto u_metadata = skia_renderer->lock_set_for_external_use_->LockResource(
           quad->u_plane_resource_id());
       metadatas.push_back(std::move(u_metadata));
-      if (is_yuv) {
+      if (is_i420) {
         auto v_metadata =
-            skia_renderer->lock_set_for_external_use_.LockResource(
+            skia_renderer->lock_set_for_external_use_->LockResource(
                 quad->v_plane_resource_id());
         metadatas.push_back(std::move(v_metadata));
       }
 
-      if (quad->a_plane_resource_id() != kInvalidResourceId) {
-        // TODO(penghuang): Handle alpha channel when Skia supports YUVA format.
-        NOTIMPLEMENTED();
+      if (has_alpha) {
+        auto a_metadata =
+            skia_renderer->lock_set_for_external_use_->LockResource(
+                quad->a_plane_resource_id());
+        metadatas.push_back(std::move(a_metadata));
       }
 
       image = skia_renderer->skia_output_surface_->MakePromiseSkImageFromYUV(
-          std::move(metadatas), yuv_color_space);
-      DCHECK(image);
+          std::move(metadatas), yuv_color_space, has_alpha);
+      LOG_IF(ERROR, !image) << "Failed to create the promise sk yuva image.";
     }
     sk_image_ = image.get();
   }
@@ -182,8 +191,7 @@ SkiaRenderer::SkiaRenderer(const RendererSettings* settings,
                            DrawMode mode)
     : DirectRenderer(settings, output_surface, resource_provider),
       draw_mode_(mode),
-      skia_output_surface_(skia_output_surface),
-      lock_set_for_external_use_(resource_provider) {
+      skia_output_surface_(skia_output_surface) {
   switch (draw_mode_) {
     case DrawMode::GL: {
       DCHECK(output_surface_);
@@ -205,7 +213,19 @@ SkiaRenderer::SkiaRenderer(const RendererSettings* settings,
     }
     case DrawMode::DDL: {
       DCHECK(skia_output_surface_);
+      lock_set_for_external_use_.emplace(resource_provider,
+                                         skia_output_surface);
       break;
+    }
+    case DrawMode::SKPRECORD: {
+      DCHECK(output_surface_);
+      context_provider_ = output_surface_->context_provider();
+      const auto& context_caps = context_provider_->ContextCapabilities();
+      use_swap_with_bounds_ = context_caps.swap_buffers_with_bounds;
+      if (context_caps.sync_query) {
+        sync_queries_ =
+            base::Optional<SyncQueryCollection>(context_provider_->ContextGL());
+      }
     }
   }
 }
@@ -213,7 +233,7 @@ SkiaRenderer::SkiaRenderer(const RendererSettings* settings,
 SkiaRenderer::~SkiaRenderer() = default;
 
 bool SkiaRenderer::CanPartialSwap() {
-  if (draw_mode_ != DrawMode::GL)
+  if (draw_mode_ != DrawMode::GL && draw_mode_ != DrawMode::SKPRECORD)
     return false;
 
   DCHECK(context_provider_);
@@ -225,7 +245,7 @@ bool SkiaRenderer::CanPartialSwap() {
 
 void SkiaRenderer::BeginDrawingFrame() {
   TRACE_EVENT0("viz", "SkiaRenderer::BeginDrawingFrame");
-  if (draw_mode_ != DrawMode::GL)
+  if (draw_mode_ != DrawMode::GL && draw_mode_ != DrawMode::SKPRECORD)
     return;
 
   // Copied from GLRenderer.
@@ -255,18 +275,6 @@ void SkiaRenderer::FinishDrawingFrame() {
   if (sync_queries_) {
     sync_queries_->EndCurrentFrame();
   }
-
-  if (settings_->show_overdraw_feedback) {
-    sk_sp<SkImage> image = overdraw_surface_->makeImageSnapshot();
-    SkPaint paint;
-    static const SkPMColor colors[SkOverdrawColorFilter::kNumColors] = {
-        0x00000000, 0x00000000, 0x2f0000ff, 0x2f00ff00, 0x3fff0000, 0x7fff0000,
-    };
-    sk_sp<SkColorFilter> color_filter = SkOverdrawColorFilter::Make(colors);
-    paint.setColorFilter(color_filter);
-    root_surface_->getCanvas()->drawImage(image.get(), 0, 0, &paint);
-    root_surface_->getCanvas()->flush();
-  }
   non_root_surface_ = nullptr;
   current_canvas_ = nullptr;
   current_surface_ = nullptr;
@@ -277,14 +285,12 @@ void SkiaRenderer::FinishDrawingFrame() {
     swap_content_bounds_ = current_frame()->root_content_bounds;
 }
 
-void SkiaRenderer::SwapBuffers(std::vector<ui::LatencyInfo> latency_info,
-                               bool need_presentation_feedback) {
+void SkiaRenderer::SwapBuffers(std::vector<ui::LatencyInfo> latency_info) {
   DCHECK(visible_);
   TRACE_EVENT0("viz,benchmark", "SkiaRenderer::SwapBuffers");
   OutputSurfaceFrame output_frame;
   output_frame.latency_info = std::move(latency_info);
   output_frame.size = surface_size_for_swap_buffers();
-  output_frame.need_presentation_feedback = need_presentation_feedback;
   if (use_swap_with_bounds_) {
     output_frame.content_bounds = std::move(swap_content_bounds_);
   } else if (use_partial_swap_) {
@@ -317,6 +323,18 @@ void SkiaRenderer::SwapBuffers(std::vector<ui::LatencyInfo> latency_info,
     case DrawMode::GL: {
       output_surface_->SwapBuffers(std::move(output_frame));
       break;
+    }
+    case DrawMode::SKPRECORD: {
+      // write to skp files
+      std::string file_name = "composited-frame.skp";
+      SkFILEWStream file(file_name.c_str());
+      DCHECK(file.isValid());
+
+      auto data = root_picture_->serialize();
+      file.write(data->data(), data->size());
+      file.fsync();
+      root_picture_ = nullptr;
+      root_recorder_.reset();
     }
   }
 
@@ -402,12 +420,24 @@ void SkiaRenderer::BindFramebufferToOutputSurface() {
       }
       break;
     }
+    case DrawMode::SKPRECORD: {
+      root_recorder_ = std::make_unique<SkPictureRecorder>();
+
+      current_recorder_ = root_recorder_.get();
+      current_picture_ = &root_picture_;
+      root_canvas_ = root_recorder_->beginRecording(
+          SkRect::MakeWH(current_frame()->device_viewport_size.width(),
+                         current_frame()->device_viewport_size.height()));
+      break;
+    }
   }
 
   current_canvas_ = root_canvas_;
   current_surface_ = root_surface_.get();
 
-  if (settings_->show_overdraw_feedback) {
+  // For DDL mode, if overdraw feedback is enabled, the root canvas is the nway
+  // canvas.
+  if (settings_->show_overdraw_feedback && draw_mode_ != DrawMode::DDL) {
     const auto& size = current_frame()->device_viewport_size;
     overdraw_surface_ = root_canvas_->makeSurface(
         SkImageInfo::MakeA8(size.width(), size.height()));
@@ -417,7 +447,6 @@ void SkiaRenderer::BindFramebufferToOutputSurface() {
     nway_canvas_->addCanvas(overdraw_canvas_.get());
     nway_canvas_->addCanvas(root_canvas_);
     current_canvas_ = nway_canvas_.get();
-    current_surface_ = overdraw_surface_.get();
   }
 }
 
@@ -439,6 +468,13 @@ void SkiaRenderer::BindFramebufferToTexture(const RenderPassId render_pass_id) {
       non_root_surface_ = backing.render_pass_surface;
       current_surface_ = non_root_surface_.get();
       current_canvas_ = non_root_surface_->getCanvas();
+      break;
+    }
+    case DrawMode::SKPRECORD: {
+      current_recorder_ = backing.recorder.get();
+      current_picture_ = &backing.picture;
+      current_canvas_ = current_recorder_->beginRecording(
+          SkRect::MakeWH(backing.size.width(), backing.size.height()));
     }
   }
 }
@@ -496,25 +532,23 @@ void SkiaRenderer::DoDrawQuad(const DrawQuad* quad,
                               const gfx::QuadF* draw_region) {
   if (!current_canvas_)
     return;
-  base::Optional<SkAutoCanvasRestore> auto_canvas_restore;
-  if (draw_region || is_scissor_enabled_) {
-    auto_canvas_restore.emplace(current_canvas_, true /* do_save */);
-    if (is_scissor_enabled_)
-      current_canvas_->clipRect(gfx::RectToSkRect(scissor_rect_));
-  }
   TRACE_EVENT0("viz", "SkiaRenderer::DoDrawQuad");
-  gfx::Transform contents_device_transform =
-      current_frame()->window_matrix * current_frame()->projection_matrix *
-      quad->shared_quad_state->quad_to_target_transform;
-  contents_device_transform.FlattenTo2d();
-  SkMatrix sk_device_matrix;
-  gfx::TransformToFlattenedSkMatrix(contents_device_transform,
-                                    &sk_device_matrix);
-  current_canvas_->setMatrix(sk_device_matrix);
+  if (MustDrawBatchedTileQuadsBeforeQuad(quad, draw_region))
+    DrawBatchedTileQuads();
+  if (quad->material == DrawQuad::TILED_CONTENT) {
+    AddTileQuadToBatch(TileDrawQuad::MaterialCast(quad), draw_region);
+    return;
+  }
 
-  current_paint_.reset();
+  base::Optional<SkAutoCanvasRestore> auto_canvas_restore;
+  const gfx::Rect* scissor_rect =
+      is_scissor_enabled_ ? &scissor_rect_ : nullptr;
+  PrepareCanvasForDrawQuads(quad->shared_quad_state->quad_to_target_transform,
+                            draw_region, scissor_rect, &auto_canvas_restore);
+
+  SkPaint paint;
   if (settings_->force_antialiasing ||
-      !IsScaleAndIntegerTranslate(sk_device_matrix)) {
+      !IsScaleAndIntegerTranslate(current_canvas_->getTotalMatrix())) {
     // TODO(danakj): Until we can enable AA only on exterior edges of the
     // layer, disable AA if any interior edges are present. crbug.com/248175
     bool all_four_edges_are_exterior =
@@ -522,41 +556,32 @@ void SkiaRenderer::DoDrawQuad(const DrawQuad* quad,
         quad->IsRightEdge();
     if (settings_->allow_antialiasing &&
         (settings_->force_antialiasing || all_four_edges_are_exterior))
-      current_paint_.setAntiAlias(true);
-    current_paint_.setFilterQuality(kLow_SkFilterQuality);
+      paint.setAntiAlias(true);
+    paint.setFilterQuality(kLow_SkFilterQuality);
   }
 
-  current_paint_.setAlpha(quad->shared_quad_state->opacity * 255);
-  current_paint_.setBlendMode(
+  paint.setAlpha(quad->shared_quad_state->opacity * 255);
+  paint.setBlendMode(
       static_cast<SkBlendMode>(quad->shared_quad_state->blend_mode));
-
-  if (draw_region) {
-    SkPath draw_region_clip_path;
-    SkPoint clip_points[4];
-    QuadFToSkPoints(*draw_region, clip_points);
-    draw_region_clip_path.addPoly(clip_points, 4, true);
-
-    current_canvas_->clipPath(draw_region_clip_path);
-  }
 
   switch (quad->material) {
     case DrawQuad::DEBUG_BORDER:
-      DrawDebugBorderQuad(DebugBorderDrawQuad::MaterialCast(quad));
+      DrawDebugBorderQuad(DebugBorderDrawQuad::MaterialCast(quad), &paint);
       break;
     case DrawQuad::PICTURE_CONTENT:
-      DrawPictureQuad(PictureDrawQuad::MaterialCast(quad));
+      DrawPictureQuad(PictureDrawQuad::MaterialCast(quad), &paint);
       break;
     case DrawQuad::RENDER_PASS:
-      DrawRenderPassQuad(RenderPassDrawQuad::MaterialCast(quad));
+      DrawRenderPassQuad(RenderPassDrawQuad::MaterialCast(quad), &paint);
       break;
     case DrawQuad::SOLID_COLOR:
-      DrawSolidColorQuad(SolidColorDrawQuad::MaterialCast(quad));
+      DrawSolidColorQuad(SolidColorDrawQuad::MaterialCast(quad), &paint);
       break;
     case DrawQuad::TEXTURE_CONTENT:
-      DrawTextureQuad(TextureDrawQuad::MaterialCast(quad));
+      DrawTextureQuad(TextureDrawQuad::MaterialCast(quad), &paint);
       break;
     case DrawQuad::TILED_CONTENT:
-      DrawTileQuad(TileDrawQuad::MaterialCast(quad));
+      NOTREACHED();
       break;
     case DrawQuad::SURFACE_CONTENT:
       // Surface content should be fully resolved to other quad types before
@@ -564,11 +589,11 @@ void SkiaRenderer::DoDrawQuad(const DrawQuad* quad,
       NOTREACHED();
       break;
     case DrawQuad::YUV_VIDEO_CONTENT:
-      DrawYUVVideoQuad(YUVVideoDrawQuad::MaterialCast(quad));
+      DrawYUVVideoQuad(YUVVideoDrawQuad::MaterialCast(quad), &paint);
       break;
     case DrawQuad::INVALID:
     case DrawQuad::STREAM_VIDEO_CONTENT:
-      DrawUnsupportedQuad(quad);
+      DrawUnsupportedQuad(quad, &paint);
       NOTREACHED();
       break;
   }
@@ -576,7 +601,77 @@ void SkiaRenderer::DoDrawQuad(const DrawQuad* quad,
   current_canvas_->resetMatrix();
 }
 
-void SkiaRenderer::DrawDebugBorderQuad(const DebugBorderDrawQuad* quad) {
+bool SkiaRenderer::MustDrawBatchedTileQuadsBeforeQuad(
+    const DrawQuad* new_quad,
+    const gfx::QuadF* draw_region) {
+  if (batched_tiles_.empty())
+    return false;
+
+  bool has_draw_region = draw_region != nullptr;
+
+  if (new_quad->material != DrawQuad::TILED_CONTENT)
+    return true;
+
+  if (ApplyTransformAndScissorToTileRect(
+          new_quad->shared_quad_state->quad_to_target_transform)) {
+    if (!batched_tile_state_.transform.IsIdentity())
+      return true;
+    DCHECK(!batched_tile_state_.has_scissor_rect);
+  } else {
+    if (batched_tile_state_.transform !=
+            new_quad->shared_quad_state->quad_to_target_transform ||
+        batched_tile_state_.has_scissor_rect != is_scissor_enabled_ ||
+        (is_scissor_enabled_ &&
+         batched_tile_state_.scissor_rect != scissor_rect_))
+      return true;
+  }
+
+  if (batched_tile_state_.blend_mode != new_quad->shared_quad_state->blend_mode)
+    return true;
+
+  if (batched_tile_state_.has_draw_region != has_draw_region ||
+      (has_draw_region && batched_tile_state_.draw_region != *draw_region))
+    return true;
+
+  if (TileDrawQuad::MaterialCast(new_quad)->nearest_neighbor !=
+      batched_tile_state_.is_nearest_neighbor)
+    return true;
+
+  return false;
+}
+
+void SkiaRenderer::PrepareCanvasForDrawQuads(
+    const gfx::Transform& quad_to_target_transform,
+    const gfx::QuadF* draw_region,
+    const gfx::Rect* scissor_rect,
+    base::Optional<SkAutoCanvasRestore>* auto_canvas_restore) {
+  if (draw_region || scissor_rect) {
+    auto_canvas_restore->emplace(current_canvas_, true /* do_save */);
+    if (scissor_rect)
+      current_canvas_->clipRect(gfx::RectToSkRect(*scissor_rect));
+  }
+
+  gfx::Transform contents_device_transform =
+      current_frame()->window_matrix * current_frame()->projection_matrix *
+      quad_to_target_transform;
+  contents_device_transform.FlattenTo2d();
+  SkMatrix sk_device_matrix;
+  gfx::TransformToFlattenedSkMatrix(contents_device_transform,
+                                    &sk_device_matrix);
+  current_canvas_->setMatrix(sk_device_matrix);
+
+  if (draw_region) {
+    SkPath draw_region_clip_path;
+    SkPoint clip_points[4];
+    QuadFToSkPoints(*draw_region, clip_points);
+    draw_region_clip_path.addPoly(clip_points, 4, true);
+    current_canvas_->clipPath(draw_region_clip_path);
+  }
+}
+
+void SkiaRenderer::DrawDebugBorderQuad(const DebugBorderDrawQuad* quad,
+                                       SkPaint* paint) {
+  DCHECK(paint);
   // We need to apply the matrix manually to have pixel-sized stroke width.
   SkPoint vertices[4];
   gfx::RectToSkRect(quad->rect).toQuad(vertices);
@@ -585,16 +680,17 @@ void SkiaRenderer::DrawDebugBorderQuad(const DebugBorderDrawQuad* quad) {
                                               4);
   current_canvas_->resetMatrix();
 
-  current_paint_.setColor(quad->color);
-  current_paint_.setAlpha(quad->shared_quad_state->opacity *
-                          SkColorGetA(quad->color));
-  current_paint_.setStyle(SkPaint::kStroke_Style);
-  current_paint_.setStrokeWidth(quad->width);
+  paint->setColor(quad->color);
+  paint->setAlpha(quad->shared_quad_state->opacity * SkColorGetA(quad->color));
+  paint->setStyle(SkPaint::kStroke_Style);
+  paint->setStrokeWidth(quad->width);
   current_canvas_->drawPoints(SkCanvas::kPolygon_PointMode, 4,
-                              transformed_vertices, current_paint_);
+                              transformed_vertices, *paint);
 }
 
-void SkiaRenderer::DrawPictureQuad(const PictureDrawQuad* quad) {
+void SkiaRenderer::DrawPictureQuad(const PictureDrawQuad* quad,
+                                   SkPaint* paint) {
+  DCHECK(paint);
   SkMatrix content_matrix;
   content_matrix.setRectToRect(gfx::RectFToSkRect(quad->tex_coord_rect),
                                gfx::RectToSkRect(quad->rect),
@@ -639,15 +735,17 @@ void SkiaRenderer::DrawPictureQuad(const PictureDrawQuad* quad) {
   quad->display_item_list->Raster(raster_canvas);
 }
 
-void SkiaRenderer::DrawSolidColorQuad(const SolidColorDrawQuad* quad) {
-  current_paint_.setColor(quad->color);
-  current_paint_.setAlpha(quad->shared_quad_state->opacity *
-                          SkColorGetA(quad->color));
-  current_canvas_->drawRect(gfx::RectToSkRect(quad->visible_rect),
-                            current_paint_);
+void SkiaRenderer::DrawSolidColorQuad(const SolidColorDrawQuad* quad,
+                                      SkPaint* paint) {
+  DCHECK(paint);
+  paint->setColor(quad->color);
+  paint->setAlpha(quad->shared_quad_state->opacity * SkColorGetA(quad->color));
+  current_canvas_->drawRect(gfx::RectToSkRect(quad->visible_rect), *paint);
 }
 
-void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
+void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+                                   SkPaint* paint) {
+  DCHECK(paint);
   ScopedSkImageBuilder builder(this, quad->resource_id());
   const SkImage* image = builder.sk_image();
   if (!image)
@@ -660,29 +758,53 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
   SkRect sk_uv_rect = gfx::RectFToSkRect(visible_uv_rect);
   SkRect quad_rect = gfx::RectToSkRect(quad->visible_rect);
 
-  if (quad->y_flipped)
+  if (quad->y_flipped) {
+    current_canvas_->translate(0, quad_rect.bottom());
     current_canvas_->scale(1, -1);
+  }
 
   bool blend_background =
       quad->background_color != SK_ColorTRANSPARENT && !image->isOpaque();
-  bool needs_layer = blend_background && (current_paint_.getAlpha() != 0xFF);
+  bool needs_layer = blend_background && (paint->getAlpha() != 0xFF);
   base::Optional<SkAutoCanvasRestore> auto_canvas_restore;
   if (needs_layer) {
     auto_canvas_restore.emplace(current_canvas_, false /* do_save */);
-    current_canvas_->saveLayerAlpha(&quad_rect, current_paint_.getAlpha());
-    current_paint_.setAlpha(0xFF);
+    current_canvas_->saveLayerAlpha(&quad_rect, paint->getAlpha());
+    paint->setAlpha(0xFF);
   }
   if (blend_background) {
     SkPaint background_paint;
     background_paint.setColor(quad->background_color);
     current_canvas_->drawRect(quad_rect, background_paint);
   }
-  current_paint_.setFilterQuality(
-      quad->nearest_neighbor ? kNone_SkFilterQuality : kLow_SkFilterQuality);
-  current_canvas_->drawImageRect(image, sk_uv_rect, quad_rect, &current_paint_);
+  paint->setFilterQuality(quad->nearest_neighbor ? kNone_SkFilterQuality
+                                                 : kLow_SkFilterQuality);
+  current_canvas_->drawImageRect(image, sk_uv_rect, quad_rect, paint);
 }
 
-void SkiaRenderer::DrawTileQuad(const TileDrawQuad* quad) {
+void SkiaRenderer::AddTileQuadToBatch(const TileDrawQuad* quad,
+                                      const gfx::QuadF* draw_region) {
+  DCHECK(!MustDrawBatchedTileQuadsBeforeQuad(quad, draw_region));
+  bool applyTransformAndScissor = ApplyTransformAndScissorToTileRect(
+      quad->shared_quad_state->quad_to_target_transform);
+  if (batched_tiles_.empty()) {
+    if (draw_region) {
+      batched_tile_state_.draw_region = *draw_region;
+    }
+    batched_tile_state_.blend_mode = quad->shared_quad_state->blend_mode;
+    batched_tile_state_.is_nearest_neighbor = quad->nearest_neighbor;
+    batched_tile_state_.has_draw_region = (draw_region != nullptr);
+    if (applyTransformAndScissor) {
+      batched_tile_state_.transform = gfx::Transform();
+      batched_tile_state_.has_scissor_rect = false;
+    } else {
+      batched_tile_state_.transform =
+          quad->shared_quad_state->quad_to_target_transform;
+      batched_tile_state_.has_scissor_rect = is_scissor_enabled_;
+      batched_tile_state_.scissor_rect = scissor_rect_;
+    }
+  }
+
   // |resource_provider_| can be NULL in resourceless software draws, which
   // should never produce tile quads in the first place.
   DCHECK(resource_provider_);
@@ -694,14 +816,81 @@ void SkiaRenderer::DrawTileQuad(const TileDrawQuad* quad) {
       quad->tex_coord_rect, gfx::RectF(quad->rect),
       gfx::RectF(quad->visible_rect));
 
+  unsigned aa_flags = SkCanvas::kNone_QuadAAFlags;
+  if (settings_->allow_antialiasing || settings_->force_antialiasing) {
+    if (quad->IsLeftEdge())
+      aa_flags |= SkCanvas::kLeft_QuadAAFlag;
+    if (quad->IsTopEdge())
+      aa_flags |= SkCanvas::kTop_QuadAAFlag;
+    if (quad->IsRightEdge())
+      aa_flags |= SkCanvas::kRight_QuadAAFlag;
+    if (quad->IsBottomEdge())
+      aa_flags |= SkCanvas::kBottom_QuadAAFlag;
+  }
+  gfx::RectF quad_rect = gfx::RectF(quad->visible_rect);
+  if (applyTransformAndScissor) {
+    quad->shared_quad_state->quad_to_target_transform.TransformRect(&quad_rect);
+    if (is_scissor_enabled_) {
+      float left_inset = scissor_rect_.x() - quad_rect.x();
+      float top_inset = scissor_rect_.y() - quad_rect.y();
+      float right_inset = quad_rect.right() - scissor_rect_.right();
+      float bottom_inset = quad_rect.bottom() - scissor_rect_.bottom();
+      if (left_inset > 0) {
+        aa_flags &= ~SkCanvas::kLeft_QuadAAFlag;
+      } else {
+        left_inset = 0;
+      }
+      if (top_inset > 0)
+        aa_flags &= ~SkCanvas::kTop_QuadAAFlag;
+      else
+        top_inset = 0;
+      if (right_inset > 0)
+        aa_flags &= ~SkCanvas::kRight_QuadAAFlag;
+      else
+        right_inset = 0;
+      if (bottom_inset > 0)
+        aa_flags &= ~SkCanvas::kBottom_QuadAAFlag;
+      else
+        bottom_inset = 0;
+      float scale_x = visible_tex_coord_rect.width() / quad_rect.width();
+      float scale_y = visible_tex_coord_rect.height() / quad_rect.height();
+      quad_rect.Inset(left_inset, top_inset, right_inset, bottom_inset);
+      visible_tex_coord_rect.Inset(left_inset * scale_x, top_inset * scale_y,
+                                   right_inset * scale_x,
+                                   bottom_inset * scale_y);
+    }
+  }
   SkRect uv_rect = gfx::RectFToSkRect(visible_tex_coord_rect);
-  current_paint_.setFilterQuality(
-      quad->nearest_neighbor ? kNone_SkFilterQuality : kLow_SkFilterQuality);
-  current_canvas_->drawImageRect(
-      image, uv_rect, gfx::RectToSkRect(quad->visible_rect), &current_paint_);
+  batched_tiles_.push_back(SkCanvas::ImageSetEntry{
+      sk_ref_sp(image), uv_rect, gfx::RectFToSkRect(quad_rect),
+      quad->shared_quad_state->opacity, aa_flags});
 }
 
-void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad) {
+void SkiaRenderer::DrawBatchedTileQuads() {
+  TRACE_EVENT0("viz", "SkiaRenderer::DrawBatchedTileQuads");
+  const gfx::QuadF* draw_region = batched_tile_state_.has_draw_region
+                                      ? &batched_tile_state_.draw_region
+                                      : nullptr;
+  const gfx::Rect* scissor_rect = batched_tile_state_.has_scissor_rect
+                                      ? &batched_tile_state_.scissor_rect
+                                      : nullptr;
+  base::Optional<SkAutoCanvasRestore> auto_canvas_restore;
+  PrepareCanvasForDrawQuads(batched_tile_state_.transform, draw_region,
+                            scissor_rect, &auto_canvas_restore);
+
+  SkFilterQuality filter_quality = batched_tile_state_.is_nearest_neighbor
+                                       ? kNone_SkFilterQuality
+                                       : kLow_SkFilterQuality;
+  current_canvas_->experimental_DrawImageSetV1(
+      &batched_tiles_.front(), batched_tiles_.size(), filter_quality,
+      batched_tile_state_.blend_mode);
+  current_canvas_->resetMatrix();
+  batched_tiles_.clear();
+}
+
+void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+                                    SkPaint* paint) {
+  DCHECK(paint);
   if (draw_mode_ != DrawMode::DDL) {
     NOTIMPLEMENTED();
     return;
@@ -718,31 +907,40 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad) {
 
   SkRect uv_rect = gfx::RectFToSkRect(visible_tex_coord_rect);
   // TODO(penghuang): figure out how to set correct filter quality.
-  current_paint_.setFilterQuality(kLow_SkFilterQuality);
-  current_canvas_->drawImageRect(
-      image, uv_rect, gfx::RectToSkRect(quad->visible_rect), &current_paint_);
+  paint->setFilterQuality(kLow_SkFilterQuality);
+  current_canvas_->drawImageRect(image, uv_rect,
+                                 gfx::RectToSkRect(quad->visible_rect), paint);
 }
 
 bool SkiaRenderer::CalculateRPDQParams(sk_sp<SkImage> content,
                                        const RenderPassDrawQuad* quad,
                                        DrawRenderPassDrawQuadParams* params) {
-  auto iter = render_pass_backings_.find(quad->render_pass_id);
-  DCHECK(render_pass_backings_.end() != iter);
-  if (params->filters == nullptr) {
+  if (!params->filters)
     return true;
-  }
 
-  // This function is called after AllocateRenderPassResourceIfNeeded, so there
-  // should be backing ready.
-  RenderPassBacking& content_texture = iter->second;
   DCHECK(!params->filters->IsEmpty());
   auto paint_filter = cc::RenderSurfaceFilters::BuildImageFilter(
-      *params->filters, gfx::SizeF(content_texture.size));
+      *params->filters, gfx::SizeF(content->width(), content->height()));
   auto filter = paint_filter ? paint_filter->cached_sk_filter_ : nullptr;
 
-  // Apply filters to the content texture.
-  // TODO(xing.xu):  Support SkColorFilter here. (https://crbug.com/823182)
+  // If the first imageFilter is a colorFilterImageFilter, pull it off and store
+  // it to be used later. Fall through to allow the remainder of the DAG (if
+  // any) to be applied. Applying the colorFilter as part of the final draw is
+  // much more efficient than applying it as a colorFilterImageFilter. This
+  // optimization would be covered by skbug.com/8700. Delete color_filter
+  // related code after Skia side implementation is done.
+  if (filter) {
+    SkColorFilter* colorfilter_rawptr = nullptr;
+    filter->asColorFilter(&colorfilter_rawptr);
+    sk_sp<SkColorFilter> color_filter(colorfilter_rawptr);
 
+    if (color_filter) {
+      params->color_filter = color_filter;
+      filter = sk_ref_sp(filter->getInput(0));
+    }
+  }
+
+  // If after applying the filter we would be clipped out, skip the draw.
   if (filter) {
     gfx::Rect clip_rect = quad->shared_quad_state->clip_rect;
     if (clip_rect.IsEmpty()) {
@@ -768,22 +966,7 @@ bool SkiaRenderer::CalculateRPDQParams(sk_sp<SkImage> content,
     if (dst_rect.IsEmpty())
       return false;
 
-    SkIPoint offset;
-    SkIRect subset;
-    gfx::RectF src_rect(quad->rect);
-    // TODO(xing.xu): Support flip_texture. (https://crbug.com/822859)
-    params->filter_image = SkiaHelper::ApplyImageFilter(
-        content, src_rect, dst_rect, quad->filters_scale, std::move(filter),
-        &offset, &subset, quad->filters_origin);
-    if (!params->filter_image)
-      return false;
-    params->dst_rect =
-        gfx::RectF(src_rect.x() + offset.fX, src_rect.y() + offset.fY,
-                   subset.width(), subset.height());
-    params->src_offset.SetPoint(subset.x(), subset.y());
-    gfx::RectF tex_rect =
-        gfx::RectF(gfx::PointF(params->src_offset), params->dst_rect.size());
-    params->tex_coord_rect = tex_rect;
+    params->image_filter = filter;
   }
   return true;
 }
@@ -794,14 +977,16 @@ const TileDrawQuad* SkiaRenderer::CanPassBeDrawnDirectly(
                                                 resource_provider_);
 }
 
-void SkiaRenderer::DrawRenderPassQuad(const RenderPassDrawQuad* quad) {
+void SkiaRenderer::DrawRenderPassQuad(const RenderPassDrawQuad* quad,
+                                      SkPaint* paint) {
+  DCHECK(paint);
   auto bypass = render_pass_bypass_quads_.find(quad->render_pass_id);
   // When Render Pass has a single quad inside we would draw that directly.
   if (bypass != render_pass_bypass_quads_.end()) {
     TileDrawQuad* tile_quad = &bypass->second;
     ScopedSkImageBuilder builder(this, tile_quad->resource_id());
     sk_sp<SkImage> content_image = sk_ref_sp(builder.sk_image());
-    DrawRenderPassQuadInternal(quad, content_image);
+    DrawRenderPassQuadInternal(quad, content_image, paint);
   } else {
     auto iter = render_pass_backings_.find(quad->render_pass_id);
     DCHECK(render_pass_backings_.end() != iter);
@@ -819,15 +1004,26 @@ void SkiaRenderer::DrawRenderPassQuad(const RenderPassDrawQuad* quad) {
       case DrawMode::GL:  // Fallthrough
       case DrawMode::VULKAN: {
         content_image = backing.render_pass_surface->makeImageSnapshot();
+        break;
+      }
+      case DrawMode::SKPRECORD: {
+        content_image = SkImage::MakeFromPicture(
+            backing.picture,
+            SkISize::Make(backing.size.width(), backing.size.height()), nullptr,
+            nullptr, SkImage::BitDepth::kU8,
+            backing.color_space.ToSkColorSpace());
+        return;
       }
     }
 
-    DrawRenderPassQuadInternal(quad, content_image);
+    DrawRenderPassQuadInternal(quad, content_image, paint);
   }
 }
 
 void SkiaRenderer::DrawRenderPassQuadInternal(const RenderPassDrawQuad* quad,
-                                              sk_sp<SkImage> content_image) {
+                                              sk_sp<SkImage> content_image,
+                                              SkPaint* paint) {
+  DCHECK(paint);
   DrawRenderPassDrawQuadParams params;
   params.filters = FiltersForPass(quad->render_pass_id);
   bool can_draw = CalculateRPDQParams(content_image, quad, &params);
@@ -835,16 +1031,15 @@ void SkiaRenderer::DrawRenderPassQuadInternal(const RenderPassDrawQuad* quad,
   if (!can_draw)
     return;
 
-  SkRect content_rect;
-  SkRect dest_visible_rect;
-  if (params.filter_image) {
-    content_rect = RectFToSkRect(params.tex_coord_rect);
-    dest_visible_rect = gfx::RectFToSkRect(params.dst_rect);
-    content_image = params.filter_image;
-  } else {
-    content_rect = RectFToSkRect(quad->tex_coord_rect);
-    dest_visible_rect = gfx::RectToSkRect(quad->visible_rect);
-  }
+  // Add color filter.
+  if (params.color_filter)
+    paint->setColorFilter(params.color_filter);
+  // Add image filter.
+  if (params.image_filter)
+    paint->setImageFilter(params.image_filter);
+
+  SkRect content_rect = RectFToSkRect(quad->tex_coord_rect);
+  SkRect dest_visible_rect = gfx::RectToSkRect(quad->visible_rect);
 
   // Prepare mask.
   ScopedSkImageBuilder mask_image_builder(this, quad->mask_resource_id());
@@ -864,35 +1059,34 @@ void SkiaRenderer::DrawRenderPassQuadInternal(const RenderPassDrawQuad* quad,
     DCHECK(mask_filter);
   }
 
-  const cc::FilterOperations* background_filters =
+  const cc::FilterOperations* backdrop_filters =
       BackgroundFiltersForPass(quad->render_pass_id);
   // Without backdrop effect.
-  if (!ShouldApplyBackgroundFilters(quad, background_filters)) {
-    if (!mask_filter) {
-      // Not mask, so we just draw the context_image directly.
-      current_canvas_->drawImageRect(content_image, content_rect,
-                                     dest_visible_rect, &current_paint_);
-      return;
-    }
+  if (!ShouldApplyBackgroundFilters(quad, backdrop_filters)) {
+    if (mask_filter)
+      paint->setMaskFilter(mask_filter);
 
-    // With mask, we need convert the content_image to a shader, and use
-    // drawRect() with the shader and the mask.
-    current_paint_.setMaskFilter(mask_filter);
-    // Convert the content_image to a shader, and use drawRect() with the
-    // shader.
-    SkMatrix content_to_dest_matrix;
-    content_to_dest_matrix.setRectToRect(content_rect,
-                                         gfx::RectToSkRect(quad->rect),
-                                         SkMatrix::kFill_ScaleToFit);
-    auto shader = content_image->makeShader(&content_to_dest_matrix);
-    current_paint_.setShader(std::move(shader));
-    current_canvas_->drawRect(dest_visible_rect, current_paint_);
+    // Draw now that all the filters are set up correctly.
+    current_canvas_->drawImageRect(content_image, content_rect,
+                                   dest_visible_rect, paint);
     return;
   }
 
   // Draw render pass with backdrop effects.
+  // Update the backdrop filter to include "regular" filters and opacity.
+  cc::FilterOperations backdrop_filters_plus_effects = *backdrop_filters;
+  if (params.filters) {
+    for (const auto& filter_op : params.filters->operations())
+      backdrop_filters_plus_effects.Append(filter_op);
+  }
+  if (quad->shared_quad_state->opacity < 1.0) {
+    backdrop_filters_plus_effects.Append(
+        cc::FilterOperation::CreateOpacityFilter(
+            quad->shared_quad_state->opacity));
+  }
+
   auto background_paint_filter = cc::RenderSurfaceFilters::BuildImageFilter(
-      *background_filters,
+      backdrop_filters_plus_effects,
       gfx::SizeF(content_image->width(), content_image->height()));
   auto background_image_filter =
       background_paint_filter ? background_paint_filter->cached_sk_filter_
@@ -911,9 +1105,9 @@ void SkiaRenderer::DrawRenderPassQuadInternal(const RenderPassDrawQuad* quad,
   SkAutoCanvasRestore auto_canvas_restore(current_canvas_, true /* do_save */);
   current_canvas_->clipRect(gfx::RectToSkRect(quad->rect));
 
-  SkPaint paint;
-  paint.setMaskFilter(mask_filter);
-  SkCanvas::SaveLayerRec rec(&dest_visible_rect, &paint,
+  SkPaint tmp_paint;
+  tmp_paint.setMaskFilter(mask_filter);
+  SkCanvas::SaveLayerRec rec(&dest_visible_rect, &tmp_paint,
                              background_image_filter.get(),
                              SkCanvas::kInitWithPrevious_SaveLayerFlag);
   // Lift content in the current_canvas_ into a new layer with
@@ -923,20 +1117,23 @@ void SkiaRenderer::DrawRenderPassQuadInternal(const RenderPassDrawQuad* quad,
   SkAutoCanvasRestore auto_canvas_restore_for_save_layer(current_canvas_,
                                                          false /* do_save */);
   current_canvas_->saveLayer(rec);
+  // TODO(916317): need to draw the backdrop once first here. Also need to
+  // pull the backdrop-filter bounds rect in and clip the backdrop image.
   current_canvas_->drawImageRect(content_image, content_rect, dest_visible_rect,
-                                 &current_paint_);
+                                 paint);
 }
 
-void SkiaRenderer::DrawUnsupportedQuad(const DrawQuad* quad) {
+void SkiaRenderer::DrawUnsupportedQuad(const DrawQuad* quad, SkPaint* paint) {
+  DCHECK(paint);
   // TODO(weiliangc): Make sure unsupported quads work. (crbug.com/644851)
   NOTIMPLEMENTED();
 #ifdef NDEBUG
-  current_paint_.setColor(SK_ColorWHITE);
+  paint->setColor(SK_ColorWHITE);
 #else
-  current_paint_.setColor(SK_ColorMAGENTA);
+  paint->setColor(SK_ColorMAGENTA);
 #endif
-  current_paint_.setAlpha(quad->shared_quad_state->opacity * 255);
-  current_canvas_->drawRect(gfx::RectToSkRect(quad->rect), current_paint_);
+  paint->setAlpha(quad->shared_quad_state->opacity * 255);
+  current_canvas_->drawRect(gfx::RectToSkRect(quad->rect), *paint);
 }
 
 void SkiaRenderer::CopyDrawnRenderPass(
@@ -944,53 +1141,82 @@ void SkiaRenderer::CopyDrawnRenderPass(
   // TODO(weiliangc): Make copy request work. (crbug.com/644851)
   TRACE_EVENT0("viz", "SkiaRenderer::CopyDrawnRenderPass");
 
-  gfx::Rect copy_rect = current_frame()->current_render_pass->output_rect;
+  // Finalize the source subrect, as the entirety of the RenderPass's output
+  // optionally clamped to the requested copy area. Then, compute the result
+  // rect, which is the selection clamped to the maximum possible result bounds.
+  // If there will be zero pixels of output or the scaling ratio was not
+  // reasonable, do not proceed.
+  gfx::Rect output_rect = current_frame()->current_render_pass->output_rect;
   if (request->has_area())
-    copy_rect.Intersect(request->area());
-
-  if (copy_rect.IsEmpty())
+    output_rect.Intersect(request->area());
+  const gfx::Rect result_bounds =
+      request->is_scaled() ? copy_output::ComputeResultRect(
+                                 gfx::Rect(output_rect.size()),
+                                 request->scale_from(), request->scale_to())
+                           : gfx::Rect(output_rect.size());
+  gfx::Rect result_rect = result_bounds;
+  if (request->has_result_selection())
+    result_rect.Intersect(request->result_selection());
+  if (result_rect.IsEmpty())
     return;
 
-  gfx::Rect window_copy_rect = MoveFromDrawToWindowSpace(copy_rect);
-
-  if (request->result_format() != CopyOutputResult::Format::RGBA_BITMAP ||
-      request->is_scaled() ||
-      (request->has_result_selection() &&
-       request->result_selection() == gfx::Rect(copy_rect.size()))) {
-    // TODO(crbug.com/644851): Complete the implementation for all request
-    // types, scaling, etc.
-    NOTIMPLEMENTED();
-    return;
+  gfx::Rect copy_rect;
+  if (request->is_scaled()) {
+    copy_rect = MoveFromDrawToWindowSpace(output_rect);
+  } else {
+    copy_rect =
+        MoveFromDrawToWindowSpace(result_rect + output_rect.OffsetFromOrigin());
   }
 
   switch (draw_mode_) {
     case DrawMode::DDL: {
-      if (settings_->show_overdraw_feedback) {
-        // TODO(crbug.com/889122): Overdraw currently requires calling flush on
-        // canvas on SkiaRenderer's thread.
-        return;
-      }
       // Root framebuffer uses id 0 in SkiaOutputSurface.
       RenderPassId render_pass_id = 0;
-      // If we are in child render pass and we don't have overdraw, copy the
-      // current render pass.
-      if (root_canvas_ != current_canvas_)
-        render_pass_id = current_frame()->current_render_pass->id;
-      skia_output_surface_->CopyOutput(render_pass_id, window_copy_rect,
+      const auto* const render_pass = current_frame()->current_render_pass;
+      if (render_pass != current_frame()->root_render_pass) {
+        render_pass_id = render_pass->id;
+      }
+      skia_output_surface_->CopyOutput(render_pass_id, copy_rect,
+                                       render_pass->color_space, result_rect,
                                        std::move(request));
       break;
     }
     case DrawMode::GL:  // Fallthrough
     case DrawMode::VULKAN: {
+      if (request->result_format() != CopyOutputResult::Format::RGBA_BITMAP ||
+          request->is_scaled() ||
+          (request->has_result_selection() &&
+           request->result_selection() == gfx::Rect(copy_rect.size()))) {
+        // TODO(crbug.com/644851): Complete the implementation for all request
+        // types, scaling, etc.
+        NOTIMPLEMENTED();
+        return;
+      }
       sk_sp<SkImage> copy_image =
           current_surface_->makeImageSnapshot()->makeSubset(
-              RectToSkIRect(window_copy_rect));
+              RectToSkIRect(copy_rect));
 
       // Send copy request by copying into a bitmap.
       SkBitmap bitmap;
       copy_image->asLegacyBitmap(&bitmap);
+      // TODO(crbug.com/795132): Plumb color space throughout SkiaRenderer up to
+      // the SkSurface/SkImage here. Until then, play "musical chairs" with the
+      // SkPixelRef to hack-in the RenderPass's |color_space|.
+      sk_sp<SkPixelRef> pixels(SkSafeRef(bitmap.pixelRef()));
+      SkIPoint origin = bitmap.pixelRefOrigin();
+      bitmap.setInfo(
+          bitmap.info().makeColorSpace(
+              current_frame()
+                  ->current_render_pass->color_space.ToSkColorSpace()),
+          bitmap.rowBytes());
+      bitmap.setPixelRef(std::move(pixels), origin.x(), origin.y());
       request->SendResult(
           std::make_unique<CopyOutputSkBitmapResult>(copy_rect, bitmap));
+      break;
+    }
+    case DrawMode::SKPRECORD: {
+      NOTIMPLEMENTED();
+      break;
     }
   }
 }
@@ -1008,18 +1234,41 @@ void SkiaRenderer::DidChangeVisibility() {
 }
 
 void SkiaRenderer::FinishDrawingQuadList() {
+  if (!batched_tiles_.empty())
+    DrawBatchedTileQuads();
   switch (draw_mode_) {
     case DrawMode::DDL: {
-      gpu::SyncToken sync_token = skia_output_surface_->SubmitPaint();
+      // Skia doesn't support releasing the last promise image ref on the DDL
+      // recordering thread. So we clear all cached promise images before
+      // SubmitPaint to the GPU thread.
       promise_images_.clear();
       yuv_promise_images_.clear();
-      lock_set_for_external_use_.UnlockResources(sync_token);
+      gpu::SyncToken sync_token = skia_output_surface_->SubmitPaint();
+      lock_set_for_external_use_->UnlockResources(sync_token);
       break;
     }
     case DrawMode::GL:  // Fallthrough
     case DrawMode::VULKAN: {
+      // For SkiaRendererPixelTestWithOverdrawFeedback, CopyDrawnRenderPass
+      // happens before FinishDrawingFrame which results in an empty image. So
+      // force a draw here.
+      if (settings_->show_overdraw_feedback &&
+          (current_frame()->current_render_pass ==
+           current_frame()->root_render_pass)) {
+        sk_sp<SkImage> image = overdraw_surface_->makeImageSnapshot();
+        SkPaint paint;
+        sk_sp<SkColorFilter> color_filter =
+            SkiaHelper::MakeOverdrawColorFilter();
+        paint.setColorFilter(color_filter);
+        current_surface_->getCanvas()->drawImage(image.get(), 0, 0, &paint);
+      }
       current_canvas_->flush();
       break;
+    }
+    case DrawMode::SKPRECORD: {
+      current_canvas_->flush();
+      sk_sp<SkPicture> picture = current_recorder_->finishRecordingAsPicture();
+      *current_picture_ = picture;
     }
   }
 }
@@ -1031,14 +1280,10 @@ void SkiaRenderer::GenerateMipmap() {
 
 bool SkiaRenderer::ShouldApplyBackgroundFilters(
     const RenderPassDrawQuad* quad,
-    const cc::FilterOperations* background_filters) const {
-  if (!background_filters)
+    const cc::FilterOperations* backdrop_filters) const {
+  if (!backdrop_filters)
     return false;
-  DCHECK(!background_filters->IsEmpty());
-
-  // TODO(hendrikw): Look into allowing background filters to see pixels from
-  // other render targets.  See crbug.com/314867.
-
+  DCHECK(!backdrop_filters->IsEmpty());
   return true;
 }
 
@@ -1055,6 +1300,8 @@ GrContext* SkiaRenderer::GetGrContext() {
 #endif
     case DrawMode::GL:
       return context_provider_->GrContext();
+    case DrawMode::SKPRECORD:
+      return nullptr;
   }
 }
 
@@ -1113,14 +1360,21 @@ void SkiaRenderer::AllocateRenderPassResourceIfNeeded(
     case DrawMode::GL: {
       caps.texture_format_bgra8888 =
           context_provider_->ContextCapabilities().texture_format_bgra8888;
+      break;
+    }
+    case DrawMode::SKPRECORD: {
+      render_pass_backings_.emplace(
+          render_pass_id,
+          RenderPassBacking(requirements.size, requirements.mipmap,
+                            current_frame()->current_render_pass->color_space));
+      return;
     }
   }
-
-  render_pass_backings_.insert(std::pair<RenderPassId, RenderPassBacking>(
+  render_pass_backings_.emplace(
       render_pass_id,
       RenderPassBacking(gr_context, caps, requirements.size,
                         requirements.mipmap,
-                        current_frame()->current_render_pass->color_space)));
+                        current_frame()->current_render_pass->color_space));
 }
 
 SkiaRenderer::RenderPassBacking::RenderPassBacking(
@@ -1158,6 +1412,14 @@ SkiaRenderer::RenderPassBacking::RenderPassBacking(
       kTopLeft_GrSurfaceOrigin, &surface_props, mipmap);
 }
 
+SkiaRenderer::RenderPassBacking::RenderPassBacking(
+    const gfx::Size& size,
+    bool mipmap,
+    const gfx::ColorSpace& color_space)
+    : size(size), mipmap(mipmap), color_space(color_space) {
+  recorder = std::make_unique<SkPictureRecorder>();
+}
+
 SkiaRenderer::RenderPassBacking::~RenderPassBacking() {}
 
 SkiaRenderer::RenderPassBacking::RenderPassBacking(
@@ -1168,6 +1430,7 @@ SkiaRenderer::RenderPassBacking::RenderPassBacking(
       format(other.format) {
   render_pass_surface = other.render_pass_surface;
   other.render_pass_surface = nullptr;
+  recorder = std::move(other.recorder);
 }
 
 SkiaRenderer::RenderPassBacking& SkiaRenderer::RenderPassBacking::operator=(
@@ -1178,6 +1441,7 @@ SkiaRenderer::RenderPassBacking& SkiaRenderer::RenderPassBacking::operator=(
   format = other.format;
   render_pass_surface = other.render_pass_surface;
   other.render_pass_surface = nullptr;
+  recorder = std::move(other.recorder);
   return *this;
 }
 

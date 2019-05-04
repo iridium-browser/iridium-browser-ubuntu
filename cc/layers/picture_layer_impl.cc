@@ -15,7 +15,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/time/time.h"
-#include "base/trace_event/trace_event_argument.h"
+#include "base/trace_event/traced_value.h"
 #include "build/build_config.h"
 #include "cc/base/math_util.h"
 #include "cc/benchmarks/micro_benchmark_impl.h"
@@ -256,12 +256,6 @@ void PictureLayerImpl::AppendQuads(viz::RenderPass* render_pass,
   viz::SharedQuadState* shared_quad_state =
       render_pass->CreateAndAppendSharedQuadState();
 
-  if (mask_type_ != Layer::LayerMaskType::NOT_MASK) {
-    append_quads_data->num_mask_layers++;
-    if (is_rounded_corner_mask())
-      append_quads_data->num_rounded_corner_mask_layers++;
-  }
-
   if (raster_source_->IsSolidColor()) {
     // TODO(sunxd): Solid color non-mask layers are forced to have contents
     // scale = 1. This is a workaround to temperarily fix
@@ -461,13 +455,6 @@ void PictureLayerImpl::AppendQuads(viz::RenderPass* render_pass,
         visible_geometry_rect.height();
     append_quads_data->visible_layer_area += visible_geometry_area;
 
-    if (mask_type_ != Layer::LayerMaskType::NOT_MASK) {
-      append_quads_data->visible_mask_layer_area += visible_geometry_area;
-      if (is_rounded_corner_mask())
-        append_quads_data->visible_rounded_corner_mask_layer_area +=
-            visible_geometry_area;
-    }
-
     bool has_draw_quad = false;
     if (*iter && iter->draw_info().IsReadyToDraw()) {
       const TileDrawInfo& draw_info = iter->draw_info();
@@ -526,7 +513,8 @@ void PictureLayerImpl::AppendQuads(viz::RenderPass* render_pass,
     if (!has_draw_quad) {
       // Checkerboard.
       SkColor color = SafeOpaqueBackgroundColor();
-      if (ShowDebugBorders(DebugBorderType::LAYER)) {
+      if (mask_type_ == Layer::LayerMaskType::NOT_MASK &&
+          ShowDebugBorders(DebugBorderType::LAYER)) {
         // Fill the whole tile with the missing tile color.
         color = DebugColors::OOMTileBorderColor();
       }
@@ -720,6 +708,7 @@ void PictureLayerImpl::UpdateViewportRectForTilePriorityInContentSpace() {
     // can cause activation flickering issues. So, if we're in this situation
     // adjust the visible rect by the the controls height.
     if (layer_tree_impl()->IsPendingTree() &&
+        layer_tree_impl()->IsActivelyScrolling() &&
         layer_tree_impl()->browser_controls_shrink_blink_size()) {
       viewport_rect_for_tile_priority_in_content_space_.Inset(
           0,                        // left
@@ -1559,13 +1548,30 @@ void PictureLayerImpl::UpdateIdealScales() {
   float min_contents_scale = MinimumContentsScale();
   DCHECK_GT(min_contents_scale, 0.f);
 
-  ideal_page_scale_ = IsAffectedByPageScale()
-                          ? layer_tree_impl()->current_page_scale_factor()
-                          : 1.f;
   ideal_device_scale_ = layer_tree_impl()->device_scale_factor();
+  if (layer_tree_impl()->PageScaleLayer()) {
+    ideal_page_scale_ = IsAffectedByPageScale()
+                            ? layer_tree_impl()->current_page_scale_factor()
+                            : 1.f;
+    ideal_contents_scale_ = GetIdealContentsScale();
+  } else {
+    // This layer may be in a layer tree embedded in a hierarchy that has its
+    // own page scale factor. We represent that here as
+    // 'external_page_scale_factor', a value that affects raster scale in the
+    // same way that page_scale_factor does, but doesn't affect any geometry
+    // calculations.
+    float external_page_scale_factor =
+        layer_tree_impl() ? layer_tree_impl()->external_page_scale_factor()
+                          : 1.f;
+    DCHECK(!layer_tree_impl() || external_page_scale_factor == 1.f ||
+           layer_tree_impl()->current_page_scale_factor() == 1.f);
+    ideal_page_scale_ = external_page_scale_factor;
+    ideal_contents_scale_ =
+        GetIdealContentsScale() * external_page_scale_factor;
+  }
   ideal_contents_scale_ =
       std::min(kMaxIdealContentsScale,
-               std::max(GetIdealContentsScale(), min_contents_scale));
+               std::max(ideal_contents_scale_, min_contents_scale));
   ideal_source_scale_ =
       ideal_contents_scale_ / ideal_page_scale_ / ideal_device_scale_;
 }

@@ -91,8 +91,11 @@ class OmniboxView {
 
   // Returns the icon to display as the location icon. If a favicon is
   // available, |on_icon_fetched| may be called later asynchronously.
+  // |search_alternate_color| should match the color used for URL text, and may
+  // be used for search suggestions depending on some flags.
   gfx::ImageSkia GetIcon(int dip_size,
                          SkColor color,
+                         SkColor search_alternate_color,
                          IconFetchedCallback on_icon_fetched) const;
 
   // The user text is the text the user has manually keyed in.  When present,
@@ -143,7 +146,7 @@ class OmniboxView {
   // defines a method with that name.
   virtual void CloseOmniboxPopup();
 
-  // Sets the focus to the autocomplete view.
+  // Sets the focus to the omnibox.
   virtual void SetFocus() = 0;
 
   // Shows or hides the caret based on whether the model's is_caret_visible() is
@@ -283,8 +286,8 @@ class OmniboxView {
   // everything is emphasized equally, whereas for URLs the scheme may be styled
   // based on the current security state, with parts of the URL de-emphasized to
   // draw attention to whatever best represents the "identity" of the current
-  // URL.
-  void UpdateTextStyle(const base::string16& display_text,
+  // URL. Returns true if the path component is eligible for fadeout.
+  bool UpdateTextStyle(const base::string16& display_text,
                        const bool text_is_url,
                        const AutocompleteSchemeClassifier& classifier);
 

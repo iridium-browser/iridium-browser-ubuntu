@@ -28,13 +28,13 @@ BrowserRenderer::BrowserRenderer(
     std::unique_ptr<InputDelegate> input_delegate,
     BrowserRendererBrowserInterface* browser,
     size_t sliding_time_size)
-    : ui_(std::move(ui)),
-      scheduler_delegate_(std::move(scheduler_delegate)),
+    : scheduler_delegate_(std::move(scheduler_delegate)),
       graphics_delegate_(std::move(graphics_delegate)),
       input_delegate_(std::move(input_delegate)),
       browser_(browser),
       ui_processing_time_(sliding_time_size),
       ui_controller_update_time_(sliding_time_size),
+      ui_(std::move(ui)),
       weak_ptr_factory_(this) {
   scheduler_delegate_->SetBrowserRenderer(this);
 }
@@ -231,7 +231,7 @@ void BrowserRenderer::SaveNextFrameBufferToDiskForTesting(
   frame_buffer_dump_filepath_base_ = filepath_base;
 }
 
-void BrowserRenderer::WatchElementForVisibilityChangeForTesting(
+void BrowserRenderer::WatchElementForVisibilityStatusForTesting(
     VisibilityChangeExpectation visibility_expectation) {
   DCHECK(ui_visibility_state_ == nullptr) << "Attempted to watch a UI element "
                                              "for visibility changes with one "
@@ -240,12 +240,16 @@ void BrowserRenderer::WatchElementForVisibilityChangeForTesting(
   ui_visibility_state_->timeout_ms =
       base::TimeDelta::FromMilliseconds(visibility_expectation.timeout_ms);
   ui_visibility_state_->element_to_watch = visibility_expectation.element_name;
-  ui_visibility_state_->initially_visible = ui_->GetElementVisibilityForTesting(
-      ui_visibility_state_->element_to_watch);
+  ui_visibility_state_->expected_visibile = visibility_expectation.visibility;
 }
 
 void BrowserRenderer::AcceptDoffPromptForTesting() {
   ui_->AcceptDoffPromptForTesting();
+}
+
+void BrowserRenderer::SetBrowserRendererBrowserInterfaceForTesting(
+    BrowserRendererBrowserInterface* interface_ptr) {
+  browser_ = interface_ptr;
 }
 
 void BrowserRenderer::UpdateUi(const RenderInfo& render_info,
@@ -318,7 +322,9 @@ base::TimeDelta BrowserRenderer::ProcessControllerInput(
       input_delegate_->GetControllerModel(render_info.head_pose);
   ui_->HandleInput(current_time, render_info, controller_model, &reticle_model,
                    &input_event_list);
-  ui_->OnControllerUpdated(controller_model, reticle_model);
+  std::vector<ControllerModel> controller_models;
+  controller_models.push_back(controller_model);
+  ui_->OnControllersUpdated(controller_models, reticle_model);
 
   auto controller_time = base::TimeTicks::Now() - timing_start;
   ui_controller_update_time_.AddSample(controller_time);
@@ -336,6 +342,7 @@ void BrowserRenderer::PerformControllerActionForTesting(
              "queued";
       using_input_delegate_for_testing_ = false;
       input_delegate_for_testing_.swap(input_delegate_);
+      ui_->SetUiInputManagerForTesting(false);
     }
     return;
   }
@@ -345,6 +352,7 @@ void BrowserRenderer::PerformControllerActionForTesting(
       input_delegate_for_testing_ =
           std::make_unique<InputDelegateForTesting>(ui_.get());
     input_delegate_for_testing_.swap(input_delegate_);
+    ui_->SetUiInputManagerForTesting(true);
   }
   if (controller_input.action != VrControllerTestAction::kEnableMockedInput) {
     static_cast<InputDelegateForTesting*>(input_delegate_.get())
@@ -405,13 +413,13 @@ void BrowserRenderer::ReportElementVisibilityStatusForTesting(
   base::TimeDelta time_since_start =
       current_time - ui_visibility_state_->start_time;
   if (ui_->GetElementVisibilityForTesting(
-          ui_visibility_state_->element_to_watch) !=
-      ui_visibility_state_->initially_visible) {
+          ui_visibility_state_->element_to_watch) ==
+      ui_visibility_state_->expected_visibile) {
     ReportElementVisibilityResultForTesting(
-        UiTestOperationResult::kVisibilityChange);
+        UiTestOperationResult::kVisibilityMatch);
   } else if (time_since_start > ui_visibility_state_->timeout_ms) {
     ReportElementVisibilityResultForTesting(
-        UiTestOperationResult::kTimeoutNoChange);
+        UiTestOperationResult::kTimeoutNoVisibilityMatch);
   }
 }
 
@@ -419,7 +427,7 @@ void BrowserRenderer::ReportElementVisibilityResultForTesting(
     UiTestOperationResult result) {
   ui_visibility_state_ = nullptr;
   browser_->ReportUiOperationResultForTesting(
-      UiTestOperationType::kElementVisibilityChange, result);
+      UiTestOperationType::kElementVisibilityStatus, result);
 }
 
 }  // namespace vr

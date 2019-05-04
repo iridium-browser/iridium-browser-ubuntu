@@ -19,7 +19,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chromeos/dbus/dbus_switches.h"
+#include "chromeos/dbus/constants/dbus_switches.h"
 
 namespace {
 
@@ -68,9 +68,9 @@ void FakeDebugDaemonClient::StartAgentTracing(
 
 void FakeDebugDaemonClient::StopAgentTracing(
     StopAgentTracingCallback callback) {
-  std::string no_data;
+  std::string trace_data = "# tracer: nop\n";
   std::move(callback).Run(GetTracingAgentName(), GetTraceEventLabel(),
-                          base::RefCountedString::TakeString(&no_data));
+                          base::RefCountedString::TakeString(&trace_data));
 }
 
 void FakeDebugDaemonClient::SetStopAgentTracingTaskRunner(

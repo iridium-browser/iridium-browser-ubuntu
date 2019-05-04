@@ -47,10 +47,6 @@ namespace base {
 class CommandLine;
 }
 
-namespace network {
-class SharedURLLoaderFactory;
-}
-
 namespace user_manager {
 class User;
 }  // namespace user_manager
@@ -275,16 +271,14 @@ class UserSessionManager
   // and show the message accordingly.
   void CheckEolStatus(Profile* profile);
 
+  // Starts migrating accounts to Chrome OS Account Manager.
+  void StartAccountManagerMigration(Profile* profile);
+
   // Note this could return NULL if not enabled.
   EasyUnlockKeyManager* GetEasyUnlockKeyManager();
 
   // Update Easy unlock cryptohome keys for given user context.
   void UpdateEasyUnlockKeys(const UserContext& user_context);
-
-  // Returns the auth request context/URLLoaderFactory associated with auth
-  // data.
-  scoped_refptr<network::SharedURLLoaderFactory> GetAuthURLLoaderFactory()
-      const;
 
   // Removes a profile from the per-user input methods states map.
   void RemoveProfileForTesting(Profile* profile);

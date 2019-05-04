@@ -15,9 +15,6 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.signin.SigninManager;
 
-import java.lang.ref.WeakReference;
-import java.util.List;
-
 /**
  * Aggregation point for application lifecycle events that the Feed cares about. Events that
  * originate in Java flow directly to FeedAppLifecycle, while native-originating events arrive
@@ -36,7 +33,11 @@ public class FeedAppLifecycle
         int ENTER_BACKGROUND = 1;
         int CLEAR_ALL = 2;
         int INITIALIZE = 3;
-        int NUM_ENTRIES = 4;
+        int SIGN_IN = 4;
+        int SIGN_OUT = 5;
+        int HISTORY_DELETED = 6;
+        int CACHED_DATA_CLEARED = 7;
+        int NUM_ENTRIES = 8;
     }
 
     private AppLifecycleListener mAppLifecycleListener;
@@ -61,10 +62,8 @@ public class FeedAppLifecycle
         mFeedScheduler = feedScheduler;
 
         int resumedActivityCount = 0;
-        List<WeakReference<Activity>> activities = ApplicationStatus.getRunningActivities();
-        for (final WeakReference<Activity> ref : activities) {
-            final Activity activity = ref.get();
-            if (activity != null && activity instanceof ChromeTabbedActivity) {
+        for (Activity activity : ApplicationStatus.getRunningActivities()) {
+            if (activity instanceof ChromeTabbedActivity) {
                 @ActivityState
                 int activityState = ApplicationStatus.getStateForActivity(activity);
                 if (activityState != ActivityState.STOPPED) {
@@ -86,8 +85,8 @@ public class FeedAppLifecycle
             mFeedScheduler.onForegrounded();
         }
 
-        SigninManager.get().addSignInStateObserver(this);
         ApplicationStatus.registerStateListenerForAllActivities(this);
+        SigninManager.get().addSignInStateObserver(this);
     }
 
     /**
@@ -102,7 +101,8 @@ public class FeedAppLifecycle
      * We call onClearAll to avoid presenting personalized suggestions based on deleted history.
      */
     public void onHistoryDeleted() {
-        onClearAll();
+        reportEvent(AppLifecycleEvent.HISTORY_DELETED);
+        onClearAll(/*suppressRefreshes*/ true);
     }
 
     /**
@@ -110,7 +110,8 @@ public class FeedAppLifecycle
      * Feed deletes its cached browsing data.
      */
     public void onCachedDataCleared() {
-        onClearAll();
+        reportEvent(AppLifecycleEvent.CACHED_DATA_CLEARED);
+        onClearAll(/*suppressRefreshes*/ false);
     }
 
     /**
@@ -152,12 +153,14 @@ public class FeedAppLifecycle
 
     @Override
     public void onSignedIn() {
-        onClearAll();
+        reportEvent(AppLifecycleEvent.SIGN_IN);
+        onClearAll(/*suppressRefreshes*/ false);
     }
 
     @Override
     public void onSignedOut() {
-        onClearAll();
+        reportEvent(AppLifecycleEvent.SIGN_OUT);
+        onClearAll(/*suppressRefreshes*/ false);
     }
 
     private void onEnterForeground() {
@@ -170,9 +173,17 @@ public class FeedAppLifecycle
         mAppLifecycleListener.onEnterBackground();
     }
 
-    private void onClearAll() {
+    private void onClearAll(boolean suppressRefreshes) {
         reportEvent(AppLifecycleEvent.CLEAR_ALL);
-        mAppLifecycleListener.onClearAll();
+        // Clearing and triggering refreshes are both asynchronous operations. The Feed is able to
+        // better coordinate them if {@link AppLifecycleListener#onClearAllWithRefresh} is called.
+        // If the scheduler returns true from {@link FeedScheduler#onArticlesCleared}, this means
+        // that it did not trigger the refresh, but is allowing us to do so.
+        if (mFeedScheduler.onArticlesCleared(suppressRefreshes)) {
+            mAppLifecycleListener.onClearAllWithRefresh();
+        } else {
+            mAppLifecycleListener.onClearAll();
+        }
     }
 
     private void initialize() {

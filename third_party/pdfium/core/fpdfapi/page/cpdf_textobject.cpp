@@ -12,7 +12,6 @@
 #include "core/fpdfapi/font/cpdf_cidfont.h"
 #include "core/fpdfapi/font/cpdf_font.h"
 #include "third_party/base/ptr_util.h"
-#include "third_party/base/stl_util.h"
 
 CPDF_TextObjectItem::CPDF_TextObjectItem() : m_CharCode(0) {}
 
@@ -116,8 +115,7 @@ CPDF_PageObject::Type CPDF_TextObject::GetType() const {
 }
 
 void CPDF_TextObject::Transform(const CFX_Matrix& matrix) {
-  CFX_Matrix text_matrix = GetTextMatrix();
-  text_matrix.Concat(matrix);
+  CFX_Matrix text_matrix = GetTextMatrix() * matrix;
 
   float* pTextMatrix = m_TextState.GetMutableMatrix();
   pTextMatrix[0] = text_matrix.a;

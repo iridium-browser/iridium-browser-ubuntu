@@ -22,6 +22,7 @@
 #include "media/capture/mojom/image_capture_types.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkFont.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "ui/gfx/codec/jpeg_codec.h"
@@ -41,6 +42,14 @@ static const float kGradientFrequency = 1.f / 5;
 static const double kMinZoom = 100.0;
 static const double kMaxZoom = 400.0;
 static const double kZoomStep = 1.0;
+
+static const double kMinExposureTime = 10.0;
+static const double kMaxExposureTime = 100.0;
+static const double kExposureTimeStep = 5.0;
+
+static const double kMinFocusDistance = 10.0;
+static const double kMaxFocusDistance = 100.0;
+static const double kFocusDistanceStep = 5.0;
 
 // Larger int means better.
 enum class PixelFormatMatchType : int {
@@ -318,6 +327,8 @@ void PacmanFramePainter::DrawPacman(base::TimeDelta elapsed_time,
   bitmap.setPixels(target_buffer);
   SkPaint paint;
   paint.setStyle(SkPaint::kFill_Style);
+  SkFont font;
+  font.setEdging(SkFont::Edging::kAlias);
   SkCanvas canvas(bitmap);
 
   const SkScalar unscaled_zoom = fake_device_state_->zoom / 100.f;
@@ -354,7 +365,8 @@ void PacmanFramePainter::DrawPacman(base::TimeDelta elapsed_time,
       base::StringPrintf("%d:%02d:%02d:%03d %d", hours, minutes, seconds,
                          milliseconds, frame_count);
   canvas.scale(3, 3);
-  canvas.drawText(time_string.data(), time_string.length(), 30, 20, paint);
+  canvas.drawSimpleText(time_string.data(), time_string.length(),
+                        kUTF8_SkTextEncoding, 30, 20, font, paint);
 
   if (pixel_format_ == Format::Y16) {
     // Use 8 bit bitmap rendered to first half of the buffer as high byte values
@@ -457,11 +469,20 @@ void FakePhotoDevice::GetPhotoState(
   mojom::PhotoStatePtr photo_state = mojo::CreateEmptyPhotoState();
 
   photo_state->current_white_balance_mode = mojom::MeteringMode::NONE;
-  photo_state->current_exposure_mode = mojom::MeteringMode::NONE;
-  photo_state->current_focus_mode = mojom::MeteringMode::NONE;
+
+  photo_state->supported_exposure_modes.push_back(mojom::MeteringMode::MANUAL);
+  photo_state->supported_exposure_modes.push_back(
+      mojom::MeteringMode::CONTINUOUS);
+  photo_state->current_exposure_mode = fake_device_state_->exposure_mode;
 
   photo_state->exposure_compensation = mojom::Range::New();
+
   photo_state->exposure_time = mojom::Range::New();
+  photo_state->exposure_time->current = fake_device_state_->exposure_time;
+  photo_state->exposure_time->max = kMaxExposureTime;
+  photo_state->exposure_time->min = kMinExposureTime;
+  photo_state->exposure_time->step = kExposureTimeStep;
+
   photo_state->color_temperature = mojom::Range::New();
   photo_state->iso = mojom::Range::New();
   photo_state->iso->current = 100.0;
@@ -474,11 +495,15 @@ void FakePhotoDevice::GetPhotoState(
   photo_state->saturation = media::mojom::Range::New();
   photo_state->sharpness = media::mojom::Range::New();
 
+  photo_state->supported_focus_modes.push_back(mojom::MeteringMode::MANUAL);
+  photo_state->supported_focus_modes.push_back(mojom::MeteringMode::CONTINUOUS);
+  photo_state->current_focus_mode = fake_device_state_->focus_mode;
+
   photo_state->focus_distance = mojom::Range::New();
-  photo_state->focus_distance->current = 3.0;
-  photo_state->focus_distance->max = 5.0;
-  photo_state->focus_distance->min = 1.0;
-  photo_state->focus_distance->step = 1.0;
+  photo_state->focus_distance->current = fake_device_state_->focus_distance;
+  photo_state->focus_distance->max = kMaxFocusDistance;
+  photo_state->focus_distance->min = kMinFocusDistance;
+  photo_state->focus_distance->step = kFocusDistanceStep;
 
   photo_state->zoom = mojom::Range::New();
   photo_state->zoom->current = fake_device_state_->zoom;
@@ -521,6 +546,16 @@ void FakePhotoDevice::SetPhotoOptions(
   if (settings->has_zoom) {
     device_state_write_access->zoom =
         std::max(kMinZoom, std::min(settings->zoom, kMaxZoom));
+  }
+  if (settings->has_exposure_time) {
+    device_state_write_access->exposure_time = std::max(
+        kMinExposureTime, std::min(settings->exposure_time, kMaxExposureTime));
+  }
+
+  if (settings->has_focus_distance) {
+    device_state_write_access->focus_distance =
+        std::max(kMinFocusDistance,
+                 std::min(settings->focus_distance, kMaxFocusDistance));
   }
 
   std::move(callback).Run(true);

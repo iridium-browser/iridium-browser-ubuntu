@@ -11,6 +11,7 @@
 
 #include "GrVkTexture.h"
 #include "GrVkRenderTarget.h"
+#include "vk/GrVkTypes.h"
 
 class GrVkGpu;
 
@@ -37,6 +38,8 @@ public:
                                                                          sk_sp<GrVkImageLayout>);
 
     bool updateForMipmap(GrVkGpu* gpu, const GrVkImageInfo& newInfo);
+
+    GrBackendFormat backendFormat() const override { return this->getBackendFormat(); }
 
 protected:
     void onAbandon() override {

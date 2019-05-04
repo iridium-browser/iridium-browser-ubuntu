@@ -4,6 +4,7 @@
 
 package org.chromium.android_webview;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -15,7 +16,7 @@ import android.support.annotation.IntDef;
 import android.util.Log;
 import android.webkit.WebSettings;
 
-import org.chromium.base.BuildInfo;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
@@ -52,6 +53,14 @@ public class AwSettings {
     /* See {@link android.webkit.WebSettings}. */
     public static final int LAYOUT_ALGORITHM_NARROW_COLUMNS = 2;
     public static final int LAYOUT_ALGORITHM_TEXT_AUTOSIZING = 3;
+
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef({FORCE_DARK_OFF, FORCE_DARK_AUTO, FORCE_DARK_ON})
+    public @interface ForceDarkMode {}
+
+    public static final int FORCE_DARK_OFF = -1;
+    public static final int FORCE_DARK_AUTO = 0;
+    public static final int FORCE_DARK_ON = +1;
 
     // This class must be created on the UI thread. Afterwards, it can be
     // used from any thread. Internally, the class uses a message queue
@@ -101,6 +110,8 @@ public class AwSettings {
     private boolean mSpatialNavigationEnabled;  // Default depends on device features.
     private boolean mEnableSupportedHardwareAcceleratedFeatures;
     private int mMixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW;
+    @ForceDarkMode
+    private int mForceDarkMode = FORCE_DARK_AUTO;
     private boolean mCSSHexAlphaColorEnabled;
     private boolean mScrollTopLeftInteropEnabled;
 
@@ -166,6 +177,7 @@ public class AwSettings {
         EventHandler() {
         }
 
+        @SuppressLint("HandlerLeak")
         void bindUiThread() {
             if (mHandler != null) return;
             mHandler = new Handler(ThreadUtils.getUiThreadLooper()) {
@@ -599,7 +611,8 @@ public class AwSettings {
     @CalledByNative
     private static boolean getAllowSniffingFileUrls() {
         // Don't allow sniffing file:// URLs for MIME type if the application targets P or later.
-        return !BuildInfo.targetsAtLeastP();
+        return ContextUtils.getApplicationContext().getApplicationInfo().targetSdkVersion
+                < Build.VERSION_CODES.P;
     }
 
     /**
@@ -1628,6 +1641,21 @@ public class AwSettings {
     public int getMixedContentMode() {
         synchronized (mAwSettingsLock) {
             return mMixedContentMode;
+        }
+    }
+
+    @ForceDarkMode
+    public int getForceDarkMode() {
+        synchronized (mAwSettingsLock) {
+            return mForceDarkMode;
+        }
+    }
+
+    public void setForceDarkMode(@ForceDarkMode int forceDarkMode) {
+        synchronized (mAwSettingsLock) {
+            if (mForceDarkMode != forceDarkMode) {
+                mForceDarkMode = forceDarkMode;
+            }
         }
     }
 

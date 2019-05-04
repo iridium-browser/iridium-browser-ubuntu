@@ -10,9 +10,9 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/values.h"
-#include "chromeos/chromeos_features.h"
-#include "chromeos/components/proximity_auth/logging/logging.h"
+#include "chromeos/components/multidevice/logging/logging.h"
 #include "chromeos/components/proximity_auth/proximity_auth_pref_names.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/services/multidevice_setup/public/cpp/prefs.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -27,21 +27,15 @@ ProximityAuthProfilePrefManager::ProximityAuthProfilePrefManager(
     : pref_service_(pref_service),
       multidevice_setup_client_(multidevice_setup_client),
       weak_ptr_factory_(this) {
-  if (base::FeatureList::IsEnabled(
-          chromeos::features::kEnableUnifiedMultiDeviceSetup)) {
-    OnFeatureStatesChanged(multidevice_setup_client_->GetFeatureStates());
+  OnFeatureStatesChanged(multidevice_setup_client_->GetFeatureStates());
 
-    multidevice_setup_client_->AddObserver(this);
-  }
+  multidevice_setup_client_->AddObserver(this);
 }
 
 ProximityAuthProfilePrefManager::~ProximityAuthProfilePrefManager() {
   registrar_.RemoveAll();
 
-  if (base::FeatureList::IsEnabled(
-          chromeos::features::kEnableUnifiedMultiDeviceSetup)) {
-    multidevice_setup_client_->RemoveObserver(this);
-  }
+  multidevice_setup_client_->RemoveObserver(this);
 }
 
 // static
@@ -128,15 +122,8 @@ void ProximityAuthProfilePrefManager::SetIsEasyUnlockEnabled(
 }
 
 bool ProximityAuthProfilePrefManager::IsEasyUnlockEnabled() const {
-  if (base::FeatureList::IsEnabled(
-          chromeos::features::kEnableUnifiedMultiDeviceSetup) &&
-      !is_in_legacy_host_mode_) {
-    return feature_state_ ==
-           chromeos::multidevice_setup::mojom::FeatureState::kEnabledByUser;
-  }
-
-  return pref_service_->GetBoolean(
-      chromeos::multidevice_setup::kSmartLockEnabledDeprecatedPrefName);
+  return feature_state_ ==
+         chromeos::multidevice_setup::mojom::FeatureState::kEnabledByUser;
 }
 
 void ProximityAuthProfilePrefManager::SetEasyUnlockEnabledStateSet() const {
@@ -205,14 +192,6 @@ void ProximityAuthProfilePrefManager::OnFeatureStatesChanged(
     return;
   }
   feature_state_ = it->second;
-
-  if (local_state_ && account_id_.is_valid())
-    SyncPrefsToLocalState();
-}
-
-void ProximityAuthProfilePrefManager::SetIsInLegacyHostMode(
-    bool is_in_legacy_host_mode) {
-  is_in_legacy_host_mode_ = is_in_legacy_host_mode;
 
   if (local_state_ && account_id_.is_valid())
     SyncPrefsToLocalState();

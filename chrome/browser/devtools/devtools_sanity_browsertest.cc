@@ -13,13 +13,13 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/optional.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -32,6 +32,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/device/tcp_device_provider.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
+#include "chrome/browser/devtools/protocol/browser_handler.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -98,7 +99,7 @@
 #include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #endif
 
 using app_modal::JavaScriptAppModalDialog;
@@ -154,7 +155,7 @@ void DispatchOnTestSuiteSkipCheck(DevToolsWindow* window,
   const char* args_array[] = {method, args...};
   std::ostringstream script;
   script << "uiTests.dispatchOnTestSuite([";
-  for (size_t i = 0; i < arraysize(args_array); ++i)
+  for (size_t i = 0; i < base::size(args_array); ++i)
     script << (i ? "," : "") << '\"' << args_array[i] << '\"';
   script << "])";
   ASSERT_TRUE(
@@ -1561,6 +1562,8 @@ bool InterceptURLLoad(content::URLLoaderInterceptor::RequestParams* params) {
     load_timing.push_end = base::TimeTicks::Now();
 
   params->client->OnReceiveResponse(response);
+  mojo::DataPipe pipe;  // The response's body is empty. The pipe is not filled.
+  params->client->OnStartLoadingResponseBody(std::move(pipe.consumer_handle));
   params->client->OnComplete(network::URLLoaderCompletionStatus());
   return true;
 }
@@ -1841,6 +1844,19 @@ IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest,
 
   // Wait until worker script is paused on the debugger statement.
   RunTestFunction(window_, "testPauseInSharedWorkerInitialization2");
+  CloseDevToolsWindow();
+}
+
+IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest,
+                       InspectSharedWorkerNetworkPanel) {
+  ASSERT_TRUE(spawned_test_server()->Start());
+  GURL url = spawned_test_server()->GetURL(kSharedWorkerTestPage);
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  scoped_refptr<DevToolsAgentHost> host =
+      WaitForFirstSharedWorker(kSharedWorkerTestWorker);
+  OpenDevToolsWindow(host);
+  RunTestFunction(window_, "testSharedWorkerNetworkPanel");
   CloseDevToolsWindow();
 }
 
@@ -2176,8 +2192,10 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestRawHeadersWithRedirectAndHSTS) {
     content::StoragePartition* partition =
         content::BrowserContext::GetDefaultStoragePartition(
             browser()->profile());
-    partition->GetNetworkContext()->AddHSTSForTesting(https_url.host(), expiry,
-                                                      include_subdomains);
+    base::RunLoop run_loop;
+    partition->GetNetworkContext()->AddHSTS(
+        https_url.host(), expiry, include_subdomains, run_loop.QuitClosure());
+    run_loop.Run();
   }
   ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -2252,7 +2270,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, LoadNetworkResourceForFrontend) {
   DevToolsWindowTesting::CloseDevToolsWindowSync(window_);
 }
 
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, CreateBrowserContext) {
+// TODO(crbug.com/921608) Disabled for flakiness.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_CreateBrowserContext) {
   embedded_test_server()->ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL url(embedded_test_server()->GetURL("/devtools/empty.html"));
@@ -2298,6 +2317,21 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsSanityTest, InspectElement) {
 
   DispatchOnTestSuite(window, "testInspectedElementIs", "INSPECTED-DIV");
   DevToolsWindowTesting::CloseDevToolsWindowSync(window);
+}
+
+IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, BrowserCloseWithBeforeUnload) {
+  ui_test_utils::NavigateToURL(browser(), GURL(url::kAboutBlankURL));
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(content::ExecuteScript(
+      tab,
+      "window.addEventListener('beforeunload',"
+      "function(event) { event.returnValue = 'Foo'; });"));
+  content::PrepContentsForBeforeUnloadTest(tab);
+  content::WindowedNotificationObserver close_observer(
+      chrome::NOTIFICATION_BROWSER_CLOSED, content::Source<Browser>(browser()));
+  BrowserHandler handler(nullptr, std::string());
+  handler.Close();
+  close_observer.Wait();
 }
 
 // Flaky on Mus. See https://crbug.com/819285.

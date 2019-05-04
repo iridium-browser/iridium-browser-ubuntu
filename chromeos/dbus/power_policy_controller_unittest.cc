@@ -7,9 +7,9 @@
 #include <memory>
 
 #include "base/message_loop/message_loop.h"
-#include "base/test/scoped_feature_list.h"
-#include "chromeos/chromeos_features.h"
+#include "base/run_loop.h"
 #include "chromeos/dbus/fake_power_manager_client.h"
+#include "chromeos/dbus/power_manager/backlight.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -339,40 +339,79 @@ TEST_F(PowerPolicyControllerTest, SuspendOnLidClosedWhileSignedOut) {
                 fake_power_client_->policy()));
 }
 
-TEST_F(PowerPolicyControllerTest, SmartDimEnabledExperimentEnabled) {
-  const std::map<std::string, std::string> params = {
-      {"dim_threshold", "0.651"}};
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeatureWithParameters(
-      chromeos::features::kUserActivityPrediction, params);
+TEST_F(PowerPolicyControllerTest, PerSessionScreenBrightnessOverride) {
+  const double kAcBrightness = 99.0;
+  const double kBatteryBrightness = 77.0;
 
   PowerPolicyController::PrefValues prefs;
-  policy_controller_->ApplyPrefs(prefs);
-  const power_manager::PowerManagementPolicy kDefaultPolicy =
-      fake_power_client_->policy();
-
-  // First disable smart dim model.
-  prefs.smart_dim_enabled = false;
-  prefs.presentation_screen_dim_delay_factor = 3.0;
-  prefs.user_activity_screen_dim_delay_factor = 2.0;
+  prefs.ac_brightness_percent = kAcBrightness;
+  prefs.battery_brightness_percent = kBatteryBrightness;
   policy_controller_->ApplyPrefs(prefs);
 
-  power_manager::PowerManagementPolicy expected_policy = kDefaultPolicy;
-  expected_policy.set_presentation_screen_dim_delay_factor(3.0);
-  expected_policy.set_user_activity_screen_dim_delay_factor(2.0);
-  EXPECT_EQ(PowerPolicyController::GetPolicyDebugString(expected_policy),
-            PowerPolicyController::GetPolicyDebugString(
-                fake_power_client_->policy()));
+  EXPECT_EQ(kAcBrightness,
+            fake_power_client_->policy().ac_brightness_percent());
+  EXPECT_EQ(kBatteryBrightness,
+            fake_power_client_->policy().battery_brightness_percent());
 
-  // Then enable smart dim model.
-  prefs.smart_dim_enabled = true;
+  // Simulate model triggered brightness change - shouldn't override the policy.
+  power_manager::SetBacklightBrightnessRequest request;
+  request.set_percent(80.0);
+  request.set_cause(power_manager::SetBacklightBrightnessRequest_Cause_MODEL);
+  fake_power_client_->SetScreenBrightness(request);
+  base::RunLoop().RunUntilIdle();
   policy_controller_->ApplyPrefs(prefs);
 
-  expected_policy.set_presentation_screen_dim_delay_factor(1.0);
-  expected_policy.set_user_activity_screen_dim_delay_factor(1.0);
-  EXPECT_EQ(PowerPolicyController::GetPolicyDebugString(expected_policy),
-            PowerPolicyController::GetPolicyDebugString(
-                fake_power_client_->policy()));
+  EXPECT_EQ(kAcBrightness,
+            fake_power_client_->policy().ac_brightness_percent());
+  EXPECT_EQ(kBatteryBrightness,
+            fake_power_client_->policy().battery_brightness_percent());
+
+  // Simulate user triggered brightness change - should override the policy.
+  request.set_percent(80.0);
+  request.set_cause(
+      power_manager::SetBacklightBrightnessRequest_Cause_USER_REQUEST);
+  fake_power_client_->SetScreenBrightness(request);
+  base::RunLoop().RunUntilIdle();
+  policy_controller_->ApplyPrefs(prefs);
+
+  EXPECT_FALSE(fake_power_client_->policy().has_ac_brightness_percent());
+  EXPECT_FALSE(fake_power_client_->policy().has_battery_brightness_percent());
+
+  // Simulate policy values update that should be ignored.
+  prefs.ac_brightness_percent = 98.0;
+  prefs.battery_brightness_percent = 76.0;
+  policy_controller_->ApplyPrefs(prefs);
+
+  EXPECT_FALSE(fake_power_client_->policy().has_ac_brightness_percent());
+  EXPECT_FALSE(fake_power_client_->policy().has_battery_brightness_percent());
 }
 
+TEST_F(PowerPolicyControllerTest, PolicyAutoScreenLockDelay) {
+  PowerPolicyController::PrefValues prefs;
+  policy_controller_->ApplyPrefs(prefs);
+
+  // Autolock disabled.
+  prefs.ac_screen_lock_delay_ms = 4000;
+  prefs.battery_screen_lock_delay_ms = 1000;
+  prefs.enable_auto_screen_lock = false;
+  policy_controller_->ApplyPrefs(prefs);
+  EXPECT_EQ(base::TimeDelta(),
+            policy_controller_->Get()->GetMaxPolicyAutoScreenLockDelay());
+
+  // Autolock enabled.
+
+  // Longer AC delay.
+  prefs.enable_auto_screen_lock = true;
+  policy_controller_->ApplyPrefs(prefs);
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(prefs.ac_screen_lock_delay_ms),
+            policy_controller_->Get()->GetMaxPolicyAutoScreenLockDelay());
+
+  // Longer battery delay.
+  prefs.ac_screen_lock_delay_ms = 1000;
+  prefs.battery_screen_lock_delay_ms = 4000;
+  policy_controller_->ApplyPrefs(prefs);
+  EXPECT_EQ(
+      base::TimeDelta::FromMilliseconds(prefs.battery_screen_lock_delay_ms),
+      policy_controller_->Get()->GetMaxPolicyAutoScreenLockDelay());
+}
 }  // namespace chromeos

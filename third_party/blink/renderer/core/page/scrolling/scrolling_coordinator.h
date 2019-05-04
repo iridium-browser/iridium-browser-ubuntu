@@ -82,6 +82,7 @@ class CORE_EXPORT ScrollingCoordinator final
 
   static ScrollingCoordinator* Create(Page*);
 
+  explicit ScrollingCoordinator(Page*);
   ~ScrollingCoordinator();
   void Trace(blink::Visitor*);
 
@@ -165,16 +166,20 @@ class CORE_EXPORT ScrollingCoordinator final
     return programmatic_scroll_animator_timeline_.get();
   }
 
+  // Traverses the frame tree to find the scrollable area using the element id.
+  // This function only checks the local frames. This function does not check
+  // the VisualViewport element id.
+  ScrollableArea* ScrollableAreaWithElementIdInAllLocalFrames(
+      const CompositorElementId&);
+
   // Callback for compositor-side layer scrolls.
   void DidScroll(const gfx::ScrollOffset&, const CompositorElementId&);
 
   // For testing purposes only. This ScrollingCoordinator is reused between
-  // layout test, and must be reset for the results to be valid.
+  // web tests, and must be reset for the results to be valid.
   void Reset(LocalFrame*);
 
  protected:
-  explicit ScrollingCoordinator(Page*);
-
   bool IsForRootLayer(ScrollableArea*) const;
   bool IsForMainFrame(ScrollableArea*) const;
 

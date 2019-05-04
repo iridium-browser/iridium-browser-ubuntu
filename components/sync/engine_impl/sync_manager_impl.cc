@@ -169,8 +169,7 @@ ModelTypeSet SyncManagerImpl::GetTypesWithEmptyProgressMarkerToken(
 void SyncManagerImpl::ConfigureSyncer(ConfigureReason reason,
                                       ModelTypeSet to_download,
                                       SyncFeatureState sync_feature_state,
-                                      const base::Closure& ready_task,
-                                      const base::Closure& retry_task) {
+                                      const base::Closure& ready_task) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!ready_task.is_null());
   DCHECK(initialized_);
@@ -183,7 +182,7 @@ void SyncManagerImpl::ConfigureSyncer(ConfigureReason reason,
            << "\n\t"
            << "types to download: " << ModelTypeSetToString(to_download);
   ConfigurationParams params(GetOriginFromReason(reason), to_download,
-                             ready_task, retry_task);
+                             ready_task);
 
   scheduler_->Start(SyncScheduler::CONFIGURATION_MODE, base::Time());
   scheduler_->ScheduleConfiguration(params);
@@ -201,7 +200,6 @@ void SyncManagerImpl::Init(InitArgs* args) {
   DCHECK(!args->long_poll_interval.is_zero());
   if (!args->enable_local_sync_backend) {
     DCHECK(!args->credentials.account_id.empty());
-    DCHECK(!args->credentials.scope_set.empty());
   }
   DCHECK(args->cancelation_signal);
   DVLOG(1) << "SyncManager starting Init...";
@@ -472,7 +470,6 @@ void SyncManagerImpl::UpdateCredentials(const SyncCredentials& credentials) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(initialized_);
   DCHECK(!credentials.account_id.empty());
-  DCHECK(!credentials.scope_set.empty());
   cycle_context_->set_account_name(credentials.email);
 
   observing_network_connectivity_changes_ = true;
@@ -691,13 +688,14 @@ void SyncManagerImpl::SetExtraChangeRecordData(
     sync_pb::EntitySpecifics original_specifics(original.ref(SPECIFICS));
     if (type == PASSWORDS) {
       // Passwords must use their own legacy ExtraPasswordChangeRecordData.
-      std::unique_ptr<sync_pb::PasswordSpecificsData> data(
-          DecryptPasswordSpecifics(original_specifics, cryptographer));
+      std::unique_ptr<sync_pb::PasswordSpecificsData> data =
+          DecryptPasswordSpecifics(original_specifics, cryptographer);
       if (!data) {
         NOTREACHED();
         return;
       }
-      buffer->SetExtraDataForId(id, new ExtraPasswordChangeRecordData(*data));
+      buffer->SetExtraDataForId(
+          id, std::make_unique<ExtraPasswordChangeRecordData>(*data));
     } else if (original_specifics.has_encrypted()) {
       // All other datatypes can just create a new unencrypted specifics and
       // attach it.
@@ -928,17 +926,6 @@ bool SyncManagerImpl::ReceivedExperiment(Experiments* experiments) {
     // know about this.
   }
 
-  ReadNode gcm_invalidations_node(&trans);
-  if (gcm_invalidations_node.InitByClientTagLookup(
-          EXPERIMENTS, kGCMInvalidationsTag) == BaseNode::INIT_OK) {
-    const sync_pb::GcmInvalidationsFlags& gcm_invalidations =
-        gcm_invalidations_node.GetExperimentsSpecifics().gcm_invalidations();
-    if (gcm_invalidations.has_enabled()) {
-      experiments->gcm_invalidations_enabled = gcm_invalidations.enabled();
-      found_experiment = true;
-    }
-  }
-
   return found_experiment;
 }
 
@@ -990,6 +977,12 @@ void SyncManagerImpl::OnCookieJarChanged(bool account_mismatch,
 
 void SyncManagerImpl::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd) {
   directory()->OnMemoryDump(pmd);
+}
+
+void SyncManagerImpl::UpdateInvalidationClientId(const std::string& client_id) {
+  DVLOG(1) << "Setting invalidator client ID: " << client_id;
+  allstatus_.SetInvalidatorClientId(client_id);
+  cycle_context_->set_invalidator_client_id(client_id);
 }
 
 }  // namespace syncer

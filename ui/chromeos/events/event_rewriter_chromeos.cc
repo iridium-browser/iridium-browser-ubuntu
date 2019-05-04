@@ -10,12 +10,12 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/sys_info.h"
-#include "chromeos/chromeos_switches.h"
+#include "base/system/sys_info.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "device/udev_linux/scoped_udev.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -257,6 +257,17 @@ ui::DomCode RelocateModifier(ui::DomCode code, ui::DomKeyLocation location) {
   return code;
 }
 
+// Returns true if |mouse_event| was generated from a touchpad device.
+bool IsFromTouchpadDevice(const ui::MouseEvent& mouse_event) {
+  for (const ui::InputDevice& touchpad :
+       ui::InputDeviceManager::GetInstance()->GetTouchpadDevices()) {
+    if (touchpad.id == mouse_event.source_device_id())
+      return true;
+  }
+
+  return false;
+}
+
 }  // namespace
 
 EventRewriterChromeOS::EventRewriterChromeOS(
@@ -468,7 +479,7 @@ int EventRewriterChromeOS::GetRemappedModifierMasks(const ui::Event& event,
                                                     int original_flags) const {
   int unmodified_flags = original_flags;
   int rewritten_flags = pressed_modifier_latches_ | latched_modifier_latches_;
-  for (size_t i = 0; unmodified_flags && (i < arraysize(kModifierRemappings));
+  for (size_t i = 0; unmodified_flags && (i < base::size(kModifierRemappings));
        ++i) {
     const ModifierRemapping* remapped_key = nullptr;
     if (!(unmodified_flags & kModifierRemappings[i].flag))
@@ -966,8 +977,9 @@ void EventRewriterChromeOS::RewriteExtendedKeys(const ui::KeyEvent& key_event,
     bool skip_search_key_remapping =
         delegate_ && delegate_->IsSearchKeyAcceleratorReserved();
     if (!skip_search_key_remapping &&
-        RewriteWithKeyboardRemappings(
-            kSearchRemappings, arraysize(kSearchRemappings), incoming, state)) {
+        RewriteWithKeyboardRemappings(kSearchRemappings,
+                                      base::size(kSearchRemappings), incoming,
+                                      state)) {
       return;
     }
   }
@@ -992,8 +1004,8 @@ void EventRewriterChromeOS::RewriteExtendedKeys(const ui::KeyEvent& key_event,
          {ui::EF_NONE, ui::DomCode::PAGE_DOWN, ui::DomKey::PAGE_DOWN,
           ui::VKEY_NEXT}}};
     if (RewriteWithKeyboardRemappings(kNonSearchRemappings,
-                                      arraysize(kNonSearchRemappings), incoming,
-                                      state)) {
+                                      base::size(kNonSearchRemappings),
+                                      incoming, state)) {
       return;
     }
   }
@@ -1097,12 +1109,12 @@ void EventRewriterChromeOS::RewriteFunctionKeys(const ui::KeyEvent& key_event,
       switch (layout) {
         case kKbdTopRowLayout2:
           mapping = kFkeysToSystemKeys2;
-          mappingSize = arraysize(kFkeysToSystemKeys2);
+          mappingSize = base::size(kFkeysToSystemKeys2);
           break;
         case kKbdTopRowLayout1:
         default:
           mapping = kFkeysToSystemKeys1;
-          mappingSize = arraysize(kFkeysToSystemKeys1);
+          mappingSize = base::size(kFkeysToSystemKeys1);
           break;
       }
 
@@ -1171,11 +1183,15 @@ void EventRewriterChromeOS::RewriteLocatedEvent(const ui::Event& event,
 int EventRewriterChromeOS::RewriteModifierClick(
     const ui::MouseEvent& mouse_event,
     int* flags) {
+  // Note that this behavior is limited to mouse events coming from touchpad
+  // devices. https://crbug.com/890648.
+
   // Remap Alt+Button1 to Button3.
   const int kAltLeftButton = (ui::EF_ALT_DOWN | ui::EF_LEFT_MOUSE_BUTTON);
   if (((*flags & kAltLeftButton) == kAltLeftButton) &&
       ((mouse_event.type() == ui::ET_MOUSE_PRESSED) ||
-       pressed_device_ids_.count(mouse_event.source_device_id()))) {
+       pressed_device_ids_.count(mouse_event.source_device_id())) &&
+      IsFromTouchpadDevice(mouse_event)) {
     *flags &= ~kAltLeftButton;
     *flags |= ui::EF_RIGHT_MOUSE_BUTTON;
     if (mouse_event.type() == ui::ET_MOUSE_PRESSED)

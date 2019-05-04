@@ -8,8 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 #include <algorithm>
+#include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -20,15 +23,16 @@
 #include "modules/audio_device/include/test_audio_device.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/criticalsection.h"
+#include "rtc_base/critical_section.h"
 #include "rtc_base/event.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/platform_thread.h"
 #include "rtc_base/random.h"
-#include "rtc_base/refcountedobject.h"
+#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/thread.h"
-#include "rtc_base/timeutils.h"
+#include "rtc_base/thread_annotations.h"
+#include "rtc_base/time_utils.h"
 
 namespace webrtc {
 
@@ -58,8 +62,6 @@ class TestAudioDeviceModuleImpl
         audio_callback_(nullptr),
         rendering_(false),
         capturing_(false),
-        done_rendering_(true, true),
-        done_capturing_(true, true),
         stop_thread_(false) {
     auto good_sample_rate = [](int sr) {
       return sr == 8000 || sr == 16000 || sr == 32000 || sr == 44100 ||
@@ -108,14 +110,12 @@ class TestAudioDeviceModuleImpl
     rtc::CritScope cs(&lock_);
     RTC_CHECK(renderer_);
     rendering_ = true;
-    done_rendering_.Reset();
     return 0;
   }
 
   int32_t StopPlayout() {
     rtc::CritScope cs(&lock_);
     rendering_ = false;
-    done_rendering_.Set();
     return 0;
   }
 
@@ -123,14 +123,12 @@ class TestAudioDeviceModuleImpl
     rtc::CritScope cs(&lock_);
     RTC_CHECK(capturer_);
     capturing_ = true;
-    done_capturing_.Reset();
     return 0;
   }
 
   int32_t StopRecording() {
     rtc::CritScope cs(&lock_);
     capturing_ = false;
-    done_capturing_.Set();
     return 0;
   }
 
@@ -172,9 +170,10 @@ class TestAudioDeviceModuleImpl
           uint32_t new_mic_level = 0;
           if (recording_buffer_.size() > 0) {
             audio_callback_->RecordedDataIsAvailable(
-                recording_buffer_.data(), recording_buffer_.size(), 2,
-                capturer_->NumChannels(), capturer_->SamplingFrequency(), 0, 0,
-                0, false, new_mic_level);
+                recording_buffer_.data(),
+                recording_buffer_.size() / capturer_->NumChannels(),
+                2 * capturer_->NumChannels(), capturer_->NumChannels(),
+                capturer_->SamplingFrequency(), 0, 0, 0, false, new_mic_level);
           }
           if (!keep_capturing) {
             capturing_ = false;
@@ -187,9 +186,10 @@ class TestAudioDeviceModuleImpl
           int64_t ntp_time_ms = -1;
           const int sampling_frequency = renderer_->SamplingFrequency();
           audio_callback_->NeedMorePlayData(
-              SamplesPerFrame(sampling_frequency), 2, renderer_->NumChannels(),
-              sampling_frequency, playout_buffer_.data(), samples_out,
-              &elapsed_time_ms, &ntp_time_ms);
+              SamplesPerFrame(sampling_frequency), 2 * renderer_->NumChannels(),
+              renderer_->NumChannels(), sampling_frequency,
+              playout_buffer_.data(), samples_out, &elapsed_time_ms,
+              &ntp_time_ms);
           const bool keep_rendering =
               renderer_->Render(rtc::ArrayView<const int16_t>(
                   playout_buffer_.data(), samples_out));

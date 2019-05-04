@@ -22,6 +22,8 @@ USE_FAKE_CAMERA_DEVICE = Tag(
 
 # Below are tags for filtering by page sets
 
+BACKDROP_FILTER = Tag(
+    'backdrop_filter', 'Backdrop filter stories')
 IMAGE_DECODING = Tag(
     'image_decoding', 'Stories with accelerated jpeg decoding')
 KEY_DESKTOP_MOVE = Tag(
@@ -42,6 +44,8 @@ PATHOLOGICAL_MOBILE_SITES = Tag(
     'pathological_mobile_sites', 'Pathological mobile sites')
 POLYMER = Tag(
     'polymer', 'Polymer stories')
+REPAINT_DESKTOP = Tag(
+    'repaint_desktop', 'Repaint desktop stories')
 SIMPLE_MOBILE_SITES = Tag(
     'simple_mobile_sites', 'Simple mobile sites')
 TOP_REAL_WORLD_DESKTOP = Tag(

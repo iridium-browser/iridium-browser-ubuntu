@@ -9,8 +9,8 @@
 
 #include <stack>
 
-#include "angle_gl.h"
 #include <GLSLANG/ShaderLang.h>
+#include "angle_gl.h"
 
 #include "compiler/translator/HashNames.h"
 #include "compiler/translator/ImmutableString.h"
@@ -65,6 +65,8 @@ bool IsOutputHLSL(ShShaderOutput output);
 bool IsOutputVulkan(ShShaderOutput output);
 
 bool IsInShaderStorageBlock(TIntermTyped *node);
+
+GLenum GetImageInternalFormatType(TLayoutImageInternalFormat iifq);
 }  // namespace sh
 
 #endif  // COMPILER_TRANSLATOR_UTIL_H_

@@ -115,10 +115,9 @@ class PaymentsClientTest : public testing::Test {
     real_pan_ = real_pan;
   }
 
-  void OnDidGetUploadDetails(
-      AutofillClient::PaymentsRpcResult result,
-      const base::string16& context_token,
-      std::unique_ptr<base::DictionaryValue> legal_message) {
+  void OnDidGetUploadDetails(AutofillClient::PaymentsRpcResult result,
+                             const base::string16& context_token,
+                             std::unique_ptr<base::Value> legal_message) {
     result_ = result;
     legal_message_ = std::move(legal_message);
   }
@@ -155,13 +154,15 @@ class PaymentsClientTest : public testing::Test {
   }
 
   // Issue a GetUploadDetails request.
-  void StartGettingUploadDetails() {
+  void StartGettingUploadDetails(
+      PaymentsClient::UploadCardSource upload_card_source =
+          PaymentsClient::UploadCardSource::UNKNOWN_UPLOAD_CARD_SOURCE) {
     client_->GetUploadDetails(
         BuildTestProfiles(), kAllDetectableValues, std::vector<const char*>(),
         "language-LOCALE",
         base::BindOnce(&PaymentsClientTest::OnDidGetUploadDetails,
                        weak_ptr_factory_.GetWeakPtr()),
-        /*billable_service_number=*/12345);
+        /*billable_service_number=*/12345, upload_card_source);
   }
 
   // Issue an UploadCard request. This requires an OAuth token before starting
@@ -231,7 +232,7 @@ class PaymentsClientTest : public testing::Test {
   AutofillClient::PaymentsRpcResult result_;
   std::string server_id_;
   std::string real_pan_;
-  std::unique_ptr<base::DictionaryValue> legal_message_;
+  std::unique_ptr<base::Value> legal_message_;
   std::vector<MigratableCreditCard> migratable_credit_cards_;
   std::unique_ptr<std::unordered_map<std::string, std::string>> save_result_;
   std::string display_text_;
@@ -442,6 +443,65 @@ TEST_F(PaymentsClientTest,
   EXPECT_TRUE(!GetUploadData().empty());
   EXPECT_TRUE(GetUploadData().find("chrome_user_context") == std::string::npos);
   EXPECT_TRUE(GetUploadData().find("full_sync_enabled") == std::string::npos);
+}
+
+TEST_F(PaymentsClientTest,
+       GetDetailsIncludesUpstreamCheckoutFlowUploadCardSourceInRequest) {
+  StartGettingUploadDetails(
+      PaymentsClient::UploadCardSource::UPSTREAM_CHECKOUT_FLOW);
+
+  // Verify that the correct upload card source was included in the request.
+  EXPECT_TRUE(GetUploadData().find("UPSTREAM_CHECKOUT_FLOW") !=
+              std::string::npos);
+}
+
+TEST_F(PaymentsClientTest,
+       GetDetailsIncludesUpstreamSettingsPageUploadCardSourceInRequest) {
+  StartGettingUploadDetails(
+      PaymentsClient::UploadCardSource::UPSTREAM_SETTINGS_PAGE);
+
+  // Verify that the correct upload card source was included in the request.
+  EXPECT_TRUE(GetUploadData().find("UPSTREAM_SETTINGS_PAGE") !=
+              std::string::npos);
+}
+
+TEST_F(PaymentsClientTest,
+       GetDetailsIncludesUpstreamCardOcrUploadCardSourceInRequest) {
+  StartGettingUploadDetails(
+      PaymentsClient::UploadCardSource::UPSTREAM_CARD_OCR);
+
+  // Verify that the correct upload card source was included in the request.
+  EXPECT_TRUE(GetUploadData().find("UPSTREAM_CARD_OCR") != std::string::npos);
+}
+
+TEST_F(
+    PaymentsClientTest,
+    GetDetailsIncludesLocalCardMigrationCheckoutFlowUploadCardSourceInRequest) {
+  StartGettingUploadDetails(
+      PaymentsClient::UploadCardSource::LOCAL_CARD_MIGRATION_CHECKOUT_FLOW);
+
+  // Verify that the correct upload card source was included in the request.
+  EXPECT_TRUE(GetUploadData().find("LOCAL_CARD_MIGRATION_CHECKOUT_FLOW") !=
+              std::string::npos);
+}
+
+TEST_F(
+    PaymentsClientTest,
+    GetDetailsIncludesLocalCardMigrationSettingsPageUploadCardSourceInRequest) {
+  StartGettingUploadDetails(
+      PaymentsClient::UploadCardSource::LOCAL_CARD_MIGRATION_SETTINGS_PAGE);
+
+  // Verify that the correct upload card source was included in the request.
+  EXPECT_TRUE(GetUploadData().find("LOCAL_CARD_MIGRATION_SETTINGS_PAGE") !=
+              std::string::npos);
+}
+
+TEST_F(PaymentsClientTest, GetDetailsIncludesUnknownUploadCardSourceInRequest) {
+  StartGettingUploadDetails();
+
+  // Verify that the absence of an upload card source results in UNKNOWN.
+  EXPECT_TRUE(GetUploadData().find("UNKNOWN_UPLOAD_CARD_SOURCE") !=
+              std::string::npos);
 }
 
 TEST_F(PaymentsClientTest, GetUploadAccountFromSyncTest) {

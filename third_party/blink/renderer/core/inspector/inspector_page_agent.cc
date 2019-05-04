@@ -33,6 +33,7 @@
 #include <memory>
 
 #include "build/build_config.h"
+#include "third_party/blink/public/platform/web_screen_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_regexp.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
@@ -88,23 +89,23 @@ using protocol::Response;
 
 namespace {
 
-String ScheduledNavigationReasonToProtocol(ScheduledNavigation::Reason reason) {
+String ClientNavigationReasonToProtocol(ClientNavigationReason reason) {
   using ReasonEnum =
       protocol::Page::FrameScheduledNavigationNotification::ReasonEnum;
   switch (reason) {
-    case ScheduledNavigation::Reason::kFormSubmissionGet:
+    case ClientNavigationReason::kFormSubmissionGet:
       return ReasonEnum::FormSubmissionGet;
-    case ScheduledNavigation::Reason::kFormSubmissionPost:
+    case ClientNavigationReason::kFormSubmissionPost:
       return ReasonEnum::FormSubmissionPost;
-    case ScheduledNavigation::Reason::kHttpHeaderRefresh:
+    case ClientNavigationReason::kHttpHeaderRefresh:
       return ReasonEnum::HttpHeaderRefresh;
-    case ScheduledNavigation::Reason::kFrameNavigation:
+    case ClientNavigationReason::kFrameNavigation:
       return ReasonEnum::ScriptInitiated;
-    case ScheduledNavigation::Reason::kMetaTagRefresh:
+    case ClientNavigationReason::kMetaTagRefresh:
       return ReasonEnum::MetaTagRefresh;
-    case ScheduledNavigation::Reason::kPageBlock:
+    case ClientNavigationReason::kPageBlock:
       return ReasonEnum::PageBlockInterstitial;
-    case ScheduledNavigation::Reason::kReload:
+    case ClientNavigationReason::kReload:
       return ReasonEnum::Reload;
     default:
       NOTREACHED();
@@ -348,9 +349,7 @@ bool InspectorPageAgent::CachedResourceContent(Resource* cached_resource,
       return true;
     case blink::ResourceType::kScript:
       MaybeEncodeTextContent(
-          cached_resource->ResourceBuffer()
-              ? ToScriptResource(cached_resource)->DecodedText()
-              : ToScriptResource(cached_resource)->SourceText().ToString(),
+          ToScriptResource(cached_resource)->TextForInspector(),
           cached_resource->ResourceBuffer(), result, base64_encoded);
       return true;
     default:
@@ -371,8 +370,8 @@ InspectorPageAgent* InspectorPageAgent::Create(
     Client* client,
     InspectorResourceContentLoader* resource_content_loader,
     v8_inspector::V8InspectorSession* v8_session) {
-  return new InspectorPageAgent(inspected_frames, client,
-                                resource_content_loader, v8_session);
+  return MakeGarbageCollected<InspectorPageAgent>(
+      inspected_frames, client, resource_content_loader, v8_session);
 }
 
 String InspectorPageAgent::ResourceTypeJson(
@@ -845,7 +844,9 @@ void InspectorPageAgent::DidClearDocumentOfWindowObject(LocalFrame* frame) {
     const String source = scripts_to_evaluate_on_load_.Get(key);
     const String world_name = worlds_to_evaluate_on_load_.Get(key);
     if (world_name.IsEmpty()) {
-      frame->GetScriptController().ExecuteScriptInMainWorld(source);
+      frame->GetScriptController().ExecuteScriptInMainWorld(
+          source, ScriptSourceLocationType::kUnknown,
+          ScriptController::kExecuteScriptWhenScriptsDisabled);
       continue;
     }
 
@@ -873,12 +874,13 @@ void InspectorPageAgent::DidClearDocumentOfWindowObject(LocalFrame* frame) {
     // a foreign world.
     v8::HandleScope handle_scope(V8PerIsolateData::MainThreadIsolate());
     frame->GetScriptController().ExecuteScriptInIsolatedWorld(
-        world_id, source, KURL(), kOpaqueResource);
+        world_id, source, KURL(), SanitizeScriptErrors::kSanitize);
   }
 
   if (!script_to_evaluate_on_load_once_.IsEmpty()) {
     frame->GetScriptController().ExecuteScriptInMainWorld(
-        script_to_evaluate_on_load_once_);
+        script_to_evaluate_on_load_once_, ScriptSourceLocationType::kUnknown,
+        ScriptController::kExecuteScriptWhenScriptsDisabled);
   }
 }
 
@@ -938,11 +940,12 @@ void InspectorPageAgent::FrameStoppedLoading(LocalFrame* frame) {
 
 void InspectorPageAgent::FrameScheduledNavigation(
     LocalFrame* frame,
-    ScheduledNavigation* scheduled_navigation) {
+    const KURL& url,
+    double delay,
+    ClientNavigationReason reason) {
   GetFrontend()->frameScheduledNavigation(
-      IdentifiersFactory::FrameId(frame), scheduled_navigation->Delay(),
-      ScheduledNavigationReasonToProtocol(scheduled_navigation->GetReason()),
-      scheduled_navigation->Url().GetString());
+      IdentifiersFactory::FrameId(frame), delay,
+      ClientNavigationReasonToProtocol(reason), url.GetString());
 }
 
 void InspectorPageAgent::FrameClearedScheduledNavigation(LocalFrame* frame) {
@@ -1021,21 +1024,21 @@ void InspectorPageAgent::WindowOpen(Document* document,
 std::unique_ptr<protocol::Page::Frame> InspectorPageAgent::BuildObjectForFrame(
     LocalFrame* frame) {
   DocumentLoader* loader = frame->Loader().GetDocumentLoader();
-  KURL url = loader->GetRequest().Url();
   std::unique_ptr<protocol::Page::Frame> frame_object =
       protocol::Page::Frame::create()
           .setId(IdentifiersFactory::FrameId(frame))
           .setLoaderId(IdentifiersFactory::LoaderId(loader))
-          .setUrl(UrlWithoutFragment(url).GetString())
+          .setUrl(UrlWithoutFragment(loader->Url()).GetString())
           .setMimeType(frame->Loader().GetDocumentLoader()->MimeType())
-          .setSecurityOrigin(SecurityOrigin::Create(url)->ToRawString())
+          .setSecurityOrigin(
+              SecurityOrigin::Create(loader->Url())->ToRawString())
           .build();
   Frame* parent_frame = frame->Tree().Parent();
   if (parent_frame) {
     frame_object->setParentId(IdentifiersFactory::FrameId(parent_frame));
     AtomicString name = frame->Tree().GetName();
     if (name.IsEmpty() && frame->DeprecatedLocalOwner())
-      name = frame->DeprecatedLocalOwner()->getAttribute(HTMLNames::idAttr);
+      name = frame->DeprecatedLocalOwner()->getAttribute(html_names::kIdAttr);
     frame_object->setName(name);
   }
   if (loader && !loader->UnreachableURL().IsEmpty())
@@ -1157,7 +1160,13 @@ Response InspectorPageAgent::getLayoutMetrics(
 
   LocalFrameView* frame_view = main_frame->View();
   ScrollOffset page_offset = frame_view->GetScrollableArea()->GetScrollOffset();
+  // page_zoom is either CSS-to-DP or CSS-to-DIP depending on
+  // enable-use-zoom-for-dsf flag.
   float page_zoom = main_frame->PageZoomFactor();
+  // page_zoom_factor is CSS to DIP (device independent pixels).
+  float page_zoom_factor =
+      page_zoom /
+      main_frame->GetPage()->GetChromeClient().WindowToViewportScalar(1);
   FloatRect visible_rect = visual_viewport.VisibleRect();
   float scale = visual_viewport.Scale();
 
@@ -1181,6 +1190,7 @@ Response InspectorPageAgent::getLayoutMetrics(
                              .setClientWidth(visible_rect.Width())
                              .setClientHeight(visible_rect.Height())
                              .setScale(scale)
+                             .setZoom(page_zoom_factor)
                              .build();
   return Response::OK();
 }
@@ -1286,10 +1296,9 @@ void InspectorPageAgent::ConsumeCompilationCache(
   auto it = compilation_cache_.find(source.Url().GetString());
   if (it == compilation_cache_.end())
     return;
-  const Vector<char>& data = it->value;
+  const protocol::Binary& data = it->value;
   *cached_data = new v8::ScriptCompiler::CachedData(
-      reinterpret_cast<const uint8_t*>(data.data()), data.size(),
-      v8::ScriptCompiler::CachedData::BufferNotOwned);
+      data.data(), data.size(), v8::ScriptCompiler::CachedData::BufferNotOwned);
 }
 
 void InspectorPageAgent::ProduceCompilationCache(const ScriptSourceCode& source,
@@ -1313,9 +1322,11 @@ void InspectorPageAgent::ProduceCompilationCache(const ScriptSourceCode& source,
   std::unique_ptr<v8::ScriptCompiler::CachedData> cached_data(
       v8::ScriptCompiler::CreateCodeCache(script->GetUnboundScript()));
   if (cached_data) {
-    String base64data = Base64Encode(
-        reinterpret_cast<const char*>(cached_data->data), cached_data->length);
-    GetFrontend()->compilationCacheProduced(url_string, base64data);
+    // CachedData produced by CreateCodeCache always owns its buffer.
+    CHECK_EQ(cached_data->buffer_policy,
+             v8::ScriptCompiler::CachedData::BufferOwned);
+    GetFrontend()->compilationCacheProduced(
+        url_string, protocol::Binary::fromCachedData(std::move(cached_data)));
   }
 }
 
@@ -1325,11 +1336,8 @@ Response InspectorPageAgent::setProduceCompilationCache(bool enabled) {
 }
 
 Response InspectorPageAgent::addCompilationCache(const String& url,
-                                                 const String& base64data) {
-  Vector<char> data;
-  if (!Base64Decode(base64data, data))
-    return Response::Error("data should be base64-encoded");
-  compilation_cache_.Set(url, std::move(data));
+                                                 const protocol::Binary& data) {
+  compilation_cache_.Set(url, data);
   return Response::OK();
 }
 
@@ -1338,13 +1346,19 @@ Response InspectorPageAgent::clearCompilationCache() {
   return Response::OK();
 }
 
+Response InspectorPageAgent::waitForDebugger() {
+  client_->WaitForDebugger();
+  return Response::OK();
+}
+
 protocol::Response InspectorPageAgent::generateTestReport(const String& message,
                                                           Maybe<String> group) {
   Document* document = inspected_frames_->Root()->GetDocument();
 
   // Construct the test report.
-  TestReportBody* body = new TestReportBody(message);
-  Report* report = new Report("test", document->Url().GetString(), body);
+  TestReportBody* body = MakeGarbageCollected<TestReportBody>(message);
+  Report* report =
+      MakeGarbageCollected<Report>("test", document->Url().GetString(), body);
 
   // Send the test report to any ReportingObservers.
   ReportingContext::From(document)->QueueReport(report);

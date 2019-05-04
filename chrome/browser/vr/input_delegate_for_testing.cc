@@ -5,6 +5,7 @@
 #include "chrome/browser/vr/input_delegate_for_testing.h"
 
 #include "chrome/browser/vr/input_event.h"
+#include "chrome/browser/vr/platform_controller_for_testing.h"
 #include "chrome/browser/vr/ui_interface.h"
 #include "chrome/browser/vr/ui_scene_constants.h"
 #include "chrome/browser/vr/ui_test_input.h"
@@ -35,6 +36,7 @@ void SetOriginAndTransform(vr::ControllerModel* model) {
 namespace vr {
 
 InputDelegateForTesting::InputDelegateForTesting(UiInterface* ui) : ui_(ui) {
+  gesture_detector_ = std::make_unique<GestureDetector>();
   cached_controller_model_.laser_direction = kForwardVector;
   SetOriginAndTransform(&cached_controller_model_);
 }
@@ -54,23 +56,17 @@ void InputDelegateForTesting::QueueControllerActionForTesting(
   DCHECK_NE(controller_input.action,
             VrControllerTestAction::kRevertToRealInput);
   ControllerModel controller_model;
-  auto target_point = ui_->GetTargetPointForTesting(
-      controller_input.element_name, controller_input.position);
-  auto direction = (target_point - kStartControllerPosition) - kOrigin;
-  direction.GetNormalized(&controller_model.laser_direction);
+  if (controller_input.element_name == UserFriendlyElementName::kNone) {
+    controller_model.laser_direction = kForwardVector;
+  } else {
+    auto target_point = ui_->GetTargetPointForTesting(
+        controller_input.element_name, controller_input.position);
+    auto direction = (target_point - kStartControllerPosition) - kOrigin;
+    direction.GetNormalized(&controller_model.laser_direction);
+  }
   SetOriginAndTransform(&controller_model);
 
   switch (controller_input.action) {
-    case VrControllerTestAction::kClick:
-      // Add in the button down action.
-      controller_model.touchpad_button_state =
-          ControllerModel::ButtonState::kDown;
-      controller_model_queue_.push(controller_model);
-      // Add in the button up action.
-      controller_model.touchpad_button_state =
-          ControllerModel::ButtonState::kUp;
-      controller_model_queue_.push(controller_model);
-      break;
     case VrControllerTestAction::kHover:
       FALLTHROUGH;
     case VrControllerTestAction::kClickUp:
@@ -85,13 +81,32 @@ void InputDelegateForTesting::QueueControllerActionForTesting(
       break;
     case VrControllerTestAction::kMove:
       // Use whatever the last button state is.
-      if (!IsQueueEmpty()) {
-        controller_model.touchpad_button_state =
-            controller_model_queue_.back().touchpad_button_state;
-      } else {
-        controller_model.touchpad_button_state =
-            cached_controller_model_.touchpad_button_state;
-      }
+      controller_model.touchpad_button_state =
+          GetMostRecentModel().touchpad_button_state;
+      controller_model_queue_.push(controller_model);
+      break;
+    case VrControllerTestAction::kAppDown:
+      controller_model.app_button_state = ControllerModel::ButtonState::kDown;
+      controller_model_queue_.push(controller_model);
+      break;
+    case VrControllerTestAction::kAppUp:
+      controller_model.app_button_state = ControllerModel::ButtonState::kUp;
+      controller_model_queue_.push(controller_model);
+      break;
+    case VrControllerTestAction::kTouchDown:
+      // Use whatever the most recent direction is and interpret the provided
+      // point as the point on the touchpad.
+      controller_model.laser_direction = GetMostRecentModel().laser_direction;
+      SetOriginAndTransform(&controller_model);
+      controller_model.touching_touchpad = true;
+      controller_model.touchpad_touch_position = controller_input.position;
+      controller_model_queue_.push(controller_model);
+      break;
+    case VrControllerTestAction::kTouchUp:
+      controller_model.laser_direction = GetMostRecentModel().laser_direction;
+      SetOriginAndTransform(&controller_model);
+      controller_model.touching_touchpad = false;
+      controller_model.touchpad_touch_position = controller_input.position;
       controller_model_queue_.push(controller_model);
       break;
     default:
@@ -106,6 +121,7 @@ bool InputDelegateForTesting::IsQueueEmpty() const {
 void InputDelegateForTesting::UpdateController(const gfx::Transform& head_pose,
                                                base::TimeTicks current_time,
                                                bool is_webxr_frame) {
+  previous_controller_model_ = cached_controller_model_;
   if (!controller_model_queue_.empty()) {
     cached_controller_model_ = controller_model_queue_.front();
     controller_model_queue_.pop();
@@ -121,7 +137,9 @@ ControllerModel InputDelegateForTesting::GetControllerModel(
 
 InputEventList InputDelegateForTesting::GetGestures(
     base::TimeTicks current_time) {
-  return InputEventList();
+  PlatformControllerForTesting controller(&previous_controller_model_,
+                                          &cached_controller_model_);
+  return gesture_detector_->DetectGestures(controller, current_time);
 }
 
 device::mojom::XRInputSourceStatePtr
@@ -139,5 +157,11 @@ InputDelegateForTesting::GetInputSourceState() {
 void InputDelegateForTesting::OnResume() {}
 
 void InputDelegateForTesting::OnPause() {}
+
+ControllerModel InputDelegateForTesting::GetMostRecentModel() {
+  if (!IsQueueEmpty())
+    return controller_model_queue_.back();
+  return cached_controller_model_;
+}
 
 }  // namespace vr

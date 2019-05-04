@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/aw_contents.h"
 #include "android_webview/browser/renderer_host/aw_render_view_host_ext.h"
@@ -13,15 +14,19 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/macros.h"
+#include "base/no_destructor.h"
 #include "base/supports_user_data.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/renderer_preferences.h"
+#include "content/public/common/renderer_preferences_util.h"
 #include "content/public/common/web_preferences.h"
 #include "jni/AwSettings_jni.h"
-#include "ui/gfx/font_render_params.h"
+#include "net/http/http_util.h"
+#include "services/network/public/cpp/features.h"
 
 using base::android::ConvertJavaStringToUTF16;
 using base::android::ConvertUTF8ToJavaString;
@@ -33,19 +38,6 @@ using content::WebPreferences;
 namespace android_webview {
 
 namespace {
-
-void PopulateFixedRendererPreferences(RendererPreferences* prefs) {
-  // TODO(boliu): Deduplicate with chrome/ code.
-  CR_DEFINE_STATIC_LOCAL(
-      const gfx::FontRenderParams, params,
-      (gfx::GetFontRenderParams(gfx::FontRenderParamsQuery(), NULL)));
-  prefs->should_antialias_text = params.antialiasing;
-  prefs->use_subpixel_positioning = params.subpixel_positioning;
-  prefs->hinting = params.hinting;
-  prefs->use_autohinter = params.autohinter;
-  prefs->use_bitmaps = params.use_bitmaps;
-  prefs->subpixel_rendering = params.subpixel_rendering;
-}
 
 void PopulateFixedWebPreferences(WebPreferences* web_prefs) {
   web_prefs->shrinks_standalone_images_to_fit = false;
@@ -167,8 +159,7 @@ void AwSettings::UpdateUserAgentLocked(JNIEnv* env,
     web_contents()->SetUserAgentOverride(override, true);
   }
 
-  const content::NavigationController& controller =
-      web_contents()->GetController();
+  content::NavigationController& controller = web_contents()->GetController();
   for (int i = 0; i < controller.GetEntryCount(); ++i)
     controller.GetEntryAtIndex(i)->SetIsOverridingUserAgent(ua_overidden);
 }
@@ -229,7 +220,7 @@ void AwSettings::UpdateRendererPreferencesLocked(
   RendererPreferences* prefs = web_contents()->GetMutableRendererPrefs();
 
   if (!renderer_prefs_initialized_) {
-    PopulateFixedRendererPreferences(prefs);
+    content::UpdateFontRendererPreferencesFromSystemSettings(prefs);
     renderer_prefs_initialized_ = true;
     update_prefs = true;
   }
@@ -243,6 +234,18 @@ void AwSettings::UpdateRendererPreferencesLocked(
   content::RenderViewHost* host = web_contents()->GetRenderViewHost();
   if (update_prefs && host)
     host->SyncRendererPrefs();
+
+  if (update_prefs &&
+      base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+    // make sure to update accept languages when the network service is enabled
+    AwBrowserContext* aw_browser_context =
+        AwBrowserContext::FromWebContents(web_contents());
+    // AndroidWebview does not use per-site storage partitions.
+    content::StoragePartition* storage_partition =
+        content::BrowserContext::GetDefaultStoragePartition(aw_browser_context);
+    storage_partition->GetNetworkContext()->SetAcceptLanguage(
+        net::HttpUtil::ExpandLanguageList(prefs->accept_languages));
+  }
 }
 
 void AwSettings::UpdateOffscreenPreRasterLocked(
@@ -486,8 +489,7 @@ static jlong JNI_AwSettings_Init(JNIEnv* env,
 }
 
 static ScopedJavaLocalRef<jstring> JNI_AwSettings_GetDefaultUserAgent(
-    JNIEnv* env,
-    const JavaParamRef<jclass>& clazz) {
+    JNIEnv* env) {
   return base::android::ConvertUTF8ToJavaString(env, GetUserAgent());
 }
 

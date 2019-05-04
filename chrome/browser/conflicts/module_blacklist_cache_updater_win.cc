@@ -135,13 +135,13 @@ void PopulatePackedListModule(
       base::i18n::ToLower(module_key.module_path.BaseName().value()));
   base::SHA1HashBytes(reinterpret_cast<const uint8_t*>(module_basename.data()),
                       module_basename.length(),
-                      packed_list_module->basename_hash);
+                      &packed_list_module->basename_hash[0]);
 
   // Hash the code id.
   const std::string module_code_id = GenerateCodeId(module_key);
   base::SHA1HashBytes(reinterpret_cast<const uint8_t*>(module_code_id.data()),
                       module_code_id.length(),
-                      packed_list_module->code_id_hash);
+                      &packed_list_module->code_id_hash[0]);
 
   packed_list_module->time_date_stamp =
       CalculateTimeDateStamp(base::Time::Now());
@@ -345,7 +345,7 @@ ModuleBlacklistCacheUpdater::DetermineModuleBlockingDecision(
   // Explicitly whitelist modules whose signing cert's Subject field matches the
   // one in the current executable. No attempt is made to check the validity of
   // module signatures or of signing certs.
-  if (exe_certificate_info_.type != CertificateType::NO_CERTIFICATE &&
+  if (exe_certificate_info_.type != CertificateInfo::Type::NO_CERTIFICATE &&
       exe_certificate_info_.subject ==
           module_data.inspection_result->certificate_info.subject) {
     return ModuleBlockingDecision::kAllowedSameCertificate;

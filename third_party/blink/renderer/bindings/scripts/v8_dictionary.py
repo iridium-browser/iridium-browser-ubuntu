@@ -93,7 +93,6 @@ def dictionary_context(dictionary, interfaces_info):
                                          if member.is_required]),
         'use_permissive_dictionary_conversion': 'PermissiveDictionaryConversion' in dictionary.extended_attributes,
         'v8_class': v8_types.v8_type(cpp_class),
-        'v8_original_class': v8_types.v8_type(dictionary.name),
     }
     if dictionary.parent:
         IdlType(dictionary.parent).add_includes_for_type()
@@ -116,6 +115,11 @@ def member_context(dictionary, member):
         raise Exception(
             'Required member %s must not have a default value.' % member.name)
 
+    if idl_type.is_nullable and idl_type.inner_type.is_dictionary:
+        raise Exception(
+            'The inner type of nullable member %s must not be a dictionary.' %
+            member.name)
+
     # In most cases, we don't have to distinguish `null` and `not present`,
     # and use null-states (e.g. nullptr, foo.IsUndefinedOrNull()) to show such
     # states for some types for memory usage and performance.
@@ -129,6 +133,7 @@ def member_context(dictionary, member):
             return None, None
         if member.default_value.is_null:
             return None, 'v8::Null(isolate)'
+
         cpp_default_value = unwrapped_idl_type.literal_cpp_value(
             member.default_value)
         v8_default_value = unwrapped_idl_type.cpp_value_to_v8_value(
@@ -149,7 +154,7 @@ def member_context(dictionary, member):
         'cpp_type': unwrapped_idl_type.cpp_type,
         'cpp_value': cpp_value,
         'cpp_value_to_v8_value': unwrapped_idl_type.cpp_value_to_v8_value(
-            cpp_value='impl.%s()' % getter_name, isolate='isolate',
+            cpp_value='impl->%s()' % getter_name, isolate='isolate',
             creation_context='creationContext',
             extended_attributes=extended_attributes),
         'deprecate_as': v8_utilities.deprecate_as(member),
@@ -159,6 +164,7 @@ def member_context(dictionary, member):
         'has_explicit_presence': has_explicit_presence,
         'has_method_name': has_method_name_for_dictionary_member(member),
         'idl_type': idl_type.base_type,
+        'is_callback_function_type': idl_type.is_callback_function,
         'is_interface_type': idl_type.is_interface_type and not is_deprecated_dictionary,
         'is_nullable': idl_type.is_nullable,
         'is_object': unwrapped_idl_type.name == 'Object' or is_deprecated_dictionary,

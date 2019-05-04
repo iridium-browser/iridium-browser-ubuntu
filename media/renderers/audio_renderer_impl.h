@@ -125,6 +125,11 @@ class MEDIA_EXPORT AudioRendererImpl
     kPlaying
   };
 
+  // Called after hardware device information is available.
+  void OnDeviceInfoReceived(DemuxerStream* stream,
+                            CdmContext* cdm_context,
+                            OutputDeviceInfo output_device_info);
+
   // Callback from the audio decoder delivering decoded audio samples.
   void DecodedAudioReady(AudioDecoderStream::Status status,
                          const scoped_refptr<AudioBuffer>& buffer);
@@ -191,7 +196,7 @@ class MEDIA_EXPORT AudioRendererImpl
   void OnPlaybackEnded();
   void OnStatisticsUpdate(const PipelineStatistics& stats);
   void OnBufferingStateChange(BufferingState state);
-  void OnWaitingForDecryptionKey();
+  void OnWaiting(WaitingReason reason);
 
   // Generally called by the AudioDecoderStream when a config change occurs. May
   // also be called internally with an empty config to reset config-based state.

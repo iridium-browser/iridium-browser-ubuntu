@@ -16,11 +16,11 @@
 #include "ash/high_contrast/high_contrast_controller.h"
 #include "ash/host/ash_window_tree_host.h"
 #include "ash/keyboard/arc/arc_virtual_keyboard_container_layout_manager.h"
+#include "ash/keyboard/ash_keyboard_controller.h"
 #include "ash/keyboard/virtual_keyboard_container_layout_manager.h"
 #include "ash/lock_screen_action/lock_screen_action_background_controller.h"
 #include "ash/login_status.h"
 #include "ash/public/cpp/ash_constants.h"
-#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
@@ -36,7 +36,6 @@
 #include "ash/shell_state.h"
 #include "ash/system/status_area_layout_manager.h"
 #include "ash/system/status_area_widget.h"
-#include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/tray_background_view.h"
 #include "ash/system/unified/unified_system_tray.h"
 #include "ash/touch/touch_observer_hud.h"
@@ -59,20 +58,20 @@
 #include "ash/wm/workspace/workspace_layout_manager.h"
 #include "ash/wm/workspace_controller.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/stl_util.h"
 #include "base/time/time.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/window_types.h"
+#include "ui/aura/null_window_targeter.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_observer.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/base/models/menu_model.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/compositor/layer.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/events/event_utils.h"
@@ -164,9 +163,10 @@ void ReparentWindow(aura::Window* window, aura::Window* new_parent) {
   // Update the restore bounds to make it relative to the display.
   wm::WindowState* state = wm::GetWindowState(window);
   gfx::Rect restore_bounds;
-  const bool has_restore_bounds = state->HasRestoreBounds();
+  const bool has_restore_bounds = state && state->HasRestoreBounds();
 
-  const bool update_bounds = state->IsNormalOrSnapped() || state->IsMinimized();
+  const bool update_bounds =
+      state && (state->IsNormalOrSnapped() || state->IsMinimized());
   gfx::Rect work_area_in_new_parent =
       screen_util::GetDisplayWorkAreaBoundsInParent(new_parent);
 
@@ -210,7 +210,7 @@ void ReparentAllWindows(aura::Window* src, aura::Window* dst) {
   };
   std::vector<int> container_ids(
       kContainerIdsToMove,
-      kContainerIdsToMove + arraysize(kContainerIdsToMove));
+      kContainerIdsToMove + base::size(kContainerIdsToMove));
   // Check the display mode as this is also necessary when trasitioning between
   // mirror and unified mode.
   if (Shell::Get()->display_manager()->current_default_multi_display_mode() ==
@@ -259,6 +259,80 @@ aura::Window* CreateContainer(int window_id,
 bool ShouldDestroyWindowInCloseChildWindows(aura::Window* window) {
   return window->owned_by_parent();
 }
+
+class RootWindowTargeter : public aura::WindowTargeter {
+ public:
+  RootWindowTargeter() = default;
+  ~RootWindowTargeter() override = default;
+
+ protected:
+  aura::Window* FindTargetForLocatedEvent(aura::Window* window,
+                                          ui::LocatedEvent* event) override {
+    if (!window->parent() && !window->bounds().Contains(event->location()) &&
+        IsEventInsideDisplayForTelemetryHack(window, event)) {
+      auto* dispatcher = window->GetHost()->dispatcher();
+      bool has_capture_target = !!dispatcher->mouse_pressed_handler() ||
+                                !!aura::client::GetCaptureWindow(window);
+
+      // Make sure that event location is within the root window bounds if
+      // 1) mouse event isn't captured.
+      // 2) A mouse is clicked without movement and capture.
+      //
+      // The event can be outside on some scale factor due to rounding, or due
+      // to not well calibrated a touch screen, or Detect this situation and
+      // adjust the location.
+      bool bounded_click = ShouldConstrainMouseClick(event, has_capture_target);
+      if (!has_capture_target || bounded_click) {
+        gfx::Point new_location =
+            FitPointToBounds(event->location(), window->bounds());
+        // Do not change |location_f|. It's used to compute pixel position and
+        // such client should know what they're doing.
+        event->set_location(new_location);
+        event->set_root_location(new_location);
+      }
+    }
+    return aura::WindowTargeter::FindTargetForLocatedEvent(window, event);
+  }
+
+  // Stop-gap workaround for telemetry tests that send events far outside of the
+  // display (e.g. 512, -4711). Fix the test and remove this (crbgu.com/904623).
+  bool IsEventInsideDisplayForTelemetryHack(aura::Window* window,
+                                            ui::LocatedEvent* event) {
+    constexpr int ExtraMarginForTelemetryTest = -10;
+    gfx::Rect bounds = window->bounds();
+    bounds.Inset(ExtraMarginForTelemetryTest, ExtraMarginForTelemetryTest);
+    return bounds.Contains(event->location());
+  }
+
+ private:
+  // Returns true if the mouse event should be constrainted.
+  bool ShouldConstrainMouseClick(ui::LocatedEvent* event,
+                                 bool has_capture_target) {
+    if (event->type() == ui::ET_MOUSE_PRESSED && !has_capture_target) {
+      last_mouse_event_type_ = ui::ET_MOUSE_PRESSED;
+      return true;
+    }
+    if (last_mouse_event_type_ == ui::ET_MOUSE_PRESSED &&
+        event->type() == ui::ET_MOUSE_RELEASED && has_capture_target) {
+      last_mouse_event_type_ = ui::ET_UNKNOWN;
+      return true;
+    }
+    // For other cases, reset the state
+    if (event->type() != ui::ET_MOUSE_CAPTURE_CHANGED)
+      last_mouse_event_type_ = ui::ET_UNKNOWN;
+    return false;
+  }
+
+  gfx::Point FitPointToBounds(const gfx::Point p, const gfx::Rect& bounds) {
+    return gfx::Point(
+        std::min(std::max(bounds.x(), p.x()), bounds.right() - 1),
+        std::min(std::max(bounds.y(), p.y()), bounds.bottom() - 1));
+  }
+
+  ui::EventType last_mouse_event_type_ = ui::ET_UNKNOWN;
+
+  DISALLOW_COPY_AND_ASSIGN(RootWindowTargeter);
+};
 
 }  // namespace
 
@@ -364,19 +438,8 @@ StatusAreaWidget* RootWindowController::GetStatusAreaWidget() {
   return shelf_widget ? shelf_widget->status_area_widget() : nullptr;
 }
 
-SystemTray* RootWindowController::GetSystemTray() {
-  // We assume in throughout the code that this will not return NULL. If code
-  // triggers this for valid reasons, it should test status_area_widget first.
-  CHECK(shelf_->shelf_widget()->status_area_widget());
-  return shelf_->shelf_widget()->status_area_widget()->system_tray();
-}
-
 bool RootWindowController::IsSystemTrayVisible() {
-  TrayBackgroundView* tray = nullptr;
-  if (features::IsSystemTrayUnifiedEnabled())
-    tray = GetStatusAreaWidget()->unified_system_tray();
-  else
-    tray = GetSystemTray();
+  TrayBackgroundView* tray = GetStatusAreaWidget()->unified_system_tray();
   return tray && tray->GetWidget()->IsVisible() && tray->visible();
 }
 
@@ -441,6 +504,9 @@ const aura::Window* RootWindowController::GetContainer(int container_id) const {
 }
 
 void RootWindowController::Shutdown() {
+  auto targeter = GetRootWindow()->SetEventTargeter(
+      std::make_unique<aura::NullWindowTargeter>());
+
   touch_exploration_manager_.reset();
 
   ResetRootForNewWindowsIfNecessary();
@@ -459,6 +525,12 @@ void RootWindowController::Shutdown() {
   system_wallpaper_.reset();
   lock_screen_action_background_controller_.reset();
   aura::client::SetScreenPositionClient(root_window, nullptr);
+
+  // The targeter may still on the stack, so delete it later.
+  if (targeter) {
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE,
+                                                    std::move(targeter));
+  }
 }
 
 void RootWindowController::CloseChildWindows() {
@@ -468,9 +540,9 @@ void RootWindowController::CloseChildWindows() {
     return;
   did_close_child_windows_ = true;
 
-  // Deactivate keyboard container before closing child windows and shutting
+  // Notify the keyboard controller before closing child windows and shutting
   // down associated layout managers.
-  DeactivateKeyboard(keyboard::KeyboardController::Get());
+  Shell::Get()->ash_keyboard_controller()->OnRootWindowClosing(GetRootWindow());
 
   shelf_->ShutdownShelfWidget();
 
@@ -533,40 +605,6 @@ aura::Window* RootWindowController::GetWindowForFullscreenMode() {
   return wm::GetWindowForFullscreenMode(GetRootWindow());
 }
 
-void RootWindowController::ActivateKeyboard(
-    keyboard::KeyboardController* keyboard_controller) {
-  DCHECK(keyboard_controller);
-
-  // There is a potential edge case where IsKeyboardEnabled() returns true but
-  // EnableKeyboard() has not been called. In that case we still don't want to
-  // activate the keyboard.
-  if (!keyboard::IsKeyboardEnabled() || !keyboard_controller->IsEnabled())
-    return;
-
-  // If the keyboard is already activated, ensure that it is activated in this
-  // root window.
-  if (keyboard_controller->GetRootWindow() == GetRootWindow())
-    return;
-
-  aura::Window* vk_container =
-      GetContainer(kShellWindowId_VirtualKeyboardContainer);
-  DCHECK(vk_container);
-  keyboard_controller->ActivateKeyboardInContainer(vk_container);
-
-  keyboard_controller->LoadKeyboardWindowInBackground();
-}
-
-void RootWindowController::DeactivateKeyboard(
-    keyboard::KeyboardController* keyboard_controller) {
-  DCHECK(keyboard_controller);
-  if (!keyboard_controller->IsEnabled())
-    return;
-
-  // If the VK is under the root window of this controller.
-  if (keyboard_controller->GetRootWindow() == GetRootWindow())
-    keyboard_controller->DeactivateKeyboard();
-}
-
 void RootWindowController::SetTouchAccessibilityAnchorPoint(
     const gfx::Point& anchor_point) {
   if (touch_exploration_manager_)
@@ -590,20 +628,17 @@ void RootWindowController::ShowContextMenu(const gfx::Point& location_in_screen,
   UMA_HISTOGRAM_ENUMERATION("Apps.ContextMenuShowSource.Desktop", source_type,
                             ui::MENU_SOURCE_TYPE_LAST);
 
-  int run_types = views::MenuRunner::CONTEXT_MENU;
-  views::MenuAnchorPosition anchor_position = views::MENU_ANCHOR_TOPLEFT;
-  if (::features::IsTouchableAppContextMenuEnabled()) {
-    run_types |= views::MenuRunner::USE_TOUCHABLE_LAYOUT |
-                 views::MenuRunner::FIXED_ANCHOR;
-    anchor_position = views::MENU_ANCHOR_BUBBLE_TOUCHABLE_ABOVE;
-  }
   menu_runner_ = std::make_unique<views::MenuRunner>(
-      menu_model_.get(), run_types,
+      menu_model_.get(),
+      views::MenuRunner::CONTEXT_MENU |
+          views::MenuRunner::USE_TOUCHABLE_LAYOUT |
+          views::MenuRunner::FIXED_ANCHOR,
       base::Bind(&RootWindowController::OnMenuClosed, base::Unretained(this),
                  base::TimeTicks::Now()));
   menu_runner_->RunMenuAt(wallpaper_widget_controller()->GetWidget(), nullptr,
                           gfx::Rect(location_in_screen, gfx::Size()),
-                          anchor_position, source_type);
+                          views::MENU_ANCHOR_BUBBLE_TOUCHABLE_RIGHT,
+                          source_type);
 }
 
 void RootWindowController::HideContextMenu() {
@@ -658,6 +693,9 @@ void RootWindowController::Init(RootWindowType root_window_type) {
   aura::Window* root_window = GetRootWindow();
   Shell* shell = Shell::Get();
   shell->InitRootWindow(root_window);
+  auto old_targeter =
+      root_window->SetEventTargeter(std::make_unique<RootWindowTargeter>());
+  DCHECK(!old_targeter);
 
   CreateContainers();
   CreateSystemWallpaper(root_window_type);

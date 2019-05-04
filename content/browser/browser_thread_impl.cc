@@ -13,13 +13,20 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/no_destructor.h"
 #include "base/sequence_checker.h"
+#include "base/task/post_task.h"
 #include "base/task/task_executor.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/content_browser_client.h"
+
+#if defined(OS_ANDROID)
+#include "base/android/task_scheduler/post_task_android.h"
+#endif
 
 namespace content {
 
@@ -99,11 +106,37 @@ BrowserThreadImpl::BrowserThreadImpl(
 
   DCHECK(!globals.task_runners[identifier_]);
   globals.task_runners[identifier_] = std::move(task_runner);
+
+  // TODO(alexclarke): Move this to the BrowserUIThreadScheduler.
+  if (identifier_ == BrowserThread::ID::UI) {
+#if defined(OS_ANDROID)
+    base::PostTaskAndroid::SignalNativeSchedulerReady();
+#endif
+
+#if defined(OS_POSIX)
+    // Allow usage of the FileDescriptorWatcher API on the UI thread, using the
+    // IO thread to watch the file descriptors.
+    //
+    // In unit tests, usage of the  FileDescriptorWatcher API is already allowed
+    // if the UI thread is running a MessageLoopForIO.
+    if (!base::MessageLoopCurrentForIO::IsSet()) {
+      file_descriptor_watcher_.emplace(
+          base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}));
+    }
+    base::FileDescriptorWatcher::AssertAllowed();
+#endif
+  }
 }
 
 BrowserThreadImpl::~BrowserThreadImpl() {
   BrowserThreadGlobals& globals = GetBrowserThreadGlobals();
   DCHECK_CALLED_ON_VALID_THREAD(globals.main_thread_checker_);
+
+#if defined(OS_ANDROID)
+  // TODO(alexclarke): Move this to the BrowserUIThreadScheduler.
+  if (identifier_ == BrowserThread::ID::UI)
+    base::PostTaskAndroid::SignalNativeSchedulerShutdown();
+#endif
 
   DCHECK_EQ(base::subtle::NoBarrier_Load(&globals.states[identifier_]),
             BrowserThreadState::RUNNING);

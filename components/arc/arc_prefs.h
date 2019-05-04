@@ -29,6 +29,7 @@ ARC_EXPORT extern const char kArcTermsShownInOobe[];
 ARC_EXPORT extern const char kArcLocationServiceEnabled[];
 ARC_EXPORT extern const char kArcPackages[];
 ARC_EXPORT extern const char kArcPaiStarted[];
+ARC_EXPORT extern const char kArcProvisioningInitiatedFromOobe[];
 ARC_EXPORT extern const char kArcPushInstallAppsRequested[];
 ARC_EXPORT extern const char kArcPushInstallAppsPending[];
 ARC_EXPORT extern const char kArcSetNotificationsEnabledDeferred[];
@@ -38,11 +39,17 @@ ARC_EXPORT extern const char kArcSupervisionTransition[];
 ARC_EXPORT extern const char kArcCompatibleFilesystemChosen[];
 ARC_EXPORT extern const char kArcVoiceInteractionValuePropAccepted[];
 ARC_EXPORT extern const char kEcryptfsMigrationStrategy[];
+ARC_EXPORT extern const char kEngagementTimeBackground[];
+ARC_EXPORT extern const char kEngagementTimeDayId[];
+ARC_EXPORT extern const char kEngagementTimeForeground[];
+ARC_EXPORT extern const char kEngagementTimeOsVersion[];
+ARC_EXPORT extern const char kEngagementTimeTotal[];
 
 // TODO(b/110211045): Move Assistant related prefs to ash.
 ARC_EXPORT extern const char kVoiceInteractionActivityControlAccepted[];
 ARC_EXPORT extern const char kVoiceInteractionContextEnabled[];
 ARC_EXPORT extern const char kVoiceInteractionEnabled[];
+ARC_EXPORT extern const char kVoiceInteractionHotwordAlwaysOn[];
 ARC_EXPORT extern const char kVoiceInteractionHotwordEnabled[];
 ARC_EXPORT extern const char kVoiceInteractionLaunchWithMicOpen[];
 ARC_EXPORT extern const char kVoiceInteractionNotificationEnabled[];

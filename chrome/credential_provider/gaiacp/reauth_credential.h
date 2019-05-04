@@ -13,7 +13,6 @@ namespace credential_provider {
 // Implementation of a ICredentialProviderCredential backed by a Gaia account.
 class ATL_NO_VTABLE CReauthCredential
     : public CComObjectRootEx<CComMultiThreadModel>,
-      public CComCoClass<CReauthCredential, &CLSID_ReauthCredential>,
       public CGaiaCredentialBase,
       public IReauthCredential {
  public:
@@ -24,6 +23,9 @@ class ATL_NO_VTABLE CReauthCredential
 
   HRESULT FinalConstruct();
   void FinalRelease();
+
+ protected:
+  HRESULT GetEmailForReauth(wchar_t* email, size_t length) override;
 
  private:
   // This class does not say it implements ICredentialProviderCredential2.
@@ -39,30 +41,12 @@ class ATL_NO_VTABLE CReauthCredential
 
   DECLARE_PROTECT_FINAL_CONSTRUCT()
 
-  HRESULT GetEmailForReauth(wchar_t* email, size_t length) override;
-
-  // ICredentialProviderCredential2
-  IFACEMETHODIMP GetStringValue(DWORD dwFieldID, wchar_t** ppsz) override;
-  IFACEMETHODIMP GetUserSid(wchar_t** sid) override;
-
-  // IGaiaCredential
-  IFACEMETHODIMP FinishAuthentication(BSTR username,
-                                      BSTR password,
-                                      BSTR fullname,
-                                      BSTR* sid,
-                                      BSTR* error_text) override;
-  IFACEMETHODIMP OnUserAuthenticated(BSTR username,
-                                     BSTR password,
-                                     BSTR sid) override;
-
   // IReauthCredential
-  IFACEMETHODIMP SetUserInfo(BSTR sid, BSTR username) override;
+  IFACEMETHODIMP SetEmailForReauth(BSTR email) override;
+  IFACEMETHODIMP SetOSUserInfo(BSTR sid, BSTR username) override;
 
-  CComBSTR user_sid_;
-  CComBSTR user_email_;
+  CComBSTR email_for_reauth_;
 };
-
-OBJECT_ENTRY_AUTO(__uuidof(ReauthCredential), CReauthCredential)
 
 }  // namespace credential_provider
 

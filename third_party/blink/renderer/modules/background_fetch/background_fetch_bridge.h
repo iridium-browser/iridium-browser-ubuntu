@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_FETCH_BACKGROUND_FETCH_BRIDGE_H_
 
 #include <memory>
-#include "third_party/blink/public/platform/modules/background_fetch/background_fetch.mojom-blink.h"
+#include "third_party/blink/public/mojom/background_fetch/background_fetch.mojom-blink.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_registration.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
@@ -17,7 +17,6 @@
 namespace blink {
 
 class BackgroundFetchRegistration;
-class WebServiceWorkerRequest;
 
 // The bridge is responsible for establishing and maintaining the Mojo
 // connection to the BackgroundFetchService. It's keyed on an active Service
@@ -45,13 +44,14 @@ class BackgroundFetchBridge final
 
   static BackgroundFetchBridge* From(ServiceWorkerRegistration* registration);
 
+  explicit BackgroundFetchBridge(ServiceWorkerRegistration& registration);
   virtual ~BackgroundFetchBridge();
 
   // Creates a new Background Fetch registration identified by |developer_id|
   // for the sequence of |requests|. The |callback| will be invoked when the
   // registration has been created.
   void Fetch(const String& developer_id,
-             Vector<WebServiceWorkerRequest> requests,
+             Vector<mojom::blink::FetchAPIRequestPtr> requests,
              mojom::blink::BackgroundFetchOptionsPtr options,
              const SkBitmap& icon,
              mojom::blink::BackgroundFetchUkmDataPtr ukm_data,
@@ -69,7 +69,7 @@ class BackgroundFetchBridge final
   void MatchRequests(
       const String& developer_id,
       const String& unique_id,
-      base::Optional<WebServiceWorkerRequest> request_to_match,
+      mojom::blink::FetchAPIRequestPtr request_to_match,
       mojom::blink::QueryParamsPtr cache_query_params,
       bool match_all,
       mojom::blink::BackgroundFetchService::MatchRequestsCallback callback);
@@ -109,8 +109,6 @@ class BackgroundFetchBridge final
       mojom::blink::BackgroundFetchRegistrationObserverPtr observer);
 
  private:
-  explicit BackgroundFetchBridge(ServiceWorkerRegistration& registration);
-
   // Returns an initialized BackgroundFetchService*. A connection will be
   // established after the first call to this method.
   mojom::blink::BackgroundFetchService* GetService();

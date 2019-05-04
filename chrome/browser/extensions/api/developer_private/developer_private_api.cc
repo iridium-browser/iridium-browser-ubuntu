@@ -710,8 +710,9 @@ ExtensionFunction::ResponseAction DeveloperPrivateAutoUpdateFunction::Run() {
     ExtensionUpdater::CheckParams params;
     params.fetch_priority = ManifestFetchData::FetchPriority::FOREGROUND;
     params.install_immediately = true;
-    params.callback = base::BindOnce(
-        &DeveloperPrivateAutoUpdateFunction::OnComplete, this /* refcounted */);
+    params.callback =
+        base::BindOnce(&DeveloperPrivateAutoUpdateFunction::OnComplete,
+                       base::RetainedRef(this));
     updater->CheckNow(std::move(params));
   }
   return RespondLater();
@@ -746,10 +747,9 @@ DeveloperPrivateGetExtensionsInfoFunction::Run() {
 
   info_generator_.reset(new ExtensionInfoGenerator(browser_context()));
   info_generator_->CreateExtensionsInfo(
-      include_disabled,
-      include_terminated,
+      include_disabled, include_terminated,
       base::Bind(&DeveloperPrivateGetExtensionsInfoFunction::OnInfosGenerated,
-                 this /* refcounted */));
+                 base::RetainedRef(this)));
 
   return RespondLater();
 }
@@ -777,7 +777,7 @@ DeveloperPrivateGetExtensionInfoFunction::Run() {
   info_generator_->CreateExtensionInfo(
       params->id,
       base::Bind(&DeveloperPrivateGetExtensionInfoFunction::OnInfosGenerated,
-                 this /* refcounted */));
+                 base::RetainedRef(this)));
 
   return RespondLater();
 }
@@ -809,7 +809,7 @@ DeveloperPrivateGetExtensionSizeFunction::Run() {
       extension->path(), IDS_APPLICATION_INFO_SIZE_SMALL_LABEL,
       base::BindOnce(
           &DeveloperPrivateGetExtensionSizeFunction::OnSizeCalculated,
-          this /* refcounted */));
+          base::RetainedRef(this)));
 
   return RespondLater();
 }
@@ -829,10 +829,9 @@ ExtensionFunction::ResponseAction DeveloperPrivateGetItemsInfoFunction::Run() {
 
   info_generator_.reset(new ExtensionInfoGenerator(browser_context()));
   info_generator_->CreateExtensionsInfo(
-      params->include_disabled,
-      params->include_terminated,
+      params->include_disabled, params->include_terminated,
       base::Bind(&DeveloperPrivateGetItemsInfoFunction::OnInfosGenerated,
-                 this /* refcounted */));
+                 base::RetainedRef(this)));
 
   return RespondLater();
 }
@@ -1158,8 +1157,8 @@ void DeveloperPrivateLoadUnpackedFunction::FileSelected(
   scoped_refptr<UnpackedInstaller> installer(
       UnpackedInstaller::Create(GetExtensionService(browser_context())));
   installer->set_be_noisy_on_failure(!fail_quietly_);
-  installer->set_completion_callback(
-      base::Bind(&DeveloperPrivateLoadUnpackedFunction::OnLoadComplete, this));
+  installer->set_completion_callback(base::BindOnce(
+      &DeveloperPrivateLoadUnpackedFunction::OnLoadComplete, this));
   installer->Load(path);
 
   retry_guid_ = DeveloperPrivateAPI::Get(browser_context())
@@ -1890,10 +1889,10 @@ DeveloperPrivateRepairExtensionFunction::Run() {
     return RespondNow(Error(kCouldNotFindWebContentsError));
 
   scoped_refptr<WebstoreReinstaller> reinstaller(new WebstoreReinstaller(
-      web_contents,
-      params->extension_id,
-      base::Bind(&DeveloperPrivateRepairExtensionFunction::OnReinstallComplete,
-                 this)));
+      web_contents, params->extension_id,
+      base::BindOnce(
+          &DeveloperPrivateRepairExtensionFunction::OnReinstallComplete,
+          this)));
   reinstaller->BeginReinstall();
 
   return RespondLater();
@@ -2015,9 +2014,16 @@ DeveloperPrivateAddHostPermissionFunction::Run() {
       .GrantRuntimePermissions(
           *extension,
           PermissionSet(APIPermissionSet(), ManifestPermissionSet(),
-                        new_host_permissions, new_host_permissions));
+                        new_host_permissions, new_host_permissions),
+          base::BindOnce(&DeveloperPrivateAddHostPermissionFunction::
+                             OnRuntimePermissionsGranted,
+                         base::RetainedRef(this)));
 
-  return RespondNow(NoArguments());
+  return did_respond() ? AlreadyResponded() : RespondLater();
+}
+
+void DeveloperPrivateAddHostPermissionFunction::OnRuntimePermissionsGranted() {
+  Respond(NoArguments());
 }
 
 DeveloperPrivateRemoveHostPermissionFunction::
@@ -2055,8 +2061,18 @@ DeveloperPrivateRemoveHostPermissionFunction::Run() {
     return RespondNow(Error("Cannot remove a host that hasn't been granted."));
 
   PermissionsUpdater(browser_context())
-      .RevokeRuntimePermissions(*extension, *permissions_to_remove);
-  return RespondNow(NoArguments());
+      .RevokeRuntimePermissions(
+          *extension, *permissions_to_remove,
+          base::BindOnce(&DeveloperPrivateRemoveHostPermissionFunction::
+                             OnRuntimePermissionsRevoked,
+                         base::RetainedRef(this)));
+
+  return did_respond() ? AlreadyResponded() : RespondLater();
+}
+
+void DeveloperPrivateRemoveHostPermissionFunction::
+    OnRuntimePermissionsRevoked() {
+  Respond(NoArguments());
 }
 
 }  // namespace api

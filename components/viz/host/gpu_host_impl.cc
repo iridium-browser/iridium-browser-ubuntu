@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/bind_helpers.h"
-#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
@@ -139,6 +138,15 @@ void VizMainWrapper::CreateGpuService(
   }
 }
 
+#if defined(USE_VIZ_DEVTOOLS)
+void VizMainWrapper::CreateVizDevTools(mojom::VizDevToolsParamsPtr params) {
+  if (viz_main_ptr_)
+    viz_main_ptr_->CreateVizDevTools(std::move(params));
+  else
+    viz_main_associated_ptr_->CreateVizDevTools(std::move(params));
+}
+#endif
+
 void VizMainWrapper::CreateFrameSinkManager(
     mojom::FrameSinkManagerParamsPtr params) {
   if (viz_main_ptr_)
@@ -256,6 +264,12 @@ void GpuHostImpl::ConnectFrameSinkManager(
   viz_main_ptr_->CreateFrameSinkManager(std::move(params));
 }
 
+#if defined(USE_VIZ_DEVTOOLS)
+void GpuHostImpl::ConnectVizDevTools(mojom::VizDevToolsParamsPtr params) {
+  viz_main_ptr_->CreateVizDevTools(std::move(params));
+}
+#endif
+
 void GpuHostImpl::EstablishGpuChannel(int client_id,
                                       uint64_t client_tracing_id,
                                       bool is_gpu_host,
@@ -290,19 +304,8 @@ void GpuHostImpl::EstablishGpuChannel(int client_id,
       base::BindOnce(&GpuHostImpl::OnChannelEstablished,
                      weak_ptr_factory_.GetWeakPtr(), client_id));
 
-  if (!params_.disable_gpu_shader_disk_cache) {
+  if (!params_.disable_gpu_shader_disk_cache)
     CreateChannelCache(client_id);
-
-    bool oopd_enabled =
-        base::FeatureList::IsEnabled(features::kVizDisplayCompositor);
-    if (oopd_enabled)
-      CreateChannelCache(gpu::kInProcessCommandBufferClientId);
-
-    bool oopr_enabled =
-        base::FeatureList::IsEnabled(features::kDefaultEnableOopRasterization);
-    if (oopr_enabled)
-      CreateChannelCache(gpu::kGrShaderCacheClientId);
-  }
 }
 
 void GpuHostImpl::SendOutstandingReplies() {
@@ -488,7 +491,6 @@ void GpuHostImpl::DidInitialize(
     const base::Optional<gpu::GpuFeatureInfo>&
         gpu_feature_info_for_hardware_gpu) {
   UMA_HISTOGRAM_BOOLEAN("GPU.GPUProcessInitialized", true);
-  initialized_ = true;
 
   // Set GPU driver bug workaround flags that are checked on the browser side.
   wake_up_gpu_before_drawing_ =
@@ -500,6 +502,24 @@ void GpuHostImpl::DidInitialize(
   delegate_->DidInitialize(gpu_info, gpu_feature_info,
                            gpu_info_for_hardware_gpu,
                            gpu_feature_info_for_hardware_gpu);
+
+  // Remove entries so that GPU process shader caches get populated on any
+  // GPU process start.
+  client_id_to_shader_cache_.clear();
+
+  if (!params_.disable_gpu_shader_disk_cache) {
+    bool oopd_enabled =
+        base::FeatureList::IsEnabled(features::kVizDisplayCompositor);
+    if (oopd_enabled)
+      CreateChannelCache(gpu::kInProcessCommandBufferClientId);
+
+    bool use_gr_shader_cache =
+        base::FeatureList::IsEnabled(
+            features::kDefaultEnableOopRasterization) ||
+        base::FeatureList::IsEnabled(features::kUseSkiaRenderer);
+    if (use_gr_shader_cache)
+      CreateChannelCache(gpu::kGrShaderCacheClientId);
+  }
 }
 
 void GpuHostImpl::DidFailInitialize() {

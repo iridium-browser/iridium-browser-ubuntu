@@ -17,7 +17,7 @@
 #include "base/i18n/icu_string_conversions.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/task/post_task.h"
@@ -31,7 +31,8 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
-#include "chromeos/chromeos_constants.h"
+#include "chromeos/constants/chromeos_constants.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/drive/chromeos/file_system_interface.h"
 #include "components/drive/drive.pb.h"
 #include "components/drive/drive_pref_names.h"
@@ -100,7 +101,7 @@ base::FilePath ExtractDrivePath(const base::FilePath& path) {
   if (components[1] != FILE_PATH_LITERAL("special"))
     return base::FilePath();
   static const base::FilePath::CharType kPrefix[] = FILE_PATH_LITERAL("drive");
-  if (components[2].compare(0, arraysize(kPrefix) - 1, kPrefix) != 0)
+  if (components[2].compare(0, base::size(kPrefix) - 1, kPrefix) != 0)
     return base::FilePath();
 
   base::FilePath drive_path = GetDriveGrandRootPath();
@@ -216,6 +217,11 @@ bool IsDriveEnabledForProfile(Profile* profile) {
   // Disable Drive if preference is set. This can happen with commandline flag
   // --disable-drive or enterprise policy, or with user settings.
   if (profile->GetPrefs()->GetBoolean(prefs::kDisableDrive))
+    return false;
+
+  // Disable drive if sync is disabled by command line flag. Outside tests, this
+  // only occurs in cases already handled by the gaia account check above.
+  if (!browser_sync::ProfileSyncService::IsSyncAllowedByFlag())
     return false;
 
   return true;

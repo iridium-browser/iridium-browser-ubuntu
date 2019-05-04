@@ -77,7 +77,7 @@ static LineLayoutItem EnclosingUnderlineObject(
       return current;
 
     if (Node* node = current.GetNode()) {
-      if (IsHTMLAnchorElement(node) || node->HasTagName(HTMLNames::fontTag))
+      if (IsHTMLAnchorElement(node) || node->HasTagName(html_names::kFontTag))
         return current;
     }
   }
@@ -147,11 +147,9 @@ void InlineTextBoxPainter::Paint(const PaintInfo& paint_info,
   base::Optional<DrawingRecorder> recorder;
   if (paint_info.phase != PaintPhase::kTextClip) {
     if (DrawingRecorder::UseCachedDrawingIfPossible(
-            paint_info.context, inline_text_box_,
-            DisplayItem::PaintPhaseToDrawingType(paint_info.phase)))
+            paint_info.context, inline_text_box_, paint_info.phase))
       return;
-    recorder.emplace(paint_info.context, inline_text_box_,
-                     DisplayItem::PaintPhaseToDrawingType(paint_info.phase));
+    recorder.emplace(paint_info.context, inline_text_box_, paint_info.phase);
   }
 
   GraphicsContext& context = paint_info.context;
@@ -187,9 +185,10 @@ void InlineTextBoxPainter::Paint(const PaintInfo& paint_info,
     // capitalizing letters can change the length of the backing string.
     // That needs to be taken into account when computing the size of the box
     // or its painting.
-    length = std::min(length, first_line_string.length() -
-                                  std::min(inline_text_box_.Start(),
-                                           first_line_string.length()));
+    if (inline_text_box_.Start() >= first_line_string.length())
+      return;
+    length =
+        std::min(length, first_line_string.length() - inline_text_box_.Start());
 
     // TODO(szager): Figure out why this CHECK sometimes fails, it shouldn't.
     CHECK_LE(inline_text_box_.Start() + length, first_line_string.length());

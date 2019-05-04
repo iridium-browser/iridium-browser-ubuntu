@@ -163,8 +163,8 @@ class TestConditionTest(unittest.TestCase):
   def testAndroidNexus6PReturnsFalseOnNotAndroid(self):
     self._platform.SetOSName('not_android')
     self.assertFalse(
-        expectations.ANDROID_NEXUS6.ShouldDisable(self._platform,
-                                                  self._finder_options))
+        expectations.ANDROID_NEXUS6P.ShouldDisable(self._platform,
+                                                   self._finder_options))
 
   def testAndroidNexus7ReturnsFalseOnNotAndroid(self):
     self._platform.SetOSName('not_android')
@@ -196,8 +196,22 @@ class TestConditionTest(unittest.TestCase):
         expectations.ANDROID_NEXUS5X.ShouldDisable(self._platform,
                                                    self._finder_options))
 
+  def testAndroidNexus5ReturnsFalseOnAndroidNexus5X(self):
+    self._platform.SetOSName('android')
+    self._platform.SetDeviceTypeName('Nexus 5X')
+    self.assertFalse(
+        expectations.ANDROID_NEXUS5.ShouldDisable(self._platform,
+                                                  self._finder_options))
+
   def testAndroidNexus6ReturnsFalseOnAndroidNotNexus6(self):
     self._platform.SetOSName('android')
+    self.assertFalse(
+        expectations.ANDROID_NEXUS6.ShouldDisable(self._platform,
+                                                  self._finder_options))
+
+  def testAndroidNexus6ReturnsFalseOnAndroidNexus6P(self):
+    self._platform.SetOSName('android')
+    self._platform.SetDeviceTypeName('Nexus 6P')
     self.assertFalse(
         expectations.ANDROID_NEXUS6.ShouldDisable(self._platform,
                                                   self._finder_options))
@@ -205,8 +219,8 @@ class TestConditionTest(unittest.TestCase):
   def testAndroidNexus6PReturnsFalseOnAndroidNotNexus6P(self):
     self._platform.SetOSName('android')
     self.assertFalse(
-        expectations.ANDROID_NEXUS6.ShouldDisable(self._platform,
-                                                  self._finder_options))
+        expectations.ANDROID_NEXUS6P.ShouldDisable(self._platform,
+                                                   self._finder_options))
 
   def testAndroidNexus7ReturnsFalseOnAndroidNotNexus7(self):
     self._platform.SetOSName('android')
@@ -251,8 +265,8 @@ class TestConditionTest(unittest.TestCase):
     self._platform.SetOSName('android')
     self._platform.SetDeviceTypeName('Nexus 6P')
     self.assertTrue(
-        expectations.ANDROID_NEXUS6.ShouldDisable(self._platform,
-                                                  self._finder_options))
+        expectations.ANDROID_NEXUS6P.ShouldDisable(self._platform,
+                                                   self._finder_options))
 
   def testAndroidNexus7ReturnsTrueOnAndroidNexus7(self):
     self._platform.SetOSName('android')
@@ -361,7 +375,6 @@ class TestConditionTest(unittest.TestCase):
   def testNexus5XWebviewFalseOnNotNexus5X(self):
     self._platform.SetOSName('android')
     self._finder_options.browser_type = 'android-webview'
-    self._platform.SetDeviceTypeName('Nexus 5')
     self.assertFalse(
         expectations.ANDROID_NEXUS5X_WEBVIEW.ShouldDisable(
             self._platform, self._finder_options))

@@ -59,7 +59,7 @@ class ArcUsbHostPermissionTest : public InProcessBrowserTest {
     DCHECK(arc_app_list_pref_);
 
     base::RunLoop run_loop;
-    arc_app_list_pref_->SetDefaltAppsReadyCallback(run_loop.QuitClosure());
+    arc_app_list_pref_->SetDefaultAppsReadyCallback(run_loop.QuitClosure());
     run_loop.Run();
 
     app_instance_ = std::make_unique<arc::FakeAppInstance>(arc_app_list_pref_);
@@ -92,13 +92,9 @@ class ArcUsbHostPermissionTest : public InProcessBrowserTest {
   }
 
   void AddArcPackage(const std::string& package_name) {
-    arc::mojom::ArcPackageInfo package;
-    package.package_name = package_name;
-    package.package_version = 0;
-    package.last_backup_android_id = 0;
-    package.last_backup_time = 0;
-    package.sync = false;
-    app_instance_->SendPackageAdded(package);
+    app_instance_->SendPackageAdded(arc::mojom::ArcPackageInfo::New(
+        package_name, 0 /* package_version */, 0 /* last_backup_android_id */,
+        0 /* last_backup_time */, false /* sync */));
   }
 
   void RemovePackage(const std::string& package_name) {

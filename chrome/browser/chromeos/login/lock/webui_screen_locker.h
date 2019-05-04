@@ -10,7 +10,6 @@
 #include <memory>
 #include <string>
 
-#include "ash/login/ui/lock_window.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
@@ -22,11 +21,13 @@
 #include "chromeos/dbus/power_manager_client.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/display/display_observer.h"
-#include "ui/views/widget/widget.h"
-#include "ui/views/widget/widget_observer.h"
 
 namespace content {
 class WebUI;
+}
+
+namespace views {
+class Widget;
 }
 
 namespace chromeos {
@@ -38,15 +39,10 @@ namespace login {
 class NetworkStateHelper;
 }
 
-namespace test {
-class WebUIScreenLockerTester;
-}
-
 // Displays a WebUI lock screen based on the Oobe account picker screen.
 class WebUIScreenLocker : public WebUILoginView,
                           public ScreenLocker::Delegate,
                           public LoginDisplay::Delegate,
-                          public views::WidgetObserver,
                           public PowerManagerClient::Observer,
                           public display::DisplayObserver,
                           public content::WebContentsObserver {
@@ -62,8 +58,9 @@ class WebUIScreenLocker : public WebUILoginView,
   // ScreenLockReady is called when all initialization has finished.
   void LockScreen();
 
+  bool webui_ready_for_testing() const { return webui_ready_; }
+
  private:
-  friend class test::WebUIScreenLockerTester;
 
   // Returns true if the lock screen should be preloaded.
   static bool ShouldPreloadLockScreen();
@@ -75,13 +72,14 @@ class WebUIScreenLocker : public WebUILoginView,
   void ShowErrorMessage(int error_msg_id,
                         HelpAppLauncher::HelpTopic help_topic_id) override;
   void ClearErrors() override;
-  void AnimateAuthenticationSuccess() override;
   void OnLockWebUIReady() override;
   void OnLockBackgroundDisplayed() override;
   void OnHeaderBarVisible() override;
   void OnAshLockAnimationFinished() override;
   void SetFingerprintState(const AccountId& account_id,
-                           ScreenLocker::FingerprintState state) override;
+                           ash::mojom::FingerprintState state) override;
+  void NotifyFingerprintAuthResult(const AccountId& account_id,
+                                   bool success) override;
   content::WebContents* GetWebContents() override;
 
   // LoginDisplay::Delegate:
@@ -98,9 +96,6 @@ class WebUIScreenLocker : public WebUILoginView,
   void ShowUpdateRequiredScreen() override;
   void ResetAutoLoginTimer() override;
   void Signout() override;
-
-  // WidgetObserver:
-  void OnWidgetDestroying(views::Widget* widget) override;
 
   // PowerManagerClient::Observer:
   void SuspendImminent(power_manager::SuspendImminent::Reason reason) override;
@@ -136,8 +131,8 @@ class WebUIScreenLocker : public WebUILoginView,
   // The ScreenLocker that owns this instance.
   ScreenLocker* screen_locker_ = nullptr;
 
-  // The screen locker window.
-  ash::LockWindow* lock_window_ = nullptr;
+  // The screen locker widget.
+  std::unique_ptr<views::Widget> lock_widget_;
 
   // Sign-in Screen controller instance (owns login screens).
   std::unique_ptr<SignInScreenController> signin_screen_controller_;

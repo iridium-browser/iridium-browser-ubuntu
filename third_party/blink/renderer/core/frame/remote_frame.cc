@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/frame/remote_frame_client.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
@@ -39,7 +40,7 @@ inline RemoteFrame::RemoteFrame(RemoteFrameClient* client,
 RemoteFrame* RemoteFrame::Create(RemoteFrameClient* client,
                                  Page& page,
                                  FrameOwner* owner) {
-  RemoteFrame* frame = new RemoteFrame(client, page, owner);
+  RemoteFrame* frame = MakeGarbageCollected<RemoteFrame>(client, page, owner);
   PageScheduler* page_scheduler = page.GetPageScheduler();
   if (frame->IsMainFrame() && page_scheduler)
     page_scheduler->SetIsMainFrameLocal(false);
@@ -60,6 +61,13 @@ void RemoteFrame::ScheduleNavigation(Document& origin_document,
                                      const KURL& url,
                                      WebFrameLoadType frame_load_type,
                                      UserGestureStatus user_gesture_status) {
+  if (!origin_document.GetSecurityOrigin()->CanDisplay(url)) {
+    origin_document.AddConsoleMessage(ConsoleMessage::Create(
+        kSecurityMessageSource, kErrorMessageLevel,
+        "Not allowed to load local resource: " + url.ElidedString()));
+    return;
+  }
+
   FrameLoadRequest frame_request(&origin_document, ResourceRequest(url));
   frame_request.GetResourceRequest().SetHasUserGesture(
       user_gesture_status == UserGestureStatus::kActive);
@@ -71,6 +79,9 @@ void RemoteFrame::ScheduleNavigation(Document& origin_document,
 
 void RemoteFrame::Navigate(const FrameLoadRequest& passed_request,
                            WebFrameLoadType frame_load_type) {
+  if (!navigation_rate_limiter().CanProceed())
+    return;
+
   FrameLoadRequest frame_request(passed_request);
 
   // The process where this frame actually lives won't have sufficient
@@ -80,8 +91,20 @@ void RemoteFrame::Navigate(const FrameLoadRequest& passed_request,
   FrameLoader::UpgradeInsecureRequest(frame_request.GetResourceRequest(),
                                       frame_request.OriginDocument());
 
+  Document* document = frame_request.OriginDocument();
+  bool is_opener_navigation = document && document->GetFrame() &&
+                              document->GetFrame()->Client()->Opener() == this;
+
+  bool prevent_sandboxed_download =
+      GetSecurityContext() &&
+      GetSecurityContext()->IsSandboxed(kSandboxDownloads) &&
+      !frame_request.GetResourceRequest().HasUserGesture() &&
+      RuntimeEnabledFeatures::
+          BlockingDownloadsInSandboxWithoutUserActivationEnabled();
+
   Client()->Navigate(frame_request.GetResourceRequest(),
                      frame_load_type == WebFrameLoadType::kReplaceCurrentItem,
+                     is_opener_navigation, prevent_sandboxed_download,
                      frame_request.GetBlobURLToken());
 }
 

@@ -98,7 +98,7 @@ message DeviceRegisterRequest {
     // user to skip.
     FLAVOR_ENROLLMENT_LOCAL_ADVERTISED = 3;
     // Device state downloaded from the server during OOBE indicates that
-    // (re-)enrollment is mandatory.
+    // re-enrollment is mandatory.
     FLAVOR_ENROLLMENT_SERVER_FORCED = 4;
     // Device state downloaded from the server during OOBE indicates that the
     // device should prompt for (re-)enrollment, but the user is allowed to
@@ -115,12 +115,24 @@ message DeviceRegisterRequest {
     // Forced attestation-based enrollment (cannot fallback to another flavor).
     FLAVOR_ENROLLMENT_ATTESTATION_LOCAL_FORCED = 9;
     // Device state downloaded from the server during OOBE indicates that
-    // (re-)enrollment is mandatory and should be attestation-based.
+    // re-enrollment is mandatory and should be attestation-based.
     FLAVOR_ENROLLMENT_ATTESTATION_SERVER_FORCED = 10;
     // Device state downloaded from the server indicated that re-enrollment is
     // mandatory, but it failed and we are doing a fallback to manual
     // enrollment.
     FLAVOR_ENROLLMENT_ATTESTATION_MANUAL_FALLBACK = 11;
+    // Enrollment triggered by USB pre-configuration
+    FLAVOR_ENROLLMENT_ATTESTATION_USB_ENROLLMENT = 12;
+    // Device state downloaded from the server during OOBE indicates that
+    // initial enrollment is mandatory.
+    FLAVOR_ENROLLMENT_INITIAL_SERVER_FORCED = 13;
+    // Device state downloaded from the server during OOBE indicates that
+    // initial enrollment is mandatory and should be attestation-based.
+    FLAVOR_ENROLLMENT_ATTESTATION_INITIAL_SERVER_FORCED = 14;
+    // Device state downloaded from the server indicated that initial enrollment
+    // is mandatory, but it failed and we are doing a fallback to manual
+    // enrollment.
+    FLAVOR_ENROLLMENT_ATTESTATION_INITIAL_MANUAL_FALLBACK = 15;
   };
 
   // Indicates the registration flavor. This is passed to the server FYI when
@@ -768,6 +780,8 @@ message CPUTempInfo {
   optional string cpu_label = 1;
   // CPU temperature in Celsius.
   optional int32 cpu_temp = 2;
+  // Unix timestamp.
+  optional int64 timestamp = 3;
 }
 
 // Chrome release channel, shared for different reports.
@@ -777,6 +791,84 @@ enum Channel {
   CHANNEL_DEV = 2;
   CHANNEL_BETA = 3;
   CHANNEL_STABLE = 4;
+}
+
+// Frequently changing data for battery.
+message BatterySample {
+  optional int64 timestamp = 1;
+  // Battery voltage
+  optional int64 voltage = 2;
+  // Battery remaining capacity (mA-hours)
+  optional int64 remaining_capacity = 3;
+  // Temperature in Celsius.
+  optional int32 temperature = 4;
+  // The battery discharge rate measured in mW. Positive if the battery is being
+  // discharged, negative if it's being charged.
+  optional int32 discharge_rate = 5;
+  // Battery charge percentage
+  optional int32 charge_rate = 6;
+}
+
+// Status of the single battery
+message BatteryInfo {
+  optional string serial = 1;
+  optional string manufacturer = 2;
+  optional string battery_health = 3;
+  // Design capacity (mA-hours)
+  optional int64 design_capacity = 4;
+  // Full charge capacity (mA-hours)
+  optional int64 full_charge_capacity = 5;
+  optional int32 cycle_count = 6;
+  // Last sampling data.
+  repeated BatterySample sample = 7;
+}
+
+// Status of the power subsystem
+message PowerStatus {
+  enum PowerSource {
+    POWER_UNKNOWN = 0;
+    POWER_AC = 1;
+    POWER_BATTERY = 2;
+  }
+  optional PowerSource power_source = 1;
+  repeated BatteryInfo batteries = 2;
+}
+
+// Status of the single storage device
+message DiskInfo {
+  optional string serial = 1;
+  optional string manufacturer = 2;
+  optional string model = 3;
+  // Size in bytes
+  optional int64 size = 4;
+  // SSD / eMMC / HDD
+  optional string type = 5;
+  optional string health = 6;
+  // volume_id for volumes on this disk.
+  repeated string volumes = 7;
+}
+
+// Status of the storage subsystem.
+message StorageStatus {
+  repeated DiskInfo disks = 1;
+}
+
+// Sampling for single temperature measurements
+message ThermalSample {
+  optional int64 timestamp = 1;
+  optional int32 temperature = 2;
+}
+
+// Temperature measurement series for thermal point.
+message ThermalInfo {
+  reserved 2;
+  optional string label = 1;
+  repeated ThermalSample sample = 3;
+}
+
+// Status for various on-board components
+message BoardStatus {
+  repeated ThermalInfo thermal = 1;
 }
 
 // Report device level status.
@@ -847,6 +939,15 @@ message DeviceStatusReportRequest {
 
   // Whether hardware write protect switch is on.
   optional bool write_protect_switch = 24;
+
+  // Status of the power subsystem.
+  optional PowerStatus power_status = 25;
+
+  // Status of the storage subsystem.
+  optional StorageStatus storage_status = 26;
+
+  // Status of various main board components.
+  optional BoardStatus board_status = 27;
 }
 
 message OsUpdateStatus {
@@ -893,7 +994,7 @@ message AppStatus {
 
 // Chrome user profile level status.
 message ChromeUserProfileReport {
-  // An string to uniquely identify this profile within the browser.
+  // A string to uniquely identify this profile within the browser.
   optional string id = 1;
   // A JSON encoded string containing both the “email” and “id” (obfuscated
   // GaiaID) of the user signed in to the Chrome browser, if any.
@@ -954,6 +1055,9 @@ message ChromeDesktopReportRequest {
   optional string os_user = 3;
   // Browser related info.
   optional BrowserReport browser_report = 4;
+  // The device serial number (this might differ with the client ID, depending
+  // on the platform)
+  optional string serial_number = 5;
 }
 
 // A validation issue from validating a policy value that was contained in
@@ -1688,7 +1792,11 @@ message TpmVersionInfo {
 message TpmStatusInfo {
   optional bool enabled = 1;
   optional bool owned = 2;
-  optional bool initialized = 3;
+  // This field was previously named "initialized", but that's not a valid name
+  // for a proto field since it generates isInitialized method for the Java
+  // binding which collides with the isInitialized method that exists for all
+  // Java protos.
+  optional bool tpm_initialized = 3;
   optional bool attestation_prepared = 4;
   optional bool attestation_enrolled = 5;
   optional int32 dictionary_attack_counter = 6;

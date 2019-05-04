@@ -25,8 +25,8 @@
 #include "ipc/ipc_sender.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "ui/accelerated_widget_mac/accelerated_widget_mac.h"
-#include "ui/accelerated_widget_mac/ca_transaction_observer.h"
 #include "ui/accelerated_widget_mac/display_link_mac.h"
+#include "ui/base/cocoa/accessibility_focus_overrider.h"
 #include "ui/base/cocoa/remote_layer_api.h"
 #include "ui/events/gesture_detection/filtered_gesture_provider.h"
 
@@ -37,6 +37,7 @@ class ScopedPasswordInputEnabler;
 
 @protocol RenderWidgetHostViewMacDelegate;
 
+@class NSAccessibilityRemoteUIElement;
 @class RenderWidgetHostViewCocoa;
 
 namespace content {
@@ -71,9 +72,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
       public mojom::RenderWidgetHostNSViewClient,
       public BrowserCompositorMacClient,
       public TextInputManager::Observer,
-      public ui::CATransactionCoordinator::PreCommitObserver,
       public ui::GestureProviderClient,
       public ui::AcceleratedWidgetMacNSView,
+      public ui::AccessibilityFocusOverrider::Client,
       public IPC::Sender {
  public:
   // The view will associate itself with the given widget. The native view must
@@ -138,7 +139,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
       const gfx::Rect& src_rect,
       const gfx::Size& output_size,
       base::OnceCallback<void(const SkBitmap&)> callback) override;
-  void EnsureSurfaceSynchronizedForLayoutTest() override;
+  void EnsureSurfaceSynchronizedForWebTest() override;
   void FocusedNodeChanged(bool is_editable_node,
                           const gfx::Rect& node_bounds_in_screen) override;
   void DidCreateNewRendererCompositorFrameSink(
@@ -154,8 +155,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   bool RequestRepaintForTesting() override;
   BrowserAccessibilityManager* CreateBrowserAccessibilityManager(
       BrowserAccessibilityDelegate* delegate, bool for_root_frame) override;
-  gfx::Point AccessibilityOriginInScreen(const gfx::Rect& bounds) override;
   gfx::NativeViewAccessible AccessibilityGetNativeViewAccessible() override;
+  gfx::NativeViewAccessible AccessibilityGetNativeViewAccessibleForWindow()
+      override;
   base::Optional<SkColor> GetBackgroundColor() const override;
 
   void SetParentUiLayer(ui::Layer* parent_ui_layer) override;
@@ -182,17 +184,19 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
       override;
 
   const viz::FrameSinkId& GetFrameSinkId() const override;
-  const viz::LocalSurfaceId& GetLocalSurfaceId() const override;
-  // Returns true when we can do SurfaceHitTesting for the event type.
-  bool ShouldRouteEvent(const blink::WebInputEvent& event) const;
-  // This method checks |event| to see if a GesturePinch event can be routed
-  // according to ShouldRouteEvent, and if not, sends it directly to the view's
-  // RenderWidgetHost.
-  // By not just defaulting to sending the GesturePinch events to the mainframe,
-  // we allow the events to be targeted to an oopif subframe, in case some
-  // consumer, such as PDF or maps, wants to intercept them and implement a
-  // custom behavior.
-  void SendGesturePinchEvent(blink::WebGestureEvent* event);
+  const viz::LocalSurfaceIdAllocation& GetLocalSurfaceIdAllocation()
+      const override;
+  // Returns true when we can hit test input events with location data to be
+  // sent to the targeted RenderWidgetHost.
+  bool ShouldRouteEvents() const;
+  // This method checks |event| to see if a GesturePinch or double tap event
+  // can be routed according to ShouldRouteEvent, and if not, sends it directly
+  // to the view's RenderWidgetHost.
+  // By not just defaulting to sending events that change the page scale to the
+  // main frame, we allow the events to be targeted to an oopif subframe, in
+  // case some consumer, such as PDF or maps, wants to intercept them and
+  // implement a custom behavior.
+  void SendTouchpadZoomEvent(const blink::WebGestureEvent* event);
 
   // Inject synthetic touch events.
   void InjectTouchEvent(const blink::WebTouchEvent& event,
@@ -224,10 +228,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
       RenderWidgetHostViewBase* updated_view) override;
   void OnTextSelectionChanged(TextInputManager* text_input_manager,
                               RenderWidgetHostViewBase* updated_view) override;
-
-  // ui::CATransactionCoordinator::PreCommitObserver implementation
-  bool ShouldWaitInPreCommit() override;
-  base::TimeDelta PreCommitTimeout() override;
 
   // ui::GestureProviderClient implementation.
   void OnGestureEvent(const ui::GestureEventData& gesture) override;
@@ -302,7 +302,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void UpdateNSViewAndDisplayProperties();
 
   // RenderWidgetHostNSViewClientHelper implementation.
-  BrowserAccessibilityManager* GetRootBrowserAccessibilityManager() override;
+  id GetRootBrowserAccessibilityElement() override;
+  id GetFocusedBrowserAccessibilityElement() override;
+  void SetAccessibilityWindow(NSWindow* window) override;
   void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event,
                             const ui::LatencyInfo& latency_info) override;
   void ForwardKeyboardEventWithCommands(
@@ -322,8 +324,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void SmartMagnify(const blink::WebGestureEvent& smart_magnify_event) override;
 
   // mojom::RenderWidgetHostNSViewClient implementation.
-  void SyncIsRenderViewHost(SyncIsRenderViewHostCallback callback) override;
-  bool SyncIsRenderViewHost(bool* is_render_view) override;
+  void SyncIsWidgetForMainFrame(
+      SyncIsWidgetForMainFrameCallback callback) override;
+  bool SyncIsWidgetForMainFrame(bool* is_for_main_frame) override;
   void RequestShutdown() override;
   void OnFirstResponderChanged(bool is_first_responder) override;
   void OnWindowIsKeyChanged(bool is_key) override;
@@ -391,18 +394,24 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void StopSpeaking() override;
   bool SyncIsSpeaking(bool* is_speaking) override;
   void SyncIsSpeaking(SyncIsSpeakingCallback callback) override;
+  void SyncGetRootAccessibilityElement(
+      SyncGetRootAccessibilityElementCallback callback) override;
+  void SetRemoteAccessibilityWindowToken(
+      const std::vector<uint8_t>& window_token) override;
 
   // BrowserCompositorMacClient implementation.
   SkColor BrowserCompositorMacGetGutterColor() const override;
   void BrowserCompositorMacOnBeginFrame(base::TimeTicks frame_time) override;
   void OnFrameTokenChanged(uint32_t frame_token) override;
   void DestroyCompositorForShutdown() override;
-  bool SynchronizeVisualProperties(
-      const base::Optional<viz::LocalSurfaceId>&
-          child_allocated_local_surface_id) override;
+  bool OnBrowserCompositorSurfaceIdChanged() override;
+  std::vector<viz::SurfaceId> CollectSurfaceIdsForEviction() override;
 
   // AcceleratedWidgetMacNSView implementation.
   void AcceleratedWidgetCALayerParamsUpdated() override;
+
+  // ui::AccessibilityFocusOverrider::Client:
+  id GetAccessibilityFocusedUIElement() override;
 
   void SetShowingContextMenu(bool showing) override;
 
@@ -539,6 +548,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // Cached copy of the display information pushed to us from the NSView.
   display::Display display_;
 
+  // Whether or not the NSView's NSWindow is the key window.
+  bool is_window_key_ = false;
+
   // Whether or not the NSView is first responder.
   bool is_first_responder_ = false;
 
@@ -622,8 +634,18 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   // Latest capture sequence number which is incremented when the caller
   // requests surfaces be synchronized via
-  // EnsureSurfaceSynchronizedForLayoutTest().
+  // EnsureSurfaceSynchronizedForWebTest().
   uint32_t latest_capture_sequence_number_ = 0u;
+
+  // Remote accessibility objects corresponding to the NSWindow that this is
+  // displayed to the user in.
+  base::scoped_nsobject<NSAccessibilityRemoteUIElement>
+      remote_window_accessible_;
+
+  // Used to force the NSApplication's focused accessibility element to be the
+  // content::BrowserAccessibilityCocoa accessibility tree when the NSView for
+  // this is focused.
+  ui::AccessibilityFocusOverrider accessibility_focus_overrider_;
 
   // Factory used to safely scope delayed calls to ShutdownHost().
   base::WeakPtrFactory<RenderWidgetHostViewMac> weak_factory_;

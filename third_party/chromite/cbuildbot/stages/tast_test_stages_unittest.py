@@ -22,6 +22,7 @@ from chromite.lib import cros_test_lib
 from chromite.lib import failures_lib
 from chromite.lib import osutils
 from chromite.lib import results_lib
+from chromite.lib.buildstore import FakeBuildStore
 
 
 class TastVMTestStageTest(generic_stages_unittest.AbstractStageTestCase,
@@ -91,7 +92,9 @@ class TastVMTestStageTest(generic_stages_unittest.AbstractStageTestCase,
   def ConstructStage(self):
     # pylint: disable=protected-access
     self._run.GetArchive().SetupArchivePath()
+    bs = FakeBuildStore()
     self._stage = tast_test_stages.TastVMTestStage(self._run,
+                                                   bs,
                                                    self._current_board)
     self._stage._attempt = 1
     image_dir = self._stage.GetImageDirSymlink()
@@ -114,17 +117,20 @@ class TastVMTestStageTest(generic_stages_unittest.AbstractStageTestCase,
     # pylint: disable=unused-argument
     # Just check positional args and tricky flags. Checking all args is an
     # exercise in verifying that we're capable of typing the same thing twice.
-    pos = [a for a in cmd if not a.startswith('--')]
-    self.assertGreater(len(pos), 0)
-    self.assertEqual(pos[0], tast_test_stages.TastVMTestStage.SCRIPT_PATH)
-    self.assertEqual(pos[1:], self._exp_test_exprs)
+    self.assertEqual(cmd[0], './cros_run_vm_test')
+
+    # test_exprs are at the end, if they exist.
+    num_test_exprs = len(self._exp_test_exprs)
+    if num_test_exprs:
+      self.assertEqual(cmd[-num_test_exprs:], self._exp_test_exprs)
 
     # The passed results dir should be relative to the chroot and should contain
     # the test suite.
-    results_arg = '--results_dir=' + \
-        os.path.join(TastVMTestStageTest.RESULTS_CHROOT_PATH,
-                     self._exp_test_suite)
-    self.assertIn(results_arg, cmd)
+    results_dir = os.path.join(self._test_root, self._exp_test_suite)
+    self.assertIn('--results-dir=' + results_dir, cmd)
+
+    # Should have tast.
+    self.assertIn('--tast', cmd)
 
     if self._test_results_data is not None:
       self._WriteResultsFile(self._test_results_data)

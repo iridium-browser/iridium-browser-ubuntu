@@ -75,15 +75,23 @@ class UpdateSieve {
   }
 
   // Determines whether the server should send an |entity| to the client as
-  // part of a GetUpdatesResponse. Update internal tracking of max versions as a
-  // side effect which will later be used to set response progress markers.
-  bool ClientWantsItem(const LoopbackServerEntity& entity) {
-    int64_t version = entity.GetVersion();
+  // part of a GetUpdatesResponse.
+  bool ClientWantsItem(const LoopbackServerEntity& entity) const {
+    ModelType type = entity.GetModelType();
+    auto it = request_version_map_.find(type);
+    if (it == request_version_map_.end())
+      return false;
+    DCHECK_NE(0U, response_version_map_.count(type));
+    return it->second < entity.GetVersion();
+  }
+
+  // Updates internal tracking of max versions to later be used to set response
+  // progress markers.
+  void UpdateProgressMarker(const LoopbackServerEntity& entity) {
+    DCHECK(ClientWantsItem(entity));
     ModelType type = entity.GetModelType();
     response_version_map_[type] =
-        std::max(response_version_map_[type], version);
-    auto it = request_version_map_.find(type);
-    return it == request_version_map_.end() ? false : it->second < version;
+        std::max(response_version_map_[type], entity.GetVersion());
   }
 
  private:
@@ -130,6 +138,11 @@ class UpdateSieve {
   ModelTypeToVersionMap response_version_map_;
 };
 
+bool SortByVersion(const LoopbackServerEntity* lhs,
+                   const LoopbackServerEntity* rhs) {
+  return lhs->GetVersion() < rhs->GetVersion();
+}
+
 }  // namespace
 
 LoopbackServer::LoopbackServer(const base::FilePath& persistent_file)
@@ -138,6 +151,7 @@ LoopbackServer::LoopbackServer(const base::FilePath& persistent_file)
       store_birthday_(0),
       persistent_file_(persistent_file),
       observer_for_tests_(nullptr) {
+  DCHECK(!persistent_file_.empty());
   Init();
 }
 
@@ -185,19 +199,37 @@ bool LoopbackServer::CreateDefaultPermanentItems() {
     if (!top_level_entity) {
       return false;
     }
+    top_level_permanent_item_ids_[model_type] = top_level_entity->GetId();
     SaveEntity(std::move(top_level_entity));
 
     if (model_type == syncer::BOOKMARKS) {
       if (!CreatePermanentBookmarkFolder(kBookmarkBarFolderServerTag,
-                                         kBookmarkBarFolderName))
+                                         kBookmarkBarFolderName)) {
         return false;
+      }
       if (!CreatePermanentBookmarkFolder(kOtherBookmarksFolderServerTag,
-                                         kOtherBookmarksFolderName))
+                                         kOtherBookmarksFolderName)) {
         return false;
+      }
+      // This folder is called "Synced Bookmarks" by sync and is renamed
+      // "Mobile Bookmarks" by the mobile client UIs.
+      if (!CreatePermanentBookmarkFolder(kSyncedBookmarksFolderServerTag,
+                                         kSyncedBookmarksFolderName)) {
+        return false;
+      }
     }
   }
 
   return true;
+}
+
+std::string LoopbackServer::GetTopLevelPermanentItemId(
+    syncer::ModelType model_type) {
+  auto it = top_level_permanent_item_ids_.find(model_type);
+  if (it == top_level_permanent_item_ids_.end()) {
+    return std::string();
+  }
+  return it->second;
 }
 
 void LoopbackServer::UpdateEntityVersion(LoopbackServerEntity* entity) {
@@ -209,12 +241,10 @@ void LoopbackServer::SaveEntity(std::unique_ptr<LoopbackServerEntity> entity) {
   entities_[entity->GetId()] = std::move(entity);
 }
 
-void LoopbackServer::HandleCommand(
-    const string& request,
-    HttpResponse::ServerConnectionCode* server_status,
-    int64_t* response_code,
-    std::string* response) {
+net::HttpStatusCode LoopbackServer::HandleCommand(const string& request,
+                                                  std::string* response) {
   DCHECK(thread_checker_.CalledOnValidThread());
+  response->clear();
 
   sync_pb::ClientToServerMessage message;
   bool parsed = message.ParseFromString(request);
@@ -243,33 +273,25 @@ void LoopbackServer::HandleCommand(
         success = true;
         break;
       default:
-        *server_status = HttpResponse::SYNC_SERVER_ERROR;
-        *response_code = net::ERR_NOT_IMPLEMENTED;
-        *response = string();
-        return;
+        return net::HTTP_BAD_REQUEST;
     }
 
     if (!success) {
-      *server_status = HttpResponse::SYNC_SERVER_ERROR;
-      *response_code = net::ERR_FAILED;
-      *response = string();
       UMA_HISTOGRAM_ENUMERATION(
           "Sync.Local.RequestTypeOnError", message.message_contents(),
           sync_pb::ClientToServerMessage_Contents_Contents_MAX);
-      return;
+      return net::HTTP_INTERNAL_SERVER_ERROR;
     }
 
     response_proto.set_error_code(sync_pb::SyncEnums::SUCCESS);
   }
 
   response_proto.set_store_birthday(GetStoreBirthday());
-
-  *server_status = HttpResponse::SERVER_CONNECTION_OK;
-  *response_code = net::HTTP_OK;
   *response = response_proto.SerializeAsString();
 
   // TODO(pastarmovj): This should be done asynchronously.
   SaveStateToFile(persistent_file_);
+  return net::HTTP_OK;
 }
 
 void LoopbackServer::EnableStrongConsistencyWithConflictDetectionModel() {
@@ -279,32 +301,40 @@ void LoopbackServer::EnableStrongConsistencyWithConflictDetectionModel() {
 bool LoopbackServer::HandleGetUpdatesRequest(
     const sync_pb::GetUpdatesMessage& get_updates,
     sync_pb::GetUpdatesResponse* response) {
-  // TODO(pvalenzuela): Implement batching instead of sending all information
-  // at once.
   response->set_changes_remaining(0);
 
   auto sieve = std::make_unique<UpdateSieve>(get_updates);
 
-  // This folder is called "Synced Bookmarks" by sync and is renamed
-  // "Mobile Bookmarks" by the mobile client UIs.
-  if (get_updates.create_mobile_bookmarks_folder() &&
-      !CreatePermanentBookmarkFolder(kSyncedBookmarksFolderServerTag,
-                                     kSyncedBookmarksFolderName)) {
-    return false;
+  std::vector<const LoopbackServerEntity*> wanted_entities;
+  for (const auto& id_and_entity : entities_) {
+    if (sieve->ClientWantsItem(*id_and_entity.second)) {
+      wanted_entities.push_back(id_and_entity.second.get());
+    }
+  }
+
+  int max_batch_size = max_get_updates_batch_size_;
+  if (get_updates.batch_size() > 0)
+    max_batch_size = std::min(max_batch_size, get_updates.batch_size());
+
+  if (static_cast<int>(wanted_entities.size()) > max_batch_size) {
+    response->set_changes_remaining(wanted_entities.size() - max_batch_size);
+    std::partial_sort(wanted_entities.begin(),
+                      wanted_entities.begin() + max_batch_size,
+                      wanted_entities.end(), SortByVersion);
+    wanted_entities.resize(max_batch_size);
   }
 
   bool send_encryption_keys_based_on_nigori = false;
-  for (const auto& kv : entities_) {
-    const LoopbackServerEntity& entity = *kv.second;
-    if (sieve->ClientWantsItem(entity)) {
-      sync_pb::SyncEntity* response_entity = response->add_entries();
-      entity.SerializeAsProto(response_entity);
+  for (const LoopbackServerEntity* entity : wanted_entities) {
+    sieve->UpdateProgressMarker(*entity);
 
-      if (entity.GetModelType() == syncer::NIGORI) {
-        send_encryption_keys_based_on_nigori =
-            response_entity->specifics().nigori().passphrase_type() ==
-            sync_pb::NigoriSpecifics::KEYSTORE_PASSPHRASE;
-      }
+    sync_pb::SyncEntity* response_entity = response->add_entries();
+    entity->SerializeAsProto(response_entity);
+
+    if (entity->GetModelType() == syncer::NIGORI) {
+      send_encryption_keys_based_on_nigori =
+          response_entity->specifics().nigori().passphrase_type() ==
+          sync_pb::NigoriSpecifics::KEYSTORE_PASSPHRASE;
     }
   }
 
@@ -444,6 +474,11 @@ bool LoopbackServer::HandleCommitRequest(
   string guid = commit.cache_guid();
   ModelTypeSet committed_model_types;
 
+  ModelTypeSet enabled_types;
+  for (int field_number : commit.config_params().enabled_type_ids()) {
+    enabled_types.Put(GetModelTypeFromSpecificsFieldNumber(field_number));
+  }
+
   // TODO(pvalenzuela): Add validation of CommitMessage.entries.
   for (const sync_pb::SyncEntity& client_entity : commit.entries()) {
     sync_pb::CommitResponse_EntryResponse* entry_response =
@@ -468,6 +503,20 @@ bool LoopbackServer::HandleCommitRequest(
     EntityMap::const_iterator iter = entities_.find(entity_id);
     DCHECK(iter != entities_.end());
     committed_model_types.Put(iter->second->GetModelType());
+
+    // Notify observers about history having been synced. "History" sync is
+    // guarded by the user's selection in the settings page. This also excludes
+    // custom passphrase users who, in addition to HISTORY_DELETE_DIRECTIVES not
+    // being enabled, will commit encrypted specifics and hence cannot be
+    // iterated over.
+    if (observer_for_tests_ && iter->second->GetModelType() == SESSIONS &&
+        enabled_types.Has(HISTORY_DELETE_DIRECTIVES) &&
+        enabled_types.Has(TYPED_URLS)) {
+      for (const sync_pb::TabNavigation& navigation :
+           client_entity.specifics().session().tab().navigation()) {
+        observer_for_tests_->OnHistoryCommit(navigation.virtual_url());
+      }
+    }
   }
 
   if (observer_for_tests_)
@@ -497,6 +546,22 @@ std::vector<sync_pb::SyncEntity> LoopbackServer::GetSyncEntitiesByModelType(
   for (const auto& kv : entities_) {
     const LoopbackServerEntity& entity = *kv.second;
     if (!(entity.IsDeleted() || entity.IsPermanent()) &&
+        entity.GetModelType() == model_type) {
+      sync_pb::SyncEntity sync_entity;
+      entity.SerializeAsProto(&sync_entity);
+      sync_entities.push_back(sync_entity);
+    }
+  }
+  return sync_entities;
+}
+
+std::vector<sync_pb::SyncEntity>
+LoopbackServer::GetPermanentSyncEntitiesByModelType(ModelType model_type) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  std::vector<sync_pb::SyncEntity> sync_entities;
+  for (const auto& kv : entities_) {
+    const LoopbackServerEntity& entity = *kv.second;
+    if (!entity.IsDeleted() && entity.IsPermanent() &&
         entity.GetModelType() == model_type) {
       sync_pb::SyncEntity sync_entity;
       entity.SerializeAsProto(&sync_entity);

@@ -9,8 +9,8 @@
 #include <algorithm>
 #include <vector>
 
-#include "fxjs/cfxjse_engine.h"
-#include "fxjs/cfxjse_value.h"
+#include "fxjs/xfa/cfxjse_engine.h"
+#include "fxjs/xfa/cfxjse_value.h"
 #include "xfa/fxfa/cxfa_eventparam.h"
 #include "xfa/fxfa/cxfa_ffnotify.h"
 #include "xfa/fxfa/cxfa_ffwidgethandler.h"
@@ -24,7 +24,7 @@ void StringProperty(CFXJSE_Value* pReturn, WideString* wsValue, bool bSetting) {
     return;
   }
 
-  pReturn->SetString(wsValue->UTF8Encode().AsStringView());
+  pReturn->SetString(wsValue->ToUTF8().AsStringView());
 }
 
 void InterProperty(CFXJSE_Value* pReturn, int32_t* iValue, bool bSetting) {
@@ -55,6 +55,10 @@ CJX_EventPseudoModel::CJX_EventPseudoModel(CScript_EventPseudoModel* model)
 }
 
 CJX_EventPseudoModel::~CJX_EventPseudoModel() {}
+
+bool CJX_EventPseudoModel::DynamicTypeIs(TypeTag eType) const {
+  return eType == static_type__ || ParentType__::DynamicTypeIs(eType);
+}
 
 void CJX_EventPseudoModel::cancelAction(CFXJSE_Value* pValue,
                                         bool bSetting,
@@ -112,7 +116,7 @@ void CJX_EventPseudoModel::newText(CFXJSE_Value* pValue,
   if (!pEventParam)
     return;
 
-  pValue->SetString(pEventParam->GetNewText().UTF8Encode().AsStringView());
+  pValue->SetString(pEventParam->GetNewText().ToUTF8().AsStringView());
 }
 
 void CJX_EventPseudoModel::prevContentType(CFXJSE_Value* pValue,
@@ -201,7 +205,7 @@ CJS_Result CJX_EventPseudoModel::reset(
 
   CXFA_EventParam* pEventParam = pScriptContext->GetEventParam();
   if (pEventParam)
-    pEventParam->Reset();
+    *pEventParam = CXFA_EventParam();
 
   return CJS_Result::Success();
 }

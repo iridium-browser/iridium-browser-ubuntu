@@ -23,40 +23,76 @@
 
 #include "perfetto/base/logging.h"
 
+namespace perfetto {
+namespace profiling {
+
 // Transport messages between threads. Multiple-producer / single-consumer.
 //
-// This has to outlive both the consumer and the producer who have to
-// negotiate termination separately, if needed. This is currently only used
-// in a scenario where the producer and consumer both are loops that never
-// terminate.
+// This has to outlive both the consumer and the producer. The Shutdown method
+// can be used to unblock both producers and consumers blocked on the queue.
+// The general shutdown logic is:
+// q.Shutdown()
+// Join all producer and consumer threads
+// destruct q
 template <typename T>
 class BoundedQueue {
  public:
-  BoundedQueue() : BoundedQueue(1) {}
-  BoundedQueue(size_t capacity) : capacity_(capacity) {
+  BoundedQueue() : BoundedQueue("unknown") {}
+  BoundedQueue(std::string name) : BoundedQueue(std::move(name), 1) {}
+  BoundedQueue(std::string name, size_t capacity)
+      : name_(std::move(name)), capacity_(capacity) {
     PERFETTO_CHECK(capacity > 0);
   }
 
-  void Add(T item) {
+  void SetName(std::string name) { name_ = std::move(name); }
+
+  void Shutdown() {
+    {
+      std::lock_guard<std::mutex> l(mutex_);
+      shutdown_ = true;
+    }
+    full_cv_.notify_all();
+    empty_cv_.notify_all();
+  }
+
+  ~BoundedQueue() { PERFETTO_DCHECK(shutdown_); }
+
+  bool Add(T item) {
     std::unique_lock<std::mutex> l(mutex_);
-    if (deque_.size() == capacity_)
-      full_cv_.wait(l, [this] { return deque_.size() < capacity_; });
+    if (deque_.size() == capacity_) {
+      if (!logged.load(std::memory_order_relaxed)) {
+        PERFETTO_ELOG("heapprofd queue %s at capacity (%zu). Blocking!",
+                      name_.c_str(), capacity_);
+        logged.store(true, std::memory_order_relaxed);
+      }
+      full_cv_.wait(l,
+                    [this] { return deque_.size() < capacity_ || shutdown_; });
+    }
+
+    if (shutdown_)
+      return false;
+
     deque_.emplace_back(std::move(item));
     if (deque_.size() == 1)
       empty_cv_.notify_all();
+    return true;
   }
 
-  T Get() {
+  bool Get(T* out) {
     std::unique_lock<std::mutex> l(mutex_);
-    if (elements_ == 0)
-      empty_cv_.wait(l, [this] { return !deque_.empty(); });
-    T item(std::move(deque_.front()));
+    if (deque_.empty())
+      empty_cv_.wait(l, [this] { return !deque_.empty() || shutdown_; });
+
+    if (shutdown_)
+      return false;
+
+    *out = std::move(deque_.front());
     deque_.pop_front();
     if (deque_.size() == capacity_ - 1) {
       l.unlock();
       full_cv_.notify_all();
     }
-    return item;
+    return true;
   }
 
   void SetCapacity(size_t capacity) {
@@ -69,12 +105,18 @@ class BoundedQueue {
   }
 
  private:
+  std::string name_;
   size_t capacity_;
+  std::atomic<bool> logged{false};
+  bool shutdown_ = false;
   size_t elements_ = 0;
   std::deque<T> deque_;
   std::condition_variable full_cv_;
   std::condition_variable empty_cv_;
   std::mutex mutex_;
 };
+
+}  // namespace profiling
+}  // namespace perfetto
 
 #endif  // SRC_PROFILING_MEMORY_BOUNDED_QUEUE_H_

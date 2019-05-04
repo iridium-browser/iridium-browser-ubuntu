@@ -1836,7 +1836,7 @@ FT_BEGIN_HEADER
    *        and add it to `origin_x'>
    *
    *       origin_x += slot->advance.x;
-   *       origin_x += slot->rsb_delta - slot->lsb_delta;
+   *       origin_x += slot->lsb_delta - slot->rsb_delta;
    *     endfor
    *   ```
    *
@@ -2919,8 +2919,8 @@ FT_BEGIN_HEADER
    *
    *   FT_LOAD_PEDANTIC ::
    *     Make the font driver perform pedantic verifications during glyph
-   *     loading.  This is mostly used to detect broken glyphs in fonts.  By
-   *     default, FreeType tries to handle broken fonts also.
+   *     loading and hinting.  This is mostly used to detect broken glyphs in
+   *     fonts.  By default, FreeType tries to handle broken fonts also.
    *
    *     In particular, errors from the TrueType bytecode engine are not
    *     passed to the application if this flag is not set; this might result

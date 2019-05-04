@@ -8,18 +8,33 @@
 
 #include <algorithm>
 
+#include "base/feature_list.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/common/url_constants.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
+#include "components/password_manager/core/browser/password_manager_client.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
+#include "components/password_manager/core/common/password_manager_features.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/elide_url.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/page_transition_types.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_skia.h"
@@ -29,11 +44,23 @@
 
 namespace {
 
+using password_manager::ManagePasswordsReferrer;
+
 // Checks whether two URLs are from the same domain or host.
 bool SameDomainOrHost(const GURL& gurl1, const GURL& gurl2) {
   return net::registry_controlled_domains::SameDomainOrHost(
       gurl1, gurl2,
       net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
+}
+
+bool IsSignedInAndSyncingPasswordsNormally(Profile* profile) {
+  return password_manager_util::IsSyncingWithNormalEncryption(
+      ProfileSyncServiceFactory::GetForProfile(profile));
+}
+
+bool IsGooglePasswordManagerEnabled() {
+  return base::FeatureList::IsEnabled(
+      password_manager::features::kGooglePasswordManager);
 }
 
 }  // namespace
@@ -56,7 +83,7 @@ std::pair<base::string16, base::string16> GetCredentialLabelsForAccountChooser(
     const autofill::PasswordForm& form) {
   base::string16 federation;
   if (!form.federation_origin.opaque())
-    federation = base::UTF8ToUTF16(form.federation_origin.host());
+    federation = GetDisplayFederation(form);
 
   if (form.display_name.empty())
     return std::make_pair(form.username_value, std::move(federation));
@@ -135,10 +162,84 @@ base::string16 GetDisplayUsername(const autofill::PasswordForm& form) {
              : form.username_value;
 }
 
+base::string16 GetDisplayFederation(const autofill::PasswordForm& form) {
+  return url_formatter::FormatOriginForSecurityDisplay(
+      form.federation_origin, url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC);
+}
+
 bool IsSyncingAutosignSetting(Profile* profile) {
   const browser_sync::ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile);
-  return (sync_service && sync_service->IsFirstSetupComplete() &&
+  return (sync_service &&
+          sync_service->GetUserSettings()->IsFirstSetupComplete() &&
           sync_service->IsSyncFeatureActive() &&
           sync_service->GetActiveDataTypes().Has(syncer::PRIORITY_PREFERENCES));
 }
+
+GURL GetGooglePasswordManagerURL(ManagePasswordsReferrer referrer) {
+  GURL url(chrome::kGooglePasswordManagerURL);
+  url = net::AppendQueryParameter(url, "utm_source", "chrome");
+#if defined(OS_ANDROID)
+  url = net::AppendQueryParameter(url, "utm_medium", "android");
+#else
+  url = net::AppendQueryParameter(url, "utm_medium", "desktop");
+#endif
+  std::string campaign = [referrer] {
+    switch (referrer) {
+      case ManagePasswordsReferrer::kChromeSettings:
+        return "chrome_settings";
+      case ManagePasswordsReferrer::kManagePasswordsBubble:
+        return "manage_passwords_bubble";
+      case ManagePasswordsReferrer::kPasswordContextMenu:
+        return "password_context_menu";
+      case ManagePasswordsReferrer::kPasswordDropdown:
+        return "password_dropdown";
+      case ManagePasswordsReferrer::kPasswordGenerationConfirmation:
+        return "password_generation_confirmation";
+      case ManagePasswordsReferrer::kProfileChooser:
+        return "profile_chooser";
+      case ManagePasswordsReferrer::kPasswordsAccessorySheet:
+        NOTREACHED();
+    }
+
+    NOTREACHED();
+    return "";
+  }();
+
+  return net::AppendQueryParameter(url, "utm_campaign", campaign);
+}
+
+bool ShouldManagePasswordsinGooglePasswordManager(Profile* profile) {
+  // To make sure that the experiment groups contain the same proportions of
+  // signed in and syncing users, we need to check the sync state before
+  // checking the feature flag.
+  return IsSignedInAndSyncingPasswordsNormally(profile) &&
+         IsGooglePasswordManagerEnabled();
+}
+
+// Navigation is handled differently on Android.
+#if !defined(OS_ANDROID)
+void NavigateToGooglePasswordManager(Profile* profile,
+                                     ManagePasswordsReferrer referrer) {
+  NavigateParams params(profile, GetGooglePasswordManagerURL(referrer),
+                        ui::PAGE_TRANSITION_LINK);
+  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+  Navigate(&params);
+}
+
+void NavigateToManagePasswordsPage(Browser* browser,
+                                   ManagePasswordsReferrer referrer) {
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.ManagePasswordsReferrer",
+                            referrer);
+  if (IsSignedInAndSyncingPasswordsNormally(browser->profile())) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "PasswordManager.ManagePasswordsReferrerSignedInAndSyncing", referrer);
+    if (IsGooglePasswordManagerEnabled()) {
+      NavigateToGooglePasswordManager(browser->profile(), referrer);
+      return;
+    }
+  }
+
+  chrome::ShowPasswordManager(browser);
+}
+#endif  // !defined(OS_ANDROID)

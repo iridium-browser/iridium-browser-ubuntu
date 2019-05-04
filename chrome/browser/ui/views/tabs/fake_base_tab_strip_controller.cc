@@ -91,6 +91,11 @@ void FakeBaseTabStripController::ToggleSelected(int index) {
 void FakeBaseTabStripController::AddSelectionFromAnchorTo(int index) {
 }
 
+bool FakeBaseTabStripController::BeforeCloseTab(int index,
+                                                CloseTabSource source) {
+  return true;
+}
+
 void FakeBaseTabStripController::CloseTab(int index, CloseTabSource source) {
   RemoveTab(index);
 }
@@ -133,10 +138,6 @@ bool FakeBaseTabStripController::IsSingleTabModeAvailable() {
   return false;
 }
 
-bool FakeBaseTabStripController::ShouldDrawStrokes() const {
-  return false;
-}
-
 void FakeBaseTabStripController::OnStartedDraggingTabs() {}
 
 void FakeBaseTabStripController::OnStoppedDraggingTabs() {}
@@ -153,21 +154,20 @@ bool FakeBaseTabStripController::EverHasVisibleBackgroundTabShapes() const {
   return false;
 }
 
-SkColor FakeBaseTabStripController::GetFrameColor() const {
+bool FakeBaseTabStripController::ShouldPaintAsActiveFrame() const {
+  return true;
+}
+
+bool FakeBaseTabStripController::CanDrawStrokes() const {
+  return false;
+}
+
+SkColor FakeBaseTabStripController::GetFrameColor(
+    BrowserNonClientFrameView::ActiveState active_state) const {
   return gfx::kPlaceholderColor;
 }
 
 SkColor FakeBaseTabStripController::GetToolbarTopSeparatorColor() const {
-  return gfx::kPlaceholderColor;
-}
-
-SkColor FakeBaseTabStripController::GetTabBackgroundColor(
-    TabState state) const {
-  return gfx::kPlaceholderColor;
-}
-
-SkColor FakeBaseTabStripController::GetTabForegroundColor(
-    TabState state) const {
   return gfx::kPlaceholderColor;
 }
 

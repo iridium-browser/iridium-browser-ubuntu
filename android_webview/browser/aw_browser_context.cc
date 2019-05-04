@@ -22,6 +22,7 @@
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task/post_task.h"
+#include "components/autofill/core/browser/autocomplete_history_manager.h"
 #include "components/policy/core/browser/browser_policy_connector_base.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/triggers/trigger_manager.h"
@@ -88,14 +89,6 @@ CreateSafeBrowsingWhitelistManager() {
       background_task_runner, io_task_runner);
 }
 
-base::FilePath GetCacheDirForAw() {
-  FilePath cache_path;
-  base::PathService::Get(base::DIR_CACHE, &cache_path);
-  cache_path =
-      cache_path.Append(FILE_PATH_LITERAL("org.chromium.android_webview"));
-  return cache_path;
-}
-
 }  // namespace
 
 AwBrowserContext::AwBrowserContext(
@@ -136,9 +129,21 @@ AwBrowserContext* AwBrowserContext::FromWebContents(
   return static_cast<AwBrowserContext*>(web_contents->GetBrowserContext());
 }
 
-void AwBrowserContext::PreMainMessageLoopRun(net::NetLog* net_log) {
-  FilePath cache_path = GetCacheDirForAw();
+// static
+base::FilePath AwBrowserContext::GetCacheDir() {
+  FilePath cache_path;
+  base::PathService::Get(base::DIR_CACHE, &cache_path);
+  cache_path =
+      cache_path.Append(FILE_PATH_LITERAL("org.chromium.android_webview"));
+  return cache_path;
+}
 
+void AwBrowserContext::PreMainMessageLoopRun(net::NetLog* net_log) {
+  FilePath cache_path = GetCacheDir();
+
+  // TODO(ntfschr): set this to nullptr when the NetworkService is disabled,
+  // once we remove a dependency on url_request_context_getter_
+  // (http://crbug.com/887538).
   url_request_context_getter_ = new AwURLRequestContextGetter(
       cache_path, context_storage_path_.Append(kChannelIDFilename),
       CreateProxyConfigService(), user_pref_service_.get(), net_log);
@@ -205,12 +210,21 @@ AwURLRequestContextGetter* AwBrowserContext::GetAwURLRequestContext() {
   return url_request_context_getter_.get();
 }
 
-base::FilePath AwBrowserContext::GetPath() const {
-  return context_storage_path_;
+autofill::AutocompleteHistoryManager*
+AwBrowserContext::GetAutocompleteHistoryManager() {
+  if (!autocomplete_history_manager_) {
+    autocomplete_history_manager_ =
+        std::make_unique<autofill::AutocompleteHistoryManager>();
+    autocomplete_history_manager_->Init(
+        form_database_service_->get_autofill_webdata_service(),
+        user_pref_service_.get(), IsOffTheRecord());
+  }
+
+  return autocomplete_history_manager_.get();
 }
 
-base::FilePath AwBrowserContext::GetCachePath() const {
-  return GetCacheDirForAw();
+base::FilePath AwBrowserContext::GetPath() const {
+  return context_storage_path_;
 }
 
 bool AwBrowserContext::IsOffTheRecord() const {
@@ -220,8 +234,7 @@ bool AwBrowserContext::IsOffTheRecord() const {
 
 content::ResourceContext* AwBrowserContext::GetResourceContext() {
   if (!resource_context_) {
-    resource_context_.reset(
-        new AwResourceContext(url_request_context_getter_.get()));
+    resource_context_.reset(new AwResourceContext);
   }
   return resource_context_.get();
 }
@@ -262,6 +275,11 @@ AwBrowserContext::GetPermissionControllerDelegate() {
   if (!permission_manager_.get())
     permission_manager_.reset(new AwPermissionManager());
   return permission_manager_.get();
+}
+
+content::ClientHintsControllerDelegate*
+AwBrowserContext::GetClientHintsControllerDelegate() {
+  return nullptr;
 }
 
 content::BackgroundFetchDelegate*

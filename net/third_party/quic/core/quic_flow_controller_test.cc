@@ -40,9 +40,8 @@ class QuicFlowControllerTest : public QuicTest {
                                          Perspective::IS_CLIENT);
     session_ = QuicMakeUnique<MockQuicSession>(connection_);
     flow_controller_ = QuicMakeUnique<QuicFlowController>(
-        session_.get(), connection_, stream_id_, Perspective::IS_CLIENT,
-        send_window_, receive_window_, should_auto_tune_receive_window_,
-        &session_flow_controller_);
+        session_.get(), stream_id_, send_window_, receive_window_,
+        should_auto_tune_receive_window_, &session_flow_controller_);
   }
 
   bool ClearControlFrame(const QuicFrame& frame) {
@@ -128,6 +127,26 @@ TEST_F(QuicFlowControllerTest, ReceivingBytes) {
   EXPECT_FALSE(flow_controller_->FlowControlViolation());
   EXPECT_EQ(kInitialSessionFlowControlWindowForTest,
             QuicFlowControllerPeer::ReceiveWindowSize(flow_controller_.get()));
+}
+
+TEST_F(QuicFlowControllerTest, Move) {
+  Initialize();
+
+  flow_controller_->AddBytesSent(send_window_ / 2);
+  EXPECT_FALSE(flow_controller_->IsBlocked());
+  EXPECT_EQ(send_window_ / 2, flow_controller_->SendWindowSize());
+
+  EXPECT_TRUE(
+      flow_controller_->UpdateHighestReceivedOffset(1 + receive_window_ / 2));
+  EXPECT_FALSE(flow_controller_->FlowControlViolation());
+  EXPECT_EQ((receive_window_ / 2) - 1,
+            QuicFlowControllerPeer::ReceiveWindowSize(flow_controller_.get()));
+
+  QuicFlowController flow_controller2(std::move(*flow_controller_));
+  EXPECT_EQ(send_window_ / 2, flow_controller2.SendWindowSize());
+  EXPECT_FALSE(flow_controller2.FlowControlViolation());
+  EXPECT_EQ((receive_window_ / 2) - 1,
+            QuicFlowControllerPeer::ReceiveWindowSize(&flow_controller2));
 }
 
 TEST_F(QuicFlowControllerTest, OnlySendBlockedFrameOncePerOffset) {

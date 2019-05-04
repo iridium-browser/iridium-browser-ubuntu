@@ -6,9 +6,11 @@
 
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/location.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
@@ -41,6 +43,9 @@ static float GetMoveDistance(const FloatRect& old_rect,
 }
 
 static float RegionGranularityScale(const IntRect& viewport) {
+  if (RuntimeEnabledFeatures::JankTrackingSweepLineEnabled())
+    return 1;
+
   return kRegionGranularitySteps /
          std::min(viewport.Height(), viewport.Width());
 }
@@ -80,6 +85,15 @@ static void RegionToTracedValue(const Region& region,
   value.EndArray();
 }
 
+static void RegionToTracedValue(const JankRegion& region,
+                                double granularity_scale,
+                                TracedValue& value) {
+  Region old_region;
+  for (IntRect rect : region.GetRects())
+    old_region.Unite(Region(rect));
+  RegionToTracedValue(old_region, granularity_scale, value);
+}
+
 JankTracker::JankTracker(LocalFrameView* frame_view)
     : frame_view_(frame_view),
       score_(0.0),
@@ -106,6 +120,12 @@ void JankTracker::AccumulateJank(const LayoutObject& source,
       SmallerThanRegionGranularity(new_rect, scale))
     return;
 
+  // Ignore layout objects that move (in the coordinate space of the paint
+  // invalidation container) on scroll.
+  // TODO(skobes): Find a way to detect when these objects jank.
+  if (source.IsFixedPositioned() || source.IsStickyPositioned())
+    return;
+
   const auto* local_xform = TransformNodeFor(painting_layer.GetLayoutObject());
   const auto* root_xform = TransformNodeFor(*source.View());
 
@@ -130,8 +150,13 @@ void JankTracker::AccumulateJank(const LayoutObject& source,
   visible_old_rect.Scale(scale);
   visible_new_rect.Scale(scale);
 
-  region_.Unite(Region(visible_old_rect));
-  region_.Unite(Region(visible_new_rect));
+  if (RuntimeEnabledFeatures::JankTrackingSweepLineEnabled()) {
+    region_experimental_.AddRect(visible_old_rect);
+    region_experimental_.AddRect(visible_new_rect);
+  } else {
+    region_.Unite(Region(visible_old_rect));
+    region_.Unite(Region(visible_new_rect));
+  }
 }
 
 void JankTracker::NotifyObjectPrePaint(const LayoutObject& object,
@@ -165,36 +190,56 @@ void JankTracker::NotifyCompositedLayerMoved(const PaintLayer& paint_layer,
 }
 
 void JankTracker::NotifyPrePaintFinished() {
-  if (!IsActive() || region_.IsEmpty())
+  if (!IsActive())
+    return;
+  bool use_sweep_line = RuntimeEnabledFeatures::JankTrackingSweepLineEnabled();
+  bool region_is_empty =
+      use_sweep_line ? region_experimental_.IsEmpty() : region_.IsEmpty();
+  if (region_is_empty)
     return;
 
   IntRect viewport = frame_view_->GetScrollableArea()->VisibleContentRect();
   double granularity_scale = RegionGranularityScale(viewport);
   viewport.Scale(granularity_scale);
-  double viewport_area = double(viewport.Width()) * double(viewport.Height());
 
-  double jank_fraction = region_.Area() / viewport_area;
+  if (viewport.IsEmpty())
+    return;
+
+  double viewport_area = double(viewport.Width()) * double(viewport.Height());
+  uint64_t region_area =
+      use_sweep_line ? region_experimental_.Area() : region_.Area();
+  double jank_fraction = region_area / viewport_area;
+  DCHECK_GT(jank_fraction, 0);
+
   score_ += jank_fraction;
 
   DVLOG(1) << "viewport " << (jank_fraction * 100)
            << "% janked, raising score to " << score_;
 
+  LocalFrame& frame = frame_view_->GetFrame();
+
   TRACE_EVENT_INSTANT2("loading", "FrameLayoutJank", TRACE_EVENT_SCOPE_THREAD,
                        "data",
                        PerFrameTraceData(jank_fraction, granularity_scale),
-                       "frame", ToTraceValue(&frame_view_->GetFrame()));
+                       "frame", ToTraceValue(&frame));
 
-  if (RuntimeEnabledFeatures::LayoutJankAPIEnabled() && jank_fraction > 0 &&
-      frame_view_->GetFrame().DomWindow()) {
+  frame.Client()->DidObserveLayoutJank(jank_fraction);
+
+  if (origin_trials::LayoutJankAPIEnabled(frame.GetDocument()) &&
+      frame.DomWindow()) {
     WindowPerformance* performance =
-        DOMWindowPerformance::performance(*frame_view_->GetFrame().DomWindow());
+        DOMWindowPerformance::performance(*frame.DomWindow());
     if (performance &&
-        performance->HasObserverFor(PerformanceEntry::kLayoutJank)) {
+        (performance->HasObserverFor(PerformanceEntry::kLayoutJank) ||
+         performance->ShouldBufferEntries())) {
       performance->AddLayoutJankFraction(jank_fraction);
     }
   }
 
-  region_ = Region();
+  if (use_sweep_line)
+    region_experimental_.Reset();
+  else
+    region_ = Region();
 }
 
 void JankTracker::NotifyInput(const WebInputEvent& event) {
@@ -234,7 +279,10 @@ std::unique_ptr<TracedValue> JankTracker::PerFrameTraceData(
   value->SetDouble("jank_fraction", jank_fraction);
   value->SetDouble("cumulative_score", score_);
   value->SetDouble("max_distance", max_distance_);
-  RegionToTracedValue(region_, granularity_scale, *value);
+  if (RuntimeEnabledFeatures::JankTrackingSweepLineEnabled())
+    RegionToTracedValue(region_experimental_, granularity_scale, *value);
+  else
+    RegionToTracedValue(region_, granularity_scale, *value);
   value->SetBoolean("is_main_frame", frame_view_->GetFrame().IsMainFrame());
   return value;
 }

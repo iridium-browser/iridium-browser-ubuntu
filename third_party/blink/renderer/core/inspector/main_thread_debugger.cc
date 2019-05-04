@@ -82,7 +82,7 @@ LocalFrame* ToFrame(ExecutionContext* context) {
   if (auto* document = DynamicTo<Document>(context))
     return document->GetFrame();
   if (context->IsMainThreadWorkletGlobalScope())
-    return ToWorkletGlobalScope(context)->GetFrame();
+    return To<WorkletGlobalScope>(context)->GetFrame();
   return nullptr;
 }
 }
@@ -179,11 +179,11 @@ void MainThreadDebugger::ExceptionThrown(ExecutionContext* context,
     script_state =
         event->World() ? ToScriptState(frame, *event->World()) : nullptr;
   } else if (context->IsMainThreadWorkletGlobalScope()) {
-    frame = ToWorkletGlobalScope(context)->GetFrame();
+    auto* scope = To<WorkletGlobalScope>(context);
+    frame = scope->GetFrame();
     if (!frame)
       return;
-    script_state =
-        ToWorkletGlobalScope(context)->ScriptController()->GetScriptState();
+    script_state = scope->ScriptController()->GetScriptState();
   } else {
     NOTREACHED();
   }
@@ -282,8 +282,20 @@ void MainThreadDebugger::unmuteMetrics(int context_group_id) {
 v8::Local<v8::Context> MainThreadDebugger::ensureDefaultContextInGroup(
     int context_group_id) {
   LocalFrame* frame = WeakIdentifierMap<LocalFrame>::Lookup(context_group_id);
-  ScriptState* script_state =
-      frame ? ToScriptStateForMainWorld(frame) : nullptr;
+  if (!frame)
+    return v8::Local<v8::Context>();
+
+  // This is a workaround code with a bailout to avoid crashing in
+  // LocalWindowProxy::Initialize().
+  // We cannot request a ScriptState on a provisional frame as it would lead
+  // to a context creation on it, which is not allowed. Remove this extra check
+  // when provisional frames concept gets eliminated. See crbug.com/897816
+  // The DCHECK is kept to catch additional regressions earlier.
+  DCHECK(!frame->IsProvisional());
+  if (frame->IsProvisional())
+    return v8::Local<v8::Context>();
+
+  ScriptState* script_state = ToScriptStateForMainWorld(frame);
   return script_state ? script_state->GetContext() : v8::Local<v8::Context>();
 }
 

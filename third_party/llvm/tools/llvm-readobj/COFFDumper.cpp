@@ -79,7 +79,7 @@ public:
       : ObjDumper(Writer), Obj(Obj), Writer(Writer), Types(100) {}
 
   void printFileHeaders() override;
-  void printSections() override;
+  void printSectionHeaders() override;
   void printRelocations() override;
   void printSymbols() override;
   void printDynamicSymbols() override;
@@ -959,7 +959,7 @@ void COFFDumper::printCodeViewSymbolSection(StringRef SectionName,
   StringMap<StringRef> FunctionLineTables;
 
   ListScope D(W, "CodeViewDebugInfo");
-  // Print the section to allow correlation with printSections.
+  // Print the section to allow correlation with printSectionHeaders.
   W.printNumber("Section", SectionName, Obj->getSectionID(Section));
 
   uint32_t Magic;
@@ -1248,7 +1248,9 @@ void COFFDumper::mergeCodeViewTypes(MergingTypeTableBuilder &CVIDs,
         error(object_error::parse_failed);
       }
       SmallVector<TypeIndex, 128> SourceToDest;
-      if (auto EC = mergeTypeAndIdRecords(CVIDs, CVTypes, SourceToDest, Types))
+      Optional<uint32_t> PCHSignature;
+      if (auto EC = mergeTypeAndIdRecords(CVIDs, CVTypes, SourceToDest, Types,
+                                          PCHSignature))
         return error(std::move(EC));
     }
   }
@@ -1277,7 +1279,7 @@ void COFFDumper::printCodeViewTypeSection(StringRef SectionName,
   W.flush();
 }
 
-void COFFDumper::printSections() {
+void COFFDumper::printSectionHeaders() {
   ListScope SectionsD(W, "Sections");
   int SectionNumber = 0;
   for (const SectionRef &Sec : Obj->sections()) {
@@ -1363,10 +1365,12 @@ void COFFDumper::printRelocation(const SectionRef &Section,
   StringRef SymbolName;
   Reloc.getTypeName(RelocName);
   symbol_iterator Symbol = Reloc.getSymbol();
+  int64_t SymbolIndex = -1;
   if (Symbol != Obj->symbol_end()) {
     Expected<StringRef> SymbolNameOrErr = Symbol->getName();
     error(errorToErrorCode(SymbolNameOrErr.takeError()));
     SymbolName = *SymbolNameOrErr;
+    SymbolIndex = Obj->getSymbolIndex(Obj->getCOFFSymbol(*Symbol));
   }
 
   if (opts::ExpandRelocs) {
@@ -1374,11 +1378,13 @@ void COFFDumper::printRelocation(const SectionRef &Section,
     W.printHex("Offset", Offset);
     W.printNumber("Type", RelocName, RelocType);
     W.printString("Symbol", SymbolName.empty() ? "-" : SymbolName);
+    W.printNumber("SymbolIndex", SymbolIndex);
   } else {
     raw_ostream& OS = W.startLine();
     OS << W.hex(Offset)
        << " " << RelocName
        << " " << (SymbolName.empty() ? "-" : SymbolName)
+       << " (" << SymbolIndex << ")"
        << "\n";
   }
 }
@@ -1549,8 +1555,10 @@ void COFFDumper::printUnwindInfo() {
     Dumper.printData(Ctx);
     break;
   }
+  case COFF::IMAGE_FILE_MACHINE_ARM64:
   case COFF::IMAGE_FILE_MACHINE_ARMNT: {
-    ARM::WinEH::Decoder Decoder(W);
+    ARM::WinEH::Decoder Decoder(W, Obj->getMachine() ==
+                                       COFF::IMAGE_FILE_MACHINE_ARM64);
     Decoder.dumpProcedureData(*Obj);
     break;
   }

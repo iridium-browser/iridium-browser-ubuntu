@@ -10,7 +10,7 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.modelutil.RecyclerViewAdapter;
+import org.chromium.ui.modelutil.RecyclerViewAdapter;
 
 /** Factory to create CategoryCardViewHolder objects. */
 class CategoryCardViewHolderFactory implements RecyclerViewAdapter.ViewHolderFactory<
@@ -27,11 +27,6 @@ class CategoryCardViewHolderFactory implements RecyclerViewAdapter.ViewHolderFac
             ViewGroup parent, @CategoryCardAdapter.ViewType int viewType) {
         View view;
         switch (viewType) {
-            case CategoryCardAdapter.ViewType.HEADER:
-                view = LayoutInflater.from(parent.getContext())
-                               .inflate(R.layout.explore_sites_title_card, parent,
-                                       /* attachToRoot = */ false);
-                break;
             case CategoryCardAdapter.ViewType.CATEGORY:
                 view = LayoutInflater.from(parent.getContext())
                                .inflate(R.layout.explore_sites_category_card_view, parent,
@@ -42,7 +37,7 @@ class CategoryCardViewHolderFactory implements RecyclerViewAdapter.ViewHolderFac
                                .inflate(R.layout.explore_sites_loading_from_net_view, parent,
                                        /* attachToRoot = */ false);
                 break;
-            case CategoryCardAdapter.ViewType.ERROR: // inflate error
+            case CategoryCardAdapter.ViewType.ERROR:
                 view = LayoutInflater.from(parent.getContext())
                                .inflate(R.layout.explore_sites_loading_error_view, parent,
                                        /* attachToRoot = */ false);

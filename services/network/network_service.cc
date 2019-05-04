@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/environment.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
@@ -17,13 +18,14 @@
 #include "base/task/post_task.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
-#include "components/certificate_transparency/sth_distributor.h"
-#include "components/certificate_transparency/sth_observer.h"
 #include "components/os_crypt/os_crypt.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "mojo/public/cpp/bindings/type_converter.h"
 #include "net/base/logging_network_change_observer.h"
 #include "net/base/network_change_notifier.h"
+#include "net/base/network_change_notifier_posix.h"
+#include "net/base/port_util.h"
+#include "net/cert/cert_database.h"
 #include "net/cert/ct_log_response_parser.h"
 #include "net/cert/signed_tree_head.h"
 #include "net/dns/dns_config_overrides.h"
@@ -39,6 +41,8 @@
 #include "net/url_request/url_request_context_builder.h"
 #include "services/network/crl_set_distributor.h"
 #include "services/network/cross_origin_read_blocking.h"
+#include "services/network/dns_config_change_manager.h"
+#include "services/network/http_auth_cache_copier.h"
 #include "services/network/net_log_capture_mode_type_converter.h"
 #include "services/network/net_log_exporter.h"
 #include "services/network/network_context.h"
@@ -47,6 +51,10 @@
 #include "services/network/public/cpp/network_switches.h"
 #include "services/network/url_loader.h"
 #include "services/network/url_request_context_builder_mojo.h"
+
+#if BUILDFLAG(IS_CT_SUPPORTED)
+#include "components/certificate_transparency/sth_distributor.h"
+#endif  // BUILDFLAG(IS_CT_SUPPORTED)
 
 #if defined(OS_ANDROID) && defined(ARCH_CPU_ARMEL)
 #include "crypto/openssl_util.h"
@@ -59,6 +67,7 @@
 
 #if defined(OS_ANDROID)
 #include "base/android/application_status_listener.h"
+#include "net/android/http_auth_negotiate_android.h"
 #endif
 
 namespace network {
@@ -76,20 +85,20 @@ net::NetLog* GetNetLog() {
 constexpr auto kUpdateLoadStatesInterval =
     base::TimeDelta::FromMilliseconds(250);
 
-std::unique_ptr<net::NetworkChangeNotifier>
-CreateNetworkChangeNotifierIfNeeded() {
+std::unique_ptr<net::NetworkChangeNotifier> CreateNetworkChangeNotifierIfNeeded(
+    net::NetworkChangeNotifier::ConnectionType initial_connection_type,
+    net::NetworkChangeNotifier::ConnectionSubtype initial_connection_subtype) {
   // There is a global singleton net::NetworkChangeNotifier if NetworkService
   // is running inside of the browser process.
   if (!net::NetworkChangeNotifier::HasNetworkChangeNotifier()) {
-#if defined(OS_ANDROID)
-    // On Android, NetworkChangeNotifier objects are always set up in process
-    // before NetworkService is run.
-    return nullptr;
-#elif defined(OS_CHROMEOS) || defined(OS_IOS) || defined(OS_FUCHSIA)
-    // ChromeOS has its own implementation of NetworkChangeNotifier that lives
-    // outside of //net. iOS doesn't embed //content. Fuchsia doesn't have an
-    // implementation yet.
-    // TODO(xunjieli): Figure out what to do for these 3 platforms.
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+    // On Android and ChromeOS, network change events are synced from the
+    // browser process.
+    return std::make_unique<net::NetworkChangeNotifierPosix>(
+        initial_connection_type, initial_connection_subtype);
+#elif defined(OS_IOS) || defined(OS_FUCHSIA)
+    // iOS doesn't embed //content. Fuchsia doesn't have an implementation yet.
+    // TODO(xunjieli): Figure out what to do for these 2 platforms.
     NOTIMPLEMENTED();
     return nullptr;
 #endif
@@ -133,15 +142,86 @@ bool LoadInfoIsMoreInteresting(const mojom::LoadInfo& a,
   return a.load_state > b.load_state;
 }
 
+#if defined(OS_ANDROID) && BUILDFLAG(USE_KERBEROS)
+// Used for Negotiate authentication on Android, which needs to generate tokens
+// in the browser process.
+class NetworkServiceAuthNegotiateAndroid : public net::HttpNegotiateAuthSystem {
+ public:
+  NetworkServiceAuthNegotiateAndroid(NetworkService* network_service,
+                                     const net::HttpAuthPreferences* prefs)
+      : network_service_(network_service), auth_negotiate_(prefs) {}
+  ~NetworkServiceAuthNegotiateAndroid() override = default;
+
+  // HttpNegotiateAuthSystem implementation:
+  bool Init() override { return auth_negotiate_.Init(); }
+
+  bool NeedsIdentity() const override {
+    return auth_negotiate_.NeedsIdentity();
+  }
+
+  bool AllowsExplicitCredentials() const override {
+    return auth_negotiate_.AllowsExplicitCredentials();
+  }
+
+  net::HttpAuth::AuthorizationResult ParseChallenge(
+      net::HttpAuthChallengeTokenizer* tok) override {
+    return auth_negotiate_.ParseChallenge(tok);
+  }
+
+  int GenerateAuthToken(const net::AuthCredentials* credentials,
+                        const std::string& spn,
+                        const std::string& channel_bindings,
+                        std::string* auth_token,
+                        net::CompletionOnceCallback callback) override {
+    network_service_->client()->OnGenerateHttpNegotiateAuthToken(
+        auth_negotiate_.server_auth_token(), auth_negotiate_.can_delegate(),
+        auth_negotiate_.GetAuthAndroidNegotiateAccountType(), spn,
+        base::BindOnce(&NetworkServiceAuthNegotiateAndroid::Finish,
+                       weak_factory_.GetWeakPtr(), auth_token,
+                       std::move(callback)));
+    return net::ERR_IO_PENDING;
+  }
+
+  void Delegate() override { auth_negotiate_.Delegate(); }
+
+ private:
+  void Finish(std::string* auth_token_out,
+              net::CompletionOnceCallback callback,
+              int result,
+              const std::string& auth_token) {
+    *auth_token_out = auth_token;
+    std::move(callback).Run(result);
+  }
+
+  NetworkService* network_service_ = nullptr;
+  net::android::HttpAuthNegotiateAndroid auth_negotiate_;
+  base::WeakPtrFactory<NetworkServiceAuthNegotiateAndroid> weak_factory_{this};
+};
+
+std::unique_ptr<net::HttpNegotiateAuthSystem> CreateAuthSystem(
+    NetworkService* network_service,
+    const net::HttpAuthPreferences* prefs) {
+  return std::make_unique<NetworkServiceAuthNegotiateAndroid>(network_service,
+                                                              prefs);
+}
+#endif
+
 }  // namespace
 
 NetworkService::NetworkService(
     std::unique_ptr<service_manager::BinderRegistry> registry,
     mojom::NetworkServiceRequest request,
-    net::NetLog* net_log)
+    net::NetLog* net_log,
+    service_manager::mojom::ServiceRequest service_request,
+    bool delay_initialization_until_set_client)
     : registry_(std::move(registry)), binding_(this) {
   DCHECK(!g_network_service);
   g_network_service = this;
+
+  // In testing environments, |service_request| may not be provided.
+  if (service_request.is_pending())
+    service_binding_.Bind(std::move(service_request));
+
   // |registry_| is nullptr when an in-process NetworkService is
   // created directly. The latter is done in concert with using
   // CreateNetworkContextWithBuilder to ease the transition to using the
@@ -153,6 +233,22 @@ NetworkService::NetworkService(
   } else if (request.is_pending()) {
     Bind(std::move(request));
   }
+
+  if (net_log) {
+    net_log_ = net_log;
+  } else {
+    net_log_ = GetNetLog();
+  }
+
+  if (!delay_initialization_until_set_client)
+    Initialize(mojom::NetworkServiceParams::New());
+}
+
+void NetworkService::Initialize(mojom::NetworkServiceParamsPtr params) {
+  if (initialized_)
+    return;
+
+  initialized_ = true;
 
 #if defined(OS_ANDROID) && defined(ARCH_CPU_ARMEL)
   // Make sure OpenSSL is initialized before using it to histogram data.
@@ -166,7 +262,17 @@ NetworkService::NetworkService(
                         CRYPTO_needs_hwcap2_workaround());
 #endif
 
+  if (!params->environment.empty())
+    SetEnvironment(std::move(params->environment));
+
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+
+  // Set-up the global port overrides.
+  if (command_line->HasSwitch(switches::kExplicitlyAllowedPorts)) {
+    std::string allowed_ports =
+        command_line->GetSwitchValueASCII(switches::kExplicitlyAllowedPorts);
+    net::SetExplicitlyAllowedPorts(allowed_ports);
+  }
 
   // Record this once per session, though the switch is appled on a
   // per-NetworkContext basis.
@@ -175,13 +281,11 @@ NetworkService::NetworkService(
       command_line->HasSwitch(switches::kIgnoreCertificateErrorsSPKIList));
 
   network_change_manager_ = std::make_unique<NetworkChangeManager>(
-      CreateNetworkChangeNotifierIfNeeded());
-
-  if (net_log) {
-    net_log_ = net_log;
-  } else {
-    net_log_ = GetNetLog();
-  }
+      CreateNetworkChangeNotifierIfNeeded(
+          net::NetworkChangeNotifier::ConnectionType(
+              params->initial_connection_type),
+          net::NetworkChangeNotifier::ConnectionSubtype(
+              params->initial_connection_subtype)));
 
   trace_net_log_observer_.WatchForTraceStart(net_log_);
 
@@ -194,11 +298,18 @@ NetworkService::NetworkService(
   network_quality_estimator_manager_ =
       std::make_unique<NetworkQualityEstimatorManager>(net_log_);
 
+  dns_config_change_manager_ = std::make_unique<DnsConfigChangeManager>();
+
   host_resolver_ = CreateHostResolver(net_log_);
 
   network_usage_accumulator_ = std::make_unique<NetworkUsageAccumulator>();
+
+  http_auth_cache_copier_ = std::make_unique<HttpAuthCacheCopier>();
+
+#if BUILDFLAG(IS_CT_SUPPORTED)
   sth_distributor_ =
       std::make_unique<certificate_transparency::STHDistributor>();
+#endif  // BUILDFLAG(IS_CT_SUPPORTED)
   crl_set_distributor_ = std::make_unique<CRLSetDistributor>();
 }
 
@@ -216,7 +327,9 @@ NetworkService::~NetworkService() {
     file_net_log_observer_->StopObserving(nullptr /*polled_data*/,
                                           base::OnceClosure());
   }
-  trace_net_log_observer_.StopWatchForTraceStart();
+
+  if (initialized_)
+    trace_net_log_observer_.StopWatchForTraceStart();
 }
 
 void NetworkService::set_os_crypt_is_configured() {
@@ -225,8 +338,10 @@ void NetworkService::set_os_crypt_is_configured() {
 
 std::unique_ptr<NetworkService> NetworkService::Create(
     mojom::NetworkServiceRequest request,
-    net::NetLog* net_log) {
-  return std::make_unique<NetworkService>(nullptr, std::move(request), net_log);
+    net::NetLog* net_log,
+    service_manager::mojom::ServiceRequest service_request) {
+  return std::make_unique<NetworkService>(nullptr, std::move(request), net_log,
+                                          std::move(service_request));
 }
 
 std::unique_ptr<mojom::NetworkContext>
@@ -249,8 +364,14 @@ void NetworkService::SetHostResolver(
 }
 
 std::unique_ptr<NetworkService> NetworkService::CreateForTesting() {
-  return base::WrapUnique(
-      new NetworkService(std::make_unique<service_manager::BinderRegistry>()));
+  return CreateForTesting(nullptr);
+}
+
+std::unique_ptr<NetworkService> NetworkService::CreateForTesting(
+    service_manager::mojom::ServiceRequest service_request) {
+  return std::make_unique<NetworkService>(
+      std::make_unique<service_manager::BinderRegistry>(),
+      nullptr /* request */, nullptr /* net_log */, std::move(service_request));
 }
 
 void NetworkService::RegisterNetworkContext(NetworkContext* network_context) {
@@ -266,7 +387,7 @@ void NetworkService::RegisterNetworkContext(NetworkContext* network_context) {
 }
 
 void NetworkService::DeregisterNetworkContext(NetworkContext* network_context) {
-  // If the NetworkContext is bthe primary network context, all other
+  // If the NetworkContext is the primary network context, all other
   // NetworkContexts must already have been destroyed.
   DCHECK(!network_context->IsPrimaryNetworkContext() ||
          network_contexts_.size() == 1);
@@ -283,8 +404,10 @@ void NetworkService::CreateNetLogEntriesForActiveObjects(
   return net::CreateNetLogEntriesForActiveObjects(contexts, observer);
 }
 
-void NetworkService::SetClient(mojom::NetworkServiceClientPtr client) {
+void NetworkService::SetClient(mojom::NetworkServiceClientPtr client,
+                               mojom::NetworkServiceParamsPtr params) {
   client_ = std::move(client);
+  Initialize(std::move(params));
 }
 
 void NetworkService::StartNetLog(base::File file,
@@ -381,7 +504,11 @@ void NetworkService::SetUpHttpAuth(
       ,
       http_auth_static_params->gssapi_library_name
 #endif
-      );
+#if defined(OS_ANDROID) && BUILDFLAG(USE_KERBEROS)
+      ,
+      base::BindRepeating(&CreateAuthSystem, this)
+#endif
+  );
 }
 
 void NetworkService::ConfigureHttpAuthPrefs(
@@ -406,20 +533,27 @@ void NetworkService::ConfigureHttpAuthPrefs(
 #endif
 }
 
-void NetworkService::SetRawHeadersAccess(uint32_t process_id, bool allow) {
+void NetworkService::SetRawHeadersAccess(
+    uint32_t process_id,
+    const std::vector<url::Origin>& origins) {
   DCHECK(process_id);
-  if (allow)
-    processes_with_raw_headers_access_.insert(process_id);
-  else
-    processes_with_raw_headers_access_.erase(process_id);
+  if (!origins.size()) {
+    raw_headers_access_origins_by_pid_.erase(process_id);
+  } else {
+    raw_headers_access_origins_by_pid_[process_id] =
+        base::flat_set<url::Origin>(origins.begin(), origins.end());
+  }
 }
 
-bool NetworkService::HasRawHeadersAccess(uint32_t process_id) const {
+bool NetworkService::HasRawHeadersAccess(uint32_t process_id,
+                                         const GURL& resource_url) const {
   // Allow raw headers for browser-initiated requests.
   if (!process_id)
     return true;
-  return processes_with_raw_headers_access_.find(process_id) !=
-         processes_with_raw_headers_access_.end();
+  auto it = raw_headers_access_origins_by_pid_.find(process_id);
+  if (it == raw_headers_access_origins_by_pid_.end())
+    return false;
+  return it->second.find(url::Origin::Create(resource_url)) != it->second.end();
 }
 
 net::NetLog* NetworkService::net_log() const {
@@ -436,17 +570,39 @@ void NetworkService::GetNetworkQualityEstimatorManager(
   network_quality_estimator_manager_->AddRequest(std::move(request));
 }
 
+void NetworkService::GetDnsConfigChangeManager(
+    mojom::DnsConfigChangeManagerRequest request) {
+  dns_config_change_manager_->AddBinding(std::move(request));
+}
+
 void NetworkService::GetTotalNetworkUsages(
     mojom::NetworkService::GetTotalNetworkUsagesCallback callback) {
   std::move(callback).Run(network_usage_accumulator_->GetTotalNetworkUsages());
 }
 
+void NetworkService::GetNetworkList(
+    uint32_t policy,
+    mojom::NetworkService::GetNetworkListCallback callback) {
+  net::NetworkInterfaceList networks;
+  if (net::GetNetworkList(&networks, policy)) {
+    std::move(callback).Run(networks);
+  } else {
+    std::move(callback).Run(base::nullopt);
+  }
+}
+
+#if BUILDFLAG(IS_CT_SUPPORTED)
 void NetworkService::UpdateSignedTreeHead(const net::ct::SignedTreeHead& sth) {
   sth_distributor_->NewSTHObserved(sth);
 }
+#endif  // BUILDFLAG(IS_CT_SUPPORTED)
 
 void NetworkService::UpdateCRLSet(base::span<const uint8_t> crl_set) {
   crl_set_distributor_->OnNewCRLSet(crl_set);
+}
+
+void NetworkService::OnCertDBChanged() {
+  net::CertDatabase::GetInstance()->NotifyObserversCertDBChanged();
 }
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -481,6 +637,11 @@ void NetworkService::RemoveCorbExceptionForPlugin(uint32_t process_id) {
   CrossOriginReadBlocking::RemoveExceptionForPlugin(process_id);
 }
 
+void NetworkService::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+  base::MemoryPressureListener::NotifyMemoryPressure(memory_pressure_level);
+}
+
 #if defined(OS_ANDROID)
 void NetworkService::OnApplicationStateChange(
     base::android::ApplicationState state) {
@@ -489,10 +650,22 @@ void NetworkService::OnApplicationStateChange(
 }
 #endif
 
+void NetworkService::SetEnvironment(
+    std::vector<mojom::EnvironmentVariablePtr> environment) {
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
+  for (const auto& variable : environment)
+    env->SetVar(variable->name, variable->value);
+}
+
 net::HttpAuthHandlerFactory* NetworkService::GetHttpAuthHandlerFactory() {
   if (!http_auth_handler_factory_) {
     http_auth_handler_factory_ = net::HttpAuthHandlerFactory::CreateDefault(
-        host_resolver_.get(), &http_auth_preferences_);
+        host_resolver_.get(), &http_auth_preferences_
+#if defined(OS_ANDROID) && BUILDFLAG(USE_KERBEROS)
+        ,
+        base::BindRepeating(&CreateAuthSystem, this)
+#endif
+    );
   }
   return http_auth_handler_factory_.get();
 }
@@ -502,9 +675,11 @@ void NetworkService::OnBeforeURLRequest() {
     MaybeStartUpdateLoadInfoTimer();
 }
 
+#if BUILDFLAG(IS_CT_SUPPORTED)
 certificate_transparency::STHReporter* NetworkService::sth_reporter() {
   return sth_distributor_.get();
 }
+#endif  // BUILDFLAG(IS_CT_SUPPORTED)
 
 void NetworkService::OnBindInterface(
     const service_manager::BindSourceInfo& source_info,
@@ -530,8 +705,10 @@ void NetworkService::DestroyNetworkContexts() {
   // The SetDnsConfigOverrides() call will will fail any in-progress DNS
   // lookups, but only if there are current config overrides (which there will
   // be if DNS over HTTPS is currently enabled).
-  host_resolver_->SetDnsConfigOverrides(net::DnsConfigOverrides());
-  host_resolver_->SetRequestContext(nullptr);
+  if (host_resolver_) {
+    host_resolver_->SetDnsConfigOverrides(net::DnsConfigOverrides());
+    host_resolver_->SetRequestContext(nullptr);
+  }
 
   DCHECK_LE(owned_network_contexts_.size(), 1u);
   owned_network_contexts_.clear();

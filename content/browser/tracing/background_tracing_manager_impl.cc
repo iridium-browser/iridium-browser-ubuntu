@@ -115,11 +115,9 @@ BackgroundTracingManagerImpl::~BackgroundTracingManagerImpl() {
 }
 
 void BackgroundTracingManagerImpl::AddMetadataGeneratorFunction() {
-  TracingControllerImpl::GetInstance()
-      ->GetTraceEventAgent()
-      ->AddMetadataGeneratorFunction(base::BindRepeating(
-          &BackgroundTracingManagerImpl::GenerateMetadataDict,
-          base::Unretained(this)));
+  tracing::TraceEventAgent::GetInstance()->AddMetadataGeneratorFunction(
+      base::BindRepeating(&BackgroundTracingManagerImpl::GenerateMetadataDict,
+                          base::Unretained(this)));
 }
 
 void BackgroundTracingManagerImpl::WhenIdle(
@@ -491,7 +489,7 @@ void BackgroundTracingManagerImpl::InvalidateTriggerHandlesForTesting() {
 void BackgroundTracingManagerImpl::SetRuleTriggeredCallbackForTesting(
     const base::Closure& callback) {
   rule_triggered_callback_for_testing_ = callback;
-};
+}
 
 void BackgroundTracingManagerImpl::FireTimerForTesting() {
   DCHECK(tracing_timer_);
@@ -504,10 +502,27 @@ void BackgroundTracingManagerImpl::StartTracing(
   TraceConfig config = GetConfigForCategoryPreset(preset, record_mode);
   if (requires_anonymized_data_)
     config.EnableArgumentFilter();
+#if defined(OS_ANDROID)
+  // Set low trace buffer size on Android in order to upload small trace files.
+  if (config_->tracing_mode() == BackgroundTracingConfigImpl::PREEMPTIVE)
+    config.SetTraceBufferSizeInEvents(20000);
+#endif
+
+  // Activate the categories immediately. StartTracing eventually does this
+  // itself, but asynchronously via PostTask, and in the meantime events will be
+  // dropped. This ensures that we start recording events for those categories
+  // immediately.
+  if (is_tracing_) {
+    uint8_t modes = base::trace_event::TraceLog::RECORDING_MODE;
+    if (!config.event_filters().empty())
+      modes |= base::trace_event::TraceLog::FILTERING_MODE;
+    base::trace_event::TraceLog::GetInstance()->SetEnabled(config, modes);
+  }
 
   is_tracing_ = TracingControllerImpl::GetInstance()->StartTracing(
-      config, base::Bind(&BackgroundTracingManagerImpl::OnStartTracingDone,
-                         base::Unretained(this), preset));
+      config, base::BindOnce(&BackgroundTracingManagerImpl::OnStartTracingDone,
+                             base::Unretained(this), preset));
+
   RecordBackgroundTracingMetric(RECORDING_ENABLED);
 }
 
@@ -630,12 +645,48 @@ void BackgroundTracingManagerImpl::BeginFinalizing(
 }
 
 void BackgroundTracingManagerImpl::AbortScenario() {
+  if (is_tracing_) {
+    scoped_refptr<TracingControllerImpl::TraceDataEndpoint> trace_data_endpoint;
+    trace_data_endpoint =
+        TracingControllerImpl::CreateCallbackEndpoint(base::BindRepeating(
+            &BackgroundTracingManagerImpl::OnAbortScenarioReceived,
+            base::Unretained(this)));
+
+    content::TracingControllerImpl::GetInstance()->StopTracing(
+        trace_data_endpoint);
+  } else {
+    OnAbortScenarioReceived(nullptr, nullptr);
+  }
+}
+
+void BackgroundTracingManagerImpl::OnAbortScenarioReceived(
+    std::unique_ptr<const base::DictionaryValue> metadata,
+    base::RefCountedString* trace_str) {
+  if (base::trace_event::TraceLog::GetInstance()->IsEnabled()) {
+    // Since the BackgroundTracingManager directly enables tracing
+    // in TraceLog, in addition to going through Mojo, there's an edge-case
+    // where tracing is rapidly stopped after starting, too quickly for the
+    // TraceEventAgent of the browser process to register itself, which means
+    // that we're left in a state where the Mojo interface doesn't think we're
+    // tracing but TraceLog is still enabled. If that's the case, we abort
+    // tracing here.
+    auto record_mode =
+        (config_->tracing_mode() == BackgroundTracingConfigImpl::PREEMPTIVE)
+            ? base::trace_event::RECORD_CONTINUOUSLY
+            : base::trace_event::RECORD_UNTIL_FULL;
+    TraceConfig config =
+        GetConfigForCategoryPreset(config_->category_preset(), record_mode);
+
+    uint8_t modes = base::trace_event::TraceLog::RECORDING_MODE;
+    if (!config.event_filters().empty())
+      modes |= base::trace_event::TraceLog::FILTERING_MODE;
+    base::trace_event::TraceLog::GetInstance()->SetDisabled(modes);
+  }
+
   is_tracing_ = false;
   triggered_named_event_handle_ = -1;
   config_.reset();
   tracing_timer_.reset();
-
-  content::TracingControllerImpl::GetInstance()->StopTracing(nullptr);
 
   for (auto* observer : background_tracing_observers_)
     observer->OnScenarioAborted();
@@ -674,8 +725,7 @@ TraceConfig BackgroundTracingManagerImpl::GetConfigForCategoryPreset(
     case BackgroundTracingConfigImpl::CategoryPreset::BENCHMARK_NAVIGATION: {
       auto config = TraceConfig(
           "benchmark,toplevel,ipc,base,browser,navigation,omnibox,ui,shutdown,"
-          "safe_browsing,task_scheduler,"
-          "disabled-by-default-task_scheduler_diagnostics,"
+          "safe_browsing,Java,EarlyJava,loading,startup,"
           "disabled-by-default-system_stats,disabled-by-default-cpu_profiler",
           record_mode);
       // Filter only browser process events.
@@ -684,6 +734,20 @@ TraceConfig BackgroundTracingManagerImpl::GetConfigForCategoryPreset(
       config.SetProcessFilterConfig(process_config);
       return config;
     }
+    case BackgroundTracingConfigImpl::CategoryPreset::BENCHMARK_RENDERERS:
+      return TraceConfig(
+          "benchmark,toplevel,ipc,base,ui,v8,renderer,blink,blink_gc,"
+          "disabled-by-default-v8.gc,"
+          "disabled-by-default-blink_gc,"
+          "disabled-by-default-renderer.scheduler,"
+          "disabled-by-default-system_stats,disabled-by-default-cpu_profiler",
+          record_mode);
+    case BackgroundTracingConfigImpl::CategoryPreset::BENCHMARK_SERVICEWORKER:
+      return TraceConfig(
+          "benchmark,toplevel,ipc,base,ServiceWorker,CacheStorage,Blob,"
+          "loader,loading,navigation,blink.user_timing,"
+          "disabled-by-default-network",
+          record_mode);
     case BackgroundTracingConfigImpl::CategoryPreset::BLINK_STYLE:
       return TraceConfig("blink_style", record_mode);
 
@@ -699,7 +763,6 @@ TraceConfig BackgroundTracingManagerImpl::GetConfigForCategoryPreset(
       config.ResetMemoryDumpConfig(memory_config);
       return config;
     }
-
     case BackgroundTracingConfigImpl::CategoryPreset::CATEGORY_PRESET_UNSET:
       NOTREACHED();
   }

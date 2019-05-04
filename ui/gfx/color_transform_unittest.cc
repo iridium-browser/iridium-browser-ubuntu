@@ -428,7 +428,7 @@ TEST(SimpleColorSpace, DefaultToSRGB) {
 // This tests to make sure that we don't emit "pow" parts of a
 // transfer function unless necessary.
 TEST(SimpleColorSpace, ShaderSourceTrFnOptimizations) {
-  SkMatrix44 primaries;
+  skcms_Matrix3x3 primaries;
   gfx::ColorSpace::CreateSRGB().GetPrimaryMatrix(&primaries);
 
   SkColorSpaceTransferFn fn_no_pow = {
@@ -458,12 +458,7 @@ TEST(SimpleColorSpace, ShaderSourceTrFnOptimizations) {
 // to make reviewing shader code simpler by giving an example of the resulting
 // shader source. This should be updated whenever shader generation is updated.
 // This test produces slightly different results on Android.
-#if defined(OS_ANDROID)
-#define MAYBE_SampleShaderSource DISABLED_SampleShaderSource
-#else
-#define MAYBE_SampleShaderSource SampleShaderSource
-#endif
-TEST(SimpleColorSpace, MAYBE_SampleShaderSource) {
+TEST(SimpleColorSpace, SampleShaderSource) {
   ColorSpace bt709 = ColorSpace::CreateREC709();
   ColorSpace output(ColorSpace::PrimaryID::BT2020,
                     ColorSpace::TransferID::GAMMA28);
@@ -479,7 +474,7 @@ TEST(SimpleColorSpace, MAYBE_SampleShaderSource) {
       "}\n"
       "float TransferFn3(float v) {\n"
       "  if (v < 0.00000000e+00)\n"
-      "    return v;\n"
+      "    return 0.00000000e+00 * v;\n"
       "  return pow(v, 3.57142866e-01);\n"
       "}\n"
       "vec3 DoColorConversion(vec3 color) {\n"

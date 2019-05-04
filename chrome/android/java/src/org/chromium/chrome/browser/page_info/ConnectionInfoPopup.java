@@ -24,20 +24,20 @@ import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ResourceId;
-import org.chromium.chrome.browser.modaldialog.DialogDismissalCause;
-import org.chromium.chrome.browser.modaldialog.ModalDialogManager;
-import org.chromium.chrome.browser.modaldialog.ModalDialogView;
-import org.chromium.chrome.browser.modaldialog.ModalDialogView.ButtonType;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.vr.UiUnsupportedMode;
 import org.chromium.chrome.browser.vr.VrModuleProvider;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
+import org.chromium.ui.modaldialog.DialogDismissalCause;
+import org.chromium.ui.modaldialog.ModalDialogManager;
+import org.chromium.ui.modaldialog.ModalDialogProperties;
+import org.chromium.ui.modelutil.PropertyModel;
 
 /**
  * Java side of Android implementation of the page info UI.
  */
-public class ConnectionInfoPopup implements OnClickListener, ModalDialogView.Controller {
+public class ConnectionInfoPopup implements OnClickListener, ModalDialogProperties.Controller {
     private static final String TAG = "ConnectionInfoPopup";
 
     private static final String HELP_URL =
@@ -45,7 +45,7 @@ public class ConnectionInfoPopup implements OnClickListener, ModalDialogView.Con
 
     private final Context mContext;
     private final ModalDialogManager mModalDialogManager;
-    private ModalDialogView mDialog;
+    private PropertyModel mDialogModel;
     private final LinearLayout mContainer;
     private final WebContents mWebContents;
     private final WebContentsObserver mWebContentsObserver;
@@ -82,13 +82,13 @@ public class ConnectionInfoPopup implements OnClickListener, ModalDialogView.Con
             public void navigationEntryCommitted() {
                 // If a navigation is committed (e.g. from in-page redirect), the data we're
                 // showing is stale so dismiss the dialog.
-                dismissDialog();
+                dismissDialog(DialogDismissalCause.UNKNOWN);
             }
 
             @Override
             public void destroy() {
                 super.destroy();
-                dismissDialog();
+                dismissDialog(DialogDismissalCause.UNKNOWN);
             }
         };
     }
@@ -143,14 +143,15 @@ public class ConnectionInfoPopup implements OnClickListener, ModalDialogView.Con
         assert mCertificateViewerTextView == null;
         mCertificateViewerTextView = new TextView(mContext);
         mCertificateViewerTextView.setText(label);
-        ApiCompatibilityUtils.setTextAppearance(mCertificateViewerTextView, R.style.BlueLink3);
+        ApiCompatibilityUtils.setTextAppearance(
+                mCertificateViewerTextView, R.style.TextAppearance_BlueLink3);
         mCertificateViewerTextView.setOnClickListener(this);
         mCertificateViewerTextView.setPadding(0, mPaddingThin, 0, 0);
         mCertificateLayout.addView(mCertificateViewerTextView);
     }
 
-    private void dismissDialog() {
-        mModalDialogManager.dismissDialog(mDialog);
+    private void dismissDialog(@DialogDismissalCause int dismissalCause) {
+        mModalDialogManager.dismissDialog(mDialogModel, dismissalCause);
     }
 
     @CalledByNative
@@ -179,7 +180,7 @@ public class ConnectionInfoPopup implements OnClickListener, ModalDialogView.Con
         mMoreInfoLink = new TextView(mContext);
         mLinkUrl = HELP_URL;
         mMoreInfoLink.setText(linkText);
-        ApiCompatibilityUtils.setTextAppearance(mMoreInfoLink, R.style.BlueLink3);
+        ApiCompatibilityUtils.setTextAppearance(mMoreInfoLink, R.style.TextAppearance_BlueLink3);
         mMoreInfoLink.setPadding(0, mPaddingThin, 0, 0);
         mMoreInfoLink.setOnClickListener(this);
         mDescriptionLayout.addView(mMoreInfoLink);
@@ -191,18 +192,20 @@ public class ConnectionInfoPopup implements OnClickListener, ModalDialogView.Con
         ScrollView scrollView = new ScrollView(mContext);
         scrollView.addView(mContainer);
 
-        ModalDialogView.Params params = new ModalDialogView.Params();
-        params.customView = scrollView;
-        params.cancelOnTouchOutside = true;
-        mDialog = new ModalDialogView(this, params);
-        mModalDialogManager.showDialog(mDialog, ModalDialogManager.ModalDialogType.APP, true);
+        mDialogModel = new PropertyModel.Builder(ModalDialogProperties.ALL_KEYS)
+                               .with(ModalDialogProperties.CONTROLLER, this)
+                               .with(ModalDialogProperties.CUSTOM_VIEW, scrollView)
+                               .with(ModalDialogProperties.CANCEL_ON_TOUCH_OUTSIDE, true)
+                               .build();
+
+        mModalDialogManager.showDialog(mDialogModel, ModalDialogManager.ModalDialogType.APP, true);
     }
 
     @Override
     public void onClick(View v) {
         if (mResetCertDecisionsButton == v) {
             nativeResetCertDecisions(mNativeConnectionInfoPopup, mWebContents);
-            dismissDialog();
+            dismissDialog(DialogDismissalCause.ACTION_ON_CONTENT);
         } else if (mCertificateViewerTextView == v) {
             byte[][] certChain = CertificateChainHelper.getCertificateChain(mWebContents);
             if (certChain == null) {
@@ -229,17 +232,18 @@ public class ConnectionInfoPopup implements OnClickListener, ModalDialogView.Con
     }
 
     @Override
-    public void onClick(@ButtonType int buttonType) {}
+    public void onClick(PropertyModel model, int buttonType) {}
 
     @Override
-    public void onDismiss(@DialogDismissalCause int dismissalCause) {
+    public void onDismiss(PropertyModel model, int dismissalCause) {
         assert mNativeConnectionInfoPopup != 0;
         mWebContentsObserver.destroy();
         nativeDestroy(mNativeConnectionInfoPopup);
+        mDialogModel = null;
     }
 
     private void showConnectionSecurityInfo() {
-        dismissDialog();
+        dismissDialog(DialogDismissalCause.ACTION_ON_CONTENT);
         try {
             Intent i = Intent.parseUri(mLinkUrl, Intent.URI_INTENT_SCHEME);
             i.putExtra(Browser.EXTRA_CREATE_NEW_TAB, true);

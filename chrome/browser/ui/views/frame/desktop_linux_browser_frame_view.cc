@@ -20,8 +20,7 @@ DesktopLinuxBrowserFrameView::DesktopLinuxBrowserFrameView(
     OpaqueBrowserFrameViewLayout* layout,
     std::unique_ptr<views::NavButtonProvider> nav_button_provider)
     : OpaqueBrowserFrameView(frame, browser_view, layout),
-      nav_button_provider_(std::move(nav_button_provider)) {
-}
+      nav_button_provider_(std::move(nav_button_provider)) {}
 
 DesktopLinuxBrowserFrameView::~DesktopLinuxBrowserFrameView() {}
 
@@ -34,9 +33,14 @@ void DesktopLinuxBrowserFrameView::Layout() {
   OpaqueBrowserFrameView::Layout();
 }
 
+DesktopLinuxBrowserFrameView::FrameButtonStyle
+DesktopLinuxBrowserFrameView::GetFrameButtonStyle() const {
+  return FrameButtonStyle::kImageButton;
+}
+
 void DesktopLinuxBrowserFrameView::MaybeUpdateCachedFrameButtonImages() {
   DrawFrameButtonParams params{
-      GetTopAreaHeight() - layout()->TitlebarTopThickness(!IsMaximized()),
+      GetTopAreaHeight() - layout()->FrameTopThickness(!IsMaximized()),
       IsMaximized(), ShouldPaintAsActive()};
   if (cache_ == params)
     return;
@@ -52,13 +56,16 @@ void DesktopLinuxBrowserFrameView::MaybeUpdateCachedFrameButtonImages() {
     for (size_t state = 0; state < views::Button::STATE_COUNT; state++) {
       views::Button::ButtonState button_state =
           static_cast<views::Button::ButtonState>(state);
-      GetButtonFromDisplayType(type)->SetImage(
+      views::Button* button = GetButtonFromDisplayType(type);
+      DCHECK_EQ(std::string(views::ImageButton::kViewClassName),
+                button->GetClassName());
+      static_cast<views::ImageButton*>(button)->SetImage(
           button_state, nav_button_provider_->GetImage(type, button_state));
     }
   }
 }
 
-views::ImageButton* DesktopLinuxBrowserFrameView::GetButtonFromDisplayType(
+views::Button* DesktopLinuxBrowserFrameView::GetButtonFromDisplayType(
     chrome::FrameButtonDisplayType type) {
   switch (type) {
     case chrome::FrameButtonDisplayType::kMinimize:

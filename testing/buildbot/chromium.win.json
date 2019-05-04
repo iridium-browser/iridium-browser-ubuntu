@@ -105,8 +105,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -134,6 +133,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -211,14 +213,14 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -331,6 +333,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "gcm_unit_tests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "gcp_unittests"
       },
       {
         "swarming": {
@@ -708,7 +716,13 @@
         }
       },
       {
+        "args": [
+          "--smoke-test-mode"
+        ],
         "isolate_name": "components_perftests",
+        "merge": {
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "components_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -726,6 +740,18 @@
         "name": "metrics_python_tests",
         "swarming": {
           "can_use_on_swarming_builders": true
+        }
+      },
+      {
+        "isolate_name": "mini_installer_tests",
+        "name": "mini_installer_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "integrity": "high"
+            }
+          ]
         }
       },
       {
@@ -761,6 +787,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -932,14 +964,13 @@
               "os": "Windows-10-15063"
             }
           ],
-          "shards": 10
+          "shards": 15
         },
         "test": "browser_tests"
       },
       {
         "args": [
           "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter",
           "--disable-features=WebRTC-H264WithOpenH264FFmpeg"
         ],
         "name": "network_service_browser_tests",
@@ -951,7 +982,7 @@
               "os": "Windows-10-15063"
             }
           ],
-          "shards": 15
+          "shards": 20
         },
         "test": "browser_tests"
       },
@@ -986,6 +1017,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -1144,14 +1178,14 @@
               "cpu": "x86-64",
               "os": "Windows-10-15063"
             }
-          ]
+          ],
+          "shards": 6
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -1366,6 +1400,18 @@
           ]
         },
         "test": "gcm_unit_tests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "cpu": "x86-64",
+              "os": "Windows-10-15063"
+            }
+          ]
+        },
+        "test": "gcp_unittests"
       },
       {
         "swarming": {
@@ -2206,6 +2252,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -2349,7 +2398,8 @@
               "cpu": "x86-64",
               "os": "Windows-10-15063"
             }
-          ]
+          ],
+          "shards": 6
         },
         "test": "content_browsertests"
       },
@@ -2491,6 +2541,7 @@
         "test": "events_unittests"
       },
       {
+        "experiment_percentage": 100,
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -2537,6 +2588,18 @@
           ]
         },
         "test": "gcm_unit_tests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "cpu": "x86-64",
+              "os": "Windows-10-15063"
+            }
+          ]
+        },
+        "test": "gcp_unittests"
       },
       {
         "swarming": {
@@ -3259,7 +3322,7 @@
       },
       {
         "args": [
-          "--smoke-test-mode",
+          "--pageset-repeat=1",
           "--test-shard-map-filename=smoke_test_benchmark_shard_map.json",
           "--browser=debug_x64"
         ],
@@ -3320,6 +3383,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true,
@@ -3506,6 +3575,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -3573,7 +3645,8 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 6
         },
         "test": "content_browsertests"
       },
@@ -3671,6 +3744,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "gcm_unit_tests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "gcp_unittests"
       },
       {
         "swarming": {
@@ -4037,7 +4116,13 @@
         }
       },
       {
+        "args": [
+          "--smoke-test-mode"
+        ],
         "isolate_name": "components_perftests",
+        "merge": {
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "components_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -4055,6 +4140,18 @@
         "name": "metrics_python_tests",
         "swarming": {
           "can_use_on_swarming_builders": true
+        }
+      },
+      {
+        "isolate_name": "mini_installer_tests",
+        "name": "mini_installer_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "integrity": "high"
+            }
+          ]
         }
       },
       {
@@ -4090,6 +4187,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -4205,8 +4308,7 @@
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_browser_tests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_browser_tests",
         "swarming": {
@@ -4234,6 +4336,9 @@
         "test": "cacheinvalidation_unittests"
       },
       {
+        "args": [
+          "--gtest_filter=-*UsingRealWebcam*"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -4312,14 +4417,13 @@
       {
         "swarming": {
           "can_use_on_swarming_builders": true,
-          "shards": 2
+          "shards": 6
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--enable-features=NetworkService",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/mojo.fyi.network_content_browsertests.filter"
+          "--enable-features=NetworkService"
         ],
         "name": "network_service_content_browsertests",
         "swarming": {
@@ -4432,6 +4536,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "gcm_unit_tests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "gcp_unittests"
       },
       {
         "swarming": {
@@ -4808,7 +4918,7 @@
       },
       {
         "args": [
-          "--smoke-test-mode",
+          "--pageset-repeat=1",
           "--test-shard-map-filename=smoke_test_benchmark_shard_map.json",
           "--browser=debug"
         ],
@@ -4863,6 +4973,12 @@
       },
       {
         "isolate_name": "views_perftests",
+        "merge": {
+          "args": [
+            "--smoke-test-mode"
+          ],
+          "script": "//tools/perf/process_perf_results.py"
+        },
         "name": "views_perftests",
         "swarming": {
           "can_use_on_swarming_builders": true

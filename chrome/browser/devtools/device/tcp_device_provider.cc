@@ -18,10 +18,10 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "net/base/net_errors.h"
-#include "net/dns/host_resolver.h"
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/tcp_client_socket.h"
+#include "services/network/public/cpp/resolve_host_client_base.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 
 namespace {
@@ -36,8 +36,7 @@ static void RunSocketCallback(
   callback.Run(result, std::move(socket));
 }
 
-class ResolveHostAndOpenSocket final
-    : public network::mojom::ResolveHostClient {
+class ResolveHostAndOpenSocket final : public network::ResolveHostClientBase {
  public:
   ResolveHostAndOpenSocket(const net::HostPortPair& address,
                            const AdbClientSocket::SocketCallback& callback,
@@ -166,5 +165,5 @@ void TCPDeviceProvider::InitializeHostResolverOnUI(
     network::mojom::HostResolverRequest request) {
   g_browser_process->system_network_context_manager()
       ->GetContext()
-      ->CreateHostResolver(std::move(request));
+      ->CreateHostResolver(base::nullopt, std::move(request));
 }

@@ -9,22 +9,25 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
+#include "cc/input/browser_controls_state.h"
+#include "ui/gfx/geometry/scroll_offset.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
 namespace gfx {
 struct PresentationFeedback;
-class Vector2dF;
 }
 
 namespace viz {
+class LocalSurfaceIdAllocation;
 struct BeginFrameArgs;
 }
 
 namespace cc {
+struct ElementId;
 
 struct ApplyViewportChangesArgs {
   // Scroll offset delta of the inner (visual) viewport.
-  gfx::Vector2dF inner_delta;
+  gfx::ScrollOffset inner_delta;
 
   // Elastic overscroll effect offset delta. This is used only on Mac. a.k.a
   // "rubber-banding" overscroll.
@@ -37,6 +40,14 @@ struct ApplyViewportChangesArgs {
   // How much the browser controls have been shown or hidden. The ratio runs
   // between 0 (hidden) and 1 (full-shown). This is additive.
   float browser_controls_delta;
+
+  // Whether the browser controls have been locked to fully hidden or shown or
+  // whether they can be freely moved.
+  BrowserControlsState browser_controls_constraint;
+
+  // Set to true when a scroll gesture being handled on the compositor has
+  // ended.
+  bool scroll_gesture_did_end;
 };
 
 // A LayerTreeHost is bound to a LayerTreeHostClient. The main rendering
@@ -80,8 +91,11 @@ class LayerTreeHostClient {
   // (Blink's notions of) style, layout, paint invalidation and compositing
   // state. (The "compositing state" will result in a mutated layer tree on the
   // LayerTreeHost via additional interface indirections which lead back to
-  // mutations on the LayerTreeHost.)
-  virtual void UpdateLayerTreeHost() = 0;
+  // mutations on the LayerTreeHost.) The |record_main_frame_metrics| flag
+  // determines whether Blink will compute metrics related to main frame update
+  // time. If true, the caller must ensure that RecordEndOfFrameMetrics is
+  // called when this method returns and the total main frame time is known.
+  virtual void UpdateLayerTreeHost(bool record_main_frame_metrics) = 0;
 
   // Notifies the client of viewport-related changes that occured in the
   // LayerTreeHost since the last commit. This typically includes things
@@ -91,6 +105,15 @@ class LayerTreeHostClient {
   virtual void RecordWheelAndTouchScrollingCount(
       bool has_scrolled_by_wheel,
       bool has_scrolled_by_touch) = 0;
+
+  // Notifies the client when an overscroll has happened.
+  virtual void SendOverscrollEventFromImplSide(
+      const gfx::Vector2dF& overscroll_delta,
+      ElementId scroll_latched_element_id) = 0;
+  // Notifies the client when a gesture scroll has ended.
+  virtual void SendScrollEndEventFromImplSide(
+      ElementId scroll_latched_element_id) = 0;
+
   // Request a LayerTreeFrameSink from the client. When the client has one it
   // should call LayerTreeHost::SetLayerTreeFrameSink. This will result in
   // either DidFailToInitializeLayerTreeFrameSink or
@@ -109,6 +132,8 @@ class LayerTreeHostClient {
   // Record UMA and UKM metrics that require the time from the start of
   // BeginMainFrame to the Commit, or early out.
   virtual void RecordEndOfFrameMetrics(base::TimeTicks frame_begin_time) = 0;
+  virtual void DidGenerateLocalSurfaceIdAllocation(
+      const viz::LocalSurfaceIdAllocation& allocation) = 0;
 
  protected:
   virtual ~LayerTreeHostClient() {}

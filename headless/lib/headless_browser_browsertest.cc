@@ -231,7 +231,13 @@ IN_PROC_BROWSER_TEST_F(HeadlessBrowserTestWithProxy, SetProxyConfig) {
   EXPECT_TRUE(browser_context->GetAllWebContents().empty());
 }
 
-IN_PROC_BROWSER_TEST_F(HeadlessBrowserTest, WebGLSupported) {
+// TODO(crbug.com/867447): Flaky on Windows 10 debug.
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_WebGLSupported DISABLED_WebGLSupported
+#else
+#define MAYBE_WebGLSupported WebGLSupported
+#endif
+IN_PROC_BROWSER_TEST_F(HeadlessBrowserTest, MAYBE_WebGLSupported) {
   HeadlessBrowserContext* browser_context =
       browser()->CreateBrowserContextBuilder().Build();
 
@@ -434,7 +440,8 @@ class CrashReporterTest : public HeadlessBrowserTest,
 
 // TODO(skyostil): Minidump generation currently is only supported on Linux and
 // Mac.
-#if defined(HEADLESS_USE_BREAKPAD) || defined(OS_MACOSX)
+#if (defined(HEADLESS_USE_BREAKPAD) || defined(OS_MACOSX)) && \
+    !defined(ADDRESS_SANITIZER)
 #define MAYBE_GenerateMinidump GenerateMinidump
 #else
 #define MAYBE_GenerateMinidump DISABLED_GenerateMinidump

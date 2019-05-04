@@ -1336,8 +1336,16 @@ IN_PROC_BROWSER_TEST_P(TwoClientBookmarksSyncTestIncludingUssTests,
   ASSERT_FALSE(ContainsDuplicateBookmarks(0));
 }
 
+// Flaky on windows, see htpp://crbug.com/919877
+#if defined(OS_WIN)
+#define MAYBE_MC_MergeSimpleBMHierarchyEqualSetsUnderBMBar \
+  DISABLED_MC_MergeSimpleBMHierarchyEqualSetsUnderBMBar
+#else
+#define MAYBE_MC_MergeSimpleBMHierarchyEqualSetsUnderBMBar \
+  MC_MergeSimpleBMHierarchyEqualSetsUnderBMBar
+#endif
 IN_PROC_BROWSER_TEST_P(TwoClientBookmarksSyncTestIncludingUssTests,
-                       MC_MergeSimpleBMHierarchyEqualSetsUnderBMBar) {
+                       MAYBE_MC_MergeSimpleBMHierarchyEqualSetsUnderBMBar) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
   DisableVerifier();
 
@@ -1376,9 +1384,10 @@ IN_PROC_BROWSER_TEST_P(TwoClientBookmarksSyncTestIncludingUssTests,
   ASSERT_FALSE(ContainsDuplicateBookmarks(0));
 }
 
+// This test is flaky, see htpp://crbug.com/908771
 // Merge moderately complex bookmark models.
 IN_PROC_BROWSER_TEST_P(TwoClientBookmarksSyncTestIncludingUssTests,
-                       MC_MergeDifferentBMModelsModeratelyComplex) {
+                       DISABLED_MC_MergeDifferentBMModelsModeratelyComplex) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
   DisableVerifier();
 
@@ -1873,8 +1882,8 @@ IN_PROC_BROWSER_TEST_P(TwoClientBookmarksSyncTestIncludingUssTests,
 
   // Set a passphrase and enable encryption on Client 0. Client 1 will not
   // understand the bookmark updates.
-  GetSyncService(0)->SetEncryptionPassphrase(kValidPassphrase,
-                                             syncer::SyncService::EXPLICIT);
+  GetSyncService(0)->GetUserSettings()->SetEncryptionPassphrase(
+      kValidPassphrase);
   ASSERT_TRUE(PassphraseAcceptedChecker(GetSyncService(0)).Wait());
   ASSERT_TRUE(EnableEncryption(0));
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
@@ -1890,7 +1899,8 @@ IN_PROC_BROWSER_TEST_P(TwoClientBookmarksSyncTestIncludingUssTests,
 
   // Set the passphrase. Everything should resolve.
   ASSERT_TRUE(PassphraseRequiredChecker(GetSyncService(1)).Wait());
-  ASSERT_TRUE(GetSyncService(1)->SetDecryptionPassphrase(kValidPassphrase));
+  ASSERT_TRUE(GetSyncService(1)->GetUserSettings()->SetDecryptionPassphrase(
+      kValidPassphrase));
   ASSERT_TRUE(PassphraseAcceptedChecker(GetSyncService(1)).Wait());
   ASSERT_TRUE(BookmarksMatchChecker().Wait());
   ASSERT_EQ(0, GetClient(1)->GetLastCycleSnapshot().num_encryption_conflicts());
@@ -1968,6 +1978,38 @@ IN_PROC_BROWSER_TEST_P(TwoClientBookmarksSyncTestIncludingUssTests,
                        CreateSyncedBookmarks) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(AllModelsMatchVerifier());
+
+  fake_server_->InjectEntity(syncer::PersistentPermanentEntity::CreateNew(
+      syncer::BOOKMARKS, "synced_bookmarks", "Synced Bookmarks",
+      "google_chrome_bookmarks"));
+  ASSERT_TRUE(BookmarksMatchChecker().Wait());
+
+  // Add a bookmark on Client 0 and ensure it syncs over. This will also trigger
+  // both clients downloading the new Synced Bookmarks folder.
+  ASSERT_NE(nullptr, AddURL(0, "Google", GURL("http://www.google.com")));
+  ASSERT_TRUE(BookmarksMatchChecker().Wait());
+
+  // Now add a bookmark within the Synced Bookmarks folder and ensure it syncs
+  // over.
+  const BookmarkNode* synced_bookmarks = GetSyncedBookmarksNode(0);
+  ASSERT_TRUE(synced_bookmarks);
+  ASSERT_NE(nullptr, AddURL(0, synced_bookmarks, 0, "Google2",
+                            GURL("http://www.google2.com")));
+  ASSERT_TRUE(BookmarksMatchChecker().Wait());
+}
+
+// Enable enccryption and then trigger the server side creation of Synced
+// Bookmarks. Ensure both clients remain syncing afterwards. Add bookmarks to
+// the synced bookmarks folder and ensure both clients receive the bookmark.
+IN_PROC_BROWSER_TEST_P(TwoClientBookmarksSyncTestIncludingUssTests,
+                       CreateSyncedBookmarksWithSingleClientEnableEncryption) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(AllModelsMatchVerifier());
+
+  // Enable the encryption on Client 0.
+  ASSERT_TRUE(EnableEncryption(0));
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_TRUE(BookmarksMatchChecker().Wait());
 
   fake_server_->InjectEntity(syncer::PersistentPermanentEntity::CreateNew(
       syncer::BOOKMARKS, "synced_bookmarks", "Synced Bookmarks",

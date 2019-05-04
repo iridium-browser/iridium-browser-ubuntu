@@ -47,6 +47,7 @@
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 #include "url/url_canon.h"
 #include "url/url_canon_ip.h"
+#include "url/url_util.h"
 
 namespace blink {
 
@@ -98,11 +99,13 @@ static bool ShouldTreatAsOpaqueOrigin(const KURL& url) {
   if (!url.IsValid())
     return true;
 
-  // FIXME: Do we need to unwrap the URL further?
   KURL relevant_url;
   if (SecurityOrigin::ShouldUseInnerURL(url)) {
     relevant_url = SecurityOrigin::ExtractInnerURL(url);
     if (!relevant_url.IsValid())
+      return true;
+    // If the inner URL is also wrapped, the URL is invalid, so treat as opqaue.
+    if (SecurityOrigin::ShouldUseInnerURL(relevant_url))
       return true;
   } else {
     relevant_url = url;
@@ -119,13 +122,19 @@ static bool ShouldTreatAsOpaqueOrigin(const KURL& url) {
     return true;
 
   // Nonstandard schemes and unregistered schemes aren't known to contain hosts
-  // and/or ports, so they'll usually be placed in opaque origins. An exception
-  // is made for non-standard local schemes.
-  // TODO: Migrate "content:" and "externalfile:" to be standard schemes, and
-  // remove the local scheme exception.
-  if (!relevant_url.CanSetHostOrPort() &&
-      !SchemeRegistry::ShouldTreatURLSchemeAsLocal(relevant_url.Protocol())) {
-    return true;
+  // and/or ports, so they'll usually be placed in opaque origins.
+  if (!relevant_url.CanSetHostOrPort()) {
+    // A temporary exception is made for non-standard local schemes.
+    // TODO: Migrate "content:" and "externalfile:" to be standard schemes, and
+    // remove the local scheme exception.
+    if (SchemeRegistry::ShouldTreatURLSchemeAsLocal(relevant_url.Protocol()))
+      return false;
+
+    // Otherwise, treat non-standard origins as opaque, unless the Android
+    // WebView workaround is enabled. If the workaround is enabled, return false
+    // so that the scheme is retained, to avoid breaking XHRs on custom schemes,
+    // et cetera.
+    return !url::AllowNonStandardSchemesForAndroidWebView();
   }
 
   // This is the common case.
@@ -208,8 +217,8 @@ scoped_refptr<SecurityOrigin> SecurityOrigin::CreateOpaque(
 scoped_refptr<SecurityOrigin> SecurityOrigin::CreateFromUrlOrigin(
     const url::Origin& origin) {
   const url::SchemeHostPort& tuple = origin.GetTupleOrPrecursorTupleIfOpaque();
-  DCHECK(String::FromUTF8(tuple.scheme().c_str()).ContainsOnlyASCII());
-  DCHECK(String::FromUTF8(tuple.host().c_str()).ContainsOnlyASCII());
+  DCHECK(String::FromUTF8(tuple.scheme().c_str()).ContainsOnlyASCIIOrEmpty());
+  DCHECK(String::FromUTF8(tuple.host().c_str()).ContainsOnlyASCIIOrEmpty());
 
   scoped_refptr<SecurityOrigin> tuple_origin;
   if (!tuple.IsInvalid()) {
@@ -528,7 +537,8 @@ scoped_refptr<SecurityOrigin> SecurityOrigin::CreateFromString(
 scoped_refptr<SecurityOrigin> SecurityOrigin::Create(const String& protocol,
                                                      const String& host,
                                                      uint16_t port) {
-  DCHECK_EQ(host, DecodeURLEscapeSequences(host));
+  DCHECK_EQ(host,
+            DecodeURLEscapeSequences(host, DecodeURLMode::kUTF8OrIsomorphic));
 
   String port_part = port ? ":" + String::Number(port) : String();
   return Create(KURL(NullURL(), protocol + "://" + host + port_part + "/"));
@@ -608,7 +618,6 @@ const SecurityOrigin* SecurityOrigin::GetOriginOrPrecursorOriginIfOpaque()
     return this;
 
   DCHECK(IsOpaque());
-  DCHECK(!precursor_origin_->IsOpaque());
   return precursor_origin_.get();
 }
 

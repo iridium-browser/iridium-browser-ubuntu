@@ -8,10 +8,11 @@
 
 #include "base/bind.h"
 #include "base/feature_list.h"
-#include "build/build_config.h"
+#include "base/memory/ptr_util.h"
 #include "gpu/ipc/service/gpu_channel.h"
 #include "media/base/audio_decoder.h"
 #include "media/base/cdm_factory.h"
+#include "media/base/fallback_video_decoder.h"
 #include "media/base/media_switches.h"
 #include "media/base/video_decoder.h"
 #include "media/gpu/buildflags.h"
@@ -20,6 +21,7 @@
 #include "media/gpu/ipc/service/media_gpu_channel_manager.h"
 #include "media/gpu/ipc/service/vda_video_decoder.h"
 #include "media/mojo/interfaces/video_decoder.mojom.h"
+#include "media/video/supported_video_decoder_config.h"
 #include "media/video/video_decode_accelerator.h"
 
 #if defined(OS_ANDROID)
@@ -39,6 +41,7 @@
 
 #if defined(OS_WIN)
 #include "media/gpu/windows/d3d11_video_decoder.h"
+#include "ui/gl/gl_angle_util_win.h"
 #endif  // defined(OS_WIN)
 
 #if defined(OS_ANDROID)
@@ -52,7 +55,7 @@ namespace media {
 namespace {
 
 #if defined(OS_ANDROID) || defined(OS_CHROMEOS) || defined(OS_MACOSX) || \
-    defined(OS_WIN)
+    defined(OS_WIN) || defined(OS_LINUX)
 gpu::CommandBufferStub* GetCommandBufferStub(
     base::WeakPtr<MediaGpuChannelManager> media_gpu_channel_manager,
     base::UnguessableToken channel_token,
@@ -66,6 +69,15 @@ gpu::CommandBufferStub* GetCommandBufferStub(
     return nullptr;
 
   return channel->LookupCommandBuffer(route_id);
+}
+#endif
+
+#if defined(OS_WIN)
+// Return a callback to get the D3D11 device for D3D11VideoDecoder.  Since it
+// only supports the ANGLE device right now, that's what we return.
+D3D11VideoDecoder::GetD3D11DeviceCB GetD3D11DeviceCallback() {
+  return base::BindRepeating(
+      []() { return gl::QueryD3D11DeviceObjectFromANGLE(); });
 }
 #endif
 
@@ -100,7 +112,7 @@ std::unique_ptr<AudioDecoder> GpuMojoMediaClient::CreateAudioDecoder(
 #endif  // defined(OS_ANDROID)
 }
 
-std::vector<mojom::SupportedVideoDecoderConfigPtr>
+std::vector<SupportedVideoDecoderConfig>
 GpuMojoMediaClient::GetSupportedVideoDecoderConfigs() {
   // TODO(liberato): Implement for D3D11VideoDecoder and MediaCodecVideoDecoder.
   VideoDecodeAccelerator::Capabilities capabilities =
@@ -111,9 +123,22 @@ GpuMojoMediaClient::GetSupportedVideoDecoderConfigs() {
       capabilities.flags &
       VideoDecodeAccelerator::Capabilities::SUPPORTS_ENCRYPTED_STREAMS;
 
-  std::vector<mojom::SupportedVideoDecoderConfigPtr> supported_configs;
+  std::vector<SupportedVideoDecoderConfig> supported_configs;
+
+#if defined(OS_ANDROID)
+  // TODO(liberato): Add MCVD.
+#elif defined(OS_WIN)
+  if (!d3d11_supported_configs_) {
+    d3d11_supported_configs_ =
+        D3D11VideoDecoder::GetSupportedVideoDecoderConfigs(
+            gpu_preferences_, gpu_workarounds_, GetD3D11DeviceCallback());
+  }
+  supported_configs = *d3d11_supported_configs_;
+#endif
+
+  // Merge the VDA supported profiles.
   for (const auto& supported_profile : capabilities.supported_profiles) {
-    supported_configs.push_back(mojom::SupportedVideoDecoderConfig::New(
+    supported_configs.push_back(SupportedVideoDecoderConfig(
         supported_profile.profile,           // profile_min
         supported_profile.profile,           // profile_max
         supported_profile.min_resolution,    // coded_size_min
@@ -146,23 +171,33 @@ std::unique_ptr<VideoDecoder> GpuMojoMediaClient::CreateVideoDecoder(
       android_overlay_factory_cb_, std::move(request_overlay_info_cb),
       std::make_unique<VideoFrameFactoryImpl>(gpu_task_runner_,
                                               std::move(get_stub_cb)));
-#elif defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(OS_WIN)
-#if defined(OS_WIN)
-  if (base::FeatureList::IsEnabled(kD3D11VideoDecoder)) {
-    return D3D11VideoDecoder::Create(
-        gpu_task_runner_, media_log->Clone(), gpu_preferences_,
-        gpu_workarounds_,
-        base::BindRepeating(&GetCommandBufferStub, media_gpu_channel_manager_,
-                            command_buffer_id->channel_token,
-                            command_buffer_id->route_id));
-  }
-#endif  // defined(OS_WIN)
-  return VdaVideoDecoder::Create(
+#elif defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(OS_WIN) || \
+    defined(OS_LINUX)
+  std::unique_ptr<VideoDecoder> vda_video_decoder = VdaVideoDecoder::Create(
       task_runner, gpu_task_runner_, media_log->Clone(), target_color_space,
       gpu_preferences_, gpu_workarounds_,
       base::BindRepeating(&GetCommandBufferStub, media_gpu_channel_manager_,
                           command_buffer_id->channel_token,
                           command_buffer_id->route_id));
+#if defined(OS_WIN)
+  if (base::FeatureList::IsEnabled(kD3D11VideoDecoder)) {
+    // If nothing has cached the configs yet, then do so now.
+    if (!d3d11_supported_configs_)
+      GetSupportedVideoDecoderConfigs();
+
+    std::unique_ptr<VideoDecoder> d3d11_video_decoder =
+        D3D11VideoDecoder::Create(
+            gpu_task_runner_, media_log->Clone(), gpu_preferences_,
+            gpu_workarounds_,
+            base::BindRepeating(
+                &GetCommandBufferStub, media_gpu_channel_manager_,
+                command_buffer_id->channel_token, command_buffer_id->route_id),
+            GetD3D11DeviceCallback(), *d3d11_supported_configs_);
+    return base::WrapUnique<VideoDecoder>(new FallbackVideoDecoder(
+        std::move(d3d11_video_decoder), std::move(vda_video_decoder)));
+  }
+#endif  // defined(OS_WIN)
+  return vda_video_decoder;
 #else
   return nullptr;
 #endif  // defined(OS_ANDROID)
@@ -181,7 +216,7 @@ std::unique_ptr<CdmFactory> GpuMojoMediaClient::CreateCdmFactory(
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 std::unique_ptr<CdmProxy> GpuMojoMediaClient::CreateCdmProxy(
-    const std::string& cdm_guid) {
+    const base::Token& cdm_guid) {
   if (cdm_proxy_factory_cb_)
     return cdm_proxy_factory_cb_.Run(cdm_guid);
 

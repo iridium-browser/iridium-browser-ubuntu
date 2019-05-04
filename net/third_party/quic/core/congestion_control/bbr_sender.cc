@@ -127,7 +127,8 @@ BbrSender::BbrSender(const RttStats* rtt_stats,
       is_app_limited_recovery_(false),
       slower_startup_(false),
       rate_based_startup_(false),
-      initial_conservation_in_startup_(CONSERVATION),
+      startup_rate_reduction_multiplier_(0),
+      startup_bytes_lost_(0),
       enable_ack_aggregation_during_startup_(false),
       expire_ack_aggregation_in_startup_(false),
       drain_to_target_(false),
@@ -261,11 +262,17 @@ void BbrSender::SetFromConfig(const QuicConfig& config,
   if (config.HasClientRequestedIndependentOption(kBBS1, perspective)) {
     rate_based_startup_ = true;
   }
-  if (config.HasClientRequestedIndependentOption(kBBS2, perspective)) {
-    initial_conservation_in_startup_ = MEDIUM_GROWTH;
+  if (GetQuicReloadableFlag(quic_bbr_startup_rate_reduction) &&
+      config.HasClientRequestedIndependentOption(kBBS4, perspective)) {
+    rate_based_startup_ = true;
+    // Hits 1.25x pacing multiplier when ~2/3 CWND is lost.
+    startup_rate_reduction_multiplier_ = 1;
   }
-  if (config.HasClientRequestedIndependentOption(kBBS3, perspective)) {
-    initial_conservation_in_startup_ = GROWTH;
+  if (GetQuicReloadableFlag(quic_bbr_startup_rate_reduction) &&
+      config.HasClientRequestedIndependentOption(kBBS5, perspective)) {
+    rate_based_startup_ = true;
+    // Hits 1.25x pacing multiplier when ~1/3 CWND is lost.
+    startup_rate_reduction_multiplier_ = 2;
   }
   if (config.HasClientRequestedIndependentOption(kBBR4, perspective)) {
     max_ack_height_.SetWindowLength(2 * kBandwidthWindowSize);
@@ -275,49 +282,49 @@ void BbrSender::SetFromConfig(const QuicConfig& config,
   }
   if (GetQuicReloadableFlag(quic_bbr_less_probe_rtt) &&
       config.HasClientRequestedIndependentOption(kBBR6, perspective)) {
-    QUIC_FLAG_COUNT_N(quic_reloadable_flag_quic_bbr_less_probe_rtt, 1, 3);
+    QUIC_RELOADABLE_FLAG_COUNT_N(quic_bbr_less_probe_rtt, 1, 3);
     probe_rtt_based_on_bdp_ = true;
   }
   if (GetQuicReloadableFlag(quic_bbr_less_probe_rtt) &&
       config.HasClientRequestedIndependentOption(kBBR7, perspective)) {
-    QUIC_FLAG_COUNT_N(quic_reloadable_flag_quic_bbr_less_probe_rtt, 2, 3);
+    QUIC_RELOADABLE_FLAG_COUNT_N(quic_bbr_less_probe_rtt, 2, 3);
     probe_rtt_skipped_if_similar_rtt_ = true;
   }
   if (GetQuicReloadableFlag(quic_bbr_less_probe_rtt) &&
       config.HasClientRequestedIndependentOption(kBBR8, perspective)) {
-    QUIC_FLAG_COUNT_N(quic_reloadable_flag_quic_bbr_less_probe_rtt, 3, 3);
+    QUIC_RELOADABLE_FLAG_COUNT_N(quic_bbr_less_probe_rtt, 3, 3);
     probe_rtt_disabled_if_app_limited_ = true;
   }
   if (GetQuicReloadableFlag(quic_bbr_flexible_app_limited) &&
       config.HasClientRequestedIndependentOption(kBBR9, perspective)) {
-    QUIC_FLAG_COUNT(quic_reloadable_flag_quic_bbr_flexible_app_limited);
+    QUIC_RELOADABLE_FLAG_COUNT(quic_bbr_flexible_app_limited);
     flexible_app_limited_ = true;
   }
   if (GetQuicReloadableFlag(quic_bbr_slower_startup3) &&
       config.HasClientRequestedIndependentOption(kBBQ1, perspective)) {
-    QUIC_FLAG_COUNT_N(quic_reloadable_flag_quic_bbr_slower_startup3, 1, 4);
+    QUIC_RELOADABLE_FLAG_COUNT_N(quic_bbr_slower_startup3, 1, 4);
     set_high_gain(kDerivedHighGain);
     set_high_cwnd_gain(kDerivedHighGain);
     set_drain_gain(1.f / kDerivedHighGain);
   }
   if (GetQuicReloadableFlag(quic_bbr_slower_startup3) &&
       config.HasClientRequestedIndependentOption(kBBQ2, perspective)) {
-    QUIC_FLAG_COUNT_N(quic_reloadable_flag_quic_bbr_slower_startup3, 2, 4);
+    QUIC_RELOADABLE_FLAG_COUNT_N(quic_bbr_slower_startup3, 2, 4);
     set_high_cwnd_gain(kDerivedHighCWNDGain);
   }
   if (GetQuicReloadableFlag(quic_bbr_slower_startup3) &&
       config.HasClientRequestedIndependentOption(kBBQ3, perspective)) {
-    QUIC_FLAG_COUNT_N(quic_reloadable_flag_quic_bbr_slower_startup3, 3, 4);
+    QUIC_RELOADABLE_FLAG_COUNT_N(quic_bbr_slower_startup3, 3, 4);
     enable_ack_aggregation_during_startup_ = true;
   }
   if (GetQuicReloadableFlag(quic_bbr_slower_startup3) &&
       config.HasClientRequestedIndependentOption(kBBQ4, perspective)) {
-    QUIC_FLAG_COUNT_N(quic_reloadable_flag_quic_bbr_slower_startup3, 4, 4);
+    QUIC_RELOADABLE_FLAG_COUNT_N(quic_bbr_slower_startup3, 4, 4);
     set_drain_gain(kModerateProbeRttMultiplier);
   }
   if (GetQuicReloadableFlag(quic_bbr_slower_startup4) &&
       config.HasClientRequestedIndependentOption(kBBQ5, perspective)) {
-    QUIC_FLAG_COUNT(quic_reloadable_flag_quic_bbr_slower_startup4);
+    QUIC_RELOADABLE_FLAG_COUNT(quic_bbr_slower_startup4);
     expire_ack_aggregation_in_startup_ = true;
   }
   if (config.HasClientRequestedIndependentOption(kMIN1, perspective)) {
@@ -446,6 +453,9 @@ void BbrSender::EnterProbeBandwidthMode(QuicTime now) {
 void BbrSender::DiscardLostPackets(const LostPacketVector& lost_packets) {
   for (const LostPacket& packet : lost_packets) {
     sampler_.OnPacketLost(packet.packet_number);
+    if (startup_rate_reduction_multiplier_ != 0 && mode_ == STARTUP) {
+      startup_bytes_lost_ += packet.bytes_lost;
+    }
   }
 }
 
@@ -660,9 +670,6 @@ void BbrSender::UpdateRecoveryState(QuicPacketNumber last_acked_packet,
       // Enter conservation on the first loss.
       if (has_losses) {
         recovery_state_ = CONSERVATION;
-        if (mode_ == STARTUP) {
-          recovery_state_ = initial_conservation_in_startup_;
-        }
         // This will cause the |recovery_window_| to be set to the correct
         // value in CalculateRecoveryWindow().
         recovery_window_ = 0;
@@ -671,14 +678,13 @@ void BbrSender::UpdateRecoveryState(QuicPacketNumber last_acked_packet,
         current_round_trip_end_ = last_sent_packet_;
         if (GetQuicReloadableFlag(quic_bbr_app_limited_recovery) &&
             last_sample_is_app_limited_) {
-          QUIC_FLAG_COUNT(quic_reloadable_flag_quic_bbr_app_limited_recovery);
+          QUIC_RELOADABLE_FLAG_COUNT(quic_bbr_app_limited_recovery);
           is_app_limited_recovery_ = true;
         }
       }
       break;
 
     case CONSERVATION:
-    case MEDIUM_GROWTH:
       if (is_round_start) {
         recovery_state_ = GROWTH;
       }
@@ -749,7 +755,21 @@ void BbrSender::CalculatePacingRate() {
     return;
   }
 
-  // Do not decrease the pacing rate during the startup.
+  // Slow the pacing rate in STARTUP by the bytes_lost / CWND.
+  if (startup_rate_reduction_multiplier_ != 0 && has_ever_detected_loss &&
+      has_non_app_limited_sample_) {
+    pacing_rate_ =
+        (1 - (startup_bytes_lost_ * startup_rate_reduction_multiplier_ * 1.0f /
+              congestion_window_)) *
+        target_rate;
+    // Ensure the pacing rate doesn't drop below the startup growth target times
+    // the bandwidth estimate.
+    pacing_rate_ =
+        std::max(pacing_rate_, kStartupGrowthTarget * BandwidthEstimate());
+    return;
+  }
+
+  // Do not decrease the pacing rate during startup.
   pacing_rate_ = std::max(pacing_rate_, target_rate);
 }
 
@@ -773,11 +793,15 @@ void BbrSender::CalculateCongestionWindow(QuicByteCount bytes_acked,
   // Instead of immediately setting the target CWND as the new one, BBR grows
   // the CWND towards |target_window| by only increasing it |bytes_acked| at a
   // time.
+  const bool add_bytes_acked =
+      !GetQuicReloadableFlag(quic_bbr_no_bytes_acked_in_startup_recovery) ||
+      !InRecovery();
   if (is_at_full_bandwidth_) {
     congestion_window_ =
         std::min(target_window, congestion_window_ + bytes_acked);
-  } else if (congestion_window_ < target_window ||
-             sampler_.total_bytes_acked() < initial_congestion_window_) {
+  } else if (add_bytes_acked &&
+             (congestion_window_ < target_window ||
+              sampler_.total_bytes_acked() < initial_congestion_window_)) {
     // If the connection is not yet out of startup phase, do not decrease the
     // window.
     congestion_window_ = congestion_window_ + bytes_acked;
@@ -813,11 +837,8 @@ void BbrSender::CalculateRecoveryWindow(QuicByteCount bytes_acked,
 
   // In CONSERVATION mode, just subtracting losses is sufficient.  In GROWTH,
   // release additional |bytes_acked| to achieve a slow-start-like behavior.
-  // In MEDIUM_GROWTH, release |bytes_acked| / 2 to split the difference.
   if (recovery_state_ == GROWTH) {
     recovery_window_ += bytes_acked;
-  } else if (recovery_state_ == MEDIUM_GROWTH) {
-    recovery_window_ += bytes_acked / 2;
   }
 
   // Sanity checks.  Ensure that we always allow to send at least an MSS or

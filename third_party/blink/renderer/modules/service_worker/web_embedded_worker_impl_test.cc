@@ -30,6 +30,24 @@
 namespace blink {
 namespace {
 
+// Fake network provider for service worker execution contexts.
+class FakeServiceWorkerNetworkProvider
+    : public WebServiceWorkerNetworkProvider {
+ public:
+  FakeServiceWorkerNetworkProvider() = default;
+  ~FakeServiceWorkerNetworkProvider() override = default;
+
+  // Return a loader from the mock factory. In production code, this uses the
+  // factory provided at worker startup to load non-installed scripts via
+  // ServiceWorkerScriptLoaderFactory.
+  std::unique_ptr<WebURLLoader> CreateURLLoader(
+      const WebURLRequest& request,
+      std::unique_ptr<scheduler::WebResourceLoadingTaskRunnerHandle>) override {
+    return Platform::Current()->GetURLLoaderMockFactory()->CreateURLLoader(
+        nullptr);
+  }
+};
+
 class MockServiceWorkerContextClient : public WebServiceWorkerContextClient {
  public:
   MockServiceWorkerContextClient() = default;
@@ -49,13 +67,9 @@ class MockServiceWorkerContextClient : public WebServiceWorkerContextClient {
     script_evaluated_event_.Signal();
   }
 
-  // Work-around for mocking a method that return unique_ptr.
-  MOCK_METHOD0(CreateServiceWorkerNetworkProviderProxy,
-               WebServiceWorkerNetworkProvider*());
   std::unique_ptr<WebServiceWorkerNetworkProvider>
   CreateServiceWorkerNetworkProvider() override {
-    return std::unique_ptr<WebServiceWorkerNetworkProvider>(
-        CreateServiceWorkerNetworkProviderProxy());
+    return std::make_unique<FakeServiceWorkerNetworkProvider>();
   }
   void WorkerContextDestroyed() override { termination_event_.Signal(); }
 
@@ -102,7 +116,8 @@ class WebEmbeddedWorkerImplTest : public testing::Test {
     worker_ = WebEmbeddedWorkerImpl::CreateForTesting(
         std::move(client), std::move(installed_scripts_manager));
 
-    WebURL script_url = URLTestHelpers::ToKURL("https://www.example.com/sw.js");
+    WebURL script_url =
+        url_test_helpers::ToKURL("https://www.example.com/sw.js");
     WebURLResponse response(script_url);
     response.SetMIMEType("text/javascript");
     response.SetHTTPStatusCode(200);
@@ -116,7 +131,7 @@ class WebEmbeddedWorkerImplTest : public testing::Test {
         WebEmbeddedWorkerStartData::kDontPauseAfterDownload;
     start_data_.wait_for_debugger_mode =
         WebEmbeddedWorkerStartData::kDontWaitForDebugger;
-    start_data_.v8_cache_options = WebSettings::kV8CacheOptionsDefault;
+    start_data_.v8_cache_options = WebSettings::V8CacheOptions::kDefault;
   }
 
   void TearDown() override {
@@ -161,8 +176,6 @@ TEST_F(WebEmbeddedWorkerImplTest, TerminateWhileLoadingScript) {
   testing::Mock::VerifyAndClearExpectations(mock_client_);
 
   // Load the shadow page.
-  EXPECT_CALL(*mock_client_, CreateServiceWorkerNetworkProviderProxy())
-      .WillOnce(testing::Return(nullptr));
   EXPECT_CALL(*mock_installed_scripts_manager_,
               IsScriptInstalled(KURL(start_data_.script_url)))
       .Times(testing::AtLeast(1))
@@ -185,8 +198,6 @@ TEST_F(WebEmbeddedWorkerImplTest, TerminateWhilePausedAfterDownload) {
   testing::Mock::VerifyAndClearExpectations(mock_client_);
 
   // Load the shadow page.
-  EXPECT_CALL(*mock_client_, CreateServiceWorkerNetworkProviderProxy())
-      .WillOnce(testing::Return(nullptr));
   EXPECT_CALL(*mock_installed_scripts_manager_,
               IsScriptInstalled(KURL(start_data_.script_url)))
       .Times(testing::AtLeast(1))
@@ -209,7 +220,7 @@ TEST_F(WebEmbeddedWorkerImplTest, TerminateWhilePausedAfterDownload) {
 
 TEST_F(WebEmbeddedWorkerImplTest, ScriptNotFound) {
   WebURL script_url =
-      URLTestHelpers::ToKURL("https://www.example.com/sw-404.js");
+      url_test_helpers::ToKURL("https://www.example.com/sw-404.js");
   WebURLResponse response;
   response.SetMIMEType("text/javascript");
   response.SetHTTPStatusCode(404);
@@ -223,8 +234,6 @@ TEST_F(WebEmbeddedWorkerImplTest, ScriptNotFound) {
   testing::Mock::VerifyAndClearExpectations(mock_client_);
 
   // Load the shadow page.
-  EXPECT_CALL(*mock_client_, CreateServiceWorkerNetworkProviderProxy())
-      .WillOnce(testing::Return(nullptr));
   EXPECT_CALL(*mock_installed_scripts_manager_,
               IsScriptInstalled(KURL(start_data_.script_url)))
       .Times(testing::AtLeast(1))
@@ -254,8 +263,6 @@ TEST_F(WebEmbeddedWorkerImplTest, MAYBE_DontPauseAfterDownload) {
   testing::Mock::VerifyAndClearExpectations(mock_client_);
 
   // Load the shadow page.
-  EXPECT_CALL(*mock_client_, CreateServiceWorkerNetworkProviderProxy())
-      .WillOnce(testing::Return(nullptr));
   EXPECT_CALL(*mock_installed_scripts_manager_,
               IsScriptInstalled(KURL(start_data_.script_url)))
       .Times(testing::AtLeast(1))
@@ -297,8 +304,6 @@ TEST_F(WebEmbeddedWorkerImplTest, MAYBE_PauseAfterDownload) {
   testing::Mock::VerifyAndClearExpectations(mock_client_);
 
   // Load the shadow page.
-  EXPECT_CALL(*mock_client_, CreateServiceWorkerNetworkProviderProxy())
-      .WillOnce(testing::Return(nullptr));
   EXPECT_CALL(*mock_installed_scripts_manager_,
               IsScriptInstalled(KURL(start_data_.script_url)))
       .Times(testing::AtLeast(1))

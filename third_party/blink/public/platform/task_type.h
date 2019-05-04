@@ -131,6 +131,18 @@ enum class TaskType : unsigned {
   kExperimentalWebSchedulingUserInteraction = 53,
   kExperimentalWebSchedulingBestEffort = 54,
 
+  // https://drafts.csswg.org/css-font-loading/#task-source
+  kFontLoading = 56,
+
+  // https://w3c.github.io/manifest/#dfn-application-life-cycle-task-source
+  kApplicationLifeCycle = 57,
+
+  // https://wicg.github.io/background-fetch/#infrastructure
+  kBackgroundFetch = 58,
+
+  // https://www.w3.org/TR/permissions/
+  kPermission = 59,
+
   ///////////////////////////////////////
   // Not-speced tasks should use one of the following task types
   ///////////////////////////////////////
@@ -181,6 +193,9 @@ enum class TaskType : unsigned {
   // * //third_party/blink/renderer/core/workers
   kInternalWorker = 36,
 
+  // Translation task that freezes when the frame is not visible.
+  kInternalTranslation = 55,
+
   // Tasks used at IntersectionObserver.
   kInternalIntersectionObserver = 44,
 
@@ -202,7 +217,7 @@ enum class TaskType : unsigned {
   kWorkerThreadTaskQueueV8 = 47,
   kWorkerThreadTaskQueueCompositor = 48,
 
-  kCount = 55,
+  kCount = 60,
 };
 
 }  // namespace blink

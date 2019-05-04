@@ -7,13 +7,20 @@
 #include <cinttypes>
 
 #include "base/format_macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/no_destructor.h"
+#include "base/process/process.h"
 #include "base/profiler/stack_sampling_profiler.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/sequence_local_storage_slot.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_log.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
+
+#if defined(OS_ANDROID)
+#include "base/android/reached_code_profiler.h"
+#endif
 
 #if defined(OS_ANDROID) && BUILDFLAG(CAN_UNWIND_WITH_CFI_TABLE) && \
     defined(OFFICIAL_BUILD)
@@ -36,10 +43,23 @@ std::string GetFrameNameFromOffsetAddr(uintptr_t offset_from_module_base) {
 class TracingProfileBuilder
     : public base::StackSamplingProfiler::ProfileBuilder {
  public:
+  TracingProfileBuilder(base::PlatformThreadId sampled_thread_id)
+      : sampled_thread_id_(sampled_thread_id) {}
+
   void OnSampleCompleted(
       std::vector<base::StackSamplingProfiler::Frame> frames) override {
-    if (frames.empty())
+    int process_priority = base::Process::Current().GetPriority();
+    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("cpu_profiler"),
+                         "ProcessPriority", TRACE_EVENT_SCOPE_THREAD,
+                         "priority", process_priority);
+
+    if (frames.empty()) {
+      TRACE_EVENT_INSTANT2(TRACE_DISABLED_BY_DEFAULT("cpu_profiler"),
+                           "StackCpuSampling", TRACE_EVENT_SCOPE_THREAD,
+                           "frames", "empty", "thread_id", sampled_thread_id_);
+
       return;
+    }
     // Insert an event with the frames rendered as a string with the following
     // formats:
     //   offset - module [debugid]
@@ -67,8 +87,10 @@ class TracingProfileBuilder
       // For chrome address we do not have symbols on the binary. So, just write
       // the offset address. For addresses on framework libraries, symbolize
       // and write the function name.
-      if (base::trace_event::CFIBacktraceAndroid::is_chrome_address(
-              frame.instruction_pointer)) {
+      if (frame.instruction_pointer == 0) {
+        frame_name = "Scanned";
+      } else if (base::trace_event::CFIBacktraceAndroid::is_chrome_address(
+                     frame.instruction_pointer)) {
         frame_name = GetFrameNameFromOffsetAddr(
             frame.instruction_pointer -
             base::trace_event::CFIBacktraceAndroid::executable_start_addr());
@@ -94,36 +116,59 @@ class TracingProfileBuilder
                           module_name.c_str(), frame.module.id.c_str());
     }
 
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("cpu_profiler"),
+    TRACE_EVENT_INSTANT2(TRACE_DISABLED_BY_DEFAULT("cpu_profiler"),
                          "StackCpuSampling", TRACE_EVENT_SCOPE_THREAD, "frames",
-                         result);
+                         result, "thread_id", sampled_thread_id_);
   }
 
   void OnProfileCompleted(base::TimeDelta profile_duration,
                           base::TimeDelta sampling_period) override {}
+
+ private:
+  base::PlatformThreadId sampled_thread_id_;
 };
 
 }  // namespace
 
+// static
+std::unique_ptr<TracingSamplerProfiler>
+TracingSamplerProfiler::CreateOnMainThread() {
+  return base::WrapUnique(
+      new TracingSamplerProfiler(base::PlatformThread::CurrentId()));
+}
+
+// static
+void TracingSamplerProfiler::CreateOnChildThread() {
+  using ProfilerSlot =
+      base::SequenceLocalStorageSlot<std::unique_ptr<TracingSamplerProfiler>>;
+  static base::NoDestructor<ProfilerSlot> slot;
+  if (!slot.get()->Get()) {
+    slot.get()->Set(base::WrapUnique(
+        new TracingSamplerProfiler(base::PlatformThread::CurrentId())));
+  }
+}
+
 TracingSamplerProfiler::TracingSamplerProfiler(
     base::PlatformThreadId sampled_thread_id)
-    : sampled_thread_id_(sampled_thread_id), weak_ptr_factory_(this) {
-  // Make sure tracing system notices profiler category.
-  TRACE_EVENT_WARMUP_CATEGORY(TRACE_DISABLED_BY_DEFAULT("cpu_profiler"));
-
+    : sampled_thread_id_(sampled_thread_id) {
   DCHECK_NE(sampled_thread_id_, base::kInvalidThreadId);
 
-  // In case tracing is currently running, start the sample profiler. The trace
-  // category can be enabled only if tracing is enabled.
+  // If tracing was enabled before initializing this class, we missed the
+  // OnTraceLogEnabled() event. Synthesize it so we can late-join the party.
+  // If the observer is added after the calling |OnTraceLogEnabled|, there is
+  // a race condition where tracing can be turned on between. By using this
+  // ordering, the |OnTraceLogEnabled| will be called twice if tracing is turned
+  // on between.
+  base::trace_event::TraceLog::GetInstance()->AddEnabledStateObserver(this);
   OnTraceLogEnabled();
 }
 
 TracingSamplerProfiler::~TracingSamplerProfiler() {
-  base::trace_event::TraceLog::GetInstance()->RemoveAsyncEnabledStateObserver(
-      this);
+  base::trace_event::TraceLog::GetInstance()->RemoveEnabledStateObserver(this);
 }
 
 void TracingSamplerProfiler::OnTraceLogEnabled() {
+  base::AutoLock lock(lock_);
   // Ensure there was not an instance of the profiler already running.
   if (profiler_.get())
     return;
@@ -133,6 +178,13 @@ void TracingSamplerProfiler::OnTraceLogEnabled() {
                                      &enabled);
   if (!enabled)
     return;
+
+#if defined(OS_ANDROID)
+  // The sampler profiler would conflict with the reached code profiler if they
+  // run at the same time because they use the same signal to suspend threads.
+  if (base::android::IsReachedCodeProfilerEnabled())
+    return;
+#endif
 
   base::StackSamplingProfiler::SamplingParams params;
   params.samples_per_profile = std::numeric_limits<int>::max();
@@ -146,27 +198,24 @@ void TracingSamplerProfiler::OnTraceLogEnabled() {
 #if defined(OS_ANDROID) && BUILDFLAG(CAN_UNWIND_WITH_CFI_TABLE) && \
     defined(OFFICIAL_BUILD)
   profiler_ = std::make_unique<base::StackSamplingProfiler>(
-      sampled_thread_id_, params, std::make_unique<TracingProfileBuilder>(),
+      sampled_thread_id_, params,
+      std::make_unique<TracingProfileBuilder>(sampled_thread_id_),
       std::make_unique<NativeStackSamplerAndroid>(sampled_thread_id_));
 #else
   profiler_ = std::make_unique<base::StackSamplingProfiler>(
-      sampled_thread_id_, params, std::make_unique<TracingProfileBuilder>());
+      sampled_thread_id_, params,
+      std::make_unique<TracingProfileBuilder>(sampled_thread_id_));
 #endif
   profiler_->Start();
 }
 
 void TracingSamplerProfiler::OnTraceLogDisabled() {
+  base::AutoLock lock(lock_);
   if (!profiler_.get())
     return;
   // Stop and release the stack sampling profiler.
   profiler_->Stop();
   profiler_.reset();
-}
-
-void TracingSamplerProfiler::OnMessageLoopStarted() {
-  base::trace_event::TraceLog::GetInstance()->AddAsyncEnabledStateObserver(
-      weak_ptr_factory_.GetWeakPtr());
-  OnTraceLogEnabled();
 }
 
 }  // namespace tracing

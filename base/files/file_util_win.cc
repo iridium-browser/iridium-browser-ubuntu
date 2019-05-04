@@ -22,10 +22,10 @@
 #include "base/files/file_path.h"
 #include "base/guid.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/process/process_handle.h"
 #include "base/rand_util.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -376,9 +376,8 @@ bool DeleteFileAfterReboot(const FilePath& path) {
   if (path.value().length() >= MAX_PATH)
     return false;
 
-  return MoveFileEx(path.value().c_str(), NULL,
-                    MOVEFILE_DELAY_UNTIL_REBOOT |
-                        MOVEFILE_REPLACE_EXISTING) != FALSE;
+  return ::MoveFileEx(path.value().c_str(), nullptr,
+                      MOVEFILE_DELAY_UNTIL_REBOOT);
 }
 
 bool ReplaceFile(const FilePath& from_path,
@@ -919,8 +918,7 @@ int GetMaximumPathComponentLength(const FilePath& path) {
 
   wchar_t volume_path[MAX_PATH];
   if (!GetVolumePathNameW(path.NormalizePathSeparators().value().c_str(),
-                          volume_path,
-                          arraysize(volume_path))) {
+                          volume_path, base::size(volume_path))) {
     return -1;
   }
 

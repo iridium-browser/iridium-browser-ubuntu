@@ -86,5 +86,27 @@ const base::Feature kLitePageServerPreviews{"LitePageServerPreviews",
 const base::Feature kAndroidOmniboxPreviewsBadge{
     "AndroidOmniboxPreviewsBadge", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Provides slow page triggering parameters.
+const base::Feature kSlowPageTriggering{"PreviewsSlowPageTriggering",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
+
+// A feature to prevent previews on all reloads.
+const base::Feature kPreviewsDisallowedOnReloads{
+    "PreviewsDisallowedOnReloads", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Allows HTTPS previews to be served via a URLLoader when network service is
+// enabled.
+const base::Feature kHTTPSServerPreviewsUsingURLLoader{
+    "HTTPSServerPreviewsUsingURLLoader", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Uses 'Lite Mode' strings instead of 'Data Saver'.
+const base::Feature kDataSaverLiteModeRebranding{
+    "DataSaverLiteModeRebranding", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// When enabled, reloading on a preview will cause the session (5 minute) rule
+// to trigger.
+const base::Feature kPreviewsReloadsAreSoftOptOuts{
+    "PreviewsReloadsAreSoftOptOuts", base::FEATURE_DISABLED_BY_DEFAULT};
+
 }  // namespace features
 }  // namespace previews

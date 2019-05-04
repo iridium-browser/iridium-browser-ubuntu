@@ -95,8 +95,6 @@ class PDFiumEngine : public PDFEngine,
   pp::VarArray GetBookmarks() override;
   base::Optional<PDFEngine::NamedDestination> GetNamedDestination(
       const std::string& destination) override;
-  gfx::PointF TransformPagePoint(int page_index,
-                                 const gfx::PointF& page_xy) override;
   int GetMostVisiblePage() override;
   pp::Rect GetPageRect(int index) override;
   pp::Rect GetPageBoundsRect(int index) override;
@@ -138,6 +136,8 @@ class PDFiumEngine : public PDFEngine,
   void OnDocumentCanceled() override;
   void CancelBrowserDownload() override;
   void KillFormFocus() override;
+  uint32_t GetLoadedByteSize() override;
+  bool ReadLoadedBytes(uint32_t length, void* buffer) override;
 
 #if defined(PDF_ENABLE_XFA)
   void UpdatePageCount();

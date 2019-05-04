@@ -29,13 +29,11 @@ class COMPONENT_EXPORT(OS_CRYPT) EncryptionKeyCreationUtilMac
       scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner);
   ~EncryptionKeyCreationUtilMac() override;
 
-  // os_crypt::EncryptionKeyCreationUtil
-  bool KeyAlreadyCreated() override;
-  bool ShouldPreventOverwriting() override;
+  // os_crypt::EncryptionKeyCreationUtil:
   void OnKeyWasFound() override;
-  void OnKeyWasStored() override;
-  void OnOverwritingPrevented() override;
-  void OnKeychainLookupFailed() override;
+  void OnKeyNotFound(const crypto::AppleKeychain& keychain) override;
+  void OnKeyStored(bool new_key_stored) override;
+  void OnKeychainLookupFailed(int error) override;
 
  private:
   // Asynchronously updates the preference on the main thread that the

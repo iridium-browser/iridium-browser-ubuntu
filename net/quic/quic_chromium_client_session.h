@@ -80,7 +80,7 @@ enum class ConnectionMigrationMode {
 
 // Cause of connection migration.
 enum ConnectionMigrationCause {
-  UNKNOWN,
+  UNKNOWN_CAUSE,
   ON_NETWORK_CONNECTED,                // No probing.
   ON_NETWORK_DISCONNECTED,             // No probing.
   ON_WRITE_ERROR,                      // No probing.
@@ -433,15 +433,16 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   void OnWriteUnblocked() override;
 
   // QuicConnectivityProbingManager::Delegate override.
-  void OnProbeNetworkSucceeded(
+  void OnProbeSucceeded(
       NetworkChangeNotifier::NetworkHandle network,
+      const quic::QuicSocketAddress& peer_address,
       const quic::QuicSocketAddress& self_address,
       std::unique_ptr<DatagramClientSocket> socket,
       std::unique_ptr<QuicChromiumPacketWriter> writer,
       std::unique_ptr<QuicChromiumPacketReader> reader) override;
 
-  void OnProbeNetworkFailed(
-      NetworkChangeNotifier::NetworkHandle network) override;
+  void OnProbeFailed(NetworkChangeNotifier::NetworkHandle network,
+                     const quic::QuicSocketAddress& peer_address) override;
 
   bool OnSendConnectivityProbingPacket(
       QuicChromiumPacketWriter* writer,
@@ -476,6 +477,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
       const quic::CryptoHandshakeMessage& message) override;
   void OnGoAway(const quic::QuicGoAwayFrame& frame) override;
   void OnRstStream(const quic::QuicRstStreamFrame& frame) override;
+  void OnCanCreateNewOutgoingStream() override;
 
   // QuicClientSessionBase methods:
   void OnConfigNegotiated() override;
@@ -644,11 +646,14 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
 
  protected:
   // quic::QuicSession methods:
-  bool ShouldCreateIncomingDynamicStream(quic::QuicStreamId id) override;
-  bool ShouldCreateOutgoingDynamicStream() override;
+  bool ShouldCreateIncomingStream(quic::QuicStreamId id) override;
+  bool ShouldCreateOutgoingBidirectionalStream() override;
+  bool ShouldCreateOutgoingUnidirectionalStream() override;
 
-  QuicChromiumClientStream* CreateIncomingDynamicStream(
+  QuicChromiumClientStream* CreateIncomingStream(
       quic::QuicStreamId id) override;
+  QuicChromiumClientStream* CreateIncomingStream(
+      quic::PendingStream pending) override;
 
  private:
   friend class test::QuicChromiumClientSessionPeer;
@@ -663,10 +668,11 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   QuicChromiumClientStream* CreateIncomingReliableStreamImpl(
       quic::QuicStreamId id,
       const NetworkTrafficAnnotationTag& traffic_annotation);
+  QuicChromiumClientStream* CreateIncomingReliableStreamImpl(
+      quic::PendingStream pending,
+      const NetworkTrafficAnnotationTag& traffic_annotation);
   // A completion callback invoked when a read completes.
   void OnReadComplete(int result);
-
-  void OnClosedStream();
 
   void CloseAllStreams(int net_error);
   void CloseAllHandles(int net_error);
@@ -674,16 +680,29 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   void NotifyRequestsOfConfirmation(int net_error);
 
   ProbingResult StartProbeNetwork(NetworkChangeNotifier::NetworkHandle network,
-                                  IPEndPoint peer_address,
+                                  const quic::QuicSocketAddress& peer_address,
                                   const NetLogWithSource& migration_net_log);
 
   // Called when there is only one possible working network: |network|, If any
-  // error encountered, this session will be cloed. When the migration succeeds:
-  //  - If we are no longer on the default interface, migrate back to default
-  //    network timer will be set.
-  //  - If we are now on the default interface, migrate back to default network
-  //    timer will be cancelled.
-  void MigrateImmediately(NetworkChangeNotifier::NetworkHandle network);
+  // error encountered, this session will be closed.
+  // When the migration succeeds:
+  //  - If no longer on the default network, set timer to migrate back to the
+  //    default network;
+  //  - If now on the default network, cancel timer to migrate back to default
+  //    network.
+  void MigrateNetworkImmediately(NetworkChangeNotifier::NetworkHandle network);
+
+  // Called when probe |network| succeeded.
+  void OnProbeNetworkSucceeded(
+      NetworkChangeNotifier::NetworkHandle network,
+      const quic::QuicSocketAddress& peer_address,
+      const quic::QuicSocketAddress& self_address,
+      std::unique_ptr<DatagramClientSocket> socket,
+      std::unique_ptr<QuicChromiumPacketWriter> writer,
+      std::unique_ptr<QuicChromiumPacketReader> reader);
+  // Called when probe |network| failed.
+  void OnProbeNetworkFailed(NetworkChangeNotifier::NetworkHandle network,
+                            const quic::QuicSocketAddress& peer_address);
 
   void StartMigrateBackToDefaultNetworkTimer(base::TimeDelta delay);
   void CancelMigrateBackToDefaultNetworkTimer();

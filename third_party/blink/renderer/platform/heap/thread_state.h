@@ -33,10 +33,10 @@
 
 #include <memory>
 
-#include "base/atomicops.h"
 #include "base/macros.h"
 #include "third_party/blink/public/platform/scheduler/web_rail_mode_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
+#include "third_party/blink/renderer/platform/heap/atomic_entry_flag.h"
 #include "third_party/blink/renderer/platform/heap/blink_gc.h"
 #include "third_party/blink/renderer/platform/heap/threading_traits.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
@@ -62,7 +62,6 @@ class IncrementalMarkingScope;
 class IncrementalMarkingTestDriver;
 }  // namespace incremental_marking_test
 
-class GarbageCollectedMixinConstructorMarkerBase;
 class MarkingVisitor;
 class PersistentNode;
 class PersistentRegion;
@@ -147,6 +146,7 @@ class PLATFORM_EXPORT ThreadState final
   enum GCState {
     kNoGCScheduled,
     kIdleGCScheduled,
+    kIncrementalMarkingStepPaused,
     kIncrementalMarkingStepScheduled,
     kIncrementalMarkingFinalizeScheduled,
     kPreciseGCScheduled,
@@ -218,19 +218,23 @@ class PLATFORM_EXPORT ThreadState final
     ThreadState* state_;
   };
 
-  // Returns true if any thread is currently incremental marking its heap and
-  // false otherwise. For an exact check use
-  // ThreadState::IsIncrementalMarking().
+  // Returns true if some thread (possibly the current thread) may be doing
+  // incremental marking. If false is returned, the *current* thread is
+  // definitely not doing incremental marking. See atomic_entry_flag.h for
+  // details.
+  //
+  // For an exact check, use ThreadState::IsIncrementalMarking.
   ALWAYS_INLINE static bool IsAnyIncrementalMarking() {
-    // Stores use full barrier to allow using the simplest relaxed load here.
-    return base::subtle::NoBarrier_Load(&incremental_marking_counter_) > 0;
+    return incremental_marking_flag_.MightBeEntered();
   }
 
-  // Returns true if any thread is currently incremental marking its heap and
-  // false otherwise. For an exact check use ThreadState::IsWrapperTracing().
+  // Returns true if some thread (possibly the current thread) may be doing
+  // wrapper tracing. If false is returned, the *current* thread is definitely
+  // not doing wrapper tracing. See atomic_entry_flag.h for details.
+  //
+  // For an exact check, use ThreadState::IsWrapperTracing.
   static bool IsAnyWrapperTracing() {
-    // Stores use full barrier to allow using the simplest relaxed load here.
-    return base::subtle::NoBarrier_Load(&wrapper_tracing_counter_) > 0;
+    return wrapper_tracing_flag_.MightBeEntered();
   }
 
   static void AttachMainThread();
@@ -299,7 +303,7 @@ class PLATFORM_EXPORT ThreadState final
   void ScheduleIncrementalMarkingFinalize();
 
   void IncrementalMarkingStart(BlinkGC::GCReason);
-  void IncrementalMarkingStep();
+  void IncrementalMarkingStep(BlinkGC::StackState);
   void IncrementalMarkingFinalize();
   bool FinishIncrementalMarkingIfRunning(BlinkGC::StackState,
                                          BlinkGC::MarkingType,
@@ -419,11 +423,6 @@ class PLATFORM_EXPORT ThreadState final
   void SafePoint(BlinkGC::StackState);
 
   void RecordStackEnd(intptr_t* end_of_stack) { end_of_stack_ = end_of_stack; }
-#if HAS_FEATURE(safe_stack)
-  void RecordUnsafeStackEnd(intptr_t* end_of_unsafe_stack) {
-    end_of_unsafe_stack_ = end_of_unsafe_stack;
-  }
-#endif
 
   void PushRegistersAndVisitStack();
 
@@ -478,29 +477,6 @@ class PLATFORM_EXPORT ThreadState final
     invalidate_dead_objects_in_wrappers_marking_deque_ =
         invalidate_dead_objects_in_wrappers_marking_deque;
     perform_cleanup_ = perform_cleanup;
-  }
-
-  // By entering a gc-forbidden scope, conservative GCs will not
-  // be allowed while handling an out-of-line allocation request.
-  // Intended used when constructing subclasses of GC mixins, where
-  // the object being constructed cannot be safely traced & marked
-  // fully should a GC be allowed while its subclasses are being
-  // constructed.
-  void EnterGCForbiddenScopeIfNeeded(
-      GarbageCollectedMixinConstructorMarkerBase* gc_mixin_marker) {
-    DCHECK(CheckThread());
-    if (!gc_mixin_marker_) {
-      EnterMixinConstructionScope();
-      gc_mixin_marker_ = gc_mixin_marker;
-    }
-  }
-  void LeaveGCForbiddenScopeIfNeeded(
-      GarbageCollectedMixinConstructorMarkerBase* gc_mixin_marker) {
-    DCHECK(CheckThread());
-    if (gc_mixin_marker_ == gc_mixin_marker) {
-      LeaveMixinConstructionScope();
-      gc_mixin_marker_ = nullptr;
-    }
   }
 
   void FreePersistentNode(PersistentRegion*, PersistentNode*);
@@ -573,13 +549,11 @@ class PLATFORM_EXPORT ThreadState final
   }
 
  private:
-  // Number of ThreadState's that are currently in incremental marking. The
-  // counter is incremented by one when some ThreadState enters incremental
-  // marking and decremented upon finishing.
-  static base::subtle::AtomicWord incremental_marking_counter_;
+  // Stores whether some ThreadState is currently in incremental marking.
+  static AtomicEntryFlag incremental_marking_flag_;
 
-  // Same semantic as |incremental_marking_counter_|.
-  static base::subtle::AtomicWord wrapper_tracing_counter_;
+  // Same semantic as |incremental_marking_flag_|.
+  static AtomicEntryFlag wrapper_tracing_flag_;
 
   ThreadState();
   ~ThreadState() override;
@@ -699,11 +673,6 @@ class PLATFORM_EXPORT ThreadState final
   intptr_t* start_of_stack_;
   intptr_t* end_of_stack_;
 
-#if HAS_FEATURE(safe_stack)
-  intptr_t* start_of_unsafe_stack_;
-  intptr_t* end_of_unsafe_stack_;
-#endif
-
   bool sweep_forbidden_;
   size_t no_allocation_count_;
   size_t gc_forbidden_count_;
@@ -713,8 +682,6 @@ class PLATFORM_EXPORT ThreadState final
 
   TimeDelta next_incremental_marking_step_duration_;
   TimeDelta previous_incremental_marking_time_left_;
-
-  GarbageCollectedMixinConstructorMarkerBase* gc_mixin_marker_;
 
   GCState gc_state_;
   GCPhase gc_phase_;

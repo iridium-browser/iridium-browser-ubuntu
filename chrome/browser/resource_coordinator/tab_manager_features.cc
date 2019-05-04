@@ -26,7 +26,7 @@ const base::Feature kCustomizedTabLoadTimeout{
 // Enables TabLoader improvements for reducing the overhead of session restores
 // involving many many tabs.
 const base::Feature kInfiniteSessionRestore{"InfiniteSessionRestore",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
+                                            base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enables proactive tab freezing and discarding.
 const base::Feature kProactiveTabFreezeAndDiscard{
@@ -35,7 +35,7 @@ const base::Feature kProactiveTabFreezeAndDiscard{
 
 // Enables the site characteristics database.
 const base::Feature kSiteCharacteristicsDatabase{
-    "SiteCharacteristicsDatabase", base::FEATURE_DISABLED_BY_DEFAULT};
+    "SiteCharacteristicsDatabase", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enables delaying the navigation of background tabs in order to improve
 // foreground tab's user experience.
@@ -52,6 +52,13 @@ const base::Feature kStaggeredBackgroundTabOpeningExperiment{
 // Enables using the Tab Ranker to score tabs for discarding instead of relying
 // on last focused time.
 const base::Feature kTabRanker{"TabRanker", base::FEATURE_DISABLED_BY_DEFAULT};
+
+#if defined(OS_CHROMEOS)
+// On ChromeOS, enables using new ProcessType enums that combine apps and tabs
+// in the same categories.
+const base::Feature kNewProcessTypes{
+  "NewProcessTypes", base::FEATURE_DISABLED_BY_DEFAULT};
+#endif // defined(OS_CHROMEOS)
 
 }  // namespace features
 
@@ -162,6 +169,11 @@ InfiniteSessionRestoreParams::InfiniteSessionRestoreParams(
 
 ProactiveTabFreezeAndDiscardParams GetProactiveTabFreezeAndDiscardParams(
     int memory_in_gb) {
+  // TimeDelta::Max() should be used to express infinite timeouts. A large
+  // timeout that is not TimeDelta::Max() causes MessageLoop to output a
+  // warning.
+  constexpr base::TimeDelta kLargeTimeout = base::TimeDelta::FromDays(14);
+
   ProactiveTabFreezeAndDiscardParams params = {};
 
   params.should_proactively_discard =
@@ -187,21 +199,27 @@ ProactiveTabFreezeAndDiscardParams GetProactiveTabFreezeAndDiscardParams(
 
   params.low_occluded_timeout = base::TimeDelta::FromSeconds(
       ProactiveTabFreezeAndDiscardParams::kLowOccludedTimeout.Get());
+  DCHECK_LT(params.low_occluded_timeout, kLargeTimeout);
 
   params.moderate_occluded_timeout = base::TimeDelta::FromSeconds(
       ProactiveTabFreezeAndDiscardParams::kModerateOccludedTimeout.Get());
+  DCHECK_LT(params.moderate_occluded_timeout, kLargeTimeout);
 
   params.high_occluded_timeout = base::TimeDelta::FromSeconds(
       ProactiveTabFreezeAndDiscardParams::kHighOccludedTimeout.Get());
+  DCHECK_LT(params.high_occluded_timeout, kLargeTimeout);
 
   params.freeze_timeout = base::TimeDelta::FromSeconds(
       ProactiveTabFreezeAndDiscardParams::kFreezeTimeout.Get());
+  DCHECK_LT(params.freeze_timeout, kLargeTimeout);
 
   params.unfreeze_timeout = base::TimeDelta::FromSeconds(
       ProactiveTabFreezeAndDiscardParams::kUnfreezeTimeout.Get());
+  DCHECK_LT(params.unfreeze_timeout, kLargeTimeout);
 
   params.refreeze_timeout = base::TimeDelta::FromSeconds(
       ProactiveTabFreezeAndDiscardParams::kRefreezeTimeout.Get());
+  DCHECK_LT(params.refreeze_timeout, kLargeTimeout);
 
   params.disable_heuristics_protections =
       ProactiveTabFreezeAndDiscardParams::kDisableHeuristicsProtections.Get();
@@ -287,6 +305,22 @@ InfiniteSessionRestoreParams GetInfiniteSessionRestoreParams() {
       InfiniteSessionRestoreParams::kMinSiteEngagementToRestore.Get();
 
   return params;
+}
+
+int GetNumOldestTabsToScoreWithTabRanker() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      features::kTabRanker, "number_of_oldest_tabs_to_score_with_TabRanker",
+      std::numeric_limits<int>::max());
+}
+
+int GetNumOldestTabsToLogWithTabRanker() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      features::kTabRanker, "number_of_oldest_tabs_to_log_with_TabRanker", 0);
+}
+
+bool DisableBackgroundLogWithTabRanker() {
+  return base::GetFieldTrialParamByFeatureAsBool(
+      features::kTabRanker, "disable_background_log_with_TabRanker", false);
 }
 
 }  // namespace resource_coordinator

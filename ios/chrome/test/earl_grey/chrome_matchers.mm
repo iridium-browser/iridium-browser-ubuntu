@@ -4,15 +4,14 @@
 
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 
-#import <OCHamcrest/OCHamcrest.h>
-
+#import <EarlGrey/EarlGrey.h>
 #import <WebKit/WebKit.h>
 
 #include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/unified_consent/feature.h"
-#import "ios/chrome/browser/ui/authentication/signin_promo_view.h"
+#import "ios/chrome/browser/ui/authentication/cells/signin_promo_view.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_ui_constants.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_switch_item.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_view_controller.h"
@@ -23,18 +22,18 @@
 #import "ios/chrome/browser/ui/payments/payment_request_picker_view_controller.h"
 #import "ios/chrome/browser/ui/payments/payment_request_view_controller.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
-#import "ios/chrome/browser/ui/settings/accounts_collection_view_controller.h"
+#import "ios/chrome/browser/ui/settings/accounts_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/cells/clear_browsing_data_constants.h"
+#import "ios/chrome/browser/ui/settings/cells/settings_switch_cell.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_switch_item.h"
-#import "ios/chrome/browser/ui/settings/cells/sync_switch_item.h"
 #import "ios/chrome/browser/ui/settings/clear_browsing_data_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/clear_browsing_data_ui_constants.h"
-#import "ios/chrome/browser/ui/settings/import_data_collection_view_controller.h"
-#import "ios/chrome/browser/ui/settings/settings_collection_view_controller.h"
+#import "ios/chrome/browser/ui/settings/import_data_table_view_controller.h"
+#import "ios/chrome/browser/ui/settings/settings_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/sync_settings_collection_view_controller.h"
 #import "ios/chrome/browser/ui/static_content/static_html_view_controller.h"
-#import "ios/chrome/browser/ui/toolbar/buttons/toolbar_constants.h"
-#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
+#import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/web/public/block_types.h"
@@ -48,39 +47,56 @@
 
 namespace {
 
-id<GREYMatcher> SettingsSwitchIsToggledOn(BOOL isToggledOn) {
+id<GREYMatcher> SettingsSwitchIsToggledOn(BOOL is_toggled_on) {
   MatchesBlock matches = ^BOOL(id element) {
     SettingsSwitchCell* switch_cell =
         base::mac::ObjCCastStrict<SettingsSwitchCell>(element);
     UISwitch* switch_view = switch_cell.switchView;
-    return (switch_view.on && isToggledOn) || (!switch_view.on && !isToggledOn);
+    return (switch_view.on && is_toggled_on) ||
+           (!switch_view.on && !is_toggled_on);
   };
   DescribeToBlock describe = ^void(id<GREYDescription> description) {
     NSString* name =
         [NSString stringWithFormat:@"settingsSwitchToggledState(%@)",
-                                   isToggledOn ? @"ON" : @"OFF"];
+                                   is_toggled_on ? @"ON" : @"OFF"];
     [description appendText:name];
   };
   return [[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
                                               descriptionBlock:describe];
 }
 
-id<GREYMatcher> SettingsSwitchIsEnabled(BOOL isEnabled) {
+id<GREYMatcher> SettingsSwitchIsEnabled(BOOL is_enabled) {
   MatchesBlock matches = ^BOOL(id element) {
     SettingsSwitchCell* switch_cell =
         base::mac::ObjCCastStrict<SettingsSwitchCell>(element);
     UISwitch* switch_view = switch_cell.switchView;
-    return (switch_view.enabled && isEnabled) ||
-           (!switch_view.enabled && !isEnabled);
+    return (switch_view.enabled && is_enabled) ||
+           (!switch_view.enabled && !is_enabled);
   };
   DescribeToBlock describe = ^void(id<GREYDescription> description) {
     NSString* name =
         [NSString stringWithFormat:@"settingsSwitchEnabledState(%@)",
-                                   isEnabled ? @"YES" : @"NO"];
+                                   is_enabled ? @"YES" : @"NO"];
     [description appendText:name];
   };
   return [[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
                                               descriptionBlock:describe];
+}
+
+// Returns the subview of |parentView| corresponding to the
+// ContentSuggestionsViewController. Returns nil if it is not in its subviews.
+UIView* SubviewWithAccessibilityIdentifier(NSString* accessibilityID,
+                                           UIView* parentView) {
+  if (parentView.accessibilityIdentifier == accessibilityID) {
+    return parentView;
+  }
+  for (UIView* view in parentView.subviews) {
+    UIView* resultView =
+        SubviewWithAccessibilityIdentifier(accessibilityID, view);
+    if (resultView)
+      return resultView;
+  }
+  return nil;
 }
 
 }  // namespace
@@ -149,15 +165,25 @@ id<GREYMatcher> ButtonWithImage(int image_id) {
                     image_matcher, nil);
 }
 
+id<GREYMatcher> StaticTextWithAccessibilityLabelId(int message_id) {
+  return StaticTextWithAccessibilityLabel(
+      l10n_util::GetNSStringWithFixup(message_id));
+}
+
 id<GREYMatcher> StaticTextWithAccessibilityLabel(NSString* label) {
   return grey_allOf(grey_accessibilityLabel(label),
                     grey_accessibilityTrait(UIAccessibilityTraitStaticText),
                     nil);
 }
 
-id<GREYMatcher> StaticTextWithAccessibilityLabelId(int message_id) {
-  return StaticTextWithAccessibilityLabel(
+id<GREYMatcher> HeaderWithAccessibilityLabelId(int message_id) {
+  return HeaderWithAccessibilityLabel(
       l10n_util::GetNSStringWithFixup(message_id));
+}
+
+id<GREYMatcher> HeaderWithAccessibilityLabel(NSString* label) {
+  return grey_allOf(grey_accessibilityLabel(label),
+                    grey_accessibilityTrait(UIAccessibilityTraitHeader), nil);
 }
 
 id<GREYMatcher> CancelButton() {
@@ -201,8 +227,19 @@ id<GREYMatcher> PageSecurityInfoIndicator() {
 }
 
 id<GREYMatcher> OmniboxText(std::string text) {
-  return grey_allOf(Omnibox(),
-                    hasProperty(@"text", base::SysUTF8ToNSString(text)), nil);
+  GREYElementMatcherBlock* matcher = [GREYElementMatcherBlock
+      matcherWithMatchesBlock:^BOOL(id element) {
+        OmniboxTextFieldIOS* omnibox =
+            base::mac::ObjCCast<OmniboxTextFieldIOS>(element);
+        return [omnibox.text isEqualToString:base::SysUTF8ToNSString(text)];
+      }
+      descriptionBlock:^void(id<GREYDescription> description) {
+        [description
+            appendText:[NSString
+                           stringWithFormat:@"Omnibox contains text \"%@\"",
+                                            base::SysUTF8ToNSString(text)]];
+      }];
+  return matcher;
 }
 
 id<GREYMatcher> OmniboxContainingText(std::string text) {
@@ -254,26 +291,27 @@ id<GREYMatcher> ShowTabsButton() {
                     grey_sufficientlyVisible(), nil);
 }
 
-id<GREYMatcher> SettingsSwitchCell(NSString* accessibilityIdentifier,
-                                   BOOL isToggledOn) {
-  return SettingsSwitchCell(accessibilityIdentifier, isToggledOn, YES);
+id<GREYMatcher> SettingsSwitchCell(NSString* accessibility_identifier,
+                                   BOOL is_toggled_on) {
+  return SettingsSwitchCell(accessibility_identifier, is_toggled_on, YES);
 }
 
-id<GREYMatcher> SettingsSwitchCell(NSString* accessibilityIdentifier,
-                                   BOOL isToggledOn,
-                                   BOOL isEnabled) {
-  return grey_allOf(grey_accessibilityID(accessibilityIdentifier),
-                    SettingsSwitchIsToggledOn(isToggledOn),
-                    SettingsSwitchIsEnabled(isEnabled),
+id<GREYMatcher> SettingsSwitchCell(NSString* accessibility_identifier,
+                                   BOOL is_toggled_on,
+                                   BOOL is_enabled) {
+  return grey_allOf(grey_accessibilityID(accessibility_identifier),
+                    SettingsSwitchIsToggledOn(is_toggled_on),
+                    SettingsSwitchIsEnabled(is_enabled),
                     grey_sufficientlyVisible(), nil);
 }
 
-id<GREYMatcher> SyncSwitchCell(NSString* accessibilityLabel, BOOL isToggledOn) {
+id<GREYMatcher> LegacySyncSwitchCell(NSString* accessibilityLabel,
+                                     BOOL is_toggled_on) {
   return grey_allOf(
       grey_accessibilityLabel(accessibilityLabel),
       grey_accessibilityValue(
-          isToggledOn ? l10n_util::GetNSString(IDS_IOS_SETTING_ON)
-                      : l10n_util::GetNSString(IDS_IOS_SETTING_OFF)),
+          is_toggled_on ? l10n_util::GetNSString(IDS_IOS_SETTING_ON)
+                        : l10n_util::GetNSString(IDS_IOS_SETTING_OFF)),
       grey_sufficientlyVisible(), nil);
 }
 
@@ -282,7 +320,9 @@ id<GREYMatcher> OpenLinkInNewTabButton() {
 }
 
 id<GREYMatcher> NavigationBarDoneButton() {
-  return ButtonWithAccessibilityLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  return grey_allOf(
+      ButtonWithAccessibilityLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON),
+      grey_userInteractionEnabled(), nil);
 }
 
 id<GREYMatcher> BookmarksNavigationBarDoneButton() {
@@ -302,11 +342,19 @@ id<GREYMatcher> AccountConsistencyConfirmationOkButton() {
 }
 
 id<GREYMatcher> AddAccountButton() {
-  return grey_accessibilityID(kSettingsAccountsAddAccountCellId);
+  return grey_accessibilityID(kSettingsAccountsTableViewAddAccountCellId);
 }
 
 id<GREYMatcher> SignOutAccountsButton() {
-  return grey_accessibilityID(kSettingsAccountsSignoutCellId);
+  return grey_accessibilityID(kSettingsAccountsTableViewSignoutCellId);
+}
+
+id<GREYMatcher> ClearBrowsingDataCell() {
+  return ButtonWithAccessibilityLabelId(IDS_IOS_CLEAR_BROWSING_DATA_TITLE);
+}
+
+id<GREYMatcher> ClearBrowsingDataButton() {
+  return ButtonWithAccessibilityLabelId(IDS_IOS_CLEAR_BUTTON);
 }
 
 id<GREYMatcher> ClearBrowsingDataCollectionView() {
@@ -350,7 +398,7 @@ id<GREYMatcher> SettingsAccountButton() {
 }
 
 id<GREYMatcher> SettingsAccountsCollectionView() {
-  return grey_accessibilityID(kSettingsAccountsId);
+  return grey_accessibilityID(kSettingsAccountsTableViewId);
 }
 
 id<GREYMatcher> SettingsImportDataImportButton() {
@@ -366,7 +414,7 @@ id<GREYMatcher> SettingsSyncManageSyncedDataButton() {
 }
 
 id<GREYMatcher> AccountsSyncButton() {
-  return grey_allOf(grey_accessibilityID(kSettingsAccountsSyncCellId),
+  return grey_allOf(grey_accessibilityID(kSettingsAccountsTableViewSyncCellId),
                     grey_sufficientlyVisible(), nil);
 }
 
@@ -379,8 +427,15 @@ id<GREYMatcher> GoogleServicesSettingsButton() {
 }
 
 id<GREYMatcher> SettingsMenuBackButton() {
-  return grey_allOf(grey_accessibilityID(@"ic_arrow_back"),
-                    grey_accessibilityTrait(UIAccessibilityTraitButton), nil);
+  UINavigationBar* navBar = base::mac::ObjCCastStrict<UINavigationBar>(
+      SubviewWithAccessibilityIdentifier(
+          @"SettingNavigationBar",
+          [[UIApplication sharedApplication] keyWindow]));
+  return grey_allOf(grey_anyOf(grey_accessibilityLabel(navBar.backItem.title),
+                               grey_accessibilityLabel(@"Back"), nil),
+                    grey_kindOfClass([UIButton class]),
+                    grey_ancestor(grey_kindOfClass([UINavigationBar class])),
+                    nil);
 }
 
 id<GREYMatcher> SettingsMenuPrivacyButton() {
@@ -407,7 +462,7 @@ id<GREYMatcher> VoiceSearchButton() {
 }
 
 id<GREYMatcher> SettingsCollectionView() {
-  return grey_accessibilityID(kSettingsCollectionViewId);
+  return grey_accessibilityID(kSettingsTableViewId);
 }
 
 id<GREYMatcher> ClearBrowsingHistoryButton() {

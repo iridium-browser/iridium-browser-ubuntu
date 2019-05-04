@@ -25,8 +25,6 @@ namespace web {
 //   friend class web::WebStateUserData<Foo>;
 //   // ... more private stuff here ...
 // }
-// --- in foo.cc ---
-// DEFINE_WEB_STATE_USER_DATA_KEY(Foo);
 //
 template <typename T>
 class WebStateUserData : public base::SupportsUserData::Data {
@@ -59,10 +57,6 @@ class WebStateUserData : public base::SupportsUserData::Data {
     return &kId;
   }
 };
-
-// Macro previously used to define the UserDataKey().
-// TODO(crbug.com/589840): Remove this once all use have been deleted.
-#define DEFINE_WEB_STATE_USER_DATA_KEY(TYPE)
 
 }  // namespace web
 

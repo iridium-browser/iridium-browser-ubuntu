@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -38,7 +39,7 @@ namespace {
 const char kURLOrigin[] = "http://remote/";
 const char kTestFileName[] = "test.dat";
 const char kTestData[] = "0123456789";
-const int kTestDataSize = arraysize(kTestData) - 1;
+const int kTestDataSize = base::size(kTestData) - 1;
 
 void ReadFromReader(storage::FileSystemFileStreamReader* reader,
                     std::string* data,
@@ -263,7 +264,7 @@ TEST_F(FileSystemFileStreamReaderTest, DeleteWithUnfinishedRead) {
   net::TestCompletionCallback callback;
   scoped_refptr<net::IOBufferWithSize> buf =
       base::MakeRefCounted<net::IOBufferWithSize>(kTestDataSize);
-  int rv = reader->Read(buf.get(), buf->size(), base::Bind(&NeverCalled));
+  int rv = reader->Read(buf.get(), buf->size(), base::BindOnce(&NeverCalled));
   ASSERT_TRUE(rv == net::ERR_IO_PENDING || rv >= 0);
 
   // Delete immediately.

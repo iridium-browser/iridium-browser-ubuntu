@@ -20,7 +20,7 @@
 #include "effects/GrBitmapTextGeoProc.h"
 #include "effects/GrDistanceFieldGeoProc.h"
 #include "text/GrAtlasManager.h"
-#include "text/GrGlyphCache.h"
+#include "text/GrStrikeCache.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -113,33 +113,34 @@ void GrAtlasTextOp::init() {
     this->setBounds(bounds, HasAABloat::kNo, IsZeroArea::kNo);
 }
 
-void GrAtlasTextOp::visitProxies(const VisitProxyFunc& func) const {
+void GrAtlasTextOp::visitProxies(const VisitProxyFunc& func, VisitorType) const {
     fProcessors.visitProxies(func);
 }
 
+#ifdef SK_DEBUG
 SkString GrAtlasTextOp::dumpInfo() const {
     SkString str;
 
     for (int i = 0; i < fGeoCount; ++i) {
         str.appendf("%d: Color: 0x%08x Trans: %.2f,%.2f Runs: %d\n",
                     i,
-                    fGeoData[i].fColor,
+                    fGeoData[i].fColor.toBytes_RGBA(),
                     fGeoData[i].fX,
                     fGeoData[i].fY,
-                    fGeoData[i].fBlob->runCount());
+                    fGeoData[i].fBlob->runCountLimit());
     }
 
     str += fProcessors.dumpProcessors();
     str += INHERITED::dumpInfo();
     return str;
 }
+#endif
 
 GrDrawOp::FixedFunctionFlags GrAtlasTextOp::fixedFunctionFlags() const {
     return FixedFunctionFlags::kNone;
 }
 
-GrDrawOp::RequiresDstTexture GrAtlasTextOp::finalize(const GrCaps& caps,
-                                                     const GrAppliedClip* clip) {
+GrProcessorSet::Analysis GrAtlasTextOp::finalize(const GrCaps& caps, const GrAppliedClip* clip) {
     GrProcessorAnalysisCoverage coverage;
     GrProcessorAnalysisColor color;
     if (kColorBitmapMask_MaskType == fMaskType) {
@@ -164,10 +165,7 @@ GrDrawOp::RequiresDstTexture GrAtlasTextOp::finalize(const GrCaps& caps,
     }
     auto analysis = fProcessors.finalize(color, coverage, clip, false, caps, &fGeoData[0].fColor);
     fUsesLocalCoords = analysis.usesLocalCoords();
-    fCanCombineOnTouchOrOverlap =
-            !analysis.requiresDstTexture() &&
-            !(fProcessors.xferProcessor() && fProcessors.xferProcessor()->xferBarrierType(caps));
-    return analysis.requiresDstTexture() ? RequiresDstTexture::kYes : RequiresDstTexture::kNo;
+    return analysis;
 }
 
 static void clip_quads(const SkIRect& clipRect, char* currVertex, const char* blobVertices,
@@ -284,7 +282,7 @@ void GrAtlasTextOp::onPrepareDraws(Target* target) {
     }
 
     GrAtlasManager* atlasManager = target->atlasManager();
-    GrGlyphCache* glyphCache = target->glyphCache();
+    GrStrikeCache* glyphCache = target->glyphCache();
 
     GrMaskFormat maskFormat = this->maskFormat();
 
@@ -319,13 +317,12 @@ void GrAtlasTextOp::onPrepareDraws(Target* target) {
         GrSamplerState samplerState = fNeedsGlyphTransform ? GrSamplerState::ClampBilerp()
                                                            : GrSamplerState::ClampNearest();
         flushInfo.fGeometryProcessor = GrBitmapTextGeoProc::Make(
-            *target->caps().shaderCaps(), this->color(), proxies, numActiveProxies, samplerState,
-            maskFormat, localMatrix, vmPerspective);
+            *target->caps().shaderCaps(), this->color(), false, proxies, numActiveProxies,
+            samplerState, maskFormat, localMatrix, vmPerspective);
     }
 
     flushInfo.fGlyphsToFlush = 0;
-    size_t vertexStride = GrTextBlob::GetVertexStride(maskFormat, vmPerspective);
-    SkASSERT(vertexStride == flushInfo.fGeometryProcessor->debugOnly_vertexStride());
+    size_t vertexStride = flushInfo.fGeometryProcessor->vertexStride();
 
     int glyphCount = this->numGlyphs();
     const GrBuffer* vertexBuffer;
@@ -346,10 +343,11 @@ void GrAtlasTextOp::onPrepareDraws(Target* target) {
     for (int i = 0; i < fGeoCount; i++) {
         const Geometry& args = fGeoData[i];
         Blob* blob = args.fBlob;
+        // TODO4F: Preserve float colors
         GrTextBlob::VertexRegenerator regenerator(
                 resourceProvider, blob, args.fRun, args.fSubRun, args.fViewMatrix, args.fX, args.fY,
-                args.fColor, target->deferredUploadTarget(), glyphCache, atlasManager,
-                &autoGlyphCache);
+                args.fColor.toBytes_RGBA(), target->deferredUploadTarget(), glyphCache,
+                atlasManager, &autoGlyphCache);
         bool done = false;
         while (!done) {
             GrTextBlob::VertexRegenerator::Result result;
@@ -445,10 +443,6 @@ GrOp::CombineResult GrAtlasTextOp::onCombineIfPossible(GrOp* t, const GrCaps& ca
         return CombineResult::kCannotCombine;
     }
 
-    if (!fCanCombineOnTouchOrOverlap && GrRectsTouchOrOverlap(this->bounds(), that->bounds())) {
-        return CombineResult::kCannotCombine;
-    }
-
     if (fMaskType != that->fMaskType) {
         return CombineResult::kCannotCombine;
     }
@@ -517,7 +511,6 @@ GrOp::CombineResult GrAtlasTextOp::onCombineIfPossible(GrOp* t, const GrCaps& ca
     that->fGeoCount = 0;
     fGeoCount = newGeoCount;
 
-    this->joinBounds(*that);
     return CombineResult::kMerged;
 }
 

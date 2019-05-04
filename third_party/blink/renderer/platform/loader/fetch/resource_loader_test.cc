@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_scheduler.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/loader/testing/mock_fetch_context.h"
+#include "third_party/blink/renderer/platform/loader/testing/test_resource_fetcher_properties.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -32,12 +33,6 @@ class ResourceLoaderTest : public testing::Test {
   ResourceLoaderTest()
       : foo_url_("https://foo.test"), bar_url_("https://bar.test"){};
 
-  void SetUp() override {
-    context_ = MockFetchContext::Create(
-        MockFetchContext::kShouldLoadNewResource, nullptr,
-        std::make_unique<TestWebURLLoaderFactory>());
-  }
-
  protected:
   using FetchRequestMode = network::mojom::FetchRequestMode;
   using FetchResponseType = network::mojom::FetchResponseType;
@@ -51,15 +46,12 @@ class ResourceLoaderTest : public testing::Test {
     const FetchResponseType expectation;
   };
 
-  Persistent<MockFetchContext> context_;
-
   ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
       platform_;
 
   const KURL foo_url_;
   const KURL bar_url_;
 
- private:
   class TestWebURLLoaderFactory final : public WebURLLoaderFactory {
     std::unique_ptr<WebURLLoader> CreateURLLoader(
         const WebURLRequest& request,
@@ -69,6 +61,11 @@ class ResourceLoaderTest : public testing::Test {
     }
   };
 
+  static scoped_refptr<base::SingleThreadTaskRunner> CreateTaskRunner() {
+    return base::MakeRefCounted<scheduler::FakeTaskRunner>();
+  }
+
+ private:
   class TestWebURLLoader final : public WebURLLoader {
    public:
     ~TestWebURLLoader() override = default;
@@ -106,8 +103,8 @@ std::ostream& operator<<(std::ostream& o, const ResourceLoaderTest::From& f) {
 }
 
 TEST_F(ResourceLoaderTest, ResponseType) {
-  // This test will be trivial if EnableOutOfBlinkCORS is enabled.
-  WebRuntimeFeatures::EnableOutOfBlinkCORS(false);
+  // This test will be trivial if EnableOutOfBlinkCors is enabled.
+  WebRuntimeFeatures::EnableOutOfBlinkCors(false);
 
   const scoped_refptr<const SecurityOrigin> origin =
       SecurityOrigin::Create(foo_url_);
@@ -117,40 +114,40 @@ TEST_F(ResourceLoaderTest, ResponseType) {
 
   TestCase cases[] = {
       // Same origin response:
-      {same_origin_url, FetchRequestMode::kNoCORS, From::kNetwork, no_origin,
+      {same_origin_url, FetchRequestMode::kNoCors, From::kNetwork, no_origin,
        FetchResponseType::kDefault, FetchResponseType::kBasic},
-      {same_origin_url, FetchRequestMode::kCORS, From::kNetwork, no_origin,
+      {same_origin_url, FetchRequestMode::kCors, From::kNetwork, no_origin,
        FetchResponseType::kDefault, FetchResponseType::kBasic},
 
       // Cross origin, no-cors:
-      {cross_origin_url, FetchRequestMode::kNoCORS, From::kNetwork, no_origin,
+      {cross_origin_url, FetchRequestMode::kNoCors, From::kNetwork, no_origin,
        FetchResponseType::kDefault, FetchResponseType::kOpaque},
 
       // Cross origin, cors:
-      {cross_origin_url, FetchRequestMode::kCORS, From::kNetwork, origin,
-       FetchResponseType::kDefault, FetchResponseType::kCORS},
-      {cross_origin_url, FetchRequestMode::kCORS, From::kNetwork, no_origin,
+      {cross_origin_url, FetchRequestMode::kCors, From::kNetwork, origin,
+       FetchResponseType::kDefault, FetchResponseType::kCors},
+      {cross_origin_url, FetchRequestMode::kCors, From::kNetwork, no_origin,
        FetchResponseType::kDefault, FetchResponseType::kError},
 
       // From service worker, no-cors:
-      {same_origin_url, FetchRequestMode::kNoCORS, From::kServiceWorker,
+      {same_origin_url, FetchRequestMode::kNoCors, From::kServiceWorker,
        no_origin, FetchResponseType::kBasic, FetchResponseType::kBasic},
-      {same_origin_url, FetchRequestMode::kNoCORS, From::kServiceWorker,
-       no_origin, FetchResponseType::kCORS, FetchResponseType::kCORS},
-      {same_origin_url, FetchRequestMode::kNoCORS, From::kServiceWorker,
+      {same_origin_url, FetchRequestMode::kNoCors, From::kServiceWorker,
+       no_origin, FetchResponseType::kCors, FetchResponseType::kCors},
+      {same_origin_url, FetchRequestMode::kNoCors, From::kServiceWorker,
        no_origin, FetchResponseType::kDefault, FetchResponseType::kDefault},
-      {same_origin_url, FetchRequestMode::kNoCORS, From::kServiceWorker,
+      {same_origin_url, FetchRequestMode::kNoCors, From::kServiceWorker,
        no_origin, FetchResponseType::kOpaque, FetchResponseType::kOpaque},
-      {same_origin_url, FetchRequestMode::kNoCORS, From::kServiceWorker,
+      {same_origin_url, FetchRequestMode::kNoCors, From::kServiceWorker,
        no_origin, FetchResponseType::kOpaqueRedirect,
        FetchResponseType::kOpaqueRedirect},
 
       // From service worker, cors:
-      {same_origin_url, FetchRequestMode::kCORS, From::kServiceWorker,
+      {same_origin_url, FetchRequestMode::kCors, From::kServiceWorker,
        no_origin, FetchResponseType::kBasic, FetchResponseType::kBasic},
-      {same_origin_url, FetchRequestMode::kNoCORS, From::kServiceWorker,
-       no_origin, FetchResponseType::kCORS, FetchResponseType::kCORS},
-      {same_origin_url, FetchRequestMode::kNoCORS, From::kServiceWorker,
+      {same_origin_url, FetchRequestMode::kNoCors, From::kServiceWorker,
+       no_origin, FetchResponseType::kCors, FetchResponseType::kCors},
+      {same_origin_url, FetchRequestMode::kNoCors, From::kServiceWorker,
        no_origin, FetchResponseType::kDefault, FetchResponseType::kDefault},
   };
 
@@ -164,8 +161,12 @@ TEST_F(ResourceLoaderTest, ResponseType) {
                  << ", original_response_type: "
                  << test.original_response_type);
 
-    context_->SetSecurityOrigin(origin);
-    ResourceFetcher* fetcher = ResourceFetcher::Create(context_);
+    auto* properties =
+        MakeGarbageCollected<TestResourceFetcherProperties>(origin);
+    FetchContext* context = MakeGarbageCollected<MockFetchContext>(
+        nullptr, std::make_unique<TestWebURLLoaderFactory>());
+    auto* fetcher = MakeGarbageCollected<ResourceFetcher>(
+        ResourceFetcherInit(*properties, context, CreateTaskRunner()));
 
     ResourceRequest request;
     request.SetURL(test.url);
@@ -173,7 +174,7 @@ TEST_F(ResourceLoaderTest, ResponseType) {
     request.SetRequestContext(mojom::RequestContextType::FETCH);
 
     FetchParameters fetch_parameters(request);
-    if (test.request_mode == network::mojom::FetchRequestMode::kCORS) {
+    if (test.request_mode == network::mojom::FetchRequestMode::kCors) {
       fetch_parameters.SetCrossOriginAccessControl(
           origin.get(), network::mojom::FetchCredentialsMode::kOmit);
     }
@@ -193,6 +194,75 @@ TEST_F(ResourceLoaderTest, ResponseType) {
     loader->DidReceiveResponse(WrappedResourceResponse(response));
     EXPECT_EQ(test.expectation, resource->GetResponse().GetType());
   }
+}
+
+class ResourceLoaderIsolatedCodeCacheTest : public ResourceLoaderTest {
+ protected:
+  bool LoadAndCheckIsolatedCodeCache(ResourceResponse response) {
+    const scoped_refptr<const SecurityOrigin> origin =
+        SecurityOrigin::Create(foo_url_);
+
+    auto* properties =
+        MakeGarbageCollected<TestResourceFetcherProperties>(origin);
+    FetchContext* context = MakeGarbageCollected<MockFetchContext>(
+        nullptr, std::make_unique<TestWebURLLoaderFactory>());
+    auto* fetcher = MakeGarbageCollected<ResourceFetcher>(
+        ResourceFetcherInit(*properties, context, CreateTaskRunner()));
+
+    ResourceRequest request;
+    request.SetURL(foo_url_);
+    request.SetRequestContext(mojom::RequestContextType::FETCH);
+
+    FetchParameters fetch_parameters(request);
+    Resource* resource = RawResource::Fetch(fetch_parameters, fetcher, nullptr);
+    ResourceLoader* loader = resource->Loader();
+
+    loader->DidReceiveResponse(WrappedResourceResponse(response));
+    return loader->should_use_isolated_code_cache_;
+  }
+};
+
+TEST_F(ResourceLoaderIsolatedCodeCacheTest, ResponseFromNetwork) {
+  ResourceResponse response(foo_url_);
+  response.SetHTTPStatusCode(200);
+  EXPECT_EQ(true, LoadAndCheckIsolatedCodeCache(response));
+}
+
+TEST_F(ResourceLoaderIsolatedCodeCacheTest,
+       SyntheticResponseFromServiceWorker) {
+  ResourceResponse response(foo_url_);
+  response.SetHTTPStatusCode(200);
+  response.SetWasFetchedViaServiceWorker(true);
+  EXPECT_EQ(false, LoadAndCheckIsolatedCodeCache(response));
+}
+
+TEST_F(ResourceLoaderIsolatedCodeCacheTest,
+       PassThroughResponseFromServiceWorker) {
+  ResourceResponse response(foo_url_);
+  response.SetHTTPStatusCode(200);
+  response.SetWasFetchedViaServiceWorker(true);
+  response.SetURLListViaServiceWorker(Vector<KURL>(1, foo_url_));
+  EXPECT_EQ(true, LoadAndCheckIsolatedCodeCache(response));
+}
+
+TEST_F(ResourceLoaderIsolatedCodeCacheTest,
+       DifferentUrlResponseFromServiceWorker) {
+  ResourceResponse response(foo_url_);
+  response.SetHTTPStatusCode(200);
+  response.SetWasFetchedViaServiceWorker(true);
+  response.SetURLListViaServiceWorker(Vector<KURL>(1, bar_url_));
+  EXPECT_EQ(false, LoadAndCheckIsolatedCodeCache(response));
+}
+
+TEST_F(ResourceLoaderIsolatedCodeCacheTest, CacheResponseFromServiceWorker) {
+  ResourceResponse response(foo_url_);
+  response.SetHTTPStatusCode(200);
+  response.SetWasFetchedViaServiceWorker(true);
+  response.SetCacheStorageCacheName("dummy");
+  // The browser does support code cache for cache_storage Responses, but they
+  // are loaded via a different mechanism.  So the ResourceLoader code caching
+  // value should be false here.
+  EXPECT_EQ(false, LoadAndCheckIsolatedCodeCache(response));
 }
 
 }  // namespace blink

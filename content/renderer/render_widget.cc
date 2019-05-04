@@ -22,7 +22,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -44,7 +44,6 @@
 #include "content/common/swapped_out_messages.h"
 #include "content/common/tab_switching_time_callback.h"
 #include "content/common/text_input_state.h"
-#include "content/common/view_messages.h"
 #include "content/common/widget_messages.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
@@ -55,24 +54,23 @@
 #include "content/public/common/use_zoom_for_dsf_policy.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/browser_plugin/browser_plugin.h"
+#include "content/renderer/compositor/layer_tree_view.h"
 #include "content/renderer/cursor_utils.h"
 #include "content/renderer/devtools/render_widget_screen_metrics_emulator.h"
 #include "content/renderer/drop_data_builder.h"
 #include "content/renderer/external_popup_menu.h"
-#include "content/renderer/gpu/frame_swap_message_queue.h"
-#include "content/renderer/gpu/layer_tree_view.h"
-#include "content/renderer/gpu/queue_message_swap_promise.h"
+#include "content/renderer/frame_swap_message_queue.h"
 #include "content/renderer/ime_event_guard.h"
 #include "content/renderer/input/main_thread_event_queue.h"
 #include "content/renderer/input/widget_input_handler_manager.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
+#include "content/renderer/queue_message_swap_promise.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_frame_metadata_observer_impl.h"
 #include "content/renderer/render_frame_proxy.h"
 #include "content/renderer/render_process.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
-#include "content/renderer/render_widget_owner_delegate.h"
 #include "content/renderer/renderer_blink_platform_impl.h"
 #include "content/renderer/resizing_mode_selector.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
@@ -108,7 +106,7 @@
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/blink/public/web/web_widget.h"
 #include "third_party/skia/include/core/SkShader.h"
-#include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/clipboard_constants.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/events/base_event_utils.h"
@@ -157,7 +155,6 @@ using blink::WebMouseWheelEvent;
 using blink::WebNavigationPolicy;
 using blink::WebNode;
 using blink::WebPagePopup;
-using blink::WebPoint;
 using blink::WebRange;
 using blink::WebRect;
 using blink::WebSize;
@@ -229,8 +226,7 @@ WebDragData DropMetaDataToWebDragData(
       // DropData::MetaData --> WebDragData-->DropData. In the end, DropData
       // will contain an empty URL (which means no URL is dragged) if the URL in
       // WebDragData is empty.
-      if (base::EqualsASCII(meta_data_item.mime_type,
-                            ui::Clipboard::kMimeTypeURIList)) {
+      if (base::EqualsASCII(meta_data_item.mime_type, ui::kMimeTypeURIList)) {
         item.string_data = WebString::FromUTF8("about:dragdrop-placeholder");
       }
       item_list.push_back(item);
@@ -275,7 +271,7 @@ WebDragData DropDataToWebDragData(const DropData& drop_data) {
   if (!drop_data.text.is_null()) {
     WebDragData::Item item;
     item.storage_type = WebDragData::Item::kStorageTypeString;
-    item.string_type = WebString::FromUTF8(ui::Clipboard::kMimeTypeText);
+    item.string_type = WebString::FromUTF8(ui::kMimeTypeText);
     item.string_data = WebString::FromUTF16(drop_data.text.string());
     item_list.push_back(item);
   }
@@ -283,7 +279,7 @@ WebDragData DropDataToWebDragData(const DropData& drop_data) {
   if (!drop_data.url.is_empty()) {
     WebDragData::Item item;
     item.storage_type = WebDragData::Item::kStorageTypeString;
-    item.string_type = WebString::FromUTF8(ui::Clipboard::kMimeTypeURIList);
+    item.string_type = WebString::FromUTF8(ui::kMimeTypeURIList);
     item.string_data = WebString::FromUTF8(drop_data.url.spec());
     item.title = WebString::FromUTF16(drop_data.url_title);
     item_list.push_back(item);
@@ -292,7 +288,7 @@ WebDragData DropDataToWebDragData(const DropData& drop_data) {
   if (!drop_data.html.is_null()) {
     WebDragData::Item item;
     item.storage_type = WebDragData::Item::kStorageTypeString;
-    item.string_type = WebString::FromUTF8(ui::Clipboard::kMimeTypeHTML);
+    item.string_type = WebString::FromUTF8(ui::kMimeTypeHTML);
     item.string_data = WebString::FromUTF16(drop_data.html.string());
     item.base_url = drop_data.html_base_url;
     item_list.push_back(item);
@@ -380,33 +376,32 @@ static bool PreferCompositingToLCDText(CompositorDependencies* compositor_deps,
 
 RenderWidget::RenderWidget(int32_t widget_routing_id,
                            CompositorDependencies* compositor_deps,
-                           WidgetType widget_type,
                            const ScreenInfo& screen_info,
                            blink::WebDisplayMode display_mode,
-                           bool swapped_out,
+                           bool is_frozen,
                            bool hidden,
                            bool never_visible,
                            mojom::WidgetRequest widget_request)
     : routing_id_(widget_routing_id),
       compositor_deps_(compositor_deps),
       webwidget_internal_(nullptr),
-      owner_delegate_(nullptr),
       auto_resize_mode_(false),
       is_hidden_(hidden),
-      compositor_never_visible_(never_visible),
+      // When there's no RenderThreadImpl we can't start the compositor without
+      // crashing, so just behave like a never-visible widget.
+      compositor_never_visible_(never_visible || !RenderThreadImpl::current()),
       is_fullscreen_granted_(false),
       display_mode_(display_mode),
       ime_event_guard_(nullptr),
       closing_(false),
-      host_closing_(false),
-      is_swapped_out_(swapped_out),
+      host_will_close_this_(false),
+      is_frozen_(is_frozen),
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
       text_input_mode_(ui::TEXT_INPUT_MODE_DEFAULT),
       text_input_flags_(0),
       next_previous_flags_(kInvalidNextPreviousFlagsValue),
       can_compose_inline_(true),
       composition_range_(gfx::Range::InvalidRange()),
-      widget_type_(widget_type),
       pending_window_rect_count_(0),
       screen_info_(screen_info),
       monitor_composition_info_(false),
@@ -415,7 +410,7 @@ RenderWidget::RenderWidget(int32_t widget_routing_id,
       resizing_mode_selector_(new ResizingModeSelector()),
       has_host_context_menu_location_(false),
       has_focus_(false),
-      for_oopif_(false),
+      for_child_local_root_frame_(false),
 #if defined(OS_MACOSX)
       text_input_client_observer_(new TextInputClientObserver(this)),
 #endif
@@ -423,6 +418,7 @@ RenderWidget::RenderWidget(int32_t widget_routing_id,
       was_shown_time_(base::TimeTicks::Now()),
       current_content_source_id_(0),
       widget_binding_(this, std::move(widget_request)),
+      warmup_weak_ptr_factory_(this),
       weak_ptr_factory_(this) {
   DCHECK_NE(routing_id_, MSG_ROUTING_NONE);
   DCHECK(RenderThread::Get());
@@ -446,6 +442,7 @@ RenderWidget::RenderWidget(int32_t widget_routing_id,
 
 RenderWidget::~RenderWidget() {
   DCHECK(!webwidget_internal_) << "Leaking our WebWidget!";
+
   // TODO(ajwong): Add in check that routing_id_ has been removed from
   // g_routing_id_widget_map once the shutdown semantics for RenderWidget
   // and RenderViewImpl are rationalized. Currently, too many unit and
@@ -479,24 +476,14 @@ void RenderWidget::InitForPopup(ShowCallback show_callback,
 
 void RenderWidget::InitForChildLocalRoot(
     blink::WebFrameWidget* web_frame_widget) {
-  for_oopif_ = true;
+  for_child_local_root_frame_ = true;
   // Init() increments the reference count on |this|, making it
   // self-referencing.
   Init(base::NullCallback(), web_frame_widget);
 }
 
 void RenderWidget::CloseForFrame() {
-  if (owner_delegate_) {
-    owner_delegate_->OverrideCloseForWidget();
-    return;
-  }
   OnClose();
-}
-
-void RenderWidget::SetSwappedOut(bool is_swapped_out) {
-  // We should only toggle between states.
-  DCHECK(is_swapped_out_ != is_swapped_out);
-  is_swapped_out_ = is_swapped_out;
 }
 
 void RenderWidget::Init(ShowCallback show_callback, WebWidget* web_widget) {
@@ -516,20 +503,12 @@ void RenderWidget::Init(ShowCallback show_callback, WebWidget* web_widget) {
   blink::scheduler::WebThreadScheduler* compositor_thread_scheduler =
       blink::scheduler::WebThreadScheduler::CompositorThreadScheduler();
   scoped_refptr<base::SingleThreadTaskRunner> compositor_input_task_runner;
-  // The |compositor_thread_scheduler| can be null in tests without a compositor
-  // thread.
-  if (compositor_thread_scheduler) {
-    // When the RenderWidget is for a frame (ie for a local root) then it uses
-    // the compositor thread task runner. When it is for a popup or other such
-    // widgets, it does not.
-    // TODO(danakj): The |web_widget| given here should become a WebFrameWidget
-    // in the case the RenderWidget is for a RenderViewImpl, but currently the
-    // WebFrameWidget gets attached after RenderWidget init. So we have to check
-    // IsWebView() as well.
-    if (web_widget->IsWebFrameWidget() || web_widget->IsWebView()) {
-      compositor_input_task_runner =
-          compositor_thread_scheduler->InputTaskRunner();
-    }
+  // Use the compositor thread task runner unless this is a popup or other such
+  // non-frame widgets. The |compositor_thread_scheduler| can be null in tests
+  // without a compositor thread.
+  if (for_frame() && compositor_thread_scheduler) {
+    compositor_input_task_runner =
+        compositor_thread_scheduler->InputTaskRunner();
   }
 
   widget_input_handler_manager_ = WidgetInputHandlerManager::Create(
@@ -564,7 +543,7 @@ void RenderWidget::ApplyEmulatedScreenMetricsForPopupWidget(
   popup_view_origin_for_emulation_ = emulator->applied_widget_rect().origin();
   popup_screen_origin_for_emulation_ =
       emulator->original_screen_rect().origin();
-  UpdateSurfaceAndScreenInfo(local_surface_id_from_parent_,
+  UpdateSurfaceAndScreenInfo(local_surface_id_allocation_from_parent_,
                              compositor_viewport_pixel_size_,
                              emulator->original_screen_info());
 }
@@ -577,9 +556,9 @@ gfx::Rect RenderWidget::AdjustValidationMessageAnchor(const gfx::Rect& anchor) {
 
 #if BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
 void RenderWidget::SetExternalPopupOriginAdjustmentsForEmulation(
-    ExternalPopupMenu* popup,
-    RenderWidgetScreenMetricsEmulator* emulator) {
-  popup->SetOriginScaleForEmulation(emulator->scale());
+    ExternalPopupMenu* popup) {
+  if (screen_metrics_emulator_)
+    popup->SetOriginScaleForEmulation(screen_metrics_emulator_->scale());
 }
 #endif
 
@@ -610,7 +589,6 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(WidgetMsg_WasHidden, OnWasHidden)
     IPC_MESSAGE_HANDLER(WidgetMsg_WasShown, OnWasShown)
     IPC_MESSAGE_HANDLER(WidgetMsg_SetActive, OnSetActive)
-    IPC_MESSAGE_HANDLER(WidgetMsg_SetBackgroundOpaque, OnSetBackgroundOpaque)
     IPC_MESSAGE_HANDLER(WidgetMsg_SetTextDirection, OnSetTextDirection)
     IPC_MESSAGE_HANDLER(WidgetMsg_SetBounds_ACK, OnRequestSetBoundsAck)
     IPC_MESSAGE_HANDLER(WidgetMsg_UpdateScreenRects, OnUpdateScreenRects)
@@ -638,10 +616,12 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
 
 bool RenderWidget::Send(IPC::Message* message) {
   // Don't send any messages after the browser has told us to close, and filter
-  // most outgoing messages while swapped out.
-  if ((is_swapped_out_ &&
-       !SwappedOutMessages::CanSendWhileSwappedOut(message)) ||
-      closing_) {
+  // most outgoing messages when frozen.
+  if (closing_) {
+    delete message;
+    return false;
+  }
+  if (is_frozen_ && !SwappedOutMessages::CanSendWhileSwappedOut(message)) {
     delete message;
     return false;
   }
@@ -659,32 +639,45 @@ void RenderWidget::SendOrCrash(IPC::Message* message) {
 }
 
 bool RenderWidget::ShouldHandleImeEvents() const {
-  // TODO(ekaramad): We track page focus in all RenderViews on the page but the
-  // RenderWidgets corresponding to OOPIFs do not get the update. For now, this
-  // method returns true when the RenderWidget is for an OOPIF, i.e., IME events
-  // will be processed regardless of page focus. We should revisit this after
-  // page focus for OOPIFs has been fully resolved (https://crbug.com/689777).
-  return GetWebWidget() && GetWebWidget()->IsWebFrameWidget() &&
-         (has_focus_ || for_oopif_);
+  if (delegate())
+    return has_focus_;
+  if (for_child_local_root_frame_) {
+    // TODO(ekaramad): We track page focus in all RenderViews on the page but
+    // the RenderWidgets corresponding to child local roots do not get the
+    // update. For now, this method returns true when the RenderWidget is for a
+    // child local frame, i.e., IME events will be processed regardless of page
+    // focus. We should revisit this after page focus for OOPIFs has been fully
+    // resolved (https://crbug.com/689777).
+    return true;
+  }
+  // Not a frame widget.
+  return false;
 }
 
 void RenderWidget::OnClose() {
   DCHECK(content::RenderThread::Get());
   if (closing_)
     return;
-  NotifyOnClose();
+  for (auto& observer : render_frames_)
+    observer.WidgetWillClose();
   closing_ = true;
 
   // Browser correspondence is no longer needed at this point.
   if (routing_id_ != MSG_ROUTING_NONE) {
     RenderThread::Get()->RemoveRoute(routing_id_);
     g_routing_id_widget_map.Get().erase(routing_id_);
-    SetHidden(false);
-    if (RenderThreadImpl::current())
+    if (RenderThreadImpl::current()) {
+      // RenderWidgets may be hidden when they are closed. If we were previously
+      // hidden, we are being counted as such in RenderThreadImpl. Thus we
+      // remove that count here by calling WidgetRestored() even though we're
+      // clearly not becoming visible here.
+      if (is_hidden_)
+        RenderThreadImpl::current()->WidgetRestored();
       RenderThreadImpl::current()->WidgetDestroyed();
+    }
   }
 
-  if (for_oopif_) {
+  if (for_child_local_root_frame_) {
     // Widgets for frames may be created and closed at any time while the frame
     // is alive. However, WebWidget must be closed synchronously because frame
     // widgets and frames hold pointers to each other. The deferred call to
@@ -708,12 +701,15 @@ void RenderWidget::OnSynchronizeVisualProperties(
   TRACE_EVENT0("renderer", "RenderWidget::OnSynchronizeVisualProperties");
 
   VisualProperties params = original_params;
-  if (owner_delegate_) {
-    owner_delegate_->ApplyNewSizeForWidget(size_, params.new_size);
+  if (delegate()) {
+    if (size_ != params.new_size) {
+      // Only hide popups when the size changes. Eg https://crbug.com/761908.
+      delegate()->CancelPagePopupForWidget();
+    }
 
     if (display_mode_ != params.display_mode) {
       display_mode_ = params.display_mode;
-      owner_delegate_->ApplyNewDisplayModeForWidget(params.display_mode);
+      delegate()->ApplyNewDisplayModeForWidget(params.display_mode);
     }
 
     bool auto_resize_mode_changed =
@@ -731,10 +727,9 @@ void RenderWidget::OnSynchronizeVisualProperties(
         max_auto_size = gfx::ScaleToCeiledSize(
             max_auto_size, params.screen_info.device_scale_factor);
       }
-      owner_delegate_->ApplyAutoResizeLimitsForWidget(min_auto_size,
-                                                      max_auto_size);
+      delegate()->ApplyAutoResizeLimitsForWidget(min_auto_size, max_auto_size);
     } else if (auto_resize_mode_changed) {
-      owner_delegate_->DisableAutoResizeForWidget();
+      delegate()->DisableAutoResizeForWidget();
       if (params.new_size.IsEmpty())
         return;
     }
@@ -759,6 +754,28 @@ void RenderWidget::OnSynchronizeVisualProperties(
     if (screen_metrics_emulator_) {
       screen_metrics_emulator_->OnSynchronizeVisualProperties(params);
     } else {
+      if (!delegate()) {
+        // The main frame controls the page scale factor, from blink. For other
+        // frame widgets, the page scale is received from its parent as part of
+        // the visual properties here. While blink doesn't need to know this
+        // page scale factor outside the main frame, the compositor does in
+        // order to produce its output at the correct scale.
+        layer_tree_view_->SetExternalPageScaleFactor(params.page_scale_factor);
+        // Store the value to give to any new RenderFrameProxy that is
+        // registered.
+        page_scale_factor_from_mainframe_ = params.page_scale_factor;
+        // Push the page scale factor down to any child RenderWidgets via our
+        // child proxy frames.
+        // TODO(danakj): This ends up setting the page scale factor in the
+        // RenderWidgetHost of the child RenderWidget, so that it can bounce
+        // the value down to its RenderWidget. Since this is essentially a
+        // global value per-page, we could instead store it once in the browser
+        // (such as in RenderViewHost) and distribute it to each frame-hosted
+        // RenderWidget from there.
+        for (auto& child_proxy : render_frame_proxies_)
+          child_proxy.OnPageScaleFactorChanged(params.page_scale_factor);
+      }
+
       gfx::Size old_visible_viewport_size = visible_viewport_size_;
       SynchronizeVisualProperties(params);
       if (old_visible_viewport_size != visible_viewport_size_) {
@@ -768,8 +785,8 @@ void RenderWidget::OnSynchronizeVisualProperties(
     }
   }
 
-  if (owner_delegate_ && params.scroll_focused_node_into_view)
-    owner_delegate_->ScrollFocusedNodeIntoViewForWidget();
+  if (delegate() && params.scroll_focused_node_into_view)
+    delegate()->ScrollFocusedNodeIntoViewForWidget();
 }
 
 void RenderWidget::OnEnableDeviceEmulation(
@@ -780,7 +797,8 @@ void RenderWidget::OnEnableDeviceEmulation(
     visual_properties.new_size = size_;
     visual_properties.compositor_viewport_pixel_size =
         compositor_viewport_pixel_size_;
-    visual_properties.local_surface_id = local_surface_id_from_parent_;
+    visual_properties.local_surface_id_allocation =
+        local_surface_id_allocation_from_parent_;
     visual_properties.visible_viewport_size = visible_viewport_size_;
     visual_properties.is_fullscreen_granted = is_fullscreen_granted_;
     visual_properties.display_mode = display_mode_;
@@ -805,11 +823,13 @@ void RenderWidget::OnWasHidden() {
     observer.WasHidden();
 }
 
-void RenderWidget::OnWasShown(base::TimeTicks show_request_timestamp) {
+void RenderWidget::OnWasShown(base::TimeTicks show_request_timestamp,
+                              bool was_evicted) {
   TRACE_EVENT0("renderer", "RenderWidget::OnWasShown");
-  // During shutdown we can just ignore this message.
-  if (!GetWebWidget())
-    return;
+  // TODO(danakj): Nothing should happen ideally if the RenderWidget is frozen!
+  // It's not visible! However.. the RenderView needs to see it as visible in
+  // order to make the Page visible /o\ so this is hard. We need to detangle
+  // page visibility from the main widget. https://crbug.com/419087
 
   was_shown_time_ = base::TimeTicks::Now();
   // See OnWasHidden
@@ -817,7 +837,13 @@ void RenderWidget::OnWasShown(base::TimeTicks show_request_timestamp) {
   for (auto& observer : render_frames_)
     observer.WasShown();
 
-  if (layer_tree_view_ && !show_request_timestamp.is_null()) {
+  if (was_evicted) {
+    for (auto& observer : render_frame_proxies_) {
+      observer.WasEvicted();
+    }
+  }
+
+  if (!show_request_timestamp.is_null()) {
     layer_tree_view_->layer_tree_host()->RequestPresentationTimeForNextFrame(
         CreateTabSwitchingTimeRecorder(show_request_timestamp));
   }
@@ -829,12 +855,10 @@ void RenderWidget::OnRequestSetBoundsAck() {
 }
 
 void RenderWidget::OnForceRedraw(int snapshot_id) {
-  if (LayerTreeView* ltv = layer_tree_view()) {
-    ltv->layer_tree_host()->RequestPresentationTimeForNextFrame(
-        base::BindOnce(&RenderWidget::DidPresentForceDrawFrame,
-                       weak_ptr_factory_.GetWeakPtr(), snapshot_id));
-    ltv->SetNeedsForcedRedraw();
-  }
+  layer_tree_view_->layer_tree_host()->RequestPresentationTimeForNextFrame(
+      base::BindOnce(&RenderWidget::DidPresentForceDrawFrame,
+                     weak_ptr_factory_.GetWeakPtr(), snapshot_id));
+  layer_tree_view_->SetNeedsForcedRedraw();
 }
 
 void RenderWidget::DidPresentForceDrawFrame(
@@ -843,7 +867,7 @@ void RenderWidget::DidPresentForceDrawFrame(
   Send(new WidgetHostMsg_ForceRedrawComplete(routing_id(), snapshot_id));
 }
 
-viz::FrameSinkId RenderWidget::GetFrameSinkIdAtPoint(const gfx::Point& point,
+viz::FrameSinkId RenderWidget::GetFrameSinkIdAtPoint(const gfx::PointF& point,
                                                      gfx::PointF* local_point) {
   return input_handler_->GetFrameSinkIdAtPoint(point, local_point);
 }
@@ -852,13 +876,29 @@ void RenderWidget::HandleInputEvent(
     const blink::WebCoalescedInputEvent& input_event,
     const ui::LatencyInfo& latency_info,
     HandledEventCallback callback) {
-  if (owner_delegate_ && is_swapped_out_) {
+  // This class is not removed as the MainThreadEventQueueClient until it
+  // is destroyed, so we must check |closing_| to avoid introducing input
+  // events after close.
+  if (is_frozen_ || closing_) {
     std::move(callback).Run(INPUT_EVENT_ACK_STATE_NOT_CONSUMED, latency_info,
                             nullptr, base::nullopt);
     return;
   }
   input_handler_->HandleInputEvent(input_event, latency_info,
                                    std::move(callback));
+}
+
+void RenderWidget::SetNeedsMainFrame() {
+  // This class is not removed as the MainThreadEventQueueClient until it
+  // is destroyed.
+  if (closing_)
+    return;
+
+  // The WebWidgetClient is not |this| if tests override it for the WebView and
+  // WebViewClient.
+  blink::WebWidgetClient* client =
+      delegate() ? delegate()->GetWebWidgetClientForWidget() : this;
+  client->ScheduleAnimation();
 }
 
 scoped_refptr<MainThreadEventQueue> RenderWidget::GetInputEventQueue() {
@@ -881,34 +921,13 @@ void RenderWidget::OnSetEditCommandsForNextKeyEvent(
 }
 
 void RenderWidget::OnSetActive(bool active) {
-  if (owner_delegate_)
-    owner_delegate_->SetActiveForWidget(active);
-}
-
-void RenderWidget::OnSetBackgroundOpaque(bool opaque) {
-  // Background opaque-ness modification is only supported for the main frame.
-  // The |owner_delegate_| is used as proxy for this RenderWidget being attached
-  // to the main frame.
-  if (!owner_delegate_)
-    return;
-
-  blink::WebWidget* web_widget = GetWebWidget();
-  // This is true since we only do this for RenderWidgets attached to the main
-  // frame.
-  DCHECK(web_widget->IsWebFrameWidget());
-  auto* web_frame_widget = static_cast<blink::WebFrameWidget*>(web_widget);
-  if (opaque) {
-    web_frame_widget->ClearBaseBackgroundColorOverride();
-    web_frame_widget->ClearBackgroundColorOverride();
-  } else {
-    web_frame_widget->SetBaseBackgroundColorOverride(SK_ColorTRANSPARENT);
-    web_frame_widget->SetBackgroundColorOverride(SK_ColorTRANSPARENT);
-  }
+  if (delegate())
+    delegate()->SetActiveForWidget(active);
 }
 
 void RenderWidget::OnSetFocus(bool enable) {
-  if (owner_delegate_)
-    owner_delegate_->DidReceiveSetFocusEventForWidget();
+  if (delegate())
+    delegate()->DidReceiveSetFocusEventForWidget();
   SetFocus(enable);
 }
 
@@ -921,15 +940,8 @@ void RenderWidget::SetFocus(bool enable) {
   for (auto& observer : render_frames_)
     observer.RenderWidgetSetFocus(enable);
 
-  if (owner_delegate_)
-    owner_delegate_->DidChangeFocusForWidget();
-}
-
-void RenderWidget::SetNeedsMainFrame() {
-  LayerTreeView* ltv = layer_tree_view();
-  if (!ltv)
-    return;
-  ltv->SetNeedsBeginFrame();
+  if (delegate())
+    delegate()->DidChangeFocusForWidget();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -951,6 +963,21 @@ void RenderWidget::RecordWheelAndTouchScrollingCount(
                                                     has_scrolled_by_touch);
 }
 
+void RenderWidget::SendOverscrollEventFromImplSide(
+    const gfx::Vector2dF& overscroll_delta,
+    cc::ElementId scroll_latched_element_id) {
+  if (!GetWebWidget())
+    return;
+  GetWebWidget()->SendOverscrollEventFromImplSide(overscroll_delta,
+                                                  scroll_latched_element_id);
+}
+void RenderWidget::SendScrollEndEventFromImplSide(
+    cc::ElementId scroll_latched_element_id) {
+  if (!GetWebWidget())
+    return;
+  GetWebWidget()->SendScrollEndEventFromImplSide(scroll_latched_element_id);
+}
+
 void RenderWidget::BeginMainFrame(base::TimeTicks frame_time) {
   if (!GetWebWidget())
     return;
@@ -962,11 +989,35 @@ void RenderWidget::BeginMainFrame(base::TimeTicks frame_time) {
 
 void RenderWidget::RequestNewLayerTreeFrameSink(
     LayerTreeFrameSinkCallback callback) {
-  DCHECK(GetWebWidget());
   // For widgets that are never visible, we don't start the compositor, so we
   // never get a request for a cc::LayerTreeFrameSink.
   DCHECK(!compositor_never_visible_);
+  // Frozen RenderWidgets should not be doing any compositing.
+  DCHECK(!is_frozen_);
 
+  if (is_closing()) {
+    // In this case, we drop the request which means the compositor waits
+    // forever, which is fine since we're going to destroy it.
+    return;
+  }
+
+  // If we have a warmup in progress, wait for that and store the callback
+  // to be run when the warmup completes.
+  if (warmup_frame_sink_request_pending_) {
+    after_warmup_callback_ = std::move(callback);
+    return;
+  }
+  // If a warmup previously completed, use the result.
+  if (warmup_frame_sink_) {
+    std::move(callback).Run(std::move(warmup_frame_sink_));
+    return;
+  }
+
+  DoRequestNewLayerTreeFrameSink(std::move(callback));
+}
+
+void RenderWidget::DoRequestNewLayerTreeFrameSink(
+    LayerTreeFrameSinkCallback callback) {
   // TODO(jonross): have this generated by the LayerTreeFrameSink itself, which
   // would then handle binding.
   mojom::RenderFrameMetadataObserverPtr ptr;
@@ -983,7 +1034,13 @@ void RenderWidget::RequestNewLayerTreeFrameSink(
   // The |url| is not always available, fallback to a fixed string.
   if (url.is_empty())
     url = GURL("chrome://gpu/RenderWidget::RequestNewLayerTreeFrameSink");
-  const char* client_name = for_oopif_ ? kOOPIF : kRenderer;
+  // TODO(danakj): This may not be accurate, depending on the intent. A child
+  // local root could be in the same process as the view, so if the client is
+  // meant to designate the process type, it seems kRenderer would be the
+  // correct choice. If client is meant to designate the widget type, then
+  // kOOPIF would denote that it is not for the main frame. However, kRenderer
+  // would also be used for other widgets such as popups.
+  const char* client_name = for_child_local_root_frame_ ? kOOPIF : kRenderer;
   RenderThreadImpl::current()->RequestNewLayerTreeFrameSink(
       routing_id_, frame_swap_message_queue_, std::move(url),
       std::move(callback), std::move(client_request), std::move(ptr),
@@ -1001,51 +1058,80 @@ void RenderWidget::DidCommitAndDrawCompositorFrame() {
   // Notify subclasses that we initiated the paint operation.
   DidInitiatePaint();
 
-  Send(new ViewHostMsg_DidCommitAndDrawCompositorFrame(routing_id_));
+  Send(new WidgetHostMsg_DidCommitAndDrawCompositorFrame(routing_id_));
 }
 
 void RenderWidget::DidCommitCompositorFrame() {
-  if (owner_delegate_)
-    owner_delegate_->DidCommitCompositorFrameForWidget();
+  if (delegate())
+    delegate()->DidCommitCompositorFrameForWidget();
 }
 
 void RenderWidget::DidCompletePageScaleAnimation() {
-  if (owner_delegate_)
-    owner_delegate_->DidCompletePageScaleAnimationForWidget();
+  if (delegate())
+    delegate()->DidCompletePageScaleAnimationForWidget();
 }
 
-bool RenderWidget::IsClosing() const {
-  // TODO(ajwong): There is oddly 2 closing states. This API is used by
-  // LayerTreeView only as part of the LayerTreeViewDelegate interface and
-  // is the guard against creating new compositor frames unnecessarily.
-  // Historically, when RenderViewImpl and RenderWidget shared the same
-  // routing id, it was possible for |closing_| to be true, |host_closing_| to
-  // false, and for the code in
-  // RenderThreadImpl::RequestNewLayerTreeFrameSink() to still look up a valid
-  // RenderViewImpl from the routing id. This is actually a benign shutdown
-  // race in Android that can be triggered in the SynchronouslyComposite path
-  // via AwContentsGarbageCollectionTest#testCreateAndGcManyTimes.
-  //
-  // Once RenderViewImpl and RenderWidget are split, attempt to combine two
-  // states so the shutdown logic is cleaner.
-  //
-  // http://crbug.com/545684
-  return host_closing_ || closing_;
+void RenderWidget::ScheduleAnimation() {
+  // This call is not needed in single thread mode for tests without a
+  // scheduler, but they need to override the WebWidgetClient and replace this
+  // method in order to schedule a synchronous composite task themselves.
+  layer_tree_view_->SetNeedsBeginFrame();
 }
 
-void RenderWidget::RequestScheduleAnimation() {
-  if (owner_delegate_) {
-    owner_delegate_->RequestScheduleAnimationForWidget();
-    return;
-  }
-  ScheduleAnimation();
+void RenderWidget::SetShowFPSCounter(bool show) {
+  cc::LayerTreeHost* host = layer_tree_view_->layer_tree_host();
+  cc::LayerTreeDebugState debug_state = host->GetDebugState();
+  debug_state.show_fps_counter = show;
+  host->SetDebugState(debug_state);
 }
 
-void RenderWidget::UpdateVisualState() {
+void RenderWidget::SetShowPaintRects(bool show) {
+  cc::LayerTreeHost* host = layer_tree_view_->layer_tree_host();
+  cc::LayerTreeDebugState debug_state = host->GetDebugState();
+  debug_state.show_paint_rects = show;
+  host->SetDebugState(debug_state);
+}
+
+void RenderWidget::SetShowDebugBorders(bool show) {
+  cc::LayerTreeHost* host = layer_tree_view_->layer_tree_host();
+  cc::LayerTreeDebugState debug_state = host->GetDebugState();
+  if (show)
+    debug_state.show_debug_borders.set();
+  else
+    debug_state.show_debug_borders.reset();
+  host->SetDebugState(debug_state);
+}
+
+void RenderWidget::SetShowScrollBottleneckRects(bool show) {
+  cc::LayerTreeHost* host = layer_tree_view_->layer_tree_host();
+  cc::LayerTreeDebugState debug_state = host->GetDebugState();
+  debug_state.show_touch_event_handler_rects = show;
+  debug_state.show_wheel_event_handler_rects = show;
+  debug_state.show_non_fast_scrollable_rects = show;
+  host->SetDebugState(debug_state);
+}
+
+void RenderWidget::SetShowHitTestBorders(bool show) {
+  cc::LayerTreeHost* host = layer_tree_view_->layer_tree_host();
+  cc::LayerTreeDebugState debug_state = host->GetDebugState();
+  debug_state.show_hit_test_borders = show;
+  host->SetDebugState(debug_state);
+}
+
+void RenderWidget::UpdateVisualState(bool record_main_frame_metrics) {
   if (!GetWebWidget())
     return;
 
-  GetWebWidget()->UpdateLifecycle(WebWidget::LifecycleUpdate::kAll);
+  // When recording main frame metrics set the lifecycle reason to
+  // kBeginMainFrame, because this is the calller of UpdateLifecycle
+  // for the main frame. Otherwise, set the reason to kTests, which is
+  // the oinly other reason this method is called.
+  WebWidget::LifecycleUpdateReason lifecycle_reason =
+      record_main_frame_metrics
+          ? WebWidget::LifecycleUpdateReason::kBeginMainFrame
+          : WebWidget::LifecycleUpdateReason::kTest;
+  GetWebWidget()->UpdateLifecycle(WebWidget::LifecycleUpdate::kAll,
+                                  lifecycle_reason);
   GetWebWidget()->SetSuppressFrameRequestsWorkaroundFor704763Only(false);
 
   if (first_update_visual_state_after_hidden_) {
@@ -1095,9 +1181,9 @@ void RenderWidget::WillBeginCompositorFrame() {
     observer.WillBeginCompositorFrame();
 }
 
-std::unique_ptr<cc::SwapPromise> RenderWidget::RequestCopyOfOutputForLayoutTest(
+std::unique_ptr<cc::SwapPromise> RenderWidget::RequestCopyOfOutputForWebTest(
     std::unique_ptr<viz::CopyOutputRequest> request) {
-  return RenderThreadImpl::current()->RequestCopyOfOutputForLayoutTest(
+  return RenderThreadImpl::current()->RequestCopyOfOutputForWebTest(
       routing_id_, std::move(request));
 }
 
@@ -1163,6 +1249,10 @@ void RenderWidget::SetInputHandler(RenderWidgetInputHandler* input_handler) {
 }
 
 void RenderWidget::ShowVirtualKeyboard() {
+  // Blink can continue running and change input state between the Close IPC
+  // and the task that actually closes this class.
+  if (closing_)
+    return;
   UpdateTextInputStateInternal(true, false);
 }
 
@@ -1176,6 +1266,10 @@ void RenderWidget::ClearTextInputState() {
 }
 
 void RenderWidget::UpdateTextInputState() {
+  // Blink can continue running and change input state between the Close IPC
+  // and the task that actually closes this class.
+  if (closing_)
+    return;
   UpdateTextInputStateInternal(false, false);
 }
 
@@ -1234,7 +1328,7 @@ void RenderWidget::UpdateTextInputStateInternal(bool show_virtual_keyboard,
     next_previous_flags_ = 0;
 #endif
     params.flags |= next_previous_flags_;
-    params.value = new_info.value.Utf8();
+    params.value = new_info.value.Utf16();
     params.selection_start = new_info.selection_start;
     params.selection_end = new_info.selection_end;
     params.composition_start = new_info.composition_start;
@@ -1251,6 +1345,16 @@ void RenderWidget::UpdateTextInputStateInternal(bool show_virtual_keyboard,
     text_input_mode_ = new_mode;
     can_compose_inline_ = new_can_compose_inline;
     text_input_flags_ = new_info.flags;
+
+#if defined(OS_ANDROID)
+    // If we send a new TextInputStateChanged message, we must also deliver a
+    // new RenderFrameMetadata, as the IME will need this info to be updated.
+    // TODO(ericrk): Consider folding the above IPC into RenderFrameMetadata.
+    // https://crbug.com/912309
+    if (IsSurfaceSynchronizationEnabled()) {
+      layer_tree_view_->RequestForceSendMetadata();
+    }
+#endif
   }
 }
 
@@ -1272,8 +1376,8 @@ bool RenderWidget::WillHandleMouseEvent(const blink::WebMouseEvent& event) {
   possible_drag_event_info_.event_location =
       gfx::Point(event.PositionInScreen().x, event.PositionInScreen().y);
 
-  if (owner_delegate_)
-    return owner_delegate_->RenderWidgetWillHandleMouseEventForWidget(event);
+  if (delegate())
+    return delegate()->RenderWidgetWillHandleMouseEventForWidget(event);
 
   return false;
 }
@@ -1281,17 +1385,12 @@ bool RenderWidget::WillHandleMouseEvent(const blink::WebMouseEvent& event) {
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetScreenMetricsDelegate
 
-void RenderWidget::Redraw() {
-  if (layer_tree_view_)
-    layer_tree_view_->SetNeedsRedrawRect(gfx::Rect(size_));
-}
-
 void RenderWidget::ResizeWebWidget() {
   gfx::Size size = GetSizeForWebWidget();
-  if (owner_delegate_) {
-    owner_delegate_->ResizeWebWidgetForWidget(
-        size, top_controls_height_, bottom_controls_height_,
-        browser_controls_shrink_blink_size_);
+  if (delegate()) {
+    delegate()->ResizeWebWidgetForWidget(size, top_controls_height_,
+                                         bottom_controls_height_,
+                                         browser_controls_shrink_blink_size_);
     return;
   }
   GetWebWidget()->Resize(size);
@@ -1334,65 +1433,54 @@ void RenderWidget::SynchronizeVisualProperties(const VisualProperties& params) {
   if (render_thread)
     render_thread->SetRenderingColorSpace(params.screen_info.color_space);
 
-  // Ignore this during shutdown.
-  if (!GetWebWidget())
-    return;
-
   gfx::Size new_compositor_viewport_pixel_size =
       params.auto_resize_enabled
           ? gfx::ScaleToCeiledSize(size_,
                                    params.screen_info.device_scale_factor)
           : params.compositor_viewport_pixel_size;
-  UpdateSurfaceAndScreenInfo(
-      params.local_surface_id.value_or(viz::LocalSurfaceId()),
-      new_compositor_viewport_pixel_size, params.screen_info);
+  UpdateSurfaceAndScreenInfo(params.local_surface_id_allocation.value_or(
+                                 viz::LocalSurfaceIdAllocation()),
+                             new_compositor_viewport_pixel_size,
+                             params.screen_info);
   UpdateCaptureSequenceNumber(params.capture_sequence_number);
-  if (layer_tree_view_) {
-    layer_tree_view_->SetBrowserControlsHeight(
-        params.top_controls_height, params.bottom_controls_height,
-        params.browser_controls_shrink_blink_size);
-    layer_tree_view_->SetRasterColorSpace(
-        screen_info_.color_space.GetRasterColorSpace());
-  }
+  layer_tree_view_->SetBrowserControlsHeight(
+      params.top_controls_height, params.bottom_controls_height,
+      params.browser_controls_shrink_blink_size);
+  layer_tree_view_->SetRasterColorSpace(
+      screen_info_.color_space.GetRasterColorSpace());
 
   UpdateZoom(params.zoom_level);
 
-  if (params.auto_resize_enabled)
-    return;
+  if (!params.auto_resize_enabled) {
+    visible_viewport_size_ = params.visible_viewport_size;
 
-  visible_viewport_size_ = params.visible_viewport_size;
+    display_mode_ = params.display_mode;
 
-  // NOTE: We may have entered fullscreen mode without changing our size.
-  bool fullscreen_change =
-      is_fullscreen_granted_ != params.is_fullscreen_granted;
-  is_fullscreen_granted_ = params.is_fullscreen_granted;
-  display_mode_ = params.display_mode;
+    size_ = params.new_size;
 
-  size_ = params.new_size;
+    ResizeWebWidget();
 
-  ResizeWebWidget();
+    WebSize visual_viewport_size;
+    if (compositor_deps_->IsUseZoomForDSFEnabled()) {
+      visual_viewport_size =
+          gfx::ScaleToCeiledSize(params.visible_viewport_size,
+                                 GetOriginalScreenInfo().device_scale_factor);
+    } else {
+      visual_viewport_size = visible_viewport_size_;
+    }
+    GetWebWidget()->ResizeVisualViewport(visual_viewport_size);
 
-  WebSize visual_viewport_size;
-  if (compositor_deps_->IsUseZoomForDSFEnabled()) {
-    visual_viewport_size =
-        gfx::ScaleToCeiledSize(params.visible_viewport_size,
-                               GetOriginalScreenInfo().device_scale_factor);
-  } else {
-    visual_viewport_size = visible_viewport_size_;
+    // NOTE: We may have entered fullscreen mode without changing our size.
+    SetIsFullscreen(params.is_fullscreen_granted);
   }
-  GetWebWidget()->ResizeVisualViewport(visual_viewport_size);
-
-  if (fullscreen_change)
-    DidToggleFullscreen();
 }
 
 void RenderWidget::SetScreenMetricsEmulationParameters(
     bool enabled,
     const blink::WebDeviceEmulationParams& params) {
-  // This is only supported in RenderView, which has an |owner_delegate_|.
-  DCHECK(owner_delegate_);
-  owner_delegate_->SetScreenMetricsEmulationParametersForWidget(enabled,
-                                                                params);
+  // This is only supported in RenderView, which has an delegate().
+  DCHECK(delegate());
+  delegate()->SetScreenMetricsEmulationParametersForWidget(enabled, params);
 }
 
 void RenderWidget::SetScreenRects(const gfx::Rect& widget_screen_rect,
@@ -1409,22 +1497,9 @@ void RenderWidget::IntrinsicSizingInfoChanged(
   Send(new WidgetHostMsg_IntrinsicSizingInfoChanged(routing_id_, sizing_info));
 }
 
-void RenderWidget::WillCloseLayerTreeView() {
-  if (host_closing_)
-    return;
-
-  // Prevent new compositors or output surfaces from being created.
-  host_closing_ = true;
-
-  // Always send this notification to prevent new layer tree views from
-  // being created, even if one hasn't been created yet.
-  if (blink::WebWidget* widget = GetWebWidget())
-    widget->WillCloseLayerTreeView();
-}
-
 void RenderWidget::DidMeaningfulLayout(blink::WebMeaningfulLayout layout_type) {
   if (layout_type == blink::WebMeaningfulLayout::kVisuallyNonEmpty) {
-    QueueMessage(new ViewHostMsg_DidFirstVisuallyNonEmptyPaint(routing_id_));
+    QueueMessage(new WidgetHostMsg_DidFirstVisuallyNonEmptyPaint(routing_id_));
   }
 
   for (auto& observer : render_frames_)
@@ -1453,8 +1528,11 @@ void RenderWidget::SetHandlingInputEvent(bool handling_input_event) {
 }
 
 void RenderWidget::QueueMessage(IPC::Message* msg) {
+  if (closing_)
+    return;
+
   // RenderThreadImpl::current() is NULL in some tests.
-  if (!layer_tree_view_ || !RenderThreadImpl::current()) {
+  if (!RenderThreadImpl::current()) {
     Send(msg);
     return;
   }
@@ -1473,10 +1551,8 @@ void RenderWidget::DidChangeCursor(const WebCursorInfo& cursor_info) {
   WebCursor cursor;
   InitializeCursorFromWebCursorInfo(&cursor, cursor_info);
   // Only send a SetCursor message if we need to make a change.
-  if (!current_cursor_.IsEqual(cursor)) {
-    current_cursor_ = cursor;
+  if (input_handler_->DidChangeCursor(cursor))
     Send(new WidgetHostMsg_SetCursor(routing_id_, cursor));
-  }
 }
 
 void RenderWidget::AutoscrollStart(const blink::WebFloatPoint& point) {
@@ -1500,12 +1576,12 @@ void RenderWidget::AutoscrollEnd() {
 //
 void RenderWidget::Show(WebNavigationPolicy policy) {
   if (!show_callback_) {
-    if (owner_delegate_) {
+    if (delegate()) {
       // When SupportsMultipleWindows is disabled, popups are reusing
       // the view's RenderWidget. In some scenarios, this makes blink to call
       // Show() twice. But otherwise, if it is enabled, we should not visit
       // Show() more than once.
-      DCHECK(!owner_delegate_->SupportsMultipleWindowsForWidget());
+      DCHECK(!delegate()->SupportsMultipleWindowsForWidget());
       return;
     } else {
       NOTREACHED() << "received extraneous Show call";
@@ -1525,7 +1601,6 @@ void RenderWidget::Show(WebNavigationPolicy policy) {
 
 LayerTreeView* RenderWidget::InitializeLayerTreeView() {
   TRACE_EVENT0("blink", "RenderWidget::InitializeLayerTreeView");
-  DCHECK(!host_closing_);
 
   layer_tree_view_ = std::make_unique<LayerTreeView>(
       this, compositor_deps_->GetCompositorMainThreadTaskRunner(),
@@ -1533,24 +1608,23 @@ LayerTreeView* RenderWidget::InitializeLayerTreeView() {
       compositor_deps_->GetTaskGraphRunner(),
       compositor_deps_->GetWebMainThreadScheduler());
   layer_tree_view_->Initialize(
-      GenerateLayerTreeSettings(compositor_deps_, for_oopif_,
+      GenerateLayerTreeSettings(compositor_deps_, for_child_local_root_frame_,
                                 screen_info_.rect.size(),
                                 screen_info_.device_scale_factor),
       compositor_deps_->CreateUkmRecorderFactory());
 
-  UpdateSurfaceAndScreenInfo(local_surface_id_from_parent_,
+  UpdateSurfaceAndScreenInfo(local_surface_id_allocation_from_parent_,
                              compositor_viewport_pixel_size_, screen_info_);
   layer_tree_view_->SetRasterColorSpace(
       screen_info_.color_space.GetRasterColorSpace());
   layer_tree_view_->SetContentSourceId(current_content_source_id_);
-  // For background pages and certain tests, we don't want to trigger
-  // LayerTreeFrameSink creation.
-  bool should_generate_frame_sink =
-      !compositor_never_visible_ && RenderThreadImpl::current();
-  if (!should_generate_frame_sink)
-    layer_tree_view_->SetNeverVisible();
+  // If the widget is hidden, delay starting the compositor until the user shows
+  // it. Also if the RenderWidget is frozen, we delay starting the compositor
+  // until we expect to use the widget, which will be signaled through
+  // WarmupCompositor().
+  if (!is_frozen_ && !is_hidden_)
+    StartStopCompositor();
 
-  StartCompositor();
   DCHECK_NE(MSG_ROUTING_NONE, routing_id_);
   layer_tree_view_->SetFrameSinkId(
       viz::FrameSinkId(RenderThread::Get()->GetClientId(), routing_id_));
@@ -1559,35 +1633,112 @@ LayerTreeView* RenderWidget::InitializeLayerTreeView() {
   if (render_thread) {
     input_event_queue_ = base::MakeRefCounted<MainThreadEventQueue>(
         this, render_thread->GetWebMainThreadScheduler()->InputTaskRunner(),
-        render_thread->GetWebMainThreadScheduler(), should_generate_frame_sink);
+        render_thread->GetWebMainThreadScheduler(),
+        /*allow_raf_aligned_input=*/!compositor_never_visible_);
   }
 
   return layer_tree_view_.get();
 }
 
-void RenderWidget::DoDeferredClose() {
-  WillCloseLayerTreeView();
-  Send(new WidgetHostMsg_Close(routing_id_));
+void RenderWidget::StartStopCompositor() {
+  if (compositor_never_visible_)
+    return;
+
+  if (is_frozen_) {
+    layer_tree_view_->SetVisible(false);
+    // Drop all gpu resources, this makes SetVisible(true) more expensive/slower
+    // but we don't expect to use this RenderWidget again until some possible
+    // future navigation. This brings us a bit closer to emulating deleting the
+    // RenderWidget instead of just stopping the compositor.
+    layer_tree_view_->ReleaseLayerTreeFrameSink();
+  } else if (is_hidden_) {
+    layer_tree_view_->SetVisible(false);
+  } else {
+    layer_tree_view_->SetVisible(true);
+  }
 }
 
-void RenderWidget::NotifyOnClose() {
-  for (auto& observer : render_frames_)
-    observer.WidgetWillClose();
+void RenderWidget::SetIsFrozen(bool is_frozen) {
+  DCHECK_NE(is_frozen, is_frozen_);
+  is_frozen_ = is_frozen;
+  // If hidden, then frozen changing doesn't change anything with the
+  // compositor since when hidden the compositor is always stopped.
+  if (!is_hidden_)
+    StartStopCompositor();
+}
+
+void RenderWidget::WarmupCompositor() {
+  DCHECK(is_frozen_);
+  if (compositor_never_visible_)
+    return;
+
+  // Keeping things simple. This would cancel any outstanding warmup if we
+  // happened to have one (this should be basically impossible). This avoids any
+  // extra book keeping about the outstanding reqeust.
+  warmup_weak_ptr_factory_.InvalidateWeakPtrs();
+  // And if we already did a warmup then we're done.
+  if (warmup_frame_sink_)
+    return;
+
+  // Mark us pending the warmup frame sink *before* calling
+  // DoRequestNewLayerTreeFrameSink() as it may run the reply callback
+  // synchronously. So we don't want to change any state after the call
+  // to DoRequestNewLayerTreeFrameSink() here.
+  warmup_frame_sink_request_pending_ = true;
+
+  auto cb = base::BindOnce(&RenderWidget::OnReplyForWarmupCompositor,
+                           warmup_weak_ptr_factory_.GetWeakPtr());
+  DoRequestNewLayerTreeFrameSink(std::move(cb));
+}
+
+void RenderWidget::OnReplyForWarmupCompositor(
+    std::unique_ptr<cc::LayerTreeFrameSink> sink) {
+  warmup_frame_sink_request_pending_ = false;
+
+  if (after_warmup_callback_)
+    std::move(after_warmup_callback_).Run(std::move(sink));
+  else
+    warmup_frame_sink_ = std::move(sink);
+}
+
+void RenderWidget::AbortWarmupCompositor() {
+  warmup_frame_sink_request_pending_ = false;
+  // Drop any pending warmup.
+  warmup_weak_ptr_factory_.InvalidateWeakPtrs();
+  // And drop any completed one.
+  warmup_frame_sink_.reset();
+
+  // If we had saved a callback to run after warmup, just do so now indicating
+  // failure.
+  if (after_warmup_callback_)
+    std::move(after_warmup_callback_).Run(nullptr);
+}
+
+void RenderWidget::DoDeferredClose() {
+  Send(new WidgetHostMsg_Close(routing_id_));
 }
 
 void RenderWidget::CloseWidgetSoon() {
   DCHECK(content::RenderThread::Get());
-  if (is_swapped_out_) {
-    // This widget is currently swapped out, and the active widget is in a
+  if (is_frozen_) {
+    // This widget is currently not active. The active main frame widget is in a
     // different process.  Have the browser route the close request to the
     // active widget instead, so that the correct unload handlers are run.
-    Send(new ViewHostMsg_RouteCloseEvent(routing_id_));
+    Send(new WidgetHostMsg_RouteCloseEvent(routing_id_));
     return;
   }
 
+  // Prevent compositor from setting up new IPC channels, since we know a
+  // WidgetMsg_Close is coming. We do this immediately, not in DoDeferredClose,
+  // as the caller (eg WebPagePopupImpl) may start tearing down things after
+  // calling this method, including detaching the frame from this RenderWidget.
+  // Then trying to make a LayerTreeFrameSink would crash.
+  // https://crbug.com/906340
+  host_will_close_this_ = true;
+
   // If a page calls window.close() twice, we'll end up here twice, but that's
   // OK.  It is safe to send multiple Close messages.
-
+  //
   // Ask the RenderWidgetHost to initiate close.  We could be called from deep
   // in Javascript.  If we ask the RendwerWidgetHost to close now, the window
   // could be closed before the JS finishes executing.  So instead, post a
@@ -1598,21 +1749,52 @@ void RenderWidget::CloseWidgetSoon() {
 }
 
 void RenderWidget::Close() {
-  screen_metrics_emulator_.reset();
-  CloseWebWidget();
+  // This was done immediately in the |for_child_local_root_frame_| case in the
+  // OnClose() IPC handler.
+  if (!for_child_local_root_frame_)
+    CloseWebWidget();
+
   layer_tree_view_.reset();
-  if (owner_delegate_)
-    owner_delegate_->DidCloseWidget();
+  if (delegate())
+    delegate()->DidCloseWidget();
   // Note the ACK is a control message going to the RenderProcessHost.
   RenderThread::Get()->Send(new WidgetHostMsg_Close_ACK(routing_id()));
 }
 
 void RenderWidget::CloseWebWidget() {
-  WillCloseLayerTreeView();
-  if (webwidget_internal_) {
-    webwidget_internal_->Close();
-    webwidget_internal_ = nullptr;
-  }
+  // If the browser has not sent OnDisableDeviceEmulation, we have an emulator
+  // hanging out still. Destroying it must happen *after* the IPC route is
+  // removed so that another IPC does not arrive and re-create the emulator
+  // during closing.
+  //
+  // This destruction is normally part of an IPC and expects objects to be alive
+  // that would be alive while the IPC route is active such as the
+  // |layer_tree_view_|. So we ensure that it is the first thing to be
+  // destroyed here before deleting things from the RenderWidget or the
+  // delegate().
+  //
+  // TODO(danakj): The emulator could reset to non-emulated values in an
+  // explicit method call (instead of in the destructor) that occurs when
+  // emulation is disabled, but does not need to occur during RenderWidget
+  // closing. Then we would not have to destroy this so carefully.
+  screen_metrics_emulator_.reset();
+
+  // Informs the WebWidget that compositor is being destroyed, so it can remove
+  // references to it first.
+  //
+  // When delegate() is present, the RenderWidget is for a main frame,
+  // and the GetWebWidget() is not the same as |webwidget_internal_|. However
+  // that widget is responsible for doing WillCloseLayerTreeView() on the
+  // |webwidget_internal_|, not us. Otherwise, they are the same and this is
+  // notifying |webwidget_internal_|.
+  GetWebWidget()->WillCloseLayerTreeView();
+
+  // While the wrapping WebWidget from an delegate() is responsible for
+  // doing WillCloseLayerTreeView() on the |webwidget_internal_|, this class is
+  // responsible for calling Close() on it. Notably, then, the wrapping
+  // WebWidget does not.
+  webwidget_internal_->Close();
+  webwidget_internal_ = nullptr;
 }
 
 void RenderWidget::UpdateWebViewWithDeviceScaleFactor() {
@@ -1634,21 +1816,28 @@ void RenderWidget::UpdateWebViewWithDeviceScaleFactor() {
 }
 
 blink::WebFrameWidget* RenderWidget::GetFrameWidget() const {
-  blink::WebWidget* web_widget = GetWebWidget();
-  if (!web_widget)
+  // TODO(danakj): Remove this check and don't call this method for non-frames.
+  if (!for_frame())
+    return nullptr;
+  // TODO(danakj): Is this needed? IPCs stop after closing, but code used to
+  // check for a null WebWidget.
+  if (closing_)
     return nullptr;
 
-  if (!web_widget->IsWebFrameWidget()) {
-    // TODO(ekaramad): This should not happen. If we have a WebWidget and we
-    // need a WebFrameWidget then we should be getting a WebFrameWidget. But
-    // unfortunately this does not seem to be the case in some scenarios --
-    // specifically when a RenderViewImpl swaps out during navigation the
-    // WebViewImpl loses its WebViewFrameWidget but sometimes we receive IPCs
-    // which are destined for WebFrameWidget (https://crbug.com/669219).
-    return nullptr;
+  blink::WebWidget* widget;
+  if (delegate()) {
+    // Main frame WebFrameWidgets are held by the delegate, the internal widget
+    // points directly to the WebView.
+    // TODO(ekaramad): We should drop IPCs when |is_frozen_| instead of
+    // handling them and finding a null here. However there is also the case
+    // of the frame being detached without the widget being frozen to be
+    // resolved (https://crbug.com/906340). So for now this can return null.
+    widget = delegate()->GetWebWidgetForWidget();
+  } else {
+    // Subframes always have a WebFrameWidget themselves.
+    widget = webwidget_internal_;
   }
-
-  return static_cast<blink::WebFrameWidget*>(web_widget);
+  return static_cast<blink::WebFrameWidget*>(widget);
 }
 
 void RenderWidget::ScreenRectToEmulatedIfNeeded(WebRect* window_rect) const {
@@ -1709,16 +1898,16 @@ void RenderWidget::SetWindowRect(const WebRect& rect_in_screen) {
   // This path is for the renderer to change the on-screen position/size of
   // the widget by changing its window rect. This is not possible for
   // RenderWidgets whose position/size are controlled by layout from another
-  // frame tree (ie. child local root frames, informed by |for_oopif_|), as
-  // the window rect can only be set by the browser.
-  if (for_oopif_)
+  // frame tree (ie. child local root frames), as the window rect can only be
+  // set by the browser.
+  if (for_child_local_root_frame_)
     return;
 
   WebRect window_rect = rect_in_screen;
   EmulatedToScreenRectIfNeeded(&window_rect);
 
   if (resizing_mode_selector_->is_synchronous_mode()) {
-    // This is a layout-test-only path. At one point, it was planned to be
+    // This is a web-test-only path. At one point, it was planned to be
     // removed. See https://crbug.com/309760.
     SetWindowRectSynchronously(window_rect);
     return;
@@ -1741,7 +1930,7 @@ void RenderWidget::SetPendingWindowRect(const WebRect& rect) {
 
   // Popups don't get size updates back from the browser so just store the set
   // values.
-  if (widget_type_ != WidgetType::kFrame) {
+  if (!for_frame()) {
     window_screen_rect_ = rect;
     widget_screen_rect_ = rect;
   }
@@ -1848,7 +2037,7 @@ void RenderWidget::OnImeFinishComposingText(bool keep_selection) {
 }
 
 void RenderWidget::UpdateSurfaceAndScreenInfo(
-    const viz::LocalSurfaceId& new_local_surface_id,
+    const viz::LocalSurfaceIdAllocation& new_local_surface_id_allocation,
     const gfx::Size& new_compositor_viewport_pixel_size,
     const ScreenInfo& new_screen_info) {
   bool orientation_changed =
@@ -1858,19 +2047,17 @@ void RenderWidget::UpdateSurfaceAndScreenInfo(
       screen_info_.device_scale_factor != new_screen_info.device_scale_factor;
   ScreenInfo previous_original_screen_info = GetOriginalScreenInfo();
 
-  local_surface_id_from_parent_ = new_local_surface_id;
+  local_surface_id_allocation_from_parent_ = new_local_surface_id_allocation;
   compositor_viewport_pixel_size_ = new_compositor_viewport_pixel_size;
   screen_info_ = new_screen_info;
 
-  if (layer_tree_view_) {
-    layer_tree_view_->SetViewportVisibleRect(ViewportVisibleRect());
-    // Note carefully that the DSF specified in |new_screen_info| is not the
-    // DSF used by the compositor during device emulation!
-    layer_tree_view_->SetViewportSizeAndScale(
-        compositor_viewport_pixel_size_,
-        GetOriginalScreenInfo().device_scale_factor,
-        local_surface_id_from_parent_);
-  }
+  layer_tree_view_->SetViewportVisibleRect(ViewportVisibleRect());
+  // Note carefully that the DSF specified in |new_screen_info| is not the
+  // DSF used by the compositor during device emulation!
+  layer_tree_view_->SetViewportSizeAndScale(
+      compositor_viewport_pixel_size_,
+      GetOriginalScreenInfo().device_scale_factor,
+      local_surface_id_allocation_from_parent_);
 
   if (orientation_changed)
     OnOrientationChange();
@@ -1898,11 +2085,11 @@ void RenderWidget::SetWindowRectSynchronously(
   visual_properties.visible_viewport_size = new_window_rect.size();
   visual_properties.is_fullscreen_granted = is_fullscreen_granted_;
   visual_properties.display_mode = display_mode_;
-  visual_properties.local_surface_id = local_surface_id_from_parent_;
+  visual_properties.local_surface_id_allocation =
+      local_surface_id_allocation_from_parent_;
   // We are resizing the window from the renderer, so allocate a new
   // viz::LocalSurfaceId to avoid surface invariants violations in tests.
-  if (layer_tree_view_)
-    layer_tree_view_->RequestNewLocalSurfaceId();
+  layer_tree_view_->RequestNewLocalSurfaceId();
   SynchronizeVisualProperties(visual_properties);
 
   widget_screen_rect_ = new_window_rect;
@@ -1949,7 +2136,6 @@ void RenderWidget::OnSetViewportIntersection(
     const gfx::Rect& compositor_visible_rect,
     bool occluded_or_obscured) {
   if (auto* frame_widget = GetFrameWidget()) {
-    DCHECK_EQ(widget_type_, WidgetType::kFrame);
     compositor_visible_rect_ = compositor_visible_rect;
     frame_widget->SetRemoteViewportIntersection(viewport_intersection,
                                                 occluded_or_obscured);
@@ -1958,26 +2144,20 @@ void RenderWidget::OnSetViewportIntersection(
 }
 
 void RenderWidget::OnSetIsInert(bool inert) {
-  if (auto* frame_widget = GetFrameWidget()) {
-    DCHECK_EQ(widget_type_, WidgetType::kFrame);
+  if (auto* frame_widget = GetFrameWidget())
     frame_widget->SetIsInert(inert);
-  }
 }
 
 void RenderWidget::OnSetInheritedEffectiveTouchAction(
     cc::TouchAction touch_action) {
-  if (auto* frame_widget = GetFrameWidget()) {
-    DCHECK_EQ(widget_type_, WidgetType::kFrame);
+  if (auto* frame_widget = GetFrameWidget())
     frame_widget->SetInheritedEffectiveTouchAction(touch_action);
-  }
 }
 
 void RenderWidget::OnUpdateRenderThrottlingStatus(bool is_throttled,
                                                   bool subtree_throttled) {
-  if (auto* frame_widget = GetFrameWidget()) {
-    DCHECK_EQ(widget_type_, WidgetType::kFrame);
+  if (auto* frame_widget = GetFrameWidget())
     frame_widget->UpdateRenderThrottlingStatus(is_throttled, subtree_throttled);
-  }
 }
 
 void RenderWidget::OnDragTargetDragEnter(
@@ -2048,10 +2228,11 @@ void RenderWidget::OnDragSourceEnded(const gfx::PointF& client_point,
 }
 
 void RenderWidget::OnDragSourceSystemDragEnded() {
-  if (!GetWebWidget())
+  blink::WebFrameWidget* frame_widget = GetFrameWidget();
+  if (!frame_widget)
     return;
 
-  static_cast<WebFrameWidget*>(GetWebWidget())->DragSourceSystemDragEnded();
+  frame_widget->DragSourceSystemDragEnded();
 }
 
 void RenderWidget::ShowVirtualKeyboardOnElementFocus() {
@@ -2135,6 +2316,10 @@ void RenderWidget::ConvertWindowToViewport(blink::WebFloatRect* rect) {
 
 void RenderWidget::OnRequestTextInputStateUpdate() {
 #if defined(OS_ANDROID)
+  // This task may run between the Close IPC and the task that actually closes
+  // this class.
+  if (closing_)
+    return;
   DCHECK(!ime_event_guard_);
   UpdateSelectionBounds();
   UpdateTextInputStateInternal(false, true /* reply_to_request */);
@@ -2187,12 +2372,22 @@ void RenderWidget::SetHidden(bool hidden) {
 
   if (render_widget_scheduling_state_)
     render_widget_scheduling_state_->SetHidden(hidden);
+
+  // TODO(danakj): Frozen RenderWidgets become visible with the RenderView but
+  // they don't need to anymore, since the RenderView's visibility is controlled
+  // separately. However even if they become visible, we don't need to start the
+  // compositor in this case.
+  // If frozen, then hidden changing doesn't change anything with the
+  // compositor since when frozen the compositor is always stopped (until
+  // we WarmupCompositor()).
+  if (!is_frozen_)
+    StartStopCompositor();
 }
 
-void RenderWidget::DidToggleFullscreen() {
-  if (!GetWebWidget())
+void RenderWidget::SetIsFullscreen(bool fullscreen) {
+  if (fullscreen == is_fullscreen_granted_)
     return;
-
+  is_fullscreen_granted_ = fullscreen;
   if (is_fullscreen_granted_) {
     GetWebWidget()->DidEnterFullscreen();
   } else {
@@ -2286,6 +2481,11 @@ void RenderWidget::UpdateSelectionBounds() {
 }
 
 void RenderWidget::DidAutoResize(const gfx::Size& new_size) {
+  // Blink can continue running and do a layout/resize between the Close IPC
+  // and the task that actually closes this class.
+  if (closing_)
+    return;
+
   WebRect new_size_in_window(0, 0, new_size.width(), new_size.height());
   ConvertViewportToWindow(&new_size_in_window);
   if (size_.width() != new_size_in_window.width ||
@@ -2303,11 +2503,10 @@ void RenderWidget::DidAutoResize(const gfx::Size& new_size) {
     // |size_| from |compositor_viewport_pixel_size_|. Also note that the
     // calculation of |new_compositor_viewport_pixel_size| does not appear to
     // take into account device emulation.
-    if (layer_tree_view_)
-      layer_tree_view_->RequestNewLocalSurfaceId();
+    layer_tree_view_->RequestNewLocalSurfaceId();
     gfx::Size new_compositor_viewport_pixel_size =
         gfx::ScaleToCeiledSize(size_, GetWebScreenInfo().device_scale_factor);
-    UpdateSurfaceAndScreenInfo(local_surface_id_from_parent_,
+    UpdateSurfaceAndScreenInfo(local_surface_id_allocation_from_parent_,
                                new_compositor_viewport_pixel_size,
                                screen_info_);
   }
@@ -2375,45 +2574,10 @@ bool RenderWidget::CanComposeInline() {
   return true;
 }
 
-blink::WebScreenInfo RenderWidget::GetScreenInfo() {
-  blink::WebScreenInfo web_screen_info;
-  web_screen_info.device_scale_factor = screen_info_.device_scale_factor;
-  web_screen_info.color_space = screen_info_.color_space;
-  web_screen_info.depth = screen_info_.depth;
-  web_screen_info.depth_per_component = screen_info_.depth_per_component;
-  web_screen_info.is_monochrome = screen_info_.is_monochrome;
-  web_screen_info.rect = blink::WebRect(screen_info_.rect);
-  web_screen_info.available_rect = blink::WebRect(screen_info_.available_rect);
-  switch (screen_info_.orientation_type) {
-    case SCREEN_ORIENTATION_VALUES_PORTRAIT_PRIMARY:
-      web_screen_info.orientation_type =
-          blink::kWebScreenOrientationPortraitPrimary;
-      break;
-    case SCREEN_ORIENTATION_VALUES_PORTRAIT_SECONDARY:
-      web_screen_info.orientation_type =
-          blink::kWebScreenOrientationPortraitSecondary;
-      break;
-    case SCREEN_ORIENTATION_VALUES_LANDSCAPE_PRIMARY:
-      web_screen_info.orientation_type =
-          blink::kWebScreenOrientationLandscapePrimary;
-      break;
-    case SCREEN_ORIENTATION_VALUES_LANDSCAPE_SECONDARY:
-      web_screen_info.orientation_type =
-          blink::kWebScreenOrientationLandscapeSecondary;
-      break;
-    default:
-      web_screen_info.orientation_type = blink::kWebScreenOrientationUndefined;
-      break;
-  }
-  web_screen_info.orientation_angle = screen_info_.orientation_angle;
-
-  return web_screen_info;
-}
-
 void RenderWidget::DidHandleGestureEvent(const WebGestureEvent& event,
                                          bool event_cancelled) {
   if (event_cancelled) {
-    // The |owner_delegate_| doesn't need to hear about cancelled events.
+    // The delegate() doesn't need to hear about cancelled events.
     return;
   }
 
@@ -2444,9 +2608,9 @@ void RenderWidget::DidHandleGestureEvent(const WebGestureEvent& event,
 #endif
 #endif
 
-  // The |owner_delegate_| gets to respond to handling gestures last.
-  if (owner_delegate_)
-    owner_delegate_->DidHandleGestureEventForWidget(event);
+  // The delegate() gets to respond to handling gestures last.
+  if (delegate())
+    delegate()->DidHandleGestureEventForWidget(event);
 }
 
 void RenderWidget::DidOverscroll(
@@ -2615,12 +2779,22 @@ cc::LayerTreeSettings RenderWidget::GenerateLayerTreeSettings(
       settings.top_controls_hide_threshold = hide_threshold;
   }
 
-  settings.use_layer_lists = cmd.HasSwitch(cc::switches::kEnableLayerLists);
+  // Blink sends cc a layer list and property trees when either
+  // BlinkGenPropertyTrees or CompositeAfterPaint are enabled.
+  settings.use_layer_lists =
+      blink::WebRuntimeFeatures::IsBlinkGenPropertyTreesEnabled() ||
+      blink::WebRuntimeFeatures::IsCompositeAfterPaintEnabled();
+
+  // Blink currently doesn't support setting fractional scroll offsets so CC
+  // must send integer values. We plan to eventually make Blink use fractional
+  // offsets internally: https://crbug.com/414283.
+  settings.commit_fractional_scroll_deltas =
+      blink::WebRuntimeFeatures::IsFractionalScrollOffsetsEnabled();
 
   // The means the renderer compositor has 2 possible modes:
   // - Threaded compositing with a scheduler.
-  // - Single threaded compositing without a scheduler (for layout tests only).
-  // Using the scheduler in layout tests introduces additional composite steps
+  // - Single threaded compositing without a scheduler (for web tests only).
+  // Using the scheduler in web tests introduces additional composite steps
   // that create flakiness.
   settings.single_thread_proxy_scheduler = false;
 
@@ -2782,12 +2956,17 @@ cc::LayerTreeSettings RenderWidget::GenerateLayerTreeSettings(
     settings.wait_for_all_pipeline_stages_before_draw = true;
     settings.enable_latency_recovery = false;
   }
+#if defined(OS_ANDROID)
+  if (features::IsSurfaceSynchronizationEnabled()) {
+    // TODO(crbug.com/933846): LatencyRecovery is causing jank on Android.
+    // Disable in viz mode for now, with plant o disable more widely once
+    // viz launches.
+    settings.enable_latency_recovery = false;
+  }
+#endif
 
   settings.enable_image_animation_resync =
       !cmd.HasSwitch(switches::kDisableImageAnimationResync);
-
-  settings.always_request_presentation_time =
-      cmd.HasSwitch(cc::switches::kAlwaysRequestPresentationTime);
 
   settings.send_compositor_frame_ack = false;
 
@@ -2894,11 +3073,6 @@ cc::ManagedMemoryPolicy RenderWidget::GetGpuMemoryPolicy(
   return actual;
 }
 
-void RenderWidget::StartCompositor() {
-  if (!is_hidden())
-    layer_tree_view_->SetVisible(true);
-}
-
 void RenderWidget::HasPointerRawMoveEventHandlers(bool has_handlers) {
   if (input_event_queue_)
     input_event_queue_->HasPointerRawMoveEventHandlers(has_handlers);
@@ -2911,12 +3085,34 @@ void RenderWidget::HasTouchEventHandlers(bool has_handlers) {
   has_touch_handlers_ = has_handlers;
   if (render_widget_scheduling_state_)
     render_widget_scheduling_state_->SetHasTouchHandler(has_handlers);
-  Send(new ViewHostMsg_HasTouchEventHandlers(routing_id_, has_handlers));
+  Send(new WidgetHostMsg_HasTouchEventHandlers(routing_id_, has_handlers));
 }
 
 void RenderWidget::SetNeedsLowLatencyInput(bool needs_low_latency) {
   if (input_event_queue_)
     input_event_queue_->SetNeedsLowLatency(needs_low_latency);
+}
+
+void RenderWidget::SetNeedsUnbufferedInputForDebugger(bool unbuffered) {
+  if (input_event_queue_)
+    input_event_queue_->SetNeedsUnbufferedInputForDebugger(unbuffered);
+}
+
+void RenderWidget::AnimateDoubleTapZoomInMainFrame(
+    const blink::WebPoint& point,
+    const blink::WebRect& rect_to_zoom) {
+  // Only oopif subframes should be sending this message.
+  DCHECK(!delegate());
+  Send(new WidgetHostMsg_AnimateDoubleTapZoomInMainFrame(routing_id(), point,
+                                                         rect_to_zoom));
+}
+
+void RenderWidget::ZoomToFindInPageRectInMainFrame(
+    const blink::WebRect& rect_to_zoom) {
+  // Only oopif subframes should be sending this message.
+  DCHECK(!delegate_);
+  Send(new WidgetHostMsg_ZoomToFindInPageRectInMainFrame(routing_id(),
+                                                         rect_to_zoom));
 }
 
 void RenderWidget::RequestUnbufferedInputEvents() {
@@ -2933,6 +3129,11 @@ void RenderWidget::SetTouchAction(cc::TouchAction touch_action) {
 
 void RenderWidget::RegisterRenderFrameProxy(RenderFrameProxy* proxy) {
   render_frame_proxies_.AddObserver(proxy);
+  // Page scale factor is propagated down the RenderWidget tree (across
+  // frame trees). A new RenderFrameProxy means there is a new child
+  // RenderWidget in another frame tree. In order for it to hear about
+  // the page scale factor we pass along the last seen value here.
+  proxy->OnPageScaleFactorChanged(page_scale_factor_from_mainframe_);
 }
 
 void RenderWidget::UnregisterRenderFrameProxy(RenderFrameProxy* proxy) {
@@ -2997,12 +3198,13 @@ bool RenderWidget::IsPointerLocked() {
       webwidget_mouse_lock_target_.get());
 }
 
-void RenderWidget::StartDragging(blink::WebReferrerPolicy policy,
+void RenderWidget::StartDragging(network::mojom::ReferrerPolicy policy,
                                  const WebDragData& data,
                                  WebDragOperationsMask mask,
                                  const SkBitmap& drag_image,
-                                 const WebPoint& web_image_offset) {
-  blink::WebRect offset_in_window(web_image_offset.x, web_image_offset.y, 0, 0);
+                                 const gfx::Point& web_image_offset) {
+  blink::WebRect offset_in_window(web_image_offset.x(), web_image_offset.y(), 0,
+                                  0);
   ConvertViewportToWindow(&offset_in_window);
   DropData drop_data(DropDataBuilder::Build(data));
   drop_data.referrer_policy = policy;
@@ -3016,17 +3218,20 @@ uint32_t RenderWidget::GetContentSourceId() {
 }
 
 void RenderWidget::DidNavigate() {
-  ++current_content_source_id_;
-  if (!layer_tree_view_)
+  // Blink may be navigating still between the Close IPC and the task that
+  // actually closes this class, and for a main frame that would come through
+  // this method. But since we are closing we can skip it.
+  if (closing_)
     return;
+
+  ++current_content_source_id_;
   layer_tree_view_->SetContentSourceId(current_content_source_id_);
   layer_tree_view_->ClearCachesOnNextCommit();
 }
 
 blink::WebWidget* RenderWidget::GetWebWidget() const {
-  if (owner_delegate_) {
-    blink::WebWidget* delegate_widget =
-        owner_delegate_->GetWebWidgetForWidget();
+  if (delegate()) {
+    blink::WebWidget* delegate_widget = delegate()->GetWebWidgetForWidget();
     if (delegate_widget)
       return delegate_widget;
   }
@@ -3074,6 +3279,27 @@ bool RenderWidget::IsSurfaceSynchronizationEnabled() const {
          layer_tree_view_->IsSurfaceSynchronizationEnabled();
 }
 
+void RenderWidget::PageScaleFactorChanged(float page_scale_factor) {
+  // The page scale is controlled by the WebView for the local main frame of
+  // the Page. So this is called from blink by for the RenderWidget of that
+  // local main frame. We forward the value on to each child RenderWidget (each
+  // of which will be via proxy child frame). These will each in turn forward
+  // the message to their child RenderWidgets (through their proxy child
+  // frames).
+  // TODO(crbug.com/924336): This value is continuously propagated during a
+  // pinch-zoom, causing the child RenderWidgets to re-raster, while the main
+  // frame is able to throttle re-raster to powers of 2. We could find some way
+  // to throttle child RenderWidgets also, perhaps by informing them when the
+  // pinch-zoom gesture is started and stopped.
+  DCHECK(!is_frozen_);
+  DCHECK(delegate());
+
+  for (auto& observer : render_frame_proxies_)
+    observer.OnPageScaleFactorChanged(page_scale_factor);
+  // Store the value to give to any new RenderFrameProxy that is registered.
+  page_scale_factor_from_mainframe_ = page_scale_factor;
+}
+
 void RenderWidget::UseSynchronousResizeModeForTesting(bool enable) {
   resizing_mode_selector_->set_is_synchronous_mode(enable);
 }
@@ -3092,12 +3318,11 @@ void RenderWidget::SetDeviceScaleFactorForTesting(float factor) {
   visual_properties.top_controls_height = 0.f;
   visual_properties.is_fullscreen_granted = is_fullscreen_granted_;
   visual_properties.display_mode = display_mode_;
-  visual_properties.local_surface_id = local_surface_id_from_parent_;
+  visual_properties.local_surface_id_allocation =
+      local_surface_id_allocation_from_parent_;
   // We are changing the device scale factor from the renderer, so allocate a
   // new viz::LocalSurfaceId to avoid surface invariants violations in tests.
-  if (layer_tree_view_)
-    layer_tree_view_->RequestNewLocalSurfaceId();
-
+  layer_tree_view_->RequestNewLocalSurfaceId();
   OnSynchronizeVisualProperties(visual_properties);
 }
 
@@ -3114,10 +3339,10 @@ void RenderWidget::SetDeviceColorSpaceForTesting(
   visual_properties.top_controls_height = 0.f;
   visual_properties.is_fullscreen_granted = is_fullscreen_granted_;
   visual_properties.display_mode = display_mode_;
-  visual_properties.local_surface_id = local_surface_id_from_parent_;
+  visual_properties.local_surface_id_allocation =
+      local_surface_id_allocation_from_parent_;
   // We are changing the device color space from the renderer, so allocate a
   // new viz::LocalSurfaceId to avoid surface invariants violations in tests.
-  if (layer_tree_view_)
     layer_tree_view_->RequestNewLocalSurfaceId();
   OnSynchronizeVisualProperties(visual_properties);
 }
@@ -3133,8 +3358,11 @@ void RenderWidget::EnableAutoResizeForTesting(const gfx::Size& min_size,
   visual_properties.auto_resize_enabled = true;
   visual_properties.min_size_for_auto_resize = min_size;
   visual_properties.max_size_for_auto_resize = max_size;
-  visual_properties.local_surface_id = base::Optional<viz::LocalSurfaceId>(
-      viz::LocalSurfaceId(1, 1, base::UnguessableToken::Create()));
+  visual_properties.local_surface_id_allocation =
+      base::Optional<viz::LocalSurfaceIdAllocation>(
+          viz::LocalSurfaceIdAllocation(
+              viz::LocalSurfaceId(1, 1, base::UnguessableToken::Create()),
+              base::TimeTicks::Now()));
   OnSynchronizeVisualProperties(visual_properties);
 }
 
@@ -3192,8 +3420,9 @@ PepperPluginInstanceImpl* RenderWidget::GetFocusedPepperPluginInsideWidget() {
 #endif
 
 gfx::Rect RenderWidget::ViewportVisibleRect() {
-  return for_oopif_ ? compositor_visible_rect_
-                    : gfx::Rect(compositor_viewport_pixel_size_);
+  return for_child_local_root_frame_
+             ? compositor_visible_rect_
+             : gfx::Rect(compositor_viewport_pixel_size_);
 }
 
 // static

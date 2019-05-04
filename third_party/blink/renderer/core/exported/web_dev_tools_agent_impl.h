@@ -45,7 +45,7 @@
 namespace blink {
 
 class ClientMessageLoopAdapter;
-class GraphicsLayer;
+class GraphicsContext;
 class InspectedFrames;
 class InspectorNetworkAgent;
 class InspectorOverlayAgent;
@@ -70,12 +70,21 @@ class CORE_EXPORT WebDevToolsAgentImpl final
   static WebDevToolsAgentImpl* CreateForFrame(WebLocalFrameImpl*);
   static WebDevToolsAgentImpl* CreateForWorker(WebLocalFrameImpl*,
                                                WorkerClient*);
+
+  WebDevToolsAgentImpl(WebLocalFrameImpl*,
+                       bool include_view_agents,
+                       WorkerClient*);
   ~WebDevToolsAgentImpl() override;
   virtual void Trace(blink::Visitor*);
+  DevToolsAgent* GetDevToolsAgent() const { return agent_.Get(); }
 
   void WillBeDestroyed();
   void FlushProtocolNotifications();
+
+  bool HasOverlays() const { return !overlay_agents_.IsEmpty(); }
   void UpdateOverlays();
+  void PaintOverlays(GraphicsContext&);  // For CompositeAfterPaint.
+
   bool HandleInputEvent(const WebInputEvent&);
   void DispatchBufferedTouchEvents();
   void BindRequest(mojom::blink::DevToolsAgentHostAssociatedPtrInfo,
@@ -90,34 +99,29 @@ class CORE_EXPORT WebDevToolsAgentImpl final
  private:
   friend class ClientMessageLoopAdapter;
 
-  WebDevToolsAgentImpl(WebLocalFrameImpl*,
-                       bool include_view_agents,
-                       WorkerClient*);
-
   // DevToolsAgent::Client implementation.
-  InspectorSession* AttachSession(
-      InspectorSession::Client*,
-      mojom::blink::DevToolsSessionStatePtr reattach_session_state) override;
-  void DetachSession(InspectorSession*) override;
+  void AttachSession(DevToolsSession*, bool restore) override;
+  void DetachSession(DevToolsSession*) override;
   void InspectElement(const WebPoint& point_in_local_root) override;
+  void DebuggerTaskStarted() override;
+  void DebuggerTaskFinished() override;
 
   // InspectorPageAgent::Client implementation.
   void PageLayoutInvalidated(bool resized) override;
+  void WaitForDebugger() override;
 
   // InspectorLayerTreeAgent::Client implementation.
-  bool IsInspectorLayer(GraphicsLayer*) override;
+  bool IsInspectorLayer(const cc::Layer*) override;
 
   // Thread::TaskObserver implementation.
-  void WillProcessTask() override;
-  void DidProcessTask() override;
+  void WillProcessTask(const base::PendingTask&) override;
+  void DidProcessTask(const base::PendingTask&) override;
 
   Member<DevToolsAgent> agent_;
-  HeapHashSet<Member<InspectorSession>> sessions_;
-  HeapHashMap<Member<InspectorSession>, Member<InspectorNetworkAgent>>
+  HeapHashMap<Member<DevToolsSession>, Member<InspectorNetworkAgent>>
       network_agents_;
-  HeapHashMap<Member<InspectorSession>, Member<InspectorPageAgent>>
-      page_agents_;
-  HeapHashMap<Member<InspectorSession>, Member<InspectorOverlayAgent>>
+  HeapHashMap<Member<DevToolsSession>, Member<InspectorPageAgent>> page_agents_;
+  HeapHashMap<Member<DevToolsSession>, Member<InspectorOverlayAgent>>
       overlay_agents_;
   WorkerClient* worker_client_;
   Member<WebLocalFrameImpl> web_local_frame_impl_;

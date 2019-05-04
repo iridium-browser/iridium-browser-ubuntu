@@ -80,10 +80,12 @@ ImageLoader.ALLOWED_CLIENTS = [
  */
 ImageLoader.prototype.onIncomingRequest_ = function(
     request_data, sender, sendResponse) {
-  if (!sender.id || !request_data)
+  if (!sender.id || !request_data) {
     return;
-  if (ImageLoader.ALLOWED_CLIENTS.indexOf(sender.id) === -1)
+  }
+  if (ImageLoader.ALLOWED_CLIENTS.indexOf(sender.id) === -1) {
     return;
+  }
 
   var request = /** @type {!LoadImageRequest} */ (request_data);
 
@@ -98,11 +100,9 @@ ImageLoader.prototype.onIncomingRequest_ = function(
   };
   // Incoming requests won't have the full type.
   assert(!(request.orientation instanceof ImageOrientation));
+  assert(!(typeof request.orientation === 'number'));
 
-  if (typeof request.orientation === 'number') {
-    request.orientation =
-        ImageOrientation.fromDriveOrientation(request.orientation);
-  } else if (request.orientation) {
+  if (request.orientation) {
     request.orientation =
         ImageOrientation.fromRotationAndScale(request.orientation);
   } else {
@@ -143,7 +143,8 @@ ImageLoader.prototype.onMessage_ = function(senderId, request, callback) {
  * @return {ImageLoader} ImageLoader object.
  */
 ImageLoader.getInstance = function() {
-  if (!ImageLoader.instance_)
+  if (!ImageLoader.instance_) {
     ImageLoader.instance_ = new ImageLoader();
+  }
   return ImageLoader.instance_;
 };

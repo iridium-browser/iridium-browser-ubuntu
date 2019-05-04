@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "content/browser/dom_storage/dom_storage_context_impl.h"
+
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -16,8 +17,8 @@
 #include "content/browser/dom_storage/dom_storage_area.h"
 #include "content/browser/dom_storage/dom_storage_namespace.h"
 #include "content/browser/dom_storage/dom_storage_task_runner.h"
-#include "content/public/browser/local_storage_usage_info.h"
 #include "content/public/browser/session_storage_usage_info.h"
+#include "content/public/browser/storage_usage_info.h"
 #include "storage/browser/test/mock_special_storage_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"

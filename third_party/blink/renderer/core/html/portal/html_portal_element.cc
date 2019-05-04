@@ -11,9 +11,13 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/local_frame_client.h"
+#include "third_party/blink/renderer/core/frame/remote_frame.h"
 #include "third_party/blink/renderer/core/html/html_unknown_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
+#include "third_party/blink/renderer/core/html/portal/document_portals.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/layout/layout_iframe.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -22,18 +26,23 @@
 namespace blink {
 
 HTMLPortalElement::HTMLPortalElement(Document& document)
-    : HTMLFrameOwnerElement(HTMLNames::portalTag, document) {}
+    : HTMLFrameOwnerElement(html_names::kPortalTag, document) {}
 
 HTMLPortalElement::~HTMLPortalElement() {}
 
+void HTMLPortalElement::Trace(Visitor* visitor) {
+  HTMLFrameOwnerElement::Trace(visitor);
+  visitor->Trace(portal_frame_);
+}
+
 HTMLElement* HTMLPortalElement::Create(Document& document) {
   if (RuntimeEnabledFeatures::PortalsEnabled())
-    return new HTMLPortalElement(document);
-  return HTMLUnknownElement::Create(HTMLNames::portalTag, document);
+    return MakeGarbageCollected<HTMLPortalElement>(document);
+  return HTMLUnknownElement::Create(html_names::kPortalTag, document);
 }
 
 void HTMLPortalElement::Navigate() {
-  KURL url = GetNonEmptyURLAttribute(HTMLNames::srcAttr);
+  KURL url = GetNonEmptyURLAttribute(html_names::kSrcAttr);
   if (!url.IsEmpty() && portal_ptr_) {
     portal_ptr_->Navigate(url);
   }
@@ -79,14 +88,10 @@ HTMLPortalElement::InsertionNotificationRequest HTMLPortalElement::InsertedInto(
   Document& document = GetDocument();
 
   if (node.IsInDocumentTree() && document.IsHTMLDocument()) {
-    document.GetFrame()->GetInterfaceProvider().GetInterface(
-        mojo::MakeRequest(&portal_ptr_));
-    portal_ptr_->Init(WTF::Bind(
-        [](HTMLPortalElement* portal,
-           const base::UnguessableToken& portal_token) {
-          portal->portal_token_ = portal_token;
-        },
-        WrapPersistent(this)));
+    std::tie(portal_frame_, portal_token_) =
+        GetDocument().GetFrame()->Client()->CreatePortal(
+            this, mojo::MakeRequest(&portal_ptr_));
+    DocumentPortals::From(GetDocument()).OnPortalInserted(this);
     Navigate();
   }
 
@@ -99,12 +104,20 @@ void HTMLPortalElement::RemovedFrom(ContainerNode& node) {
   Document& document = GetDocument();
 
   if (node.IsInDocumentTree() && document.IsHTMLDocument()) {
+    // The portal creation is asynchronous, and the Document only gets notified
+    // after the element receives a callback from the browser that assigns its
+    // token, so we need to check whether that has been completed before
+    // notifying the document about the portal's removal.
+    if (!portal_token_.is_empty())
+      DocumentPortals::From(GetDocument()).OnPortalRemoved(this);
+
+    portal_token_ = base::UnguessableToken();
     portal_ptr_.reset();
   }
 }
 
 bool HTMLPortalElement::IsURLAttribute(const Attribute& attribute) const {
-  return attribute.GetName() == HTMLNames::srcAttr ||
+  return attribute.GetName() == html_names::kSrcAttr ||
          HTMLFrameOwnerElement::IsURLAttribute(attribute);
 }
 
@@ -112,8 +125,13 @@ void HTMLPortalElement::ParseAttribute(
     const AttributeModificationParams& params) {
   HTMLFrameOwnerElement::ParseAttribute(params);
 
-  if (params.name == HTMLNames::srcAttr)
+  if (params.name == html_names::kSrcAttr)
     Navigate();
+}
+
+LayoutObject* HTMLPortalElement::CreateLayoutObject(
+    const ComputedStyle& style) {
+  return new LayoutIFrame(this);
 }
 
 }  // namespace blink

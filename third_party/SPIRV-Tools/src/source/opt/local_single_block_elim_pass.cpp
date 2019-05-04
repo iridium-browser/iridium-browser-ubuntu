@@ -200,7 +200,7 @@ Pass::Status LocalSingleBlockLoadStoreElimPass::ProcessImpl() {
     return LocalSingleBlockLoadStoreElim(fp);
   };
 
-  bool modified = ProcessEntryPointCallTree(pfn, get_module());
+  bool modified = context()->ProcessEntryPointCallTree(pfn);
   return modified ? Status::SuccessWithChange : Status::SuccessWithoutChange;
 }
 
@@ -253,7 +253,8 @@ void LocalSingleBlockLoadStoreElimPass::InitExtensions() {
       "SPV_NV_shader_image_footprint",
       "SPV_NV_shading_rate",
       "SPV_NV_mesh_shader",
-      "SPV_NVX_raytracing",
+      "SPV_NV_ray_tracing",
+      "SPV_EXT_fragment_invocation_density",
   });
 }
 

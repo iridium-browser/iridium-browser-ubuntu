@@ -36,37 +36,22 @@ class PostProcessingPipeline;
 // MixAndFilter() is called (they must be added each time data is queried).
 class FilterGroup {
  public:
-  enum class GroupType { kStream, kFinalMix, kLinearize };
   // |num_channels| indicates number of input audio channels.
-  // |type| indicates where in the pipeline this FilterGroup sits.
-  //    some features are specific to certain locations:
-  //     - mono mixer takes place at the end of kFinalMix.
-  //     - channel selection occurs before post-processing in kLinearize.
   // |name| is used for debug printing
   // |pipeline| - processing pipeline.
-  // |device_ids| is a set of strings that is used as a filter to determine
-  //   if an InputQueue belongs to this group (InputQueue->name() must exactly
-  //   match an entry in |device_ids| to be processed by this group).
-  // |mixed_inputs| are FilterGroups that will be mixed into this FilterGroup.
-  //   ex: the final mix ("mix") FilterGroup mixes all other filter groups.
-  // FilterGroups currently use either InputQueues OR FilterGroups as inputs,
-  //   but there is no technical limitation preventing mixing input classes.
-
   FilterGroup(int num_channels,
-              GroupType type,
               const std::string& name,
-              std::unique_ptr<PostProcessingPipeline> pipeline,
-              const base::flat_set<std::string>& device_ids,
-              const std::vector<FilterGroup*>& mixed_inputs);
+              std::unique_ptr<PostProcessingPipeline> pipeline);
 
   ~FilterGroup();
 
+  // |input| will be recursively mixed into this FilterGroup's input buffer when
+  // MixAndFilter() is called. Registering a FilterGroup as an input to more
+  // than one FilterGroup will result in incorrect behavior.
+  void AddMixedInput(FilterGroup* input);
+
   // Sets the sample rate of the post-processors.
   void Initialize(int output_samples_per_second);
-
-  // Returns |true| if this FilterGroup is appropriate to process an input with
-  // the given |input_device_id|.
-  bool CanProcessInput(const std::string& input_device_id);
 
   // Adds/removes |input| from |active_inputs_|.
   void AddInput(MixerInput* input);
@@ -107,14 +92,14 @@ class FilterGroup {
   void SetPostProcessorConfig(const std::string& name,
                               const std::string& config);
 
-  // Toggles the mono mixer.
-  void SetMixToMono(bool mix_to_mono);
-
-  // Sets the active channel.
+  // Sets the active channel for post processors.
   void UpdatePlayoutChannel(int playout_channel);
 
   // Get content type
   AudioContentType content_type() const { return content_type_; }
+
+  // Recursively print the layout of the pipeline.
+  void PrintTopology() const;
 
  private:
   // Resizes temp_ and mixed_ if they are too small to hold |num_frames| frames.
@@ -123,14 +108,11 @@ class FilterGroup {
   void AddTempBuffer(int num_channels, int num_frames);
 
   const int num_channels_;
-  const GroupType type_;
-  bool mix_to_mono_;
-  int playout_channel_;
   const std::string name_;
-  const base::flat_set<std::string> device_ids_;
   std::vector<FilterGroup*> mixed_inputs_;
   base::flat_set<MixerInput*> active_inputs_;
 
+  int playout_channel_selection_;
   int output_samples_per_second_;
   int frames_zeroed_;
   float last_volume_;

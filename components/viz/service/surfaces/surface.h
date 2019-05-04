@@ -88,11 +88,6 @@ class VIZ_SERVICE_EXPORT Surface final : public SurfaceDeadlineClient {
   void SetDependencyDeadline(
       std::unique_ptr<SurfaceDependencyDeadline> deadline);
 
-  // Clears the pending and active frame data as well as the
-  // |seen_first_frame_activation_| bit causing a FirstSurfaceActivation to be
-  // triggered on the next CompositorFrame activation.
-  void Reset(base::WeakPtr<SurfaceClient> client);
-
   const SurfaceId& surface_id() const { return surface_info_.id(); }
   const SurfaceId& previous_frame_surface_id() const {
     return previous_frame_surface_id_;
@@ -145,10 +140,6 @@ class VIZ_SERVICE_EXPORT Surface final : public SurfaceDeadlineClient {
   // frame.
   void NotifySurfaceIdAvailable(const SurfaceId& surface_id);
 
-  // Returns whether the Surface is blocked on the provided |surface_id| or a
-  // predecessor.
-  bool IsBlockedOn(const SurfaceId& surface_id) const;
-
   // Called if a deadline has been hit and this surface is not yet active but
   // it's marked as respecting deadlines.
   void ActivatePendingFrameForDeadline(
@@ -186,7 +177,8 @@ class VIZ_SERVICE_EXPORT Surface final : public SurfaceDeadlineClient {
 
   void TakeLatencyInfo(std::vector<ui::LatencyInfo>* latency_info);
   bool TakePresentedCallback(PresentedCallback* callback);
-  void RunDrawCallback();
+  void SendAckToClient();
+  void MarkAsDrawn();
   void NotifyAggregatedDamage(const gfx::Rect& damage_rect,
                               base::TimeTicks expected_display_time);
 
@@ -210,12 +202,19 @@ class VIZ_SERVICE_EXPORT Surface final : public SurfaceDeadlineClient {
   bool HasActiveFrame() const { return active_frame_data_.has_value(); }
   bool HasPendingFrame() const { return pending_frame_data_.has_value(); }
   bool HasUndrawnActiveFrame() const {
-    return HasActiveFrame() && !active_frame_data_->frame_processed;
+    return HasActiveFrame() && !active_frame_data_->frame_drawn;
+  }
+  bool HasUnackedActiveFrame() const {
+    return HasActiveFrame() && !active_frame_data_->frame_acked;
   }
 
   // Returns true if at any point, another Surface's CompositorFrame has
   // depended on this Surface.
   bool HasDependentFrame() const { return seen_first_surface_dependency_; }
+
+  bool seen_first_surface_embedding() const {
+    return seen_first_surface_embedding_;
+  }
 
   // SurfaceDeadlineClient implementation:
   void OnDeadline(base::TimeDelta duration) override;
@@ -246,8 +245,9 @@ class VIZ_SERVICE_EXPORT Surface final : public SurfaceDeadlineClient {
 
     CompositorFrame frame;
     uint64_t frame_index;
-    // Whether the frame has been processed (displayed, or discarded), or not.
-    bool frame_processed = false;
+    // Whether the frame has been displayed or not.
+    bool frame_drawn = false;
+    bool frame_acked = false;
     // TODO(sad): This callback would ideally become part of SurfaceClient API.
     PresentedCallback presented_callback;
   };

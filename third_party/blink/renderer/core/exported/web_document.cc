@@ -31,6 +31,7 @@
 #include "third_party/blink/public/web/web_document.h"
 
 #include "base/memory/scoped_refptr.h"
+#include "services/network/public/mojom/referrer_policy.mojom-blink.h"
 #include "third_party/blink/public/platform/web_distillability.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/web/web_dom_event.h"
@@ -153,21 +154,11 @@ WebString WebDocument::Title() const {
   return WebString(ConstUnwrap<Document>()->title());
 }
 
-WebString WebDocument::ContentAsTextForTesting(bool use_inner_text) const {
+WebString WebDocument::ContentAsTextForTesting() const {
   Element* document_element = ConstUnwrap<Document>()->documentElement();
   if (!document_element)
     return WebString();
-  if (use_inner_text)
-    return document_element->innerText();
-
-  // TODO(editing-dev): We should use |Element::innerText()|.
-  const_cast<Document*>(ConstUnwrap<Document>())
-      ->UpdateStyleAndLayoutIgnorePendingStylesheetsForNode(document_element);
-  if (!document_element->GetLayoutObject())
-    return document_element->textContent(true);
-  return WebString(
-      PlainText(EphemeralRange::RangeOfContents(*document_element),
-                TextIteratorBehavior::Builder().SetForInnerText(true).Build()));
+  return document_element->innerText();
 }
 
 WebElementCollection WebDocument::All() {
@@ -231,9 +222,8 @@ void WebDocument::WatchCSSSelectors(const WebVector<WebString>& web_selectors) {
   CSSSelectorWatch::From(*document).WatchCSSSelectors(selectors);
 }
 
-WebReferrerPolicy WebDocument::GetReferrerPolicy() const {
-  return static_cast<WebReferrerPolicy>(
-      ConstUnwrap<Document>()->GetReferrerPolicy());
+network::mojom::ReferrerPolicy WebDocument::GetReferrerPolicy() const {
+  return ConstUnwrap<Document>()->GetReferrerPolicy();
 }
 
 WebString WebDocument::OutgoingReferrer() {
@@ -269,7 +259,7 @@ bool WebDocument::ManifestUseCredentials() const {
   if (!link_element)
     return false;
   return EqualIgnoringASCIICase(
-      link_element->FastGetAttribute(HTMLNames::crossoriginAttr),
+      link_element->FastGetAttribute(html_names::kCrossoriginAttr),
       "use-credentials");
 }
 

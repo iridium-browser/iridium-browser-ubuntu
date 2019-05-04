@@ -49,7 +49,7 @@
 #include "gin/v8_initializer.h"  // nogncheck
 #endif
 
-#include "third_party/webrtc/rtc_base/rtccertificate.h"  // nogncheck
+#include "third_party/webrtc/rtc_base/rtc_certificate.h"  // nogncheck
 
 using blink::WebString;
 
@@ -168,9 +168,8 @@ TestBlinkWebUnitTestSupport::TestBlinkWebUnitTestSupport()
   blink_interface_provider_.reset(
       new BlinkInterfaceProviderImpl(connector_.get()));
 
-  service_manager::Connector::TestApi test_api(connector_.get());
-  test_api.OverrideBinderForTesting(
-      service_manager::Identity(mojom::kBrowserServiceName),
+  connector_->OverrideBinderForTesting(
+      service_manager::ServiceFilter::ByName(mojom::kBrowserServiceName),
       blink::mojom::ClipboardHost::Name_,
       base::BindRepeating(&TestBlinkWebUnitTestSupport::BindClipboardHost,
                           weak_factory_.GetWeakPtr()));
@@ -178,7 +177,7 @@ TestBlinkWebUnitTestSupport::TestBlinkWebUnitTestSupport()
   service_manager::BinderRegistry empty_registry;
   blink::Initialize(this, &empty_registry, main_thread_scheduler_.get());
   g_test_platform = this;
-  blink::SetLayoutTestMode(true);
+  blink::SetWebTestMode(true);
   blink::WebRuntimeFeatures::EnableDatabase(true);
   blink::WebRuntimeFeatures::EnableNotifications(true);
   blink::WebRuntimeFeatures::EnableTouchEventFeatureDetection(true);
@@ -212,13 +211,6 @@ TestBlinkWebUnitTestSupport::~TestBlinkWebUnitTestSupport() {
 
 blink::WebBlobRegistry* TestBlinkWebUnitTestSupport::GetBlobRegistry() {
   return &blob_registry_;
-}
-
-std::unique_ptr<blink::WebIDBFactory>
-TestBlinkWebUnitTestSupport::CreateIdbFactory() {
-  NOTREACHED() <<
-      "IndexedDB cannot be tested with in-process harnesses.";
-  return nullptr;
 }
 
 std::unique_ptr<blink::WebURLLoaderFactory>

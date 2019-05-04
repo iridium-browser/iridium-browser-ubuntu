@@ -24,7 +24,6 @@
 #include "third_party/blink/renderer/core/html/custom/custom_element_definition_builder.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_descriptor.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_reaction_stack.h"
-#include "third_party/blink/renderer/core/html/custom/custom_element_upgrade_reaction.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_upgrade_sorter.h"
 #include "third_party/blink/renderer/core/html/custom/v0_custom_element_registration_context.h"
 #include "third_party/blink/renderer/core/html_element_type_helpers.h"
@@ -78,7 +77,8 @@ bool ThrowIfValidName(const AtomicString& name,
 
 CustomElementRegistry* CustomElementRegistry::Create(
     const LocalDOMWindow* owner) {
-  CustomElementRegistry* registry = new CustomElementRegistry(owner);
+  CustomElementRegistry* registry =
+      MakeGarbageCollected<CustomElementRegistry>(owner);
   Document* document = owner->document();
   if (V0CustomElementRegistrationContext* v0 =
           document ? document->RegistrationContext() : nullptr)
@@ -89,11 +89,11 @@ CustomElementRegistry* CustomElementRegistry::Create(
 CustomElementRegistry::CustomElementRegistry(const LocalDOMWindow* owner)
     : element_definition_is_running_(false),
       owner_(owner),
-      v0_(new V0RegistrySet()),
-      upgrade_candidates_(new UpgradeCandidateMap()),
+      v0_(MakeGarbageCollected<V0RegistrySet>()),
+      upgrade_candidates_(MakeGarbageCollected<UpgradeCandidateMap>()),
       reaction_stack_(&CustomElementReactionStack::Current()) {}
 
-void CustomElementRegistry::Trace(blink::Visitor* visitor) {
+void CustomElementRegistry::Trace(Visitor* visitor) {
   visitor->Trace(definitions_);
   visitor->Trace(owner_);
   visitor->Trace(v0_);
@@ -107,7 +107,7 @@ CustomElementDefinition* CustomElementRegistry::define(
     ScriptState* script_state,
     const AtomicString& name,
     V8CustomElementConstructor* constructor,
-    const ElementDefinitionOptions& options,
+    const ElementDefinitionOptions* options,
     ExceptionState& exception_state) {
   ScriptCustomElementDefinitionBuilder builder(script_state, this, constructor,
                                                exception_state);
@@ -119,7 +119,7 @@ CustomElementDefinition* CustomElementRegistry::DefineInternal(
     ScriptState* script_state,
     const AtomicString& name,
     CustomElementDefinitionBuilder& builder,
-    const ElementDefinitionOptions& options,
+    const ElementDefinitionOptions* options,
     ExceptionState& exception_state) {
   TRACE_EVENT1("blink", "CustomElementRegistry::define", "name", name.Utf8());
   if (!builder.CheckConstructorIntrinsics())
@@ -150,10 +150,10 @@ CustomElementDefinition* CustomElementRegistry::DefineInternal(
 
   // Step 7. customized built-in elements definition
   // element interface extends option checks
-  if (options.hasExtends()) {
+  if (options->hasExtends()) {
     // 7.1. If element interface is valid custom element name, throw exception
-    const AtomicString& extends = AtomicString(options.extends());
-    if (ThrowIfValidName(AtomicString(options.extends()), exception_state))
+    const AtomicString& extends = AtomicString(options->extends());
+    if (ThrowIfValidName(AtomicString(options->extends()), exception_state))
       return nullptr;
     // 7.2. If element interface is undefined element, throw exception
     if (htmlElementTypeForTag(extends) ==
@@ -212,9 +212,8 @@ CustomElementDefinition* CustomElementRegistry::DefineInternal(
   CHECK(!exception_state.HadException());
   CHECK(definition->Descriptor() == descriptor);
   if (RuntimeEnabledFeatures::CustomElementDefaultStyleEnabled() &&
-      options.hasStyles())
-    definition->SetDefaultStyleSheets(options.styles());
-
+      options->hasStyles())
+    definition->SetDefaultStyleSheets(options->styles());
   definitions_.emplace_back(definition);
   NameIdMap::AddResult result = name_id_map_.insert(descriptor.GetName(), id);
   CHECK(result.is_new_entry);
@@ -222,7 +221,7 @@ CustomElementDefinition* CustomElementRegistry::DefineInternal(
   HeapVector<Member<Element>> candidates;
   CollectCandidates(descriptor, &candidates);
   for (Element* candidate : candidates)
-    definition->EnqueueUpgradeReaction(candidate);
+    definition->EnqueueUpgradeReaction(*candidate);
 
   // 16: when-defined promise processing
   const auto& entry = when_defined_promise_map_.find(name);
@@ -290,10 +289,10 @@ CustomElementDefinition* CustomElementRegistry::DefinitionForId(
   return id ? definitions_[id - 1].Get() : nullptr;
 }
 
-void CustomElementRegistry::AddCandidate(Element* candidate) {
-  AtomicString name = candidate->localName();
+void CustomElementRegistry::AddCandidate(Element& candidate) {
+  AtomicString name = candidate.localName();
   if (!CustomElement::IsValidName(name)) {
-    const AtomicString& is = candidate->IsValue();
+    const AtomicString& is = candidate.IsValue();
     if (!is.IsNull())
       name = is;
   }
@@ -304,10 +303,11 @@ void CustomElementRegistry::AddCandidate(Element* candidate) {
   if (it != upgrade_candidates_->end()) {
     set = it->value;
   } else {
-    set = upgrade_candidates_->insert(name, new UpgradeCandidateSet())
+    set = upgrade_candidates_
+              ->insert(name, MakeGarbageCollected<UpgradeCandidateSet>())
               .stored_value->value;
   }
-  set->insert(candidate);
+  set->insert(&candidate);
 }
 
 // https://html.spec.whatwg.org/multipage/scripting.html#dom-customelementsregistry-whendefined
@@ -362,7 +362,7 @@ void CustomElementRegistry::upgrade(Node* root) {
 
   // 2. For each candidate of candidates, try to upgrade candidate.
   for (auto& candidate : candidates) {
-    CustomElement::TryToUpgrade(candidate,
+    CustomElement::TryToUpgrade(*candidate,
                                 true /* upgrade_invisible_elements */);
   }
 }

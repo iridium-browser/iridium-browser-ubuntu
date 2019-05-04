@@ -4,16 +4,16 @@
 
 import("//build/config/chromecast_build.gni")
 import("//build/config/compiler/compiler.gni")
-import("//build/toolchain/toolchain.gni")
 import("//build/config/ui.gni")
 import("//build/split_static_library.gni")
+import("//build/toolchain/toolchain.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 import("//third_party/blink/renderer/bindings/bindings.gni")
 import("//third_party/blink/renderer/bindings/modules/v8/generated.gni")
 import("//third_party/blink/renderer/bindings/scripts/scripts.gni")
+import("//third_party/blink/renderer/build/scripts/scripts.gni")
 import("//third_party/blink/renderer/config.gni")
 import("//third_party/blink/renderer/core/core.gni")
-import("//third_party/blink/renderer/build/scripts/scripts.gni")
 import("//third_party/blink/renderer/modules/modules_idl_files.gni")
 import("//third_party/blink/renderer/platform/platform_generated.gni")
 import("//third_party/protobuf/proto_library.gni")
@@ -267,6 +267,7 @@ jumbo_source_set("testing") {
     "fetch/testing/internals_fetch.h",
     "fetch/testing/worker_internals_fetch.cc",
     "fetch/testing/worker_internals_fetch.h",
+    "html/forms/mock_file_chooser.h",
     "testing/callback_function_test.cc",
     "testing/callback_function_test.h",
     "testing/death_aware_script_wrappable.cc",
@@ -282,13 +283,13 @@ jumbo_source_set("testing") {
     "testing/gc_object_liveness_observer.h",
     "testing/gc_observation.cc",
     "testing/gc_observation.h",
+    "testing/hit_test_layer_rect.h",
+    "testing/hit_test_layer_rect_list.cc",
+    "testing/hit_test_layer_rect_list.h",
     "testing/internal_settings.cc",
     "testing/internal_settings.h",
     "testing/internals.cc",
     "testing/internals.h",
-    "testing/layer_rect.h",
-    "testing/layer_rect_list.cc",
-    "testing/layer_rect_list.h",
     "testing/mock_hyphenation.cc",
     "testing/mock_hyphenation.h",
     "testing/null_execution_context.cc",
@@ -349,6 +350,7 @@ generate_event_interfaces("core_event_interfaces") {
     "events/message_event.idl",
     "events/mouse_event.idl",
     "events/mutation_event.idl",
+    "events/overscroll_event.idl",
     "events/page_transition_event.idl",
     "events/picture_in_picture_control_event.idl",
     "events/pointer_event.idl",
@@ -367,7 +369,8 @@ generate_event_interfaces("core_event_interfaces") {
     "invisible_dom/activate_invisible_event.idl",
     "mojo/test/mojo_interface_request_event.idl",
   ]
-  output_file = "core/event_names.json5"
+
+  output_file = "core/event_interface_names.json5"
 }
 
 # generated_testing_idls -------------------------------------------------------
@@ -380,7 +383,7 @@ group("generated_testing_idls") {
   ]
 }
 
-action("generated_settings_macros") {
+blink_python_runner("generated_settings_macros") {
   script = "../build/scripts/make_settings.py"
 
   inputs = scripts_for_json5_files + [
@@ -399,7 +402,7 @@ action("generated_settings_macros") {
   ]
 }
 
-action("generated_testing_idls_settings") {
+blink_python_runner("generated_testing_idls_settings") {
   script = "../build/scripts/make_internal_settings.py"
 
   inputs = scripts_for_json5_files + [
@@ -423,7 +426,7 @@ action("generated_testing_idls_settings") {
   ]
 }
 
-action("generated_testing_idls_internal_runtime_flags") {
+blink_python_runner("generated_testing_idls_internal_runtime_flags") {
   script = "../build/scripts/make_internal_runtime_flags.py"
 
   inputs = scripts_for_json5_files + [
@@ -447,7 +450,7 @@ action("generated_testing_idls_internal_runtime_flags") {
 
 css_properties("make_core_generated_computed_style_initial_values") {
   script = "../build/scripts/core/style/make_computed_style_initial_values.py"
-  in_files = [ "css/computed_style_extra_fields.json5" ]
+  in_files = [ "style/computed_style_extra_fields.json5" ]
   other_inputs = [ "../build/scripts/core/style/templates/computed_style_initial_values.h.tmpl" ]
   outputs = [
     "$blink_core_output_dir/style/computed_style_initial_values.h",
@@ -455,15 +458,18 @@ css_properties("make_core_generated_computed_style_initial_values") {
 }
 
 css_properties("make_core_generated_computed_style_base") {
-  script = "../build/scripts/make_computed_style_base.py"
+  script = "../build/scripts/core/style/make_computed_style_base.py"
   in_files = [
-    "css/computed_style_extra_fields.json5",
-    "css/computed_style_diff_functions.json5",
+    "style/computed_style_extra_fields.json5",
+    "style/computed_style_diff_functions.json5",
     "css/css_value_keywords.json5",
     "css/css_properties_ranking.json5",
     "css/css_group_config.json5",
   ]
   other_inputs = [
+    "../build/scripts/core/style/templates/computed_style_base.cc.tmpl",
+    "../build/scripts/core/style/templates/computed_style_base.h.tmpl",
+    "../build/scripts/core/style/templates/computed_style_base_constants.h.tmpl",
     "../build/scripts/templates/fields/field.tmpl",
     "../build/scripts/templates/fields/group.tmpl",
     "../build/scripts/templates/fields/base.tmpl",
@@ -472,27 +478,24 @@ css_properties("make_core_generated_computed_style_base") {
     "../build/scripts/templates/fields/primitive.tmpl",
     "../build/scripts/templates/fields/monotonic_flag.tmpl",
     "../build/scripts/templates/fields/external.tmpl",
-    "../build/scripts/templates/computed_style_base.h.tmpl",
-    "../build/scripts/templates/computed_style_base.cc.tmpl",
-    "../build/scripts/templates/computed_style_base_constants.h.tmpl",
     "../build/scripts/keyword_utils.py",
   ]
   outputs = [
-    "$blink_core_output_dir/computed_style_base.h",
-    "$blink_core_output_dir/computed_style_base.cc",
-    "$blink_core_output_dir/computed_style_base_constants.h",
+    "$blink_core_output_dir/style/computed_style_base.cc",
+    "$blink_core_output_dir/style/computed_style_base.h",
+    "$blink_core_output_dir/style/computed_style_base_constants.h",
   ]
 }
 
 css_properties("make_core_generated_css_value_id_mappings") {
-  script = "../build/scripts/make_css_value_id_mappings.py"
+  script = "../build/scripts/core/css/make_css_value_id_mappings.py"
   in_files = [ "css/css_value_keywords.json5" ]
   other_inputs = [
-    "../build/scripts/templates/css_value_id_mappings_generated.h.tmpl",
+    "../build/scripts/core/css/templates/css_value_id_mappings_generated.h.tmpl",
     "../build/scripts/keyword_utils.py",
   ]
   outputs = [
-    "$blink_core_output_dir/css_value_id_mappings_generated.h",
+    "$blink_core_output_dir/css/css_value_id_mappings_generated.h",
   ]
 }
 
@@ -826,6 +829,7 @@ css_properties("make_core_generated_css_longhand_property_classes") {
     "$blink_core_output_dir/css/properties/longhands/text_decoration_color.h",
     "$blink_core_output_dir/css/properties/longhands/text_decoration_color.cc",
     "$blink_core_output_dir/css/properties/longhands/text_decoration_line.h",
+    "$blink_core_output_dir/css/properties/longhands/text_decoration_skip_ink.h",
     "$blink_core_output_dir/css/properties/longhands/text_decoration_style.h",
     "$blink_core_output_dir/css/properties/longhands/text_indent.h",
     "$blink_core_output_dir/css/properties/longhands/text_justify.h",
@@ -1127,15 +1131,15 @@ css_properties("make_core_generated_css_shorthand_property_classes") {
 }
 
 css_properties("make_core_generated_css_property_names") {
-  script = "../build/scripts/make_css_property_names.py"
+  script = "../build/scripts/core/css/make_css_property_names.py"
   other_inputs = [
     "../build/scripts/gperf.py",
-    "../build/scripts/templates/css_property_names.cc.tmpl",
-    "../build/scripts/templates/css_property_names.h.tmpl",
+    "../build/scripts/core/css/templates/css_property_names.cc.tmpl",
+    "../build/scripts/core/css/templates/css_property_names.h.tmpl",
   ]
   outputs = [
-    "$blink_core_output_dir/css_property_names.cc",
-    "$blink_core_output_dir/css_property_names.h",
+    "$blink_core_output_dir/css/css_property_names.cc",
+    "$blink_core_output_dir/css/css_property_names.h",
   ]
 }
 
@@ -1160,6 +1164,8 @@ code_generator("make_core_generated_atrule_names") {
 code_generator("make_core_generated_media_features") {
   script = "../build/scripts/core/css/make_media_features.py"
   json_inputs = [ "css/media_feature_names.json5" ]
+  other_inputs =
+      scripts_for_json5_files + [ "../build/scripts/media_feature_symbol.py" ]
   templates = [ "../build/scripts/core/css/templates/media_features.h.tmpl" ]
   outputs = [
     "$blink_core_output_dir/css/media_features.h",
@@ -1269,7 +1275,7 @@ process_json5_files("make_core_generated_svg_element_type_helpers") {
 
 make_event_factory("make_core_generated_event_factory") {
   in_files = [
-    "$blink_core_output_dir/event_names.json5",
+    "$blink_core_output_dir/event_interface_names.json5",
     "events/event_interface_aliases.json5",
   ]
   outputs = [
@@ -1286,7 +1292,8 @@ code_generator("make_core_generated_media_feature_names") {
     "../build/scripts/templates/make_names.cc.tmpl",
     "../build/scripts/templates/make_names.h.tmpl",
   ]
-  other_inputs = make_names_files
+  other_inputs =
+      make_names_files + [ "../build/scripts/media_feature_symbol.py" ]
   outputs = [
     "$blink_core_output_dir/css/media_feature_names.cc",
     "$blink_core_output_dir/css/media_feature_names.h",
@@ -1299,7 +1306,7 @@ make_names("make_core_generated_media_type_names") {
 }
 
 make_names("make_core_generated_event_names") {
-  in_files = [ "$blink_core_output_dir/event_names.json5" ]
+  in_files = [ "$blink_core_output_dir/event_interface_names.json5" ]
   output_dir = blink_core_output_dir
 }
 
@@ -1376,7 +1383,7 @@ action("make_minimized_css") {
   script = "../build/scripts/minimize_css.py"
 
   inputs = [
-    "css/html.css",
+    "html/resources/html.css",
   ]
   outputs = [
     "$blink_core_output_dir/html.css",
@@ -1409,18 +1416,18 @@ action("make_core_generated_html_entity_table") {
   deps = make_core_generated_deps
 }
 
-action("make_core_generated_css_tokenizer_codepoints") {
+blink_python_runner("make_core_generated_css_tokenizer_codepoints") {
   visibility = []  # Allow re-assignment of list.
   visibility = [ ":*" ]
-  script = "../build/scripts/make_css_tokenizer_codepoints.py"
+  script = "../build/scripts/core/css/make_css_tokenizer_codepoints.py"
 
   outputs = [
-    "$blink_core_output_dir/css_tokenizer_codepoints.cc",
+    "$blink_core_output_dir/css/css_tokenizer_codepoints.cc",
   ]
 
   args = [
     "--output_dir",
-    rel_blink_core_gen_dir,
+    "$rel_blink_core_gen_dir/css",
   ]
   if (is_mac && !use_system_xcode) {
     args += [
@@ -1432,24 +1439,24 @@ action("make_core_generated_css_tokenizer_codepoints") {
   deps = make_core_generated_deps
 }
 
-action("make_core_generated_css_primitive_value_unit_trie") {
+blink_python_runner("make_core_generated_css_primitive_value_unit_trie") {
   visibility = []  # Allow re-assignment of list.
   visibility = [ ":*" ]
-  script = "../build/scripts/make_css_primitive_value_unit_trie.py"
+  script = "../build/scripts/core/css/make_css_primitive_value_unit_trie.py"
 
   input_file = "css/css_primitive_value_units.json5"
   inputs = make_trie_helpers_files + [
              input_file,
-             "../build/scripts/templates/css_primitive_value_unit_trie.cc.tmpl",
+             "../build/scripts/core/css/templates/css_primitive_value_unit_trie.cc.tmpl",
            ]
   outputs = [
-    "$blink_core_output_dir/css_primitive_value_unit_trie.cc",
+    "$blink_core_output_dir/css/css_primitive_value_unit_trie.cc",
   ]
 
   args = [
     rebase_path(input_file, root_build_dir),
     "--output_dir",
-    rel_blink_core_gen_dir,
+    "$rel_blink_core_gen_dir/css",
   ]
   if (is_mac && !use_system_xcode) {
     args += [
@@ -1461,7 +1468,7 @@ action("make_core_generated_css_primitive_value_unit_trie") {
   deps = make_core_generated_deps
 }
 
-action("make_core_generated_html_element_lookup_trie") {
+blink_python_runner("make_core_generated_html_element_lookup_trie") {
   visibility = []  # Allow re-assignment of list.
   visibility = [ ":*" ]
   script = "../build/scripts/make_element_lookup_trie.py"
@@ -1492,7 +1499,7 @@ action("make_core_generated_html_element_lookup_trie") {
   deps = make_core_generated_deps
 }
 
-action("make_core_generated_origin_trials") {
+blink_python_runner("make_core_generated_origin_trials") {
   script = "../build/scripts/make_origin_trials.py"
 
   inputs = scripts_for_json5_files + [
@@ -1518,7 +1525,7 @@ action("make_core_generated_origin_trials") {
     ]
   }
 }
-action("make_core_generated_web_origin_trials") {
+blink_python_runner("make_core_generated_web_origin_trials") {
   script = "../build/scripts/make_web_origin_trials.py"
 
   inputs = scripts_for_json5_files + [
@@ -1573,11 +1580,10 @@ targets_generating_sources = [
   ":make_core_generated_css_primitive_value_unit_trie",
   ":make_core_generated_computed_style_initial_values",
   ":make_core_generated_computed_style_base",
-  ":make_core_generated_css_value_id_mappings",
-  ":make_core_generated_css_property_baseclass",
   ":make_core_generated_css_longhand_property_classes",
-  ":make_core_generated_css_shorthand_property_classes",
+  ":make_core_generated_css_property_baseclass",
   ":make_core_generated_css_property_names",
+  ":make_core_generated_css_shorthand_property_classes",
   ":make_core_generated_css_value_id_mappings",
   ":make_core_generated_cssom_types",
   ":make_core_generated_event_factory",
@@ -1714,6 +1720,7 @@ jumbo_source_set("unit_tests") {
     "animation/list_interpolation_functions_test.cc",
     "animation/property_handle_test.cc",
     "animation/scroll_timeline_test.cc",
+    "animation/scroll_timeline_util_test.cc",
     "animation/timing_calculations_test.cc",
     "animation/timing_input_test.cc",
     "clipboard/data_object_test.cc",
@@ -1724,15 +1731,20 @@ jumbo_source_set("unit_tests") {
     "css/css_computed_style_declaration_test.cc",
     "css/css_font_face_source_test.cc",
     "css/css_gradient_value_test.cc",
+    "css/css_invalid_variable_value_test.cc",
     "css/css_page_rule_test.cc",
     "css/css_paint_value_test.cc",
+    "css/css_primitive_value_test.cc",
+    "css/css_property_name_test.cc",
+    "css/css_property_value_set_test.cc",
     "css/css_selector_test.cc",
     "css/css_selector_watch_test.cc",
     "css/css_style_declaration_test.cc",
     "css/css_style_sheet_test.cc",
-    "css/css_test_helper.cc",
-    "css/css_test_helper.h",
+    "css/css_test_helpers.cc",
+    "css/css_test_helpers.h",
     "css/css_value_test_helper.h",
+    "css/cssom/cross_thread_style_value_test.cc",
     "css/cssom/css_math_invert_test.cc",
     "css/cssom/css_math_negate_test.cc",
     "css/cssom/css_numeric_value_type_test.cc",
@@ -1740,6 +1752,7 @@ jumbo_source_set("unit_tests") {
     "css/cssom/css_style_image_value_test.cc",
     "css/cssom/css_unit_value_test.cc",
     "css/cssom/css_unparsed_value_test.cc",
+    "css/cssom/paint_worklet_style_property_map_test.cc",
     "css/cssom/prepopulated_computed_style_property_map_test.cc",
     "css/drag_update_test.cc",
     "css/font_face_cache_test.cc",
@@ -1753,6 +1766,7 @@ jumbo_source_set("unit_tests") {
     "css/media_values_test.cc",
     "css/parser/css_lazy_parsing_test.cc",
     "css/parser/css_parser_fast_paths_test.cc",
+    "css/parser/css_parser_local_context_test.cc",
     "css/parser/css_parser_token_stream_test.cc",
     "css/parser/css_parser_token_test.cc",
     "css/parser/css_property_parser_test.cc",
@@ -1762,6 +1776,8 @@ jumbo_source_set("unit_tests") {
     "css/parser/sizes_attribute_parser_test.cc",
     "css/parser/sizes_calc_parser_test.cc",
     "css/properties/css_parsing_utils_test.cc",
+    "css/properties/css_property_ref_test.cc",
+    "css/properties/longhands/custom_property_test.cc",
     "css/resolver/css_variable_data_test.cc",
     "css/resolver/css_variable_resolver_test.cc",
     "css/resolver/font_builder_test.cc",
@@ -1782,6 +1798,8 @@ jumbo_source_set("unit_tests") {
     "css/threaded/filter_operation_resolver_threaded_test.cc",
     "css/threaded/font_object_threaded_test.cc",
     "css/threaded/text_renderer_threaded_test.cc",
+    "display_lock/display_lock_budget_test.cc",
+    "display_lock/display_lock_context_test.cc",
     "dom/attr_test.cc",
     "dom/document_statistics_collector_test.cc",
     "dom/document_test.cc",
@@ -1800,7 +1818,6 @@ jumbo_source_set("unit_tests") {
     "dom/names_map_test.cc",
     "dom/node_test.cc",
     "dom/nth_index_cache_test.cc",
-    "dom/pausable_object_test.cc",
     "dom/range_test.cc",
     "dom/scripted_animation_controller_test.cc",
     "dom/scripted_idle_task_controller_test.cc",
@@ -1820,8 +1837,7 @@ jumbo_source_set("unit_tests") {
     "events/pointer_event_factory_test.cc",
     "events/touch_event_test.cc",
     "events/web_input_event_conversion_test.cc",
-    "exported/fake_web_plugin.cc",
-    "exported/fake_web_plugin.h",
+    "execution_context/pausable_object_test.cc",
     "exported/local_frame_client_impl_test.cc",
     "exported/prerendering_test.cc",
     "exported/web_associated_url_loader_impl_test.cc",
@@ -1832,6 +1848,7 @@ jumbo_source_set("unit_tests") {
     "exported/web_frame_serializer_sanitization_test.cc",
     "exported/web_frame_serializer_test.cc",
     "exported/web_frame_test.cc",
+    "exported/web_layer_test.cc",
     "exported/web_meaningful_layouts_test.cc",
     "exported/web_node_test.cc",
     "exported/web_plugin_container_test.cc",
@@ -1846,6 +1863,7 @@ jumbo_source_set("unit_tests") {
     "feature_policy/policy_test.cc",
     "fetch/blob_bytes_consumer_test.cc",
     "fetch/body_stream_buffer_test.cc",
+    "fetch/buffering_bytes_consumer_test.cc",
     "fetch/bytes_consumer_for_data_consumer_handle_test.cc",
     "fetch/bytes_consumer_test.cc",
     "fetch/bytes_consumer_test_util.cc",
@@ -1868,10 +1886,10 @@ jumbo_source_set("unit_tests") {
     "frame/csp/csp_source_test.cc",
     "frame/csp/media_list_directive_test.cc",
     "frame/csp/source_list_directive_test.cc",
-    "frame/deferred_loading_test.cc",
     "frame/document_loading_rendering_test.cc",
     "frame/dom_timer_test.cc",
     "frame/find_in_page_test.cc",
+    "frame/frame_overlay_test.cc",
     "frame/frame_serializer_test.cc",
     "frame/frame_test.cc",
     "frame/frame_test_helpers.cc",
@@ -1908,6 +1926,7 @@ jumbo_source_set("unit_tests") {
     "html/forms/email_input_type_test.cc",
     "html/forms/external_popup_menu_test.cc",
     "html/forms/file_input_type_test.cc",
+    "html/forms/form_controller_test.cc",
     "html/forms/form_data_test.cc",
     "html/forms/html_form_control_element_test.cc",
     "html/forms/html_form_element_test.cc",
@@ -1936,15 +1955,19 @@ jumbo_source_set("unit_tests") {
     "html/image_document_test.cc",
     "html/imports/html_import_sheets_test.cc",
     "html/lazy_load_frame_observer_test.cc",
+    "html/lazy_load_image_observer_test.cc",
     "html/link_element_loading_test.cc",
     "html/link_rel_attribute_test.cc",
     "html/list_item_ordinal_test.cc",
     "html/media/autoplay_uma_helper_test.cc",
     "html/media/html_media_element_event_listeners_test.cc",
     "html/media/html_media_element_test.cc",
+    "html/media/html_media_test_helper.cc",
+    "html/media/html_media_test_helper.h",
     "html/media/html_video_element_persistent_test.cc",
     "html/media/html_video_element_test.cc",
     "html/media/media_custom_controls_fullscreen_detector_test.cc",
+    "html/media/video_wake_lock_test.cc",
     "html/media_element_filling_viewport_test.cc",
     "html/parser/atomic_html_token_test.cc",
     "html/parser/compact_html_token_test.cc",
@@ -1975,11 +1998,14 @@ jumbo_source_set("unit_tests") {
     "inspector/inspector_session_state_test.cc",
     "inspector/main_thread_debugger_test.cc",
     "inspector/protocol_parser_test.cc",
+    "inspector/protocol_unittest.cc",
     "intersection_observer/intersection_observer_test.cc",
+    "invisible_dom/find_invisible_test.cc",
     "layout/api/selection_state_test.cc",
     "layout/collapsed_border_value_test.cc",
     "layout/custom/layout_worklet_test.cc",
     "layout/grid_test.cc",
+    "layout/jank_region_test.cc",
     "layout/jank_tracker_test.cc",
     "layout/layout_block_test.cc",
     "layout/layout_box_model_object_test.cc",
@@ -2000,6 +2026,7 @@ jumbo_source_set("unit_tests") {
     "layout/layout_table_row_test.cc",
     "layout/layout_table_section_test.cc",
     "layout/layout_table_test.cc",
+    "layout/layout_text_control_single_line_test.cc",
     "layout/layout_text_control_test.cc",
     "layout/layout_text_fragment_test.cc",
     "layout/layout_text_test.cc",
@@ -2017,6 +2044,8 @@ jumbo_source_set("unit_tests") {
     "layout/ng/geometry/ng_physical_offset_rect_test.cc",
     "layout/ng/geometry/ng_physical_offset_test.cc",
     "layout/ng/geometry/ng_physical_rect_test.cc",
+    "layout/ng/inline/ng_baseline_test.cc",
+    "layout/ng/inline/ng_caret_navigator_test.cc",
     "layout/ng/inline/ng_caret_position_test.cc",
     "layout/ng/inline/ng_inline_fragment_traversal_test.cc",
     "layout/ng/inline/ng_inline_items_builder_test.cc",
@@ -2052,7 +2081,6 @@ jumbo_source_set("unit_tests") {
     "layout/svg/layout_svg_text_test.cc",
     "layout/text_autosizer_test.cc",
     "layout/visual_rect_mapping_test.cc",
-    "loader/allowed_by_nosniff_test.cc",
     "loader/base_fetch_context_test.cc",
     "loader/document_load_timing_test.cc",
     "loader/document_loader_test.cc",
@@ -2087,9 +2115,10 @@ jumbo_source_set("unit_tests") {
     "page/context_menu_controller_test.cc",
     "page/drag_controller_test.cc",
     "page/focus_controller_test.cc",
-    "page/page_overlay_test.cc",
     "page/page_popup_client_test.cc",
     "page/print_context_test.cc",
+    "page/scrolling/fragment_anchor_test.cc",
+    "page/scrolling/main_thread_scrolling_reasons_test.cc",
     "page/scrolling/root_scroller_test.cc",
     "page/scrolling/scroll_into_view_test.cc",
     "page/scrolling/scroll_metrics_test.cc",
@@ -2116,6 +2145,7 @@ jumbo_source_set("unit_tests") {
     "paint/first_meaningful_paint_detector_test.cc",
     "paint/fragment_data_test.cc",
     "paint/html_canvas_painter_test.cc",
+    "paint/image_element_timing_test.cc",
     "paint/image_paint_timing_detector_test.cc",
     "paint/link_highlight_impl_test.cc",
     "paint/ng/ng_paint_fragment_test.cc",
@@ -2136,7 +2166,7 @@ jumbo_source_set("unit_tests") {
     "paint/paint_property_tree_printer_test.cc",
     "paint/paint_property_tree_update_tests.cc",
     "paint/pre_paint_tree_walk_test.cc",
-    "paint/stub_chrome_client_for_spv2.h",
+    "paint/stub_chrome_client_for_cap.h",
     "paint/table_painter_test.cc",
     "paint/text_paint_timing_detector_test.cc",
     "paint/text_painter_test.cc",
@@ -2159,7 +2189,10 @@ jumbo_source_set("unit_tests") {
     "scroll/scrollable_area_test.cc",
     "scroll/scrollbar_theme_overlay_test.cc",
     "streams/readable_stream_operations_test.cc",
+    "streams/readable_stream_test.cc",
+    "streams/test_underlying_source.h",
     "streams/transform_stream_test.cc",
+    "streams/writable_stream_test.cc",
     "style/border_value_test.cc",
     "style/computed_style_test.cc",
     "style/filter_operations_test.cc",
@@ -2169,6 +2202,8 @@ jumbo_source_set("unit_tests") {
     "svg/svg_path_parser_test.cc",
     "svg/svg_text_content_element_test.cc",
     "svg/unsafe_svg_attribute_sanitization_test.cc",
+    "testing/fake_web_plugin.cc",
+    "testing/fake_web_plugin.h",
     "testing/sim/sim_canvas.cc",
     "testing/sim/sim_canvas.h",
     "testing/sim/sim_compositor.cc",
@@ -2181,10 +2216,6 @@ jumbo_source_set("unit_tests") {
     "testing/sim/sim_request.h",
     "testing/sim/sim_test.cc",
     "testing/sim/sim_test.h",
-    "testing/sim/sim_web_frame_client.cc",
-    "testing/sim/sim_web_frame_client.h",
-    "testing/sim/sim_web_view_client.cc",
-    "testing/sim/sim_web_view_client.h",
     "timing/memory_info_test.cc",
     "timing/performance_navigation_timing_test.cc",
     "timing/performance_observer_test.cc",
@@ -2294,7 +2325,7 @@ fuzzer_test("stylesheet_contents_fuzzer") {
     "../platform:blink_fuzzer_test_support",
   ]
   dict = "//third_party/blink/renderer/core/css/css.dict"
-  seed_corpus = "//third_party/WebKit/LayoutTests/fast/css/resources"
+  seed_corpus = "//third_party/blink/web_tests/fast/css/resources"
   libfuzzer_options = [ "max_len=1024" ]
 }
 
@@ -2317,7 +2348,7 @@ fuzzer_test("html_preload_scanner_fuzzer") {
     "html/parser/html_preload_scanner_fuzzer.cc",
     "html/parser/text_resource_decoder_for_fuzzing.h",
   ]
-  seed_corpus = "//third_party/WebKit/LayoutTests/fast/parser"
+  seed_corpus = "//third_party/blink/web_tests/fast/parser"
   deps = [
     ":core",
     "../platform:blink_fuzzer_test_support",

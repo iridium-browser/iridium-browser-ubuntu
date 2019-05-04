@@ -9,6 +9,7 @@
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/wm/splitview/split_view_controller.h"
+#include "ash/wm/splitview/split_view_utils.h"
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/wm_event.h"
 #include "ui/aura/client/aura_constants.h"
@@ -24,6 +25,8 @@ BaseState::~BaseState() = default;
 void BaseState::OnWMEvent(WindowState* window_state, const WMEvent* event) {
   if (event->IsWorkspaceEvent()) {
     HandleWorkspaceEvents(window_state, event);
+    if (window_state->IsPip())
+      window_state->UpdatePipBounds();
     return;
   }
   if ((window_state->IsTrustedPinned() || window_state->IsPinned()) &&
@@ -39,7 +42,6 @@ void BaseState::OnWMEvent(WindowState* window_state, const WMEvent* event) {
 
   if (event->IsBoundsEvent()) {
     HandleBoundsEvents(window_state, event);
-    window_state->UpdatePipRoundedCorners();
     return;
   }
   DCHECK(event->IsTransitionEvent());
@@ -70,6 +72,8 @@ mojom::WindowStateType BaseState::GetStateForTransitionEvent(
       return mojom::WindowStateType::INACTIVE;
     case WM_EVENT_PIN:
       return mojom::WindowStateType::PINNED;
+    case WM_EVENT_PIP:
+      return mojom::WindowStateType::PIP;
     case WM_EVENT_TRUSTED_PIN:
       return mojom::WindowStateType::TRUSTED_PINNED;
     default:
@@ -120,8 +124,7 @@ void BaseState::CycleSnap(WindowState* window_state, WMEventType event) {
                                         : mojom::WindowStateType::RIGHT_SNAPPED;
 
   if (window_state->CanSnap() &&
-      window_state->GetStateType() != desired_snap_state &&
-      window_state->window()->type() != aura::client::WINDOW_TYPE_PANEL) {
+      window_state->GetStateType() != desired_snap_state) {
     const wm::WMEvent event(desired_snap_state ==
                                     mojom::WindowStateType::LEFT_SNAPPED
                                 ? wm::WM_EVENT_SNAP_LEFT
@@ -149,8 +152,13 @@ void BaseState::UpdateMinimizedState(
       window->SetProperty(aura::client::kPreMinimizedShowStateKey,
                           ToWindowShowState(previous_state_type));
     }
+    // Count minimizing a PIP window as dismissing it. Android apps in PIP mode
+    // don't exit when they are dismissed, they just go back to being a regular
+    // app, but minimized.
     ::wm::SetWindowVisibilityAnimationType(
-        window, WINDOW_VISIBILITY_ANIMATION_TYPE_MINIMIZE);
+        window, previous_state_type == mojom::WindowStateType::PIP
+                    ? WINDOW_VISIBILITY_ANIMATION_TYPE_FADE_IN_SLIDE_OUT
+                    : WINDOW_VISIBILITY_ANIMATION_TYPE_MINIMIZE);
 
     window->Hide();
     if (window_state->IsActive())
@@ -172,7 +180,7 @@ gfx::Rect BaseState::GetSnappedWindowBoundsInParent(
     aura::Window* window,
     const mojom::WindowStateType state_type) {
   gfx::Rect bounds_in_parent;
-  if (SplitViewController::ShouldAllowSplitView()) {
+  if (ShouldAllowSplitView()) {
     bounds_in_parent =
         Shell::Get()->split_view_controller()->GetSnappedWindowBoundsInParent(
             window, (state_type == mojom::WindowStateType::LEFT_SNAPPED)

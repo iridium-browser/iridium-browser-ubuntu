@@ -30,9 +30,9 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/version.h"
@@ -379,7 +379,7 @@ bool DeleteFileFromTempProcess(const base::FilePath& path,
       L"%SystemRoot%\\System32\\rundll32.exe";
   wchar_t rundll32[MAX_PATH];
   DWORD size =
-      ExpandEnvironmentStrings(kRunDll32Path, rundll32, arraysize(rundll32));
+      ExpandEnvironmentStrings(kRunDll32Path, rundll32, base::size(rundll32));
   if (!size || size >= MAX_PATH)
     return false;
 
@@ -473,7 +473,7 @@ bool ContainsUnsupportedSwitch(const base::CommandLine& cmd_line) {
     "app-host",
     "app-launcher",
   };
-  for (size_t i = 0; i < arraysize(kLegacySwitches); ++i) {
+  for (size_t i = 0; i < base::size(kLegacySwitches); ++i) {
     if (cmd_line.HasSwitch(kLegacySwitches[i]))
       return true;
   }
@@ -877,6 +877,21 @@ base::string16 GetElevationServiceClsidRegistryPath() {
 
 base::string16 GetElevationServiceAppidRegistryPath() {
   return GetElevationServiceGuid(L"Software\\Classes\\AppID\\");
+}
+
+base::string16 GetElevationServiceIid(base::StringPiece16 prefix) {
+  base::string16 result =
+      InstallUtil::String16FromGUID(install_static::GetElevatorIid());
+  result.insert(0, prefix.data(), prefix.size());
+  return result;
+}
+
+base::string16 GetElevationServiceIidRegistryPath() {
+  return GetElevationServiceIid(L"Software\\Classes\\Interface\\");
+}
+
+base::string16 GetElevationServiceTypeLibRegistryPath() {
+  return GetElevationServiceIid(L"Software\\Classes\\TypeLib\\");
 }
 
 }  // namespace installer

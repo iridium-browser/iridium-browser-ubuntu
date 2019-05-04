@@ -23,7 +23,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
@@ -45,7 +45,6 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/common/prerender_types.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/prefs/pref_service.h"
@@ -351,10 +350,10 @@ WebContents* PrerenderManager::SwapInternal(const GURL& url,
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!IsWebContentsPrerendering(web_contents, nullptr));
 
-  // Only swap if the target WebContents has a CoreTabHelper delegate to swap
-  // out of it. For a normal WebContents, this is if it is in a TabStripModel.
+  // Only swap if the target WebContents has a CoreTabHelper to swap out of it.
+  // For a normal WebContents, this is if it is in a TabStripModel.
   CoreTabHelper* core_tab_helper = CoreTabHelper::FromWebContents(web_contents);
-  if (!core_tab_helper || !core_tab_helper->delegate())
+  if (!core_tab_helper)
     return nullptr;
 
   PrerenderTabHelper* target_tab_helper =

@@ -19,7 +19,7 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
-#include "components/signin/core/browser/profile_management_switches.h"
+#include "components/signin/core/browser/account_consistency_method.h"
 #include "components/signin/core/browser/signin_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -133,12 +133,11 @@ class DiceSigninUiUtilTest : public BrowserWithTestWindowTest {
   // BrowserWithTestWindowTest:
   TestingProfile::TestingFactories GetTestingFactories() override {
     return {{SigninManagerFactory::GetInstance(),
-             base::BindRepeating(&BuildFakeSigninManagerBase)},
+             base::BindRepeating(&BuildFakeSigninManagerForTesting)},
             {ProfileOAuth2TokenServiceFactory::GetInstance(),
              base::BindRepeating(&BuildFakeProfileOAuth2TokenService)},
             {GaiaCookieManagerServiceFactory::GetInstance(),
-             base::BindRepeating(
-                 &BuildFakeGaiaCookieManagerServiceNoFakeUrlFetcher)}};
+             base::BindRepeating(&BuildFakeGaiaCookieManagerService)}};
   }
 
   // BrowserWithTestWindowTest:

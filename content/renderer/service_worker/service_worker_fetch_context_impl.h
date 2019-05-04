@@ -17,8 +17,9 @@ class ResourceDispatcher;
 class URLLoaderThrottleProvider;
 class WebSocketHandshakeThrottleProvider;
 
-class ServiceWorkerFetchContextImpl : public blink::WebWorkerFetchContext,
-                                      public mojom::RendererPreferenceWatcher {
+class ServiceWorkerFetchContextImpl final
+    : public blink::WebWorkerFetchContext,
+      public mojom::RendererPreferenceWatcher {
  public:
   // |url_loader_factory_info| is used for regular loads from the service worker
   // (i.e., Fetch API). It typically goes to network, but it might internally
@@ -39,32 +40,33 @@ class ServiceWorkerFetchContextImpl : public blink::WebWorkerFetchContext,
       std::unique_ptr<WebSocketHandshakeThrottleProvider>
           websocket_handshake_throttle_provider,
       mojom::RendererPreferenceWatcherRequest preference_watcher_request);
-  ~ServiceWorkerFetchContextImpl() override;
 
   // blink::WebWorkerFetchContext implementation:
   void SetTerminateSyncLoadEvent(base::WaitableEvent*) override;
-  void InitializeOnWorkerThread() override;
-  std::unique_ptr<blink::WebURLLoaderFactory> CreateURLLoaderFactory() override;
+  void InitializeOnWorkerThread(blink::AcceptLanguagesWatcher*) override;
+  blink::WebURLLoaderFactory* GetURLLoaderFactory() override;
   std::unique_ptr<blink::WebURLLoaderFactory> WrapURLLoaderFactory(
       mojo::ScopedMessagePipeHandle url_loader_factory_handle) override;
-  std::unique_ptr<blink::WebURLLoaderFactory> CreateScriptLoaderFactory()
-      override;
+  blink::WebURLLoaderFactory* GetScriptLoaderFactory() override;
   void WillSendRequest(blink::WebURLRequest&) override;
   blink::mojom::ControllerServiceWorkerMode IsControlledByServiceWorker()
       const override;
   blink::WebURL SiteForCookies() const override;
   std::unique_ptr<blink::WebSocketHandshakeThrottle>
   CreateWebSocketHandshakeThrottle() override;
+  blink::WebString GetAcceptLanguages() const override;
 
  private:
+  ~ServiceWorkerFetchContextImpl() override;
+
   // Implements mojom::RendererPreferenceWatcher.
   void NotifyUpdate(const RendererPreferences& new_prefs) override;
 
   RendererPreferences renderer_preferences_;
   const GURL worker_script_url_;
-  // Consumed on the worker thread to create |url_loader_factory_|.
+  // Consumed on the worker thread to create |web_url_loader_factory_|.
   std::unique_ptr<network::SharedURLLoaderFactoryInfo> url_loader_factory_info_;
-  // Consumed on the worker thread to create |script_loader_factory_|.
+  // Consumed on the worker thread to create |web_script_loader_factory_|.
   std::unique_ptr<network::SharedURLLoaderFactoryInfo>
       script_loader_factory_info_;
   const int service_worker_provider_id_;
@@ -73,9 +75,9 @@ class ServiceWorkerFetchContextImpl : public blink::WebWorkerFetchContext,
   std::unique_ptr<ResourceDispatcher> resource_dispatcher_;
 
   // Responsible for regular loads from the service worker (i.e., Fetch API).
-  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
+  std::unique_ptr<blink::WebURLLoaderFactory> web_url_loader_factory_;
   // Responsible for handling importScripts().
-  scoped_refptr<network::SharedURLLoaderFactory> script_loader_factory_;
+  std::unique_ptr<blink::WebURLLoaderFactory> web_script_loader_factory_;
 
   std::unique_ptr<URLLoaderThrottleProvider> throttle_provider_;
   std::unique_ptr<WebSocketHandshakeThrottleProvider>
@@ -89,6 +91,8 @@ class ServiceWorkerFetchContextImpl : public blink::WebWorkerFetchContext,
 
   // This is owned by ThreadedMessagingProxyBase on the main thread.
   base::WaitableEvent* terminate_sync_load_event_ = nullptr;
+
+  blink::AcceptLanguagesWatcher* accept_languages_watcher_ = nullptr;
 };
 
 }  // namespace content

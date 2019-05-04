@@ -52,39 +52,30 @@ void BackgroundSyncNetworkObserver::RegisterWithNetworkConnectionTracker(
   DCHECK(network_connection_tracker);
   network_connection_tracker_ = network_connection_tracker;
   network_connection_tracker_->AddNetworkConnectionObserver(this);
-  network_connection_tracker_->GetConnectionType(
-      &connection_type_,
-      base::BindOnce(&BackgroundSyncNetworkObserver::OnConnectionChanged,
-                     weak_ptr_factory_.GetWeakPtr()));
+
+  UpdateConnectionType();
 }
 
-bool BackgroundSyncNetworkObserver::NetworkSufficient(
-    SyncNetworkState network_state) {
+void BackgroundSyncNetworkObserver::UpdateConnectionType() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  network::mojom::ConnectionType connection_type;
+  bool synchronous_return = network_connection_tracker_->GetConnectionType(
+      &connection_type,
+      base::BindOnce(&BackgroundSyncNetworkObserver::OnConnectionChanged,
+                     weak_ptr_factory_.GetWeakPtr()));
+  if (synchronous_return)
+    OnConnectionChanged(connection_type);
+}
+
+bool BackgroundSyncNetworkObserver::NetworkSufficient() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  switch (network_state) {
-    case NETWORK_STATE_ANY:
-      return true;
-    case NETWORK_STATE_AVOID_CELLULAR:
-      // Note that this returns true for CONNECTION_UNKNOWN to avoid never
-      // firing.
-      return connection_type_ !=
-                 network::mojom::ConnectionType::CONNECTION_NONE &&
-             !network::NetworkConnectionTracker::IsConnectionCellular(
-                 connection_type_);
-    case NETWORK_STATE_ONLINE:
-      return connection_type_ !=
-             network::mojom::ConnectionType::CONNECTION_NONE;
-  }
-
-  NOTREACHED();
-  return false;
+  return connection_type_ != network::mojom::ConnectionType::CONNECTION_NONE;
 }
 
 void BackgroundSyncNetworkObserver::OnConnectionChanged(
     network::mojom::ConnectionType connection_type) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
   if (ignore_network_changes_)
     return;
   NotifyManagerIfConnectionChanged(connection_type);

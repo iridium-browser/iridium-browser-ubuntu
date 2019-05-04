@@ -13,6 +13,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
+#include "base/win/scoped_handle.h"
 #include "base/win/scoped_process_information.h"
 #include "chrome/credential_provider/gaiacp/logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -43,20 +45,11 @@ FakeOSProcessManager::~FakeOSProcessManager() {
   *GetInstanceStorage() = original_manager_;
 }
 
-HRESULT FakeOSProcessManager::CreateLogonToken(const wchar_t* username,
-                                               const wchar_t* password,
-                                               base::win::ScopedHandle* token) {
-  // Setting a non-null value for the token.  The value won't be used for
-  // anything except to check for the magic number.
-  token->Set(reinterpret_cast<base::win::ScopedHandle::Handle>(this));
-  return S_OK;
-}
-
 HRESULT FakeOSProcessManager::GetTokenLogonSID(
     const base::win::ScopedHandle& token,
     PSID* sid) {
-  // Make sure the handle has been created by CreateLogonToken().
-  if (token.Get() != reinterpret_cast<base::win::ScopedHandle::Handle>(this))
+  // Make sure the token is valid, but otherwise ignore it.
+  if (!token.IsValid())
     return E_INVALIDARG;
 
   return CreateArbitrarySid(++next_rid_, sid);
@@ -73,15 +66,20 @@ HRESULT FakeOSProcessManager::CreateProcessWithToken(
     _STARTUPINFOW* startupinfo,
     base::win::ScopedProcessInformation* procinfo) {
   // Ignore the logon token and create a process as the current user.
+  // If the startupinfo includes a desktop name, make sure to ignore.  In tests
+  // the desktop has not been configured to allow a newly created process to
+  // to access it.
+  _STARTUPINFOW local_startupinfo = *startupinfo;
+  local_startupinfo.lpDesktop = nullptr;
+
   PROCESS_INFORMATION new_procinfo = {};
   // Pass a copy of the command line string to CreateProcessW() because this
   // function could change the string.
   std::unique_ptr<wchar_t, void (*)(void*)>
       cmdline(_wcsdup(command_line.GetCommandLineString().c_str()), std::free);
   if (!::CreateProcessW(command_line.GetProgram().value().c_str(),
-                        cmdline.get(),
-                        nullptr, nullptr, TRUE, CREATE_SUSPENDED, nullptr,
-                        nullptr, startupinfo, &new_procinfo)) {
+                        cmdline.get(), nullptr, nullptr, TRUE, CREATE_SUSPENDED,
+                        nullptr, nullptr, &local_startupinfo, &new_procinfo)) {
     HRESULT hr = HRESULT_FROM_WIN32(::GetLastError());
     return hr;
   }
@@ -119,26 +117,20 @@ HRESULT FakeOSUserManager::AddUser(const wchar_t* username,
                                    bool add_to_users_group,
                                    BSTR* sid,
                                    DWORD* error) {
+  USES_CONVERSION;
+
   if (error)
     *error = 0;
 
   bool user_found = username_to_info_.count(username) > 0;
 
   if (user_found) {
-    // If adding the special "gaia" account, and if the error is "user already
-    // exists", consider this is a success.  Otherwise the user is not allowed
-    // to exist already. !add_to_users_group means special "gaia" account.
-    if (!add_to_users_group) {
-      *sid = ::SysAllocString(W2COLE(username_to_info_[username].sid.c_str()));
-    } else {
-      *sid = nullptr;
-    }
-
+    *sid = ::SysAllocString(W2COLE(username_to_info_[username].sid.c_str()));
     return HRESULT_FROM_WIN32(NERR_UserExists);
   }
 
   PSID psid = nullptr;
-  HRESULT hr = FakeOSUserManager::CreateNewSID(&psid);
+  HRESULT hr = CreateNewSID(&psid);
   if (FAILED(hr))
     return hr;
 
@@ -158,18 +150,49 @@ HRESULT FakeOSUserManager::AddUser(const wchar_t* username,
   return S_OK;
 }
 
-HRESULT FakeOSUserManager::SetUserPassword(const wchar_t* username,
-                                           const wchar_t* password,
-                                           DWORD* error) {
-  if (error)
-    *error = 0;
-
+HRESULT FakeOSUserManager::ChangeUserPassword(const wchar_t* username,
+                                              const wchar_t* old_password,
+                                              const wchar_t* new_password) {
   if (username_to_info_.count(username) > 0) {
-    username_to_info_[username].password = password;
+    if (username_to_info_[username].password != old_password)
+      return HRESULT_FROM_WIN32(ERROR_INVALID_PASSWORD);
+
+    username_to_info_[username].password = new_password;
     return S_OK;
   }
 
   return HRESULT_FROM_WIN32(NERR_UserNotFound);
+}
+
+HRESULT FakeOSUserManager::IsWindowsPasswordValid(const wchar_t* username,
+                                                  const wchar_t* password) {
+  if (username_to_info_.count(username) > 0) {
+    return username_to_info_[username].password == password ? S_OK : S_FALSE;
+  }
+
+  return HRESULT_FROM_WIN32(NERR_UserNotFound);
+}
+
+HRESULT FakeOSUserManager::CreateLogonToken(const wchar_t* username,
+                                            const wchar_t* password,
+                                            bool /*interactive*/,
+                                            base::win::ScopedHandle* token) {
+  if (username_to_info_.count(username) == 0) {
+    return HRESULT_FROM_WIN32(NERR_BadUsername);
+  } else if (username_to_info_[username].password != password) {
+    return HRESULT_FROM_WIN32(NERR_UserExists);
+  }
+
+  // Create a token with a dummy handle value.
+  base::FilePath path;
+  if (!base::CreateTemporaryFile(&path))
+    return HRESULT_FROM_WIN32(::GetLastError());
+
+  token->Set(CreateFile(path.value().c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                        nullptr, CREATE_ALWAYS,
+                        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+                        nullptr));
+  return token->IsValid() ? S_OK : HRESULT_FROM_WIN32(::GetLastError());
 }
 
 HRESULT FakeOSUserManager::GetUserSID(const wchar_t* username, PSID* sid) {
@@ -183,10 +206,15 @@ HRESULT FakeOSUserManager::GetUserSID(const wchar_t* username, PSID* sid) {
   return HRESULT_FROM_WIN32(NERR_UserNotFound);
 }
 
-HRESULT FakeOSUserManager::FindUserBySID(const wchar_t* sid) {
+HRESULT FakeOSUserManager::FindUserBySID(const wchar_t* sid,
+                                         wchar_t* username,
+                                         DWORD length) {
   for (auto& kv : username_to_info_) {
-    if (kv.second.sid == sid)
+    if (kv.second.sid == sid) {
+      if (username)
+        wcscpy_s(username, length, kv.first.c_str());
       return S_OK;
+    }
   }
 
   return HRESULT_FROM_WIN32(ERROR_NONE_MAPPED);
@@ -212,7 +240,7 @@ FakeOSUserManager::UserInfo::~UserInfo() {}
 
 bool FakeOSUserManager::UserInfo::operator==(const UserInfo& other) const {
   return password == other.password && fullname == other.fullname &&
-      comment == other.comment && sid == other.sid;
+         comment == other.comment && sid == other.sid;
 }
 
 const FakeOSUserManager::UserInfo FakeOSUserManager::GetUserInfo(
@@ -312,56 +340,5 @@ FakeScopedUserProfile::FakeScopedUserProfile(const base::string16& sid,
                                              const base::string16& password) {}
 
 FakeScopedUserProfile::~FakeScopedUserProfile() {}
-
-///////////////////////////////////////////////////////////////////////////////
-
-FakeWinHttpUrlFetcherFactory::FakeWinHttpUrlFetcherFactory()
-    : original_creator_(*WinHttpUrlFetcher::GetCreatorFunctionStorage()) {
-  *WinHttpUrlFetcher::GetCreatorFunctionStorage() = base::BindRepeating(
-      &FakeWinHttpUrlFetcherFactory::Create, base::Unretained(this));
-}
-
-FakeWinHttpUrlFetcherFactory::~FakeWinHttpUrlFetcherFactory() {
-  *WinHttpUrlFetcher::GetCreatorFunctionStorage() = original_creator_;
-}
-
-void FakeWinHttpUrlFetcherFactory::SetFakeResponse(
-    const GURL& url,
-    const WinHttpUrlFetcher::Headers& headers,
-    const std::string& response) {
-  fake_responses_.emplace(url, std::make_pair(headers, response));
-}
-
-std::unique_ptr<WinHttpUrlFetcher> FakeWinHttpUrlFetcherFactory::Create(
-    const GURL& url) {
-  if (fake_responses_.count(url) == 0)
-    return nullptr;
-
-  const Response& response = fake_responses_[url];
-
-  FakeWinHttpUrlFetcher* fetcher = new FakeWinHttpUrlFetcher(std::move(url));
-  fetcher->response_headers_ = response.first;
-  fetcher->response_ = response.second;
-  return std::unique_ptr<WinHttpUrlFetcher>(fetcher);
-}
-
-FakeWinHttpUrlFetcher::FakeWinHttpUrlFetcher(const GURL& url)
-    : WinHttpUrlFetcher() {}
-
-FakeWinHttpUrlFetcher::~FakeWinHttpUrlFetcher() {}
-
-// WinHttpUrlFetcher
-bool FakeWinHttpUrlFetcher::IsValid() const {
-  return true;
-}
-
-HRESULT FakeWinHttpUrlFetcher::Fetch(std::string* response) {
-  response->assign(response_);
-  return S_OK;
-}
-
-HRESULT FakeWinHttpUrlFetcher::Close() {
-  return S_OK;
-}
 
 }  // namespace credential_provider

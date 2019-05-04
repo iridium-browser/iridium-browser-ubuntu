@@ -27,6 +27,25 @@
 
 namespace content {
 
+namespace {
+
+bool IsSiteIsolationDisabled() {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableSiteIsolation)) {
+    return true;
+  }
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableSiteIsolationForPolicy)) {
+    return true;
+  }
+
+  return GetContentClient() &&
+         GetContentClient()->browser()->ShouldDisableSiteIsolation();
+}
+
+}  // namespace
+
 // static
 bool SiteIsolationPolicy::UseDedicatedProcessesForAllSites() {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -34,10 +53,8 @@ bool SiteIsolationPolicy::UseDedicatedProcessesForAllSites() {
     return true;
   }
 
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSiteIsolationTrials)) {
+  if (IsSiteIsolationDisabled())
     return false;
-  }
 
   // The switches above needs to be checked first, because if the
   // ContentBrowserClient consults a base::Feature, then it will activate the
@@ -60,13 +77,6 @@ void SiteIsolationPolicy::PopulateURLLoaderFactoryParamsPtrForCORB(
   params->is_corb_enabled = true;
   params->corb_detachable_resource_type = RESOURCE_TYPE_PREFETCH;
   params->corb_excluded_resource_type = RESOURCE_TYPE_PLUGIN_RESOURCE;
-
-  const char* initiator_scheme_exception =
-      GetContentClient()
-          ->browser()
-          ->GetInitiatorSchemeBypassingDocumentBlocking();
-  if (initiator_scheme_exception)
-    params->corb_excluded_initiator_scheme = initiator_scheme_exception;
 }
 
 // static
@@ -79,10 +89,8 @@ bool SiteIsolationPolicy::AreIsolatedOriginsEnabled() {
     return true;
   }
 
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSiteIsolationTrials)) {
+  if (IsSiteIsolationDisabled())
     return false;
-  }
 
   // The feature needs to be checked last, because checking the feature
   // activates the field trial and assigns the client either to a control or an
@@ -112,18 +120,17 @@ SiteIsolationPolicy::GetIsolatedOriginsFromEnvironment() {
   std::string cmdline_arg =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kIsolateOrigins);
+  std::vector<url::Origin> origins;
   if (!cmdline_arg.empty()) {
-    std::vector<url::Origin> cmdline_origins =
-        ParseIsolatedOrigins(cmdline_arg);
+    origins = ParseIsolatedOrigins(cmdline_arg);
     UMA_HISTOGRAM_COUNTS_1000("SiteIsolation.IsolateOrigins.Size",
-                              cmdline_origins.size());
-    return cmdline_origins;
+                              origins.size());
   }
 
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSiteIsolationTrials)) {
-    return std::vector<url::Origin>();
-  }
+  // --isolate-origins (both command-line flag and enterprise policy) trumps
+  // the opt-out flag.
+  if (IsSiteIsolationDisabled())
+    return origins;
 
   // The feature needs to be checked last, because checking the feature
   // activates the field trial and assigns the client either to a control or an
@@ -132,9 +139,13 @@ SiteIsolationPolicy::GetIsolatedOriginsFromEnvironment() {
     std::string field_trial_arg = base::GetFieldTrialParamValueByFeature(
         features::kIsolateOrigins,
         features::kIsolateOriginsFieldTrialParamName);
-    return ParseIsolatedOrigins(field_trial_arg);
+    std::vector<url::Origin> field_trial_origins =
+        ParseIsolatedOrigins(field_trial_arg);
+    origins.reserve(origins.size() + field_trial_origins.size());
+    std::move(field_trial_origins.begin(), field_trial_origins.end(),
+              std::back_inserter(origins));
   }
-  return std::vector<url::Origin>();
+  return origins;
 }
 
 // static

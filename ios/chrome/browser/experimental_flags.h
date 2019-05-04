@@ -7,10 +7,16 @@
 
 #include <string>
 
+#include "base/feature_list.h"
+
 // This file can be empty. Its purpose is to contain the relatively short lived
 // declarations required for experimental flags.
 
 namespace experimental_flags {
+
+// Feature to load external files with WebState instead of using
+// ExternalFileController.
+extern const base::Feature kExternalFilesLoadedInWebState;
 
 enum GaiaEnvironment {
   GAIA_ENVIRONMENT_PROD,
@@ -20,7 +26,7 @@ enum GaiaEnvironment {
 
 enum WhatsNewPromoStatus {
   WHATS_NEW_DEFAULT = 0,         // Not forced to enable a promo.
-  WHATS_NEW_APP_RATING,          // Force enable App Rating Promo.
+  WHATS_NEW_TEST_COMMAND_TIP,    // Test Tip that runs a command.
   WHATS_NEW_MOVE_TO_DOCK_TIP,    // Force enable Move To Dock Tip promo.
   WHATS_NEW_PROMO_STATUS_COUNT,  // Count of Whats New Promo Statuses.
 };
@@ -55,10 +61,16 @@ bool IsThirdPartyKeyboardWorkaroundEnabled();
 // TODO (crbug.com/884719): Remove all use of this flag.
 bool IsBookmarksUIRebootEnabled();
 
+// Whether the Infobar UI Reboot is enabled.
+bool IsInfobarUIRebootEnabled();
+
 // Whether the application group sandbox must be cleared before starting.
 // Calling this method will reset the flag to false, so the sandbox is cleared
 // only once.
 bool MustClearApplicationGroupSandbox();
+
+// Whether password generation is enabled.
+bool IsAutomaticPasswordGenerationEnabled();
 
 }  // namespace experimental_flags
 

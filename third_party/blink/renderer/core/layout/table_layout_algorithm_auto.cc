@@ -225,7 +225,7 @@ static bool ShouldScaleColumnsForParent(LayoutTable* table) {
     // use ~infinity to make sure we use all available size in the containing
     // block. However, this just doesn't work if this is a flex or grid item, so
     // disallow scaling in that case.
-    if (cb->IsFlexibleBox() || cb->IsLayoutGrid())
+    if (cb->IsFlexibleBoxIncludingNG() || cb->IsLayoutGrid())
       return false;
     cb = cb->ContainingBlock();
   }
@@ -242,7 +242,7 @@ static bool ShouldScaleColumnsForSelf(LayoutTable* table) {
   // A special case.  If this table is not fixed width and contained inside
   // a cell, then don't bloat the maxwidth by examining percentage growth.
   while (true) {
-    Length tw = table->StyleRef().Width();
+    const Length& tw = table->StyleRef().Width();
     if ((!tw.IsAuto() && !tw.IsPercentOrCalc()) ||
         table->IsOutOfFlowPositioned())
       return true;
@@ -281,7 +281,7 @@ void TableLayoutAlgorithmAuto::ComputeIntrinsicLogicalWidths(
   bool scale_columns_for_self = ShouldScaleColumnsForSelf(table_);
 
   float remaining_percent = 100;
-  for (size_t i = 0; i < layout_struct_.size(); ++i) {
+  for (wtf_size_t i = 0; i < layout_struct_.size(); ++i) {
     min_width += layout_struct_[i].effective_min_logical_width;
     max_width += layout_struct_[i].effective_max_logical_width;
     if (scale_columns_for_self) {
@@ -328,7 +328,7 @@ void TableLayoutAlgorithmAuto::ComputeIntrinsicLogicalWidths(
 void TableLayoutAlgorithmAuto::ApplyPreferredLogicalWidthQuirks(
     LayoutUnit& min_width,
     LayoutUnit& max_width) const {
-  Length table_logical_width = table_->StyleRef().LogicalWidth();
+  const Length& table_logical_width = table_->StyleRef().LogicalWidth();
   if (table_logical_width.IsFixed() && table_logical_width.IsPositive()) {
     // |minWidth| is the result of measuring the intrinsic content's size. Keep
     // it to make sure we are *never* smaller than the actual content.
@@ -359,10 +359,10 @@ void TableLayoutAlgorithmAuto::ApplyPreferredLogicalWidthQuirks(
 int TableLayoutAlgorithmAuto::CalcEffectiveLogicalWidth() {
   int max_logical_width = 0;
 
-  size_t n_eff_cols = layout_struct_.size();
+  wtf_size_t n_eff_cols = layout_struct_.size();
   int spacing_in_row_direction = table_->HBorderSpacing();
 
-  for (size_t i = 0; i < n_eff_cols; ++i) {
+  for (wtf_size_t i = 0; i < n_eff_cols; ++i) {
     layout_struct_[i].effective_logical_width = layout_struct_[i].logical_width;
     layout_struct_[i].effective_min_logical_width =
         layout_struct_[i].min_logical_width;
@@ -370,7 +370,7 @@ int TableLayoutAlgorithmAuto::CalcEffectiveLogicalWidth() {
         layout_struct_[i].max_logical_width;
   }
 
-  for (size_t i = 0; i < span_cells_.size(); ++i) {
+  for (wtf_size_t i = 0; i < span_cells_.size(); ++i) {
     LayoutTableCell* cell = span_cells_[i];
     if (!cell)
       break;
@@ -385,7 +385,7 @@ int TableLayoutAlgorithmAuto::CalcEffectiveLogicalWidth() {
 
     unsigned eff_col =
         table_->AbsoluteColumnToEffectiveColumn(cell->AbsoluteColumnIndex());
-    size_t last_col = eff_col;
+    wtf_size_t last_col = eff_col;
     int cell_min_logical_width =
         (cell->MinPreferredLogicalWidth() + spacing_in_row_direction).ToInt();
     int cell_max_logical_width =
@@ -658,7 +658,7 @@ void TableLayoutAlgorithmAuto::UpdateLayout() {
                              table_->BordersPaddingAndSpacingInRowDirection())
                                 .ToInt();
   int available = table_logical_width;
-  size_t n_eff_cols = table_->NumEffectiveColumns();
+  unsigned n_eff_cols = table_->NumEffectiveColumns();
 
   // FIXME: It is possible to be called without having properly updated our
   // internal representation.  This means that our preferred logical widths were
@@ -683,7 +683,7 @@ void TableLayoutAlgorithmAuto::UpdateLayout() {
   unsigned num_auto_empty_cells_only = 0;
 
   // fill up every cell with its minWidth
-  for (size_t i = 0; i < n_eff_cols; ++i) {
+  for (unsigned i = 0; i < n_eff_cols; ++i) {
     int cell_logical_width = layout_struct_[i].effective_min_logical_width;
     layout_struct_[i].computed_logical_width = cell_logical_width;
     available -= cell_logical_width;
@@ -715,7 +715,7 @@ void TableLayoutAlgorithmAuto::UpdateLayout() {
 
   // allocate width to percent cols
   if (available > 0 && have_percent) {
-    for (size_t i = 0; i < n_eff_cols; ++i) {
+    for (unsigned i = 0; i < n_eff_cols; ++i) {
       Length& logical_width = layout_struct_[i].effective_logical_width;
       if (logical_width.IsPercentOrCalc()) {
         int cell_logical_width =
@@ -751,7 +751,7 @@ void TableLayoutAlgorithmAuto::UpdateLayout() {
 
   // then allocate width to fixed cols
   if (available > 0) {
-    for (size_t i = 0; i < n_eff_cols; ++i) {
+    for (unsigned i = 0; i < n_eff_cols; ++i) {
       Length& logical_width = layout_struct_[i].effective_logical_width;
       if (logical_width.IsFixed() &&
           logical_width.Value() > layout_struct_[i].computed_logical_width) {
@@ -806,7 +806,7 @@ void TableLayoutAlgorithmAuto::UpdateLayout() {
 
   DCHECK_EQ(table_->EffectiveColumnPositions().size(), n_eff_cols + 1);
   int pos = 0;
-  for (size_t i = 0; i < n_eff_cols; ++i) {
+  for (unsigned i = 0; i < n_eff_cols; ++i) {
     table_->SetEffectiveColumnPosition(i, pos);
     pos += layout_struct_[i].computed_logical_width + table_->HBorderSpacing();
   }
@@ -871,7 +871,7 @@ void TableLayoutAlgorithmAuto::DistributeWidthToColumns(int& available,
 
 void TableLayoutAlgorithmAuto::ShrinkColumnWidth(const LengthType& length_type,
                                                  int& available) {
-  size_t n_eff_cols = table_->NumEffectiveColumns();
+  unsigned n_eff_cols = table_->NumEffectiveColumns();
   int logical_width_beyond_min = 0;
   for (unsigned i = n_eff_cols; i;) {
     --i;

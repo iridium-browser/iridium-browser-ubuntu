@@ -11,8 +11,7 @@
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/heap/heap_buildflags.h"
 #include "third_party/blink/renderer/platform/heap/heap_compact.h"
-#include "third_party/blink/renderer/platform/heap/heap_terminated_array.h"
-#include "third_party/blink/renderer/platform/heap/heap_terminated_array_builder.h"
+#include "third_party/blink/renderer/platform/heap/heap_test_utilities.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
@@ -85,6 +84,10 @@ class IncrementalMarkingScopeBase {
  public:
   explicit IncrementalMarkingScopeBase(ThreadState* thread_state)
       : thread_state_(thread_state), heap_(thread_state_->Heap()) {
+    if (thread_state_->IsMarkingInProgress() ||
+        thread_state_->IsSweepingInProgress()) {
+      PreciselyCollectGarbage();
+    }
     heap_.CommitCallbackStacks();
   }
 
@@ -220,8 +223,13 @@ class ExpectNoWriteBarrierFires : public IncrementalMarkingScope {
 
 class Object : public GarbageCollected<Object> {
  public:
-  static Object* Create() { return new Object(); }
-  static Object* Create(Object* next) { return new Object(next); }
+  static Object* Create() { return MakeGarbageCollected<Object>(); }
+  static Object* Create(Object* next) {
+    return MakeGarbageCollected<Object>(next);
+  }
+
+  Object() : next_(nullptr) {}
+  explicit Object(Object* next) : next_(next) {}
 
   void set_next(Object* next) { next_ = next; }
 
@@ -231,10 +239,9 @@ class Object : public GarbageCollected<Object> {
 
   virtual void Trace(blink::Visitor* visitor) { visitor->Trace(next_); }
 
- private:
-  Object() : next_(nullptr) {}
-  explicit Object(Object* next) : next_(next) {}
+  Member<Object>& next_ref() { return next_; }
 
+ private:
   Member<Object> next_;
 };
 
@@ -384,31 +391,30 @@ class Child : public GarbageCollected<Child>,
   USING_GARBAGE_COLLECTED_MIXIN(Child);
 
  public:
-  static Child* Create() { return new Child(); }
+  static Child* Create() { return MakeGarbageCollected<Child>(); }
+
+  Child() : ClassWithVirtual(), Mixin() {}
   ~Child() override {}
 
   void Trace(blink::Visitor* visitor) override { Mixin::Trace(visitor); }
 
   void Foo() override {}
   void Bar() override {}
-
- protected:
-  Child() : ClassWithVirtual(), Mixin() {}
 };
 
 class ParentWithMixinPointer : public GarbageCollected<ParentWithMixinPointer> {
  public:
   static ParentWithMixinPointer* Create() {
-    return new ParentWithMixinPointer();
+    return MakeGarbageCollected<ParentWithMixinPointer>();
   }
+
+  ParentWithMixinPointer() : mixin_(nullptr) {}
 
   void set_mixin(Mixin* mixin) { mixin_ = mixin; }
 
   virtual void Trace(blink::Visitor* visitor) { visitor->Trace(mixin_); }
 
  protected:
-  ParentWithMixinPointer() : mixin_(nullptr) {}
-
   Member<Mixin> mixin_;
 };
 
@@ -695,7 +701,7 @@ class ObjectNode : public GarbageCollected<ObjectNode>,
 
 TEST(IncrementalMarkingTest, HeapDoublyLinkedListPush) {
   Object* obj = Object::Create();
-  ObjectNode* obj_node = new ObjectNode(obj);
+  ObjectNode* obj_node = MakeGarbageCollected<ObjectNode>(obj);
   HeapDoublyLinkedList<ObjectNode> list;
   {
     ExpectWriteBarrierFires scope(ThreadState::Current(), {obj_node});
@@ -707,7 +713,7 @@ TEST(IncrementalMarkingTest, HeapDoublyLinkedListPush) {
 
 TEST(IncrementalMarkingTest, HeapDoublyLinkedListAppend) {
   Object* obj = Object::Create();
-  ObjectNode* obj_node = new ObjectNode(obj);
+  ObjectNode* obj_node = MakeGarbageCollected<ObjectNode>(obj);
   HeapDoublyLinkedList<ObjectNode> list;
   {
     ExpectWriteBarrierFires scope(ThreadState::Current(), {obj_node});
@@ -1016,11 +1022,9 @@ TEST(IncrementalMarkingTest, HeapHashSetStrongWeakPair) {
   Object* obj2 = Object::Create();
   HeapHashSet<StrongWeakPair> set;
   {
-    // Only the strong field in the StrongWeakPair should be hit by the
-    // write barrier.
-    ExpectWriteBarrierFires scope(ThreadState::Current(), {obj1});
+    // Both, the weak and the strong field, are hit by the write barrier.
+    ExpectWriteBarrierFires scope(ThreadState::Current(), {obj1, obj2});
     set.insert(StrongWeakPair(obj1, obj2));
-    EXPECT_FALSE(obj2->IsMarked());
   }
 }
 
@@ -1029,11 +1033,9 @@ TEST(IncrementalMarkingTest, HeapLinkedHashSetStrongWeakPair) {
   Object* obj2 = Object::Create();
   HeapLinkedHashSet<StrongWeakPair> set;
   {
-    // Only the strong field in the StrongWeakPair should be hit by the
-    // write barrier.
-    ExpectWriteBarrierFires scope(ThreadState::Current(), {obj1});
+    // Both, the weak and the strong field, are hit by the write barrier.
+    ExpectWriteBarrierFires scope(ThreadState::Current(), {obj1, obj2});
     set.insert(StrongWeakPair(obj1, obj2));
-    EXPECT_FALSE(obj2->IsMarked());
   }
 }
 
@@ -1103,52 +1105,6 @@ TEST(IncrementalMarkingTest, HeapHashCountedSetSwap) {
       ExpectWriteBarrierFires scope(ThreadState::Current(), {obj1, obj2});
       container1.swap(container2);
     }
-  }
-}
-
-// =============================================================================
-// HeapTerminatedArray support. ================================================
-// =============================================================================
-
-class TerminatedArrayNode {
-  DISALLOW_NEW();
-
- public:
-  TerminatedArrayNode(Object* obj) : obj_(obj), is_last_in_array_(false) {}
-
-  // TerminatedArray support.
-  bool IsLastInArray() const { return is_last_in_array_; }
-  void SetLastInArray(bool flag) { is_last_in_array_ = flag; }
-
-  void Trace(blink::Visitor* visitor) { visitor->Trace(obj_); }
-
- private:
-  Member<Object> obj_;
-  bool is_last_in_array_;
-};
-
-}  // namespace incremental_marking_test
-}  // namespace blink
-
-WTF_ALLOW_MOVE_INIT_AND_COMPARE_WITH_MEM_FUNCTIONS(
-    blink::incremental_marking_test::TerminatedArrayNode);
-
-namespace blink {
-namespace incremental_marking_test {
-
-TEST(IncrementalMarkingTest, HeapTerminatedArrayBuilder) {
-  Object* obj = Object::Create();
-  HeapTerminatedArray<TerminatedArrayNode>* array = nullptr;
-  {
-    // The builder allocates the backing store on Oilpans heap, effectively
-    // triggering a write barrier.
-    HeapTerminatedArrayBuilder<TerminatedArrayNode> builder(array);
-    builder.Grow(1);
-    {
-      ExpectWriteBarrierFires scope(ThreadState::Current(), {obj});
-      builder.Append(TerminatedArrayNode(obj));
-    }
-    array = builder.Release();
   }
 }
 
@@ -1547,7 +1503,8 @@ class RegisteringObject : public GarbageCollected<RegisteringObject>,
 TEST(IncrementalMarkingTest, WriteBarrierDuringMixinConstruction) {
   IncrementalMarkingScope scope(ThreadState::Current());
   ObjectRegistry registry;
-  RegisteringObject* object = new RegisteringObject(&registry);
+  RegisteringObject* object =
+      MakeGarbageCollected<RegisteringObject>(&registry);
 
   // Clear any objects that have been added to the regular marking worklist in
   // the process of calling the constructor.
@@ -1581,7 +1538,7 @@ TEST(IncrementalMarkingTest, WriteBarrierDuringMixinConstruction) {
 
 TEST(IncrementalMarkingTest, OverrideAfterMixinConstruction) {
   ObjectRegistry registry;
-  RegisteringMixin* mixin = new RegisteringObject(&registry);
+  RegisteringMixin* mixin = MakeGarbageCollected<RegisteringObject>(&registry);
   HeapObjectHeader* header = mixin->GetHeapObjectHeader();
   const void* uninitialized_value = BlinkGC::kNotFullyConstructedObject;
   EXPECT_NE(uninitialized_value, header);
@@ -1606,35 +1563,37 @@ class IncrementalMarkingTestDriver {
     thread_state_->IncrementalMarkingStart(BlinkGC::GCReason::kTesting);
   }
 
-  bool SingleStep() {
+  bool SingleStep(BlinkGC::StackState stack_state =
+                      BlinkGC::StackState::kNoHeapPointersOnStack) {
     CHECK(thread_state_->IsIncrementalMarking());
     if (thread_state_->GetGCState() ==
         ThreadState::kIncrementalMarkingStepScheduled) {
-      thread_state_->RunScheduledGC(BlinkGC::kNoHeapPointersOnStack);
+      thread_state_->IncrementalMarkingStep(stack_state);
       return true;
     }
     return false;
   }
 
-  void FinishSteps() {
+  void FinishSteps(BlinkGC::StackState stack_state =
+                       BlinkGC::StackState::kNoHeapPointersOnStack) {
     CHECK(thread_state_->IsIncrementalMarking());
-    while (SingleStep()) {
+    while (SingleStep(stack_state)) {
     }
   }
 
   void FinishGC() {
     CHECK(thread_state_->IsIncrementalMarking());
-    FinishSteps();
+    FinishSteps(BlinkGC::StackState::kNoHeapPointersOnStack);
     CHECK_EQ(ThreadState::kIncrementalMarkingFinalizeScheduled,
              thread_state_->GetGCState());
-    thread_state_->RunScheduledGC(BlinkGC::kNoHeapPointersOnStack);
+    thread_state_->RunScheduledGC(BlinkGC::StackState::kNoHeapPointersOnStack);
     CHECK(!thread_state_->IsIncrementalMarking());
     thread_state_->CompleteSweep();
   }
 
-  HashSet<MovableReference*>& GetTracedSlot() {
+  size_t GetHeapCompactLastFixupCount() {
     HeapCompact* compaction = ThreadState::Current()->Heap().Compaction();
-    return compaction->traced_slots_;
+    return compaction->last_fixup_count_for_testing();
   }
 
  private:
@@ -1727,7 +1686,7 @@ TEST(IncrementalMarkingTest, NoBackingFreeDuringIncrementalMarking) {
 TEST(IncrementalMarkingTest, DropReferenceWithHeapCompaction) {
   using Store = HeapHashCountedSet<Member<Object>>;
 
-  Persistent<Store> persistent(new Store);
+  Persistent<Store> persistent(new Store());
   persistent->insert(Object::Create());
   IncrementalMarkingTestDriver driver(ThreadState::Current());
   HeapCompact::ScheduleCompactionGCForTesting(true);
@@ -1742,19 +1701,180 @@ TEST(IncrementalMarkingTest, DropReferenceWithHeapCompaction) {
 TEST(IncrementalMarkingTest, HasInlineCapacityCollectionWithHeapCompaction) {
   using Store = HeapVector<Member<Object>, 2>;
 
-  Persistent<Store> persistent(new Store);
-  Persistent<Store> persistent2(new Store);
+  Persistent<Store> persistent(MakeGarbageCollected<Store>());
+  Persistent<Store> persistent2(MakeGarbageCollected<Store>());
 
   IncrementalMarkingTestDriver driver(ThreadState::Current());
   HeapCompact::ScheduleCompactionGCForTesting(true);
   persistent->push_back(Object::Create());
   driver.Start();
-  driver.FinishSteps();
+  driver.FinishGC();
 
   // Should collect also slots that has only inline buffer and nullptr
   // references.
-  EXPECT_EQ(driver.GetTracedSlot().size(), 2u);
+#if defined(ANNOTATE_CONTIGUOUS_CONTAINER)
+  // When ANNOTATE_CONTIGUOUS_CONTAINER is defined, inline capacity is ignored.
+  EXPECT_EQ(driver.GetHeapCompactLastFixupCount(), 1u);
+#else
+  EXPECT_EQ(driver.GetHeapCompactLastFixupCount(), 2u);
+#endif
+}
+
+TEST(IncrementalMarkingTest, WeakHashMapHeapCompaction) {
+  using Store = HeapHashCountedSet<WeakMember<Object>>;
+
+  Persistent<Store> persistent(new Store());
+
+  IncrementalMarkingTestDriver driver(ThreadState::Current());
+  HeapCompact::ScheduleCompactionGCForTesting(true);
+  driver.Start();
+  driver.FinishSteps();
+  persistent->insert(Object::Create());
   driver.FinishGC();
+
+  // Weak callback should register the slot.
+  EXPECT_EQ(driver.GetHeapCompactLastFixupCount(), 1u);
+}
+
+TEST(IncrementalMarkingTest, ConservativeGCWhileCompactionScheduled) {
+  using Store = HeapVector<Member<Object>>;
+  Persistent<Store> persistent(MakeGarbageCollected<Store>());
+  persistent->push_back(Object::Create());
+
+  IncrementalMarkingTestDriver driver(ThreadState::Current());
+  HeapCompact::ScheduleCompactionGCForTesting(true);
+  driver.Start();
+  driver.FinishSteps();
+  ThreadState::Current()->CollectGarbage(
+      BlinkGC::kHeapPointersOnStack, BlinkGC::kAtomicMarking,
+      BlinkGC::kLazySweeping, BlinkGC::GCReason::kConservativeGC);
+
+  // Heap compaction should be canceled if incremental marking finishes with a
+  // conservative GC.
+  EXPECT_EQ(driver.GetHeapCompactLastFixupCount(), 0u);
+}
+
+namespace {
+
+class ObjectWithWeakMember : public GarbageCollected<ObjectWithWeakMember> {
+ public:
+  ObjectWithWeakMember() = default;
+
+  void set_object(Object* object) { object_ = object; }
+
+  void Trace(Visitor* visitor) { visitor->Trace(object_); }
+
+ private:
+  WeakMember<Object> object_ = nullptr;
+};
+
+}  // namespace
+
+TEST(IncrementalMarkingTest, WeakMember) {
+  // Regression test: https://crbug.com/913431
+
+  Persistent<ObjectWithWeakMember> persistent(
+      MakeGarbageCollected<ObjectWithWeakMember>());
+  IncrementalMarkingTestDriver driver(ThreadState::Current());
+  driver.Start();
+  driver.FinishSteps();
+  persistent->set_object(Object::Create());
+  driver.FinishGC();
+  ConservativelyCollectGarbage();
+}
+
+TEST(IncrementalMarkingTest, MemberSwap) {
+  // Regression test: https://crbug.com/913431
+  //
+  // MemberBase::Swap may be used to swap in a not-yet-processed member into an
+  // already-processed member. This leads to a stale pointer that is not marked.
+
+  Persistent<Object> object1(MakeGarbageCollected<Object>());
+  IncrementalMarkingTestDriver driver(ThreadState::Current());
+  driver.Start();
+  // The repro leverages the fact that initializing stores do not emit a barrier
+  // (because they are still reachable from stack) to simulate the problematic
+  // interleaving.
+  driver.FinishSteps();
+  Object* object2 =
+      MakeGarbageCollected<Object>(MakeGarbageCollected<Object>());
+  object2->next_ref().Swap(object1->next_ref());
+  driver.FinishGC();
+  ConservativelyCollectGarbage();
+}
+
+namespace {
+
+template <typename T>
+class ObjectHolder : public GarbageCollected<ObjectHolder<T>> {
+ public:
+  ObjectHolder() = default;
+
+  virtual void Trace(Visitor* visitor) { visitor->Trace(holder_); }
+
+  void set_value(T* value) { holder_ = value; }
+  T* value() const { return holder_.Get(); }
+
+ private:
+  Member<T> holder_;
+};
+
+}  // namespace
+
+TEST(IncrementalMarkingTest, StepDuringObjectConstruction) {
+  // Test ensures that objects in construction are delayed for processing to
+  // allow omitting write barriers on initializing stores.
+
+  using O = ObjectWithCallbackBeforeInitializer<Object>;
+  using Holder = ObjectHolder<O>;
+  Persistent<Holder> holder(MakeGarbageCollected<Holder>());
+  IncrementalMarkingTestDriver driver(ThreadState::Current());
+  driver.Start();
+  MakeGarbageCollected<O>(
+      base::BindOnce(
+          [](IncrementalMarkingTestDriver* driver, Holder* holder, O* thiz) {
+            // Publish not-fully-constructed object |thiz| by triggering write
+            // barrier for the object.
+            holder->set_value(thiz);
+            CHECK(HeapObjectHeader::FromPayload(holder->value())->IsValid());
+            // Finish call incremental steps.
+            driver->FinishSteps(BlinkGC::StackState::kHeapPointersOnStack);
+          },
+          &driver, holder.Get()),
+      MakeGarbageCollected<Object>());
+  driver.FinishGC();
+  CHECK(HeapObjectHeader::FromPayload(holder->value())->IsValid());
+  CHECK(HeapObjectHeader::FromPayload(holder->value()->value())->IsValid());
+  PreciselyCollectGarbage();
+}
+
+TEST(IncrementalMarkingTest, StepDuringMixinObjectConstruction) {
+  // Test ensures that mixin objects in construction are delayed for processing
+  // to allow omitting write barriers on initializing stores.
+
+  using Parent = ObjectWithMixinWithCallbackBeforeInitializer<Object>;
+  using Mixin = MixinWithCallbackBeforeInitializer<Object>;
+  using Holder = ObjectHolder<Mixin>;
+  Persistent<Holder> holder(MakeGarbageCollected<Holder>());
+  IncrementalMarkingTestDriver driver(ThreadState::Current());
+  driver.Start();
+  MakeGarbageCollected<Parent>(
+      base::BindOnce(
+          [](IncrementalMarkingTestDriver* driver, Holder* holder,
+             Mixin* thiz) {
+            // Publish not-fully-constructed object
+            // |thiz| by triggering write barrier for
+            // the object.
+            holder->set_value(thiz);
+            // Finish call incremental steps.
+            driver->FinishSteps(BlinkGC::StackState::kHeapPointersOnStack);
+          },
+          &driver, holder.Get()),
+      MakeGarbageCollected<Object>());
+  driver.FinishGC();
+  CHECK(holder->value()->GetHeapObjectHeader()->IsValid());
+  CHECK(HeapObjectHeader::FromPayload(holder->value()->value())->IsValid());
+  PreciselyCollectGarbage();
 }
 
 }  // namespace incremental_marking_test

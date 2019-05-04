@@ -14,6 +14,7 @@ import android.content.Context;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.preference.PreferenceManager;
+import android.support.annotation.Nullable;
 import android.util.Log;
 import java.io.File;
 import java.io.IOException;
@@ -34,7 +35,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import javax.annotation.Nullable;
 import org.appspot.apprtc.AppRTCClient.SignalingParameters;
 import org.appspot.apprtc.RecordedAudioToFileController;
 import org.webrtc.AudioSource;
@@ -52,6 +52,7 @@ import org.webrtc.MediaStreamTrack;
 import org.webrtc.MediaStreamTrack.MediaType;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnection.IceConnectionState;
+import org.webrtc.PeerConnection.PeerConnectionState;
 import org.webrtc.PeerConnectionFactory;
 import org.webrtc.RtpParameters;
 import org.webrtc.RtpReceiver;
@@ -293,10 +294,22 @@ public class PeerConnectionClient {
     void onIceConnected();
 
     /**
-     * Callback fired once connection is closed (IceConnectionState is
+     * Callback fired once connection is disconnected (IceConnectionState is
      * DISCONNECTED).
      */
     void onIceDisconnected();
+
+    /**
+     * Callback fired once DTLS connection is established (PeerConnectionState
+     * is CONNECTED).
+     */
+    void onConnected();
+
+    /**
+     * Callback fired once DTLS connection is disconnected (PeerConnectionState
+     * is DISCONNECTED).
+     */
+    void onDisconnected();
 
     /**
      * Callback fired once peer connection is closed.
@@ -1259,6 +1272,20 @@ public class PeerConnectionClient {
           events.onIceDisconnected();
         } else if (newState == IceConnectionState.FAILED) {
           reportError("ICE connection failed.");
+        }
+      });
+    }
+
+    @Override
+    public void onConnectionChange(final PeerConnection.PeerConnectionState newState) {
+      executor.execute(() -> {
+        Log.d(TAG, "PeerConnectionState: " + newState);
+        if (newState == PeerConnectionState.CONNECTED) {
+          events.onConnected();
+        } else if (newState == PeerConnectionState.DISCONNECTED) {
+          events.onDisconnected();
+        } else if (newState == PeerConnectionState.FAILED) {
+          reportError("DTLS connection failed.");
         }
       });
     }

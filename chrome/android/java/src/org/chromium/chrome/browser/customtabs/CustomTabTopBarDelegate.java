@@ -11,26 +11,41 @@ import android.view.ViewStub;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.dependency_injection.ActivityScope;
+
+import javax.inject.Inject;
 
 /**
  * Delegate that manages top bar area inside of {@link CustomTabActivity}.
  */
-class CustomTabTopBarDelegate {
-    private ChromeActivity mActivity;
+@ActivityScope
+public class CustomTabTopBarDelegate {
+    private final ChromeActivity mActivity;
     private ViewGroup mTopBarView;
     @Nullable
     private View mTopBarContentView;
+    @Nullable
+    private Integer mTopBarHeight;
 
+    @Inject
     public CustomTabTopBarDelegate(ChromeActivity activity) {
         mActivity = activity;
     }
 
     /**
-     * Makes the top bar area to show, if any.
+     * Adds the top bar, if any, to the view hierarchy and updates its visibility.
      */
-    public void showTopBarIfNecessary() {
+    public void showTopBarIfNecessary(boolean isVisible) {
         if (mTopBarContentView != null && mTopBarContentView.getParent() == null) {
             getTopBarView().addView(mTopBarContentView);
+        }
+        if (mTopBarContentView != null) {
+            if (mTopBarHeight != null && mTopBarHeight == 0) {
+                // Hide the top bar when its height is specifically set to 0.
+                mTopBarContentView.setVisibility(View.GONE);
+            } else {
+                mTopBarContentView.setVisibility(isVisible ? View.VISIBLE : View.GONE);
+            }
         }
     }
 
@@ -39,6 +54,29 @@ class CustomTabTopBarDelegate {
      */
     public void setTopBarContentView(View view) {
         mTopBarContentView = view;
+    }
+
+    /**
+     * Sets the height of the top bar.
+     */
+    public void setTopBarHeight(int height) {
+        mTopBarHeight = height;
+    }
+
+    /**
+     * Gets the height of the top bar, or null if it is not specified.
+     */
+    @Nullable
+    public Integer getTopBarHeight() {
+        return mTopBarHeight;
+    }
+
+    /**
+     * Gets the top bar content view, or null if it is not specified.
+     */
+    @Nullable
+    public View getTopBarContentView() {
+        return mTopBarContentView;
     }
 
     /**

@@ -100,6 +100,9 @@ void MessageCenterImpl::SetVisibility(Visibility visibility) {
       for (auto& observer : observer_list_)
         observer.OnNotificationUpdated(id);
     }
+
+    for (Notification* notification : GetPopupNotifications())
+      MarkSinglePopupAsShown(notification->id(), false);
   }
 
   for (auto& observer : observer_list_)
@@ -300,17 +303,6 @@ void MessageCenterImpl::SetNotificationImage(const std::string& notification_id,
                                              const gfx::Image& image) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (notification_list_->SetNotificationImage(notification_id, image)) {
-    for (auto& observer : observer_list_)
-      observer.OnNotificationUpdated(notification_id);
-  }
-}
-
-void MessageCenterImpl::SetNotificationButtonIcon(
-    const std::string& notification_id, int button_index,
-    const gfx::Image& image) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (notification_list_->SetNotificationButtonIcon(notification_id,
-                                                    button_index, image)) {
     for (auto& observer : observer_list_)
       observer.OnNotificationUpdated(notification_id);
   }

@@ -47,7 +47,7 @@ class MODULES_EXPORT ConvolverHandler final : public AudioHandler {
   ~ConvolverHandler() override;
 
   // AudioHandler
-  void Process(size_t frames_to_process) override;
+  void Process(uint32_t frames_to_process) override;
   // Called in the main thread when the number of channels for the input may
   // have changed.
   void CheckNumberOfChannelsForInput(AudioNodeInput*) override;
@@ -58,7 +58,7 @@ class MODULES_EXPORT ConvolverHandler final : public AudioHandler {
 
   bool Normalize() const { return normalize_; }
   void SetNormalize(bool normalize) { normalize_ = normalize; }
-  void SetChannelCount(unsigned long, ExceptionState&) final;
+  void SetChannelCount(unsigned, ExceptionState&) final;
   void SetChannelCountMode(const String&, ExceptionState&) final;
 
  private:
@@ -95,8 +95,10 @@ class MODULES_EXPORT ConvolverNode final : public AudioNode {
  public:
   static ConvolverNode* Create(BaseAudioContext&, ExceptionState&);
   static ConvolverNode* Create(BaseAudioContext*,
-                               const ConvolverOptions&,
+                               const ConvolverOptions*,
                                ExceptionState&);
+
+  ConvolverNode(BaseAudioContext&);
 
   AudioBuffer* buffer() const;
   void setBuffer(AudioBuffer*, ExceptionState&);
@@ -104,7 +106,6 @@ class MODULES_EXPORT ConvolverNode final : public AudioNode {
   void setNormalize(bool);
 
  private:
-  ConvolverNode(BaseAudioContext&);
   ConvolverHandler& GetConvolverHandler() const;
 
   FRIEND_TEST_ALL_PREFIXES(ConvolverNodeTest, ReverbLifetime);

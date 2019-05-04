@@ -52,25 +52,26 @@ CPDFSDK_Widget::~CPDFSDK_Widget() = default;
 #ifdef PDF_ENABLE_XFA
 CXFA_FFWidget* CPDFSDK_Widget::GetMixXFAWidget() const {
   CPDFXFA_Context* pContext = m_pPageView->GetFormFillEnv()->GetXFAContext();
-  if (pContext->GetFormType() == FormType::kXFAForeground) {
-    if (!m_hMixXFAWidget) {
-      if (CXFA_FFDocView* pDocView = pContext->GetXFADocView()) {
-        WideString sName;
-        if (GetFieldType() == FormFieldType::kRadioButton) {
-          sName = GetAnnotName();
-          if (sName.IsEmpty())
-            sName = GetName();
-        } else {
-          sName = GetName();
-        }
+  if (pContext->GetFormType() != FormType::kXFAForeground)
+    return nullptr;
 
-        if (!sName.IsEmpty())
-          m_hMixXFAWidget = pDocView->GetWidgetByName(sName, nullptr);
-      }
-    }
-    return m_hMixXFAWidget.Get();
+  CXFA_FFDocView* pDocView = pContext->GetXFADocView();
+  if (!pDocView)
+    return nullptr;
+
+  WideString sName;
+  if (GetFieldType() == FormFieldType::kRadioButton) {
+    sName = GetAnnotName();
+    if (sName.IsEmpty())
+      sName = GetName();
+  } else {
+    sName = GetName();
   }
-  return nullptr;
+
+  if (sName.IsEmpty())
+    return nullptr;
+
+  return pDocView->GetWidgetByName(sName, nullptr);
 }
 
 CXFA_FFWidget* CPDFSDK_Widget::GetGroupMixXFAWidget() const {
@@ -125,48 +126,48 @@ static XFA_EVENTTYPE GetXFAEventType(CPDF_AAction::AActionType eAAT,
   XFA_EVENTTYPE eEventType = XFA_EVENT_Unknown;
 
   switch (eAAT) {
-    case CPDF_AAction::CursorEnter:
+    case CPDF_AAction::kCursorEnter:
       eEventType = XFA_EVENT_MouseEnter;
       break;
-    case CPDF_AAction::CursorExit:
+    case CPDF_AAction::kCursorExit:
       eEventType = XFA_EVENT_MouseExit;
       break;
-    case CPDF_AAction::ButtonDown:
+    case CPDF_AAction::kButtonDown:
       eEventType = XFA_EVENT_MouseDown;
       break;
-    case CPDF_AAction::ButtonUp:
+    case CPDF_AAction::kButtonUp:
       eEventType = XFA_EVENT_MouseUp;
       break;
-    case CPDF_AAction::GetFocus:
+    case CPDF_AAction::kGetFocus:
       eEventType = XFA_EVENT_Enter;
       break;
-    case CPDF_AAction::LoseFocus:
+    case CPDF_AAction::kLoseFocus:
       eEventType = XFA_EVENT_Exit;
       break;
-    case CPDF_AAction::PageOpen:
-    case CPDF_AAction::PageClose:
-    case CPDF_AAction::PageVisible:
-    case CPDF_AAction::PageInvisible:
+    case CPDF_AAction::kPageOpen:
+    case CPDF_AAction::kPageClose:
+    case CPDF_AAction::kPageVisible:
+    case CPDF_AAction::kPageInvisible:
       break;
-    case CPDF_AAction::KeyStroke:
+    case CPDF_AAction::kKeyStroke:
       if (!bWillCommit)
         eEventType = XFA_EVENT_Change;
       break;
-    case CPDF_AAction::Validate:
+    case CPDF_AAction::kValidate:
       eEventType = XFA_EVENT_Validate;
       break;
-    case CPDF_AAction::OpenPage:
-    case CPDF_AAction::ClosePage:
-    case CPDF_AAction::Format:
-    case CPDF_AAction::Calculate:
-    case CPDF_AAction::CloseDocument:
-    case CPDF_AAction::SaveDocument:
-    case CPDF_AAction::DocumentSaved:
-    case CPDF_AAction::PrintDocument:
-    case CPDF_AAction::DocumentPrinted:
+    case CPDF_AAction::kOpenPage:
+    case CPDF_AAction::kClosePage:
+    case CPDF_AAction::kFormat:
+    case CPDF_AAction::kCalculate:
+    case CPDF_AAction::kCloseDocument:
+    case CPDF_AAction::kSaveDocument:
+    case CPDF_AAction::kDocumentSaved:
+    case CPDF_AAction::kPrintDocument:
+    case CPDF_AAction::kDocumentPrinted:
       break;
-    case CPDF_AAction::DocumentOpen:
-    case CPDF_AAction::NumberOfActions:
+    case CPDF_AAction::kDocumentOpen:
+    case CPDF_AAction::kNumberOfActions:
       NOTREACHED();
       break;
   }
@@ -673,9 +674,7 @@ void CPDFSDK_Widget::DrawShadow(CFX_RenderDevice* pDevice,
   if (!m_pInteractiveForm->IsNeedHighLight(fieldType))
     return;
 
-  CFX_Matrix page2device;
-  pPageView->GetCurrentMatrix(page2device);
-
+  CFX_Matrix page2device = pPageView->GetCurrentMatrix();
   CFX_FloatRect rcDevice = GetRect();
   CFX_PointF tmp =
       page2device.Transform(CFX_PointF(rcDevice.left, rcDevice.bottom));
@@ -846,22 +845,22 @@ bool CPDFSDK_Widget::OnAAction(CPDF_AAction::AActionType type,
 
 CPDF_Action CPDFSDK_Widget::GetAAction(CPDF_AAction::AActionType eAAT) {
   switch (eAAT) {
-    case CPDF_AAction::CursorEnter:
-    case CPDF_AAction::CursorExit:
-    case CPDF_AAction::ButtonDown:
-    case CPDF_AAction::ButtonUp:
-    case CPDF_AAction::GetFocus:
-    case CPDF_AAction::LoseFocus:
-    case CPDF_AAction::PageOpen:
-    case CPDF_AAction::PageClose:
-    case CPDF_AAction::PageVisible:
-    case CPDF_AAction::PageInvisible:
+    case CPDF_AAction::kCursorEnter:
+    case CPDF_AAction::kCursorExit:
+    case CPDF_AAction::kButtonDown:
+    case CPDF_AAction::kButtonUp:
+    case CPDF_AAction::kGetFocus:
+    case CPDF_AAction::kLoseFocus:
+    case CPDF_AAction::kPageOpen:
+    case CPDF_AAction::kPageClose:
+    case CPDF_AAction::kPageVisible:
+    case CPDF_AAction::kPageInvisible:
       return CPDFSDK_BAAnnot::GetAAction(eAAT);
 
-    case CPDF_AAction::KeyStroke:
-    case CPDF_AAction::Format:
-    case CPDF_AAction::Validate:
-    case CPDF_AAction::Calculate: {
+    case CPDF_AAction::kKeyStroke:
+    case CPDF_AAction::kFormat:
+    case CPDF_AAction::kValidate:
+    case CPDF_AAction::kCalculate: {
       CPDF_FormField* pField = GetFormField();
       if (pField->GetAdditionalAction().GetDict())
         return pField->GetAdditionalAction().GetAction(eAAT);

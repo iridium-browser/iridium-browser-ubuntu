@@ -99,7 +99,7 @@ bool BookmarkMenuController::ShouldExecuteCommandWithoutClosingMenu(
 bool BookmarkMenuController::GetDropFormats(
     MenuItemView* menu,
     int* formats,
-    std::set<ui::Clipboard::FormatType>* format_types) {
+    std::set<ui::ClipboardFormatType>* format_types) {
   return menu_delegate_->GetDropFormats(menu, formats, format_types);
 }
 
@@ -186,6 +186,13 @@ void BookmarkMenuController::WillShowMenu(MenuItemView* menu) {
 void BookmarkMenuController::BookmarkModelChanged() {
   if (!menu_delegate_->is_mutating_model())
     menu()->Cancel();
+}
+
+bool BookmarkMenuController::ShouldTryPositioningBesideAnchor() const {
+  // The bookmark menu appears from the bookmark bar, which has a set of buttons positioned next to
+  // each other; if the bookmark menu appears beside its anchor button, it will likely overlay the
+  // adjacent bookmark button, which prevents easy scrubbing through the bookmark bar's menus.
+  return false;
 }
 
 BookmarkMenuController::~BookmarkMenuController() {

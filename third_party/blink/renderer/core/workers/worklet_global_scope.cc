@@ -61,9 +61,11 @@ WorkletGlobalScope::WorkletGlobalScope(
     ThreadType thread_type,
     LocalFrame* frame,
     WorkerThread* worker_thread)
-    : WorkerOrWorkletGlobalScope(isolate,
-                                 creation_params->worker_clients,
-                                 reporting_proxy),
+    : WorkerOrWorkletGlobalScope(
+          isolate,
+          creation_params->worker_clients,
+          std::move(creation_params->web_worker_fetch_context),
+          reporting_proxy),
       url_(creation_params->script_url),
       user_agent_(creation_params->user_agent),
       document_security_origin_(creation_params->starter_origin),
@@ -203,14 +205,12 @@ void WorkletGlobalScope::FetchAndInvokeScript(
 
   // Step 3 to 5 are implemented in
   // WorkletModuleTreeClient::NotifyModuleTreeLoadFinished.
-  WorkletModuleTreeClient* client = new WorkletModuleTreeClient(
-      modulator, std::move(outside_settings_task_runner), pending_tasks);
+  WorkletModuleTreeClient* client =
+      MakeGarbageCollected<WorkletModuleTreeClient>(
+          modulator, std::move(outside_settings_task_runner), pending_tasks);
 
-  // TODO(nhiroki): Specify an appropriate destination defined in each worklet
-  // spec (e.g., "paint worklet", "audio worklet").
-  mojom::RequestContextType destination = mojom::RequestContextType::SCRIPT;
-  FetchModuleScript(module_url_record, outside_settings_object, destination,
-                    credentials_mode,
+  FetchModuleScript(module_url_record, outside_settings_object,
+                    GetDestinationForMainScript(), credentials_mode,
                     ModuleScriptCustomFetchType::kWorkletAddModule, client);
 }
 
@@ -236,6 +236,13 @@ void WorkletGlobalScope::BindContentSecurityPolicyToExecutionContext() {
   // based on state from the document (the origin and CSP headers it passed
   // here), and use the document's origin for 'self' CSP checks.
   GetContentSecurityPolicy()->SetupSelf(*document_security_origin_);
+}
+
+mojom::RequestContextType WorkletGlobalScope::GetDestinationForMainScript() {
+  // TODO(nhiroki): Return an appropriate destination defined in each worklet
+  // spec (e.g., "paint worklet", "audio worklet") (https://crbug.com/843980,
+  // https://crbug.com/843982)
+  return mojom::RequestContextType::SCRIPT;
 }
 
 void WorkletGlobalScope::Trace(blink::Visitor* visitor) {

@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//base/win/embedded_i18n/generate_embedded_i18n.gni")
 import("//build/buildflag_header.gni")
 import("//build/config/allocator.gni")
 import("//build/config/clang/clang.gni")
@@ -10,24 +11,31 @@ import("//build/config/dcheck_always_on.gni")
 import("//build/nocompile.gni")
 import("//build/toolchain/win/midl.gni")
 import("//chrome/process_version_rc_template.gni")
-import("//tools/grit/grit_rule.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 import("//testing/test.gni")
+import("//tools/grit/grit_rule.gni")
 
 # This static library is shared with the setup program.
-
 source_set("common") {
   sources = [
-    "gcp_strings.cc",
-    "gcp_strings.h",
+    "gcp_crash_reporter_client.cc",
+    "gcp_crash_reporter_client.h",
+    "gcp_crash_reporting_utils.cc",
+    "gcp_crash_reporting_utils.h",
     "gcp_utils.cc",
     "gcp_utils.h",
     "logging.cc",
     "logging.h",
   ]
   public_configs = [ ":common_config" ]
+  public_deps = [
+    "//chrome/credential_provider/common:common_constants",
+  ]
   deps = [
+    ":string_resources",
     "//base:base",
+    "//chrome/common:version_header",
+    "//components/crash/core/common",
     "//components/version_info",
     "//google_apis:google_apis",
   ]
@@ -40,6 +48,7 @@ config("common_config") {
   ]
   libs = [
     "secur32.lib",  # For LsaXXX functions
+    "wbemuuid.lib",  # For CLSID_WbemLocator
   ]
 }
 
@@ -55,6 +64,8 @@ source_set("gaiacp_lib") {
     "gaia_credential_provider.h",
     "gaia_credential_provider_module.cc",
     "gaia_credential_provider_module.h",
+    "gcp_crash_reporting.cc",
+    "gcp_crash_reporting.h",
     "initguid.cc",
     "os_process_manager.cc",
     "os_process_manager.h",
@@ -74,12 +85,23 @@ source_set("gaiacp_lib") {
     "win_http_url_fetcher.h",
   ]
   public_configs = [ ":gaiacp_config" ]
-  public_deps = [ ":common" ]
+  public_deps = [
+    ":common",
+  ]
   deps = [
     ":gaia_credential_provider_idl",
-    ":resources",
+    ":static_resources",
     "//chrome/common:version_header",
+    "//chrome/installer/launcher_support",
+    "//components/crash/content/app:app",
+    "//components/crash/content/app:crash_export_thunks",
+    "//components/crash/content/app:run_as_crashpad_handler",
   ]
+  if (is_component_build) {
+    deps += [ "//content/public/common" ]
+  } else {
+    deps += [ "//content/public/common:static_switches" ]
+  }
 }
 
 config("gaiacp_config") {
@@ -115,30 +137,53 @@ process_version_rc_template("version") {
   output = "$root_out_dir/gaia_credential_provider.rc"
 }
 
-midl("gaia_credential_provider_idl") {
-  sources = [
-    "gaia_credential_provider.idl",
-  ]
-  header_file = "gaia_credential_provider_i.h"
+if (is_chrome_branded) {
+  gaia_credential_provider_clsid = "0b5bfdf0-4594-47ac-940a-cfc69abc561c"
+} else {
+  gaia_credential_provider_clsid = "89adae71-aee5-4ee2-bffb-e8424e06f519"
 }
 
-grit("resources") {
-  source = "gaia_resources.grd"
+action("generate_credential_provider_idl_file") {
+  script = "//build/util/version.py"
+
+  inputs = [
+    "gaia_credential_provider_idl.templ",
+  ]
+  outputs = [
+    "$target_gen_dir/gaia_credential_provider.idl",
+  ]
+
+  args = [
+    "-e",
+    "GAIA_CREDENTIAL_PROVIDER_CLSID='$gaia_credential_provider_clsid'",
+    rebase_path(inputs[0], root_build_dir),
+    rebase_path(outputs[0], root_build_dir),
+  ]
+}
+
+midl("gaia_credential_provider_idl") {
+  dynamic_guid = gaia_credential_provider_clsid
+  deps = [
+    ":generate_credential_provider_idl_file",
+  ]
+  header_file = "gaia_credential_provider_i.h"
+  sources = get_target_outputs(":generate_credential_provider_idl_file")
+}
+
+grit("static_resources") {
+  source = "gaia_static_resources.grd"
   inputs = [
     "gaia_credential_provider.rgs",
     "google_logo_small.bmp",
   ]
   outputs = [
-    "grit/gaia_resources.h",
-    "grit/gaia_resources.rc",
+    "grit/gaia_static_resources.h",
+    "grit/gaia_static_resources.rc",
   ]
   resource_ids = ""
   grit_flags = [
     "-E",
     "root_gen_dir=" + rebase_path(root_gen_dir, root_build_dir),
-  ]
-  deps = [
-    ":gaia_credential_provider_idl",
   ]
 }
 
@@ -155,7 +200,29 @@ shared_library("gaia1_0") {
     ":version",
     "//chrome/common:version_header",
   ]
-  configs += [
-    "//build/config/win:windowed",
+  configs += [ "//build/config/win:windowed" ]
+}
+
+# String Resource targets for the credential provider dll.
+
+generate_embedded_i18n("generate_strings") {
+  grdfile_folder = "./"
+  grdfile_name = "gaia_resources"
+  xtb_relative_path = "strings"
+  grd_files_info = [ [
+        grdfile_folder,
+        grdfile_name,
+        xtb_relative_path,
+        default_embedded_i18_locales,
+      ] ]
+
+  output_file_name_base = grdfile_name
+}
+
+# Compile the generated .rc file.
+source_set("string_resources") {
+  sources = get_target_outputs(":generate_strings")
+  public_deps = [
+    ":generate_strings",
   ]
 }

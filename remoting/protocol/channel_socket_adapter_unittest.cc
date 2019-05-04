@@ -16,7 +16,7 @@
 #include "net/socket/socket.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/webrtc/p2p/base/mockicetransport.h"
+#include "third_party/webrtc/p2p/base/mock_ice_transport.h"
 
 using net::IOBuffer;
 
@@ -65,7 +65,7 @@ TEST_F(TransportChannelSocketAdapterTest, Read) {
   ASSERT_EQ(net::ERR_IO_PENDING, result);
 
   channel_.SignalReadPacket(&channel_, kTestData, kTestDataSize,
-                            rtc::CreatePacketTime(0), 0);
+                            rtc::TimeMicros(), 0);
   EXPECT_EQ(kTestDataSize, callback_result_);
 }
 

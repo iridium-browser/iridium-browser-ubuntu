@@ -81,7 +81,6 @@ void StreamBufferManager::SetUpStreamsAndBuffers(
     const cros::mojom::CameraMetadataPtr& static_metadata,
     std::vector<cros::mojom::Camera3StreamPtr> streams) {
   DCHECK(ipc_task_runner_->BelongsToCurrentThread());
-  DCHECK(!stream_context_[StreamType::kPreview]);
 
   // The partial result count metadata is optional; defaults to 1 in case it
   // is not set in the static metadata.
@@ -191,6 +190,7 @@ void StreamBufferManager::StopPreview(
     base::OnceCallback<void(int32_t)> callback) {
   DCHECK(ipc_task_runner_->BelongsToCurrentThread());
   capturing_ = false;
+  repeating_request_settings_.reset();
   if (callback) {
     capture_interface_->Flush(std::move(callback));
   }
@@ -728,12 +728,14 @@ void StreamBufferManager::SubmitCaptureResultIfComplete(
   CaptureResult& pending_result = pending_results_[frame_number];
   if (!stream_context_[stream_type]->capture_results_with_buffer.count(
           frame_number) ||
-      pending_result.partial_metadata_received.size() < partial_result_count_ ||
+      pending_result.partial_metadata_received.empty() ||
+      *pending_result.partial_metadata_received.rbegin() <
+          partial_result_count_ ||
       pending_result.reference_time == base::TimeTicks()) {
     // We can only submit the result buffer of |frame_number| for |stream_type|
     // when:
     //   1. The result buffer for |stream_type| is received, and
-    //   2. All the result metadata are received, and
+    //   2. Received partial result id equals to partial result count, and
     //   3. The shutter time is received.
     return;
   }

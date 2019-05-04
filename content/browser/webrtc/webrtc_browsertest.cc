@@ -9,6 +9,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/webrtc/webrtc_content_browsertest_base.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/network_service_util.h"
 #include "content/public/common/webrtc_ip_handling_policy.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -60,7 +61,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, CanSetupAudioAndVideoCall) {
 }
 
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, NetworkProcessCrashRecovery) {
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
+  if (!IsOutOfProcessNetworkService())
     return;
   MakeTypicalPeerConnectionCall("call({video: true, audio: true});");
   SimulateNetworkServiceCrash();
@@ -237,9 +238,9 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, ApplyConstraints) {
 }
 
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
-                       GetSettingsWhenRemoteDimensionsUnknown) {
+                       GetSettingsReportsValuesForRemoteTracks) {
   MakeTypicalPeerConnectionCall(
-      "testGetSettingsWhenRemoteDimensionsUnknown();");
+      "testGetSettingsReportsValuesForRemoteTracks();");
 }
 
 #if defined(OS_ANDROID) && BUILDFLAG(USE_PROPRIETARY_CODECS)

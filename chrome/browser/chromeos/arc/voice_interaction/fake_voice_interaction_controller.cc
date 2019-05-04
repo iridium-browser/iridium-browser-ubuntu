@@ -31,6 +31,10 @@ void FakeVoiceInteractionController::NotifyContextEnabled(bool enabled) {
   voice_interaction_context_enabled_ = enabled;
 }
 
+void FakeVoiceInteractionController::NotifyHotwordAlwaysOn(bool enabled) {
+  voice_interaction_hotword_always_on_ = enabled;
+}
+
 void FakeVoiceInteractionController::NotifyHotwordEnabled(bool enabled) {
   voice_interaction_hotword_enabled_ = enabled;
 }
@@ -56,26 +60,6 @@ void FakeVoiceInteractionController::NotifyLocaleChanged(
 void FakeVoiceInteractionController::NotifyLaunchWithMicOpen(
     bool launch_with_mic_open) {
   launch_with_mic_open_ = launch_with_mic_open;
-}
-
-void FakeVoiceInteractionController::IsSettingEnabled(
-    IsSettingEnabledCallback callback) {
-  std::move(callback).Run(voice_interaction_settings_enabled_);
-}
-
-void FakeVoiceInteractionController::IsSetupCompleted(
-    IsSetupCompletedCallback callback) {
-  std::move(callback).Run(voice_interaction_setup_completed_);
-}
-
-void FakeVoiceInteractionController::IsContextEnabled(
-    IsContextEnabledCallback callback) {
-  std::move(callback).Run(voice_interaction_context_enabled_);
-}
-
-void FakeVoiceInteractionController::IsHotwordEnabled(
-    IsHotwordEnabledCallback callback) {
-  std::move(callback).Run(voice_interaction_hotword_enabled_);
 }
 
 }  // namespace arc

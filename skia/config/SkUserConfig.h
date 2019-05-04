@@ -130,7 +130,6 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 // until we update our call-sites (typically these are for API changes).
 //
 // Remove these as we update our sites.
-//
 
 // Workaround for poor anisotropic mipmap quality,
 // pending Skia ripmap support.
@@ -151,22 +150,18 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #define SK_DISABLE_EXPLICIT_GPU_RESOURCE_ALLOCATION
 #endif
 
-#ifndef SK_SUPPORT_LEGACY_TILED_BITMAPS
-#define SK_SUPPORT_LEGACY_TILED_BITMAPS
+#ifndef SK_IGNORE_LINEONLY_AA_CONVEX_PATH_OPTS
+#define SK_IGNORE_LINEONLY_AA_CONVEX_PATH_OPTS
 #endif
 
 // Max. verb count for paths rendered by the edge-AA tessellating path renderer.
 #define GR_AA_TESSELLATOR_MAX_VERB_COUNT 100
 
-#ifndef SK_SUPPORT_LEGACY_THREADED_DAA_BUGS
-#define SK_SUPPORT_LEGACY_THREADED_DAA_BUGS
-#endif
-
 #ifndef SK_SUPPORT_LEGACY_AAA_CHOICE
 #define SK_SUPPORT_LEGACY_AAA_CHOICE
 #endif
 
-#define SK_LEGACY_XFORM_CANVAS_IN_PICTURE_IMAGES
+#define SK_LEGACY_SRGB_STAGE_CHOICE
 
 ///////////////////////// Imported from BUILD.gn and skia_common.gypi
 

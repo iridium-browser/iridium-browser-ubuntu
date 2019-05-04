@@ -77,7 +77,7 @@ bool WaylandBufferManager::CreateBuffer(base::File file,
                                         const std::vector<uint64_t>& modifiers,
                                         uint32_t planes_count,
                                         uint32_t buffer_id) {
-  TRACE_EVENT2("Wayland", "WaylandBufferManager::CreateZwpLinuxDmabuf",
+  TRACE_EVENT2("wayland", "WaylandBufferManager::CreateZwpLinuxDmabuf",
                "Format", format, "Buffer id", buffer_id);
 
   static const struct zwp_linux_buffer_params_v1_listener params_listener = {
@@ -121,7 +121,7 @@ bool WaylandBufferManager::ScheduleBufferSwap(gfx::AcceleratedWidget widget,
                                               uint32_t buffer_id,
                                               const gfx::Rect& damage_region,
                                               wl::BufferSwapCallback callback) {
-  TRACE_EVENT1("Wayland", "WaylandBufferManager::ScheduleSwapBuffer",
+  TRACE_EVENT1("wayland", "WaylandBufferManager::ScheduleSwapBuffer",
                "Buffer id", buffer_id);
 
   if (!ValidateDataFromGpu(widget, buffer_id))
@@ -152,7 +152,7 @@ bool WaylandBufferManager::ScheduleBufferSwap(gfx::AcceleratedWidget widget,
 }
 
 bool WaylandBufferManager::DestroyBuffer(uint32_t buffer_id) {
-  TRACE_EVENT1("Wayland", "WaylandBufferManager::DestroyZwpLinuxDmabuf",
+  TRACE_EVENT1("wayland", "WaylandBufferManager::DestroyZwpLinuxDmabuf",
                "Buffer id", buffer_id);
 
   auto it = buffers_.find(buffer_id);
@@ -181,7 +181,7 @@ void WaylandBufferManager::ClearState() {
 
 // TODO(msisov): handle buffer swap failure or success.
 bool WaylandBufferManager::SwapBuffer(Buffer* buffer) {
-  TRACE_EVENT1("Wayland", "WaylandBufferManager::SwapBuffer", "Buffer id",
+  TRACE_EVENT1("wayland", "WaylandBufferManager::SwapBuffer", "Buffer id",
                buffer->buffer_id);
 
   WaylandWindow* window = connection_->GetWindow(buffer->widget);
@@ -313,7 +313,11 @@ void WaylandBufferManager::CreateSucceededInternal(
     }
   }
 
-  DCHECK(buffer);
+  // It can happen that buffer was destroyed by a client while the Wayland
+  // compositor was processing a request to create a wl_buffer.
+  if (!buffer)
+    return;
+
   buffer->wl_buffer.reset(new_buffer);
   buffer->params = nullptr;
   zwp_linux_buffer_params_v1_destroy(params);
@@ -328,6 +332,21 @@ void WaylandBufferManager::OnBufferSwapped(Buffer* buffer) {
       .Run(buffer->swap_result, std::move(buffer->feedback));
 }
 
+void WaylandBufferManager::AddSupportedFourCCFormat(uint32_t fourcc_format) {
+  // Return on not the supported fourcc format.
+  if (!IsValidBufferFormat(fourcc_format))
+    return;
+
+  // It can happen that ::Format or ::Modifiers call can have already added such
+  // a format. Thus, we can ignore that format.
+  gfx::BufferFormat format = GetBufferFormatFromFourCCFormat(fourcc_format);
+  auto it = std::find(supported_buffer_formats_.begin(),
+                      supported_buffer_formats_.end(), format);
+  if (it != supported_buffer_formats_.end())
+    return;
+  supported_buffer_formats_.push_back(format);
+}
+
 // static
 void WaylandBufferManager::Modifiers(
     void* data,
@@ -335,7 +354,9 @@ void WaylandBufferManager::Modifiers(
     uint32_t format,
     uint32_t modifier_hi,
     uint32_t modifier_lo) {
-  NOTIMPLEMENTED();
+  WaylandBufferManager* self = static_cast<WaylandBufferManager*>(data);
+  if (self)
+    self->AddSupportedFourCCFormat(format);
 }
 
 // static
@@ -343,11 +364,8 @@ void WaylandBufferManager::Format(void* data,
                                   struct zwp_linux_dmabuf_v1* zwp_linux_dmabuf,
                                   uint32_t format) {
   WaylandBufferManager* self = static_cast<WaylandBufferManager*>(data);
-  // Return on not the supported ARGB format.
-  if (format == DRM_FORMAT_ARGB2101010)
-    return;
-  self->supported_buffer_formats_.push_back(
-      GetBufferFormatFromFourCCFormat(format));
+  if (self)
+    self->AddSupportedFourCCFormat(format);
 }
 
 // static
@@ -356,7 +374,6 @@ void WaylandBufferManager::CreateSucceeded(
     struct zwp_linux_buffer_params_v1* params,
     struct wl_buffer* new_buffer) {
   WaylandBufferManager* self = static_cast<WaylandBufferManager*>(data);
-
   DCHECK(self);
   self->CreateSucceededInternal(params, new_buffer);
 }

@@ -18,13 +18,6 @@ const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 // Enable keyboard shortcuts used by developers only.
 const char kAshDeveloperShortcuts[] = "ash-dev-shortcuts";
 
-// Disables the dimming and blur of the wallpaper on login and lock screens.
-const char kAshDisableLoginDimAndBlur[] = "ash-disable-login-dim-and-blur";
-
-// Disables a smoother animation for screen rotation.
-const char kAshDisableSmoothScreenRotation[] =
-    "ash-disable-smooth-screen-rotation";
-
 // Disables the split view on tablet mode.
 const char kAshDisableTabletSplitView[] = "disable-tablet-splitview";
 
@@ -59,13 +52,6 @@ const char kAshEnableTabletMode[] = "enable-touchview";
 
 // Enable the wayland server.
 const char kAshEnableWaylandServer[] = "enable-wayland-server";
-
-// Enables mirrored screen.
-const char kAshEnableMirroredScreen[] = "ash-enable-mirrored-screen";
-
-// Enables display scale tray settings. This uses force-device-scale-factor flag
-// to modify the dsf of the device to any non discrete value.
-const char kAshEnableScaleSettingsTray[] = "ash-enable-scale-settings-tray";
 
 // Enables the stylus tools next to the status area.
 const char kAshForceEnableStylusTools[] = "force-enable-stylus-tools";

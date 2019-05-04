@@ -4,16 +4,24 @@
 
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 
-const base::Feature kFirstResponderKeyWindow{"FirstResponderKeyWindow",
-                                             base::FEATURE_ENABLED_BY_DEFAULT};
-
 // TODO(crbug.com/893314) : Remove this flag.
 const base::Feature kClosingLastIncognitoTab{"ClosingLastIncognitoTab",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kCopyImage{"CopyImage", base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kBrowserContainerContainsNTP{
+    "BrowserContainerContainsNTP", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kBrowserContainerKeepsContentView{
+    "BrowserContainerKeepsContentView", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kOmniboxPopupShortcutIconsInZeroState{
     "OmniboxPopupShortcutIconsInZeroState", base::FEATURE_DISABLED_BY_DEFAULT};
-const base::Feature kWKWebViewSnapshots{"WKWebViewSnapshots",
-                                        base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kSnapshotDrawView{"SnapshotDrawView",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kCopiedContentBehavior{"CopiedContentBehavior",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kSettingsRefresh{"SettingsRefresh",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};

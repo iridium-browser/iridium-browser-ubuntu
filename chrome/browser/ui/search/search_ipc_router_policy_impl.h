@@ -20,7 +20,7 @@ class WebContents;
 // The SearchIPCRouter::Policy implementation.
 class SearchIPCRouterPolicyImpl : public SearchIPCRouter::Policy {
  public:
-  explicit SearchIPCRouterPolicyImpl(const content::WebContents* web_contents);
+  explicit SearchIPCRouterPolicyImpl(content::WebContents* web_contents);
   ~SearchIPCRouterPolicyImpl() override;
 
  private:
@@ -33,10 +33,10 @@ class SearchIPCRouterPolicyImpl : public SearchIPCRouter::Policy {
   bool ShouldProcessUndoAllMostVisitedDeletions() override;
   bool ShouldProcessAddCustomLink() override;
   bool ShouldProcessUpdateCustomLink() override;
+  bool ShouldProcessReorderCustomLink() override;
   bool ShouldProcessDeleteCustomLink() override;
   bool ShouldProcessUndoCustomLinkAction() override;
   bool ShouldProcessResetCustomLinks() override;
-  bool ShouldProcessDoesUrlResolve() override;
   bool ShouldProcessLogEvent() override;
   bool ShouldProcessPasteIntoOmnibox(bool is_active_tab) override;
   bool ShouldProcessChromeIdentityCheck() override;
@@ -48,13 +48,17 @@ class SearchIPCRouterPolicyImpl : public SearchIPCRouter::Policy {
   bool ShouldProcessSetCustomBackgroundURL() override;
   bool ShouldProcessSetCustomBackgroundURLWithAttributions() override;
   bool ShouldProcessSelectLocalBackgroundImage() override;
+  bool ShouldProcessBlocklistSearchSuggestion() override;
+  bool ShouldProcessBlocklistSearchSuggestionWithHash() override;
+  bool ShouldProcessSearchSuggestionSelected() override;
+  bool ShouldProcessOptOutOfSearchSuggestions() override;
 
   // Used by unit tests.
   void set_is_incognito(bool is_incognito) {
     is_incognito_ = is_incognito;
   }
 
-  const content::WebContents* web_contents_;
+  content::WebContents* web_contents_;
   bool is_incognito_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchIPCRouterPolicyImpl);

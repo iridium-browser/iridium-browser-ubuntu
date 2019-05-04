@@ -23,7 +23,6 @@
 namespace aura {
 class PropertyConverter;
 class Window;
-class WindowTreeHost;
 }  // namespace aura
 
 namespace gfx {
@@ -35,6 +34,7 @@ class ScopedInterfaceEndpointHandle;
 }
 
 namespace ui {
+class EventTarget;
 class KeyEvent;
 class OSExchangeData;
 class SystemInputInjector;
@@ -118,10 +118,10 @@ class COMPONENT_EXPORT(WINDOW_SERVICE) WindowServiceDelegate {
   // injection.
   virtual ui::SystemInputInjector* GetSystemInputInjector();
 
-  // Returns the WindowTreeHost for the specified display id, null if not a
-  // valid display.
-  virtual aura::WindowTreeHost* GetWindowTreeHostForDisplayId(
-      int64_t display_id);
+  // Returns the EventTarget which can process all of the events on the system.
+  virtual ui::EventTarget* GetGlobalEventTarget() = 0;
+
+  virtual aura::Window* GetRootWindowForDisplayId(int64_t display_id) = 0;
 
   // Returns the topmost visible window at the location in screen coordinate,
   // excluding |ignore|. |real_topmost| is updated to the topmost visible window

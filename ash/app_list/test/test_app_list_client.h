@@ -45,20 +45,16 @@ class TestAppListClient : public mojom::AppListClient {
                                int event_flags) override {}
   void OnAppListTargetVisibilityChanged(bool visible) override {}
   void OnAppListVisibilityChanged(bool visible) override {}
-  void StartVoiceInteractionSession() override;
-  void ToggleVoiceInteractionSession() override;
   void OnFolderCreated(mojom::AppListItemMetadataPtr item) override {}
   void OnFolderDeleted(mojom::AppListItemMetadataPtr item) override {}
   void OnItemUpdated(mojom::AppListItemMetadataPtr item) override {}
   void OnPageBreakItemAdded(const std::string& id,
                             const syncer::StringOrdinal& position) override {}
   void OnPageBreakItemDeleted(const std::string& id) override {}
-
-  size_t voice_session_count() const { return voice_session_count_; }
+  void GetNavigableContentsFactory(
+      content::mojom::NavigableContentsFactoryRequest request) override {}
 
  private:
-  size_t voice_session_count_ = 0u;
-
   mojo::Binding<mojom::AppListClient> binding_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAppListClient);

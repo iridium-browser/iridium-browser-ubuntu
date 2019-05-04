@@ -59,7 +59,10 @@ public abstract class XrTestFramework {
     public static final int POLL_TIMEOUT_SHORT_MS = 1000;
     public static final int POLL_TIMEOUT_LONG_MS = 10000;
 
-    public static final String[] NATIVE_URLS_OF_INTEREST = {UrlConstants.BOOKMARKS_FOLDER_URL,
+    // The "3" corresponds to the "Mobile Bookmarks" folder - omitting a particular folder
+    // automatically redirects to that folder, and not having it in the URL causes issues with the
+    // URL we expect to be loaded being different than the actual URL.
+    public static final String[] NATIVE_URLS_OF_INTEREST = {UrlConstants.BOOKMARKS_FOLDER_URL + "3",
             UrlConstants.BOOKMARKS_UNCATEGORIZED_URL, UrlConstants.BOOKMARKS_URL,
             UrlConstants.DOWNLOADS_URL, UrlConstants.NATIVE_HISTORY_URL, UrlConstants.NTP_URL,
             UrlConstants.RECENT_TABS_URL};
@@ -89,16 +92,6 @@ public abstract class XrTestFramework {
     public static String getFileUrlForHtmlTestFile(String testName) {
         return "file://" + UrlUtils.getIsolatedTestFilePath(TEST_DIR) + "/html/" + testName
                 + ".html";
-    }
-
-    /**
-     * Gets the path to pass to an EmbeddedTestServer.getURL to load the given HTML test file.
-     *
-     * @param testName The name of the test whose file will be retrieved.
-     * @param A path that can be passed to EmbeddedTestServer.getURL to load the test file.
-     */
-    public static String getEmbeddedServerPathForHtmlTestFile(String testName) {
-        return "/" + TEST_DIR + "/html/" + testName + ".html";
     }
 
     /**
@@ -382,6 +375,15 @@ public abstract class XrTestFramework {
         mRule = rule;
         mFirstTabWebContents = mRule.getWebContents();
         mFirstTabContentView = mRule.getActivity().getActivityTab().getContentView();
+    }
+
+    /**
+     * Gets the URL that loads the given test file from the embedded test server.
+     *
+     * @param testName The name of the test whose file will be retrieved.
+     */
+    public String getEmbeddedServerUrlForHtmlTestFile(String testName) {
+        return mRule.getTestServer().getURL("/" + TEST_DIR + "/html/" + testName + ".html");
     }
 
     /**

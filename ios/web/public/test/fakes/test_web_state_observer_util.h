@@ -8,7 +8,6 @@
 #include <memory>
 
 #include "ios/web/public/favicon_url.h"
-#include "ios/web/public/load_committed_details.h"
 #include "url/gurl.h"
 
 namespace web {
@@ -43,12 +42,6 @@ struct TestDidFinishNavigationInfo {
   std::unique_ptr<web::NavigationContext> context;
 };
 
-// Arguments passed to |NavigationItemCommitted|.
-struct TestCommitNavigationInfo {
-  WebState* web_state = nullptr;
-  LoadCommittedDetails load_details;
-};
-
 // Arguments passed to |PageLoaded|.
 struct TestLoadPageInfo {
   WebState* web_state = nullptr;
@@ -67,11 +60,6 @@ struct TestNavigationItemsPrunedInfo {
   int count;
 };
 
-// Arguments passed to |NavigationItemChanged|.
-struct TestNavigationItemChangedInfo {
-  WebState* web_state = nullptr;
-};
-
 // Arguments passed to |TitleWasSet|.
 struct TestTitleWasSetInfo {
   WebState* web_state = nullptr;
@@ -79,11 +67,6 @@ struct TestTitleWasSetInfo {
 
 // Arguments passed to |DidChangeVisibleSecurityState|.
 struct TestDidChangeVisibleSecurityStateInfo {
-  WebState* web_state = nullptr;
-};
-
-// Arguments passed to |DidSuppressDialog|.
-struct TestDidSuppressDialogInfo {
   WebState* web_state = nullptr;
 };
 

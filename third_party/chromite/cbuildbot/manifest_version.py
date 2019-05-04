@@ -25,6 +25,7 @@ from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import osutils
+from chromite.lib import retry_util
 from chromite.lib import timeout_util
 
 
@@ -62,6 +63,64 @@ class GenerateBuildSpecException(Exception):
 
 class BuildSpecsValueError(Exception):
   """Exception gets thrown when a encountering invalid values."""
+
+
+def ResolveBuildspec(manifest_dir, buildspec):
+  """Look up a buildspec, and return an absolute path to it's manifest.
+
+  A buildspec is a relative path to a pinned manifest in an instance of
+  manifest-versions. The trailing '.xml' is optional.
+
+  Formal versions are defined with paths of the form:
+    buildspecs/65/10294.0.0.xml
+
+  Other buildsspecs tend to have forms like:
+    full/buildspecs/71/11040.0.0-rc3.xml
+    paladin/buildspecs/26/3560.0.0-rc5.xml
+
+  Args:
+    manifest_dir: Path to a manifest-versions instance (internal or external).
+    buildspec: buildspec defining which manifest to use.
+
+  Returns:
+    Absolute path to pinned manifest file matching the buildspec.
+
+  Raises:
+    BuildSpecsValueError if no pinned manifest matches.
+  """
+  candidate = os.path.join(manifest_dir, buildspec)
+  if not candidate.endswith('.xml'):
+    candidate += '.xml'
+
+  if not os.path.exists(candidate):
+    raise BuildSpecsValueError('buildspec %s does not exist.' % buildspec)
+
+  return candidate
+
+
+def ResolveBuildspecVersion(manifest_dir, version):
+  """Resolve a version '1.2.3' to the pinned manifest matching it.
+
+  Args:
+    manifest_dir: Path to a manifest-versions instance (internal or external).
+    version: ChromeOS version number, of the form 11040.0.0.
+
+  Returns:
+    Absolute path to pinned manifest file matching the version number.
+
+  Raises:
+    BuildSpecsValueError if no pinned manifest matches.
+  """
+  chrome_branches = os.listdir(os.path.join(manifest_dir, 'buildspecs'))
+
+  for cb in chrome_branches:
+    candidate = os.path.join(
+        manifest_dir, 'buildspecs', cb, '%s.xml' % version)
+
+    if os.path.exists(candidate):
+      return candidate
+
+  raise BuildSpecsValueError('No buildspec for version %s found.' % version)
 
 
 def RefreshManifestCheckout(manifest_dir, manifest_repo):
@@ -390,11 +449,17 @@ def CandidateBuildSpecPath(version_info,
       return spec_path
 
 
-def _CommitAndPush(manifest_repo, buildspec, contents, dryrun):
+@retry_util.WithRetry(max_retry=20)
+def _CommitAndPush(manifest_repo, git_url, buildspec, contents, dryrun):
   """Helper for committing and pushing buildspecs.
+
+  Will create/checkout/clean the manifest_repo checkout at the given
+  path with no assumptions about the previous state. It should NOT be
+  considered clean when this function exits.
 
   Args:
     manifest_repo: Path to root of git repo for manifest_versions (int or ext).
+    git_url: Git URL for remote git repository.
     buildspec: Relative path to buildspec in  repo.
     contents: String constaining contents of buildspec manifest.
     dryrun: Git push --dry-run if set to True.
@@ -402,10 +467,10 @@ def _CommitAndPush(manifest_repo, buildspec, contents, dryrun):
   Returns:
     Full path to buildspec created.
   """
+  RefreshManifestCheckout(manifest_repo, git_url)
+
   filename = os.path.join(manifest_repo, buildspec)
   assert not os.path.exists(filename)
-
-  logging.info('Creating buildspec: %s as %s', buildspec, filename)
 
   git.CreatePushBranch(PUSH_BRANCH, manifest_repo, sync=False)
   osutils.WriteFile(filename, contents, makedirs=True)
@@ -413,8 +478,9 @@ def _CommitAndPush(manifest_repo, buildspec, contents, dryrun):
   git.RunGit(manifest_repo, ['add', '-A'])
   message = 'Creating buildspec: %s' % buildspec
   git.RunGit(manifest_repo, ['commit', '-m', message])
-
   git.PushBranch(PUSH_BRANCH, manifest_repo, dryrun=dryrun)
+
+  logging.info('Created buildspec: %s as %s', buildspec, filename)
 
   return filename
 
@@ -431,6 +497,9 @@ def PopulateAndPublishBuildSpec(rel_build_spec,
 
   The new buildspec is created in manifest_versions and pushed remotely.
 
+  The manifest_versions paths do not need to be in a clean state, but should
+  be consistent from build to build for performance reasons.
+
   Args:
     rel_build_spec: Path relative to manifest_verions root for buildspec.
     manifest: Contents of the manifest to publish as a string.
@@ -438,9 +507,13 @@ def PopulateAndPublishBuildSpec(rel_build_spec,
     manifest_versions_ext: Path to manifest-versions checkout (public).
     dryrun: Git push --dry-run if set to True.
   """
+  site_params = config_lib.GetSiteParams()
+
   # Create and push internal buildspec.
   build_spec = _CommitAndPush(
-      manifest_versions_int, rel_build_spec, manifest, dryrun)
+      manifest_versions_int,
+      site_params.MANIFEST_VERSIONS_INT_GOB_URL,
+      rel_build_spec, manifest, dryrun)
 
   if manifest_versions_ext:
     # Create the external only manifest in a tmp file, read into string.
@@ -449,7 +522,9 @@ def PopulateAndPublishBuildSpec(rel_build_spec,
                                   whitelisted_remotes=whitelisted_remotes)
     manifest_ext = osutils.ReadFile(tmp_manifest)
 
-    _CommitAndPush(manifest_versions_ext, rel_build_spec, manifest_ext, dryrun)
+    _CommitAndPush(manifest_versions_ext,
+                   site_params.MANIFEST_VERSIONS_GOB_URL,
+                   rel_build_spec, manifest_ext, dryrun)
 
 
 def GenerateAndPublishOfficialBuildSpec(
@@ -543,7 +618,8 @@ class BuildSpecsManager(object):
 
   def __init__(self, source_repo, manifest_repo, build_names, incr_type, force,
                branch, manifest=constants.DEFAULT_MANIFEST, dry_run=True,
-               config=None, metadata=None, db=None, buildbucket_client=None):
+               config=None, metadata=None, buildstore=None,
+               buildbucket_client=None):
     """Initializes a build specs manager.
 
     Args:
@@ -560,7 +636,7 @@ class BuildSpecsManager(object):
       config: Instance of config_lib.BuildConfig. Config dict of this builder.
       metadata: Instance of metadata_lib.CBuildbotMetadata. Metadata of this
                 builder.
-      db: Instance of cidb.CIDBConnection.
+      buildstore: BuildStore object to make DB calls.
       buildbucket_client: Instance of buildbucket_lib.buildbucket_client.
     """
     self.cros_source = source_repo
@@ -580,7 +656,8 @@ class BuildSpecsManager(object):
     self.config = config
     self.master = False if config is None else config.master
     self.metadata = metadata
-    self.db = db
+    self.buildstore = buildstore
+    self.db = buildstore.GetCIDBHandle()
     self.buildbucket_client = buildbucket_client
 
     # Directories and specifications are set once we load the specs.
@@ -767,7 +844,7 @@ class BuildSpecsManager(object):
     return (self._latest_build and
             self._latest_build['status'] == constants.BUILDER_STATUS_FAILED)
 
-  def WaitForSlavesToComplete(self, master_build_id, db, builders_array,
+  def WaitForSlavesToComplete(self, master_build_id, builders_array,
                               pool=None, timeout=3 * 60,
                               ignore_timeout_exception=True):
     """Wait for all slaves to complete or timeout.
@@ -779,7 +856,6 @@ class BuildSpecsManager(object):
 
     Args:
       master_build_id: Master build id to check.
-      db: An instance of cidb.CIDBConnection.
       builders_array: The name list of the build configs to check.
       pool: An instance of ValidationPool.validation_pool used by sync stage
             to apply changes.
@@ -801,7 +877,7 @@ class BuildSpecsManager(object):
       logging.info('%s until timeout...', remaining)
 
     slave_status = build_status.SlaveStatus(
-        start_time, builders_array, master_build_id, db,
+        start_time, builders_array, master_build_id, buildstore=self.buildstore,
         config=self.config,
         metadata=self.metadata,
         buildbucket_client=self.buildbucket_client,
@@ -930,8 +1006,22 @@ class BuildSpecsManager(object):
       CreateSymlink(src_file, dest_file)
 
   def PushSpecChanges(self, commit_message):
-    """Pushes any changes you have in the manifest directory."""
-    _PushGitChanges(self.manifest_dir, commit_message, dry_run=self.dry_run)
+    """Pushes any changes you have in the manifest directory.
+
+    Args:
+      commit_message: Message that the git commit will contain.
+    """
+    # %submit enables Gerrit automerge feature to manage contention on the
+    # high traffic manifest_versions repository.
+    push_to_git = git.GetTrackingBranch(
+        self.manifest_dir, for_checkout=False, for_push=False)
+    push_to = git.RemoteRef(push_to_git.remote, 'refs/for/master%submit',
+                            push_to_git.project_name)
+    _PushGitChanges(
+        self.manifest_dir,
+        commit_message,
+        dry_run=self.dry_run,
+        push_to=push_to)
 
   def UpdateStatus(self, success_map, message=None, retries=NUM_RETRIES):
     """Updates the status of the build for the current build spec.
@@ -952,8 +1042,7 @@ class BuildSpecsManager(object):
         commit_message = (
             'Automatic checkin: status=%s build_version %s for %s' %
             (builder_status_lib.BuilderStatus.GetCompletedStatus(success),
-             self.current_version,
-             self.build_names[0]))
+             self.current_version, self.build_names[0]))
 
         self._SetPassSymlinks(success_map)
 

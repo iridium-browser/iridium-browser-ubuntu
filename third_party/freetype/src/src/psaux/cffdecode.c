@@ -235,8 +235,8 @@
       return FT_THROW( Syntax_Error );
     }
 
-    adx += decoder->builder.left_bearing.x;
-    ady += decoder->builder.left_bearing.y;
+    adx = ADD_LONG( adx, decoder->builder.left_bearing.x );
+    ady = ADD_LONG( ady, decoder->builder.left_bearing.y );
 
 #ifdef FT_CONFIG_OPTION_INCREMENTAL
     /* Incremental fonts don't necessarily have valid charsets.        */
@@ -1568,7 +1568,7 @@
               x = ADD_LONG( x, args[0] );
               y = ADD_LONG( y, args[1] );
               cff_builder_add_point( builder, x, y,
-                                     (FT_Bool)( count == 3 ) );
+                                     FT_BOOL( count == 3 ) );
               args += 2;
             }
 
@@ -1606,7 +1606,7 @@
               x = ADD_LONG( x, args[0] );
               y = ADD_LONG( y, args[1] );
               cff_builder_add_point( builder, x, y,
-                                     (FT_Bool)( count == 4 || count == 1 ) );
+                                     FT_BOOL( count == 4 || count == 1 ) );
               args += 2;
             }
 
@@ -1748,7 +1748,10 @@
         case cff_op_sqrt:
           FT_TRACE4(( " sqrt\n" ));
 
-          if ( args[0] > 0 )
+          /* without upper limit the loop below might not finish */
+          if ( args[0] > 0x7FFFFFFFL )
+            args[0] = 46341;
+          else if ( args[0] > 0 )
           {
             FT_Fixed  root = args[0];
             FT_Fixed  new_root;
@@ -1839,7 +1842,7 @@
               /* before C99 it is implementation-defined whether    */
               /* the result of `%' is negative if the first operand */
               /* is negative                                        */
-              idx = -( ( -idx ) % count );
+              idx = -( NEG_INT( idx ) % count );
               while ( idx < 0 )
               {
                 FT_Fixed  tmp = args[0];
@@ -1950,7 +1953,8 @@
             if ( num_results < 0 )
               goto Syntax_Error;
 
-            if ( num_results * (FT_Int)num_designs > num_args )
+            if ( num_results > num_args                       ||
+                 num_results * (FT_Int)num_designs > num_args )
               goto Stack_Underflow;
 
             /* since we currently don't handle interpolation of multiple */
@@ -2027,20 +2031,31 @@
           break;
 
         case cff_op_callothersubr:
-          /* this is an invalid Type 2 operator; however, there        */
-          /* exist fonts which are incorrectly converted from probably */
-          /* Type 1 to CFF, and some parsers seem to accept it         */
+          {
+            FT_Fixed  arg;
 
-          FT_TRACE4(( " callothersubr (invalid op)\n" ));
 
-          /* subsequent `pop' operands should add the arguments,       */
-          /* this is the implementation described for `unknown' other  */
-          /* subroutines in the Type1 spec.                            */
-          /*                                                           */
-          /* XXX Fix return arguments (see discussion below).          */
-          args -= 2 + ( args[-2] >> 16 );
-          if ( args < stack )
-            goto Stack_Underflow;
+            /* this is an invalid Type 2 operator; however, there      */
+            /* exist fonts which are incorrectly converted from        */
+            /* probably Type 1 to CFF, and some parsers seem to accept */
+            /* it                                                      */
+
+            FT_TRACE4(( " callothersubr (invalid op)\n" ));
+
+            /* subsequent `pop' operands should add the arguments,     */
+            /* this is the implementation described for `unknown'      */
+            /* other subroutines in the Type1 spec.                    */
+            /*                                                         */
+            /* XXX Fix return arguments (see discussion below).        */
+
+            arg = 2 + ( args[-2] >> 16 );
+            if ( arg >= CFF_MAX_OPERANDS )
+              goto Stack_Underflow;
+
+            args -= arg;
+            if ( args < stack )
+              goto Stack_Underflow;
+          }
           break;
 
         case cff_op_pop:

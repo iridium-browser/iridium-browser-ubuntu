@@ -99,17 +99,10 @@ ServiceWorkerRegistrationObjectHost::~ServiceWorkerRegistrationObjectHost() {
 
 blink::mojom::ServiceWorkerRegistrationObjectInfoPtr
 ServiceWorkerRegistrationObjectHost::CreateObjectInfo() {
-  // |info->options->script_type| is never accessed anywhere, so just set it to
-  // kClassic.
-  // TODO(asamidoi, nhiroki): Remove |options| from
-  // ServiceWorkerRegistrationObjectInfo, since |script_type| is a
-  // non-per-registration property.
-  blink::mojom::ScriptType script_type = blink::mojom::ScriptType::kClassic;
-
   auto info = blink::mojom::ServiceWorkerRegistrationObjectInfo::New();
-  info->options = blink::mojom::ServiceWorkerRegistrationOptions::New(
-      registration_->pattern(), script_type, registration_->update_via_cache());
   info->registration_id = registration_->id();
+  info->scope = registration_->scope();
+  info->update_via_cache = registration_->update_via_cache();
   bindings_.AddBinding(this, mojo::MakeRequest(&info->host_ptr_info));
   info->request = mojo::MakeRequest(&remote_registration_);
 
@@ -227,7 +220,7 @@ void ServiceWorkerRegistrationObjectHost::Unregister(
   }
 
   context_->UnregisterServiceWorker(
-      registration_->pattern(),
+      registration_->scope(),
       base::AdaptCallbackForRepeating(base::BindOnce(
           &ServiceWorkerRegistrationObjectHost::UnregistrationComplete,
           weak_ptr_factory_.GetWeakPtr(), std::move(callback))));
@@ -251,7 +244,7 @@ void ServiceWorkerRegistrationObjectHost::EnableNavigationPreload(
   }
 
   context_->storage()->UpdateNavigationPreloadEnabled(
-      registration_->id(), registration_->pattern().GetOrigin(), enable,
+      registration_->id(), registration_->scope().GetOrigin(), enable,
       base::AdaptCallbackForRepeating(base::BindOnce(
           &ServiceWorkerRegistrationObjectHost::
               DidUpdateNavigationPreloadEnabled,
@@ -298,7 +291,7 @@ void ServiceWorkerRegistrationObjectHost::SetNavigationPreloadHeader(
   }
 
   context_->storage()->UpdateNavigationPreloadHeader(
-      registration_->id(), registration_->pattern().GetOrigin(), value,
+      registration_->id(), registration_->scope().GetOrigin(), value,
       base::AdaptCallbackForRepeating(base::BindOnce(
           &ServiceWorkerRegistrationObjectHost::
               DidUpdateNavigationPreloadHeader,
@@ -430,7 +423,7 @@ bool ServiceWorkerRegistrationObjectHost::CanServeRegistrationObjectHostMethods(
 
   // TODO(falken): This check can be removed once crbug.com/439697 is fixed.
   // (Also see crbug.com/776408)
-  if (provider_host_->document_url().is_empty()) {
+  if (provider_host_->url().is_empty()) {
     std::move(*callback).Run(
         blink::mojom::ServiceWorkerErrorType::kSecurity,
         std::string(error_prefix) +
@@ -439,14 +432,13 @@ bool ServiceWorkerRegistrationObjectHost::CanServeRegistrationObjectHostMethods(
     return false;
   }
 
-  std::vector<GURL> urls = {provider_host_->document_url(),
-                            registration_->pattern()};
+  std::vector<GURL> urls = {provider_host_->url(), registration_->scope()};
   if (!ServiceWorkerUtils::AllOriginsMatchAndCanAccessServiceWorkers(urls)) {
     bindings_.ReportBadMessage(ServiceWorkerConsts::kBadMessageImproperOrigins);
     return false;
   }
 
-  if (!provider_host_->AllowServiceWorker(registration_->pattern())) {
+  if (!provider_host_->AllowServiceWorker(registration_->scope())) {
     std::move(*callback).Run(
         blink::mojom::ServiceWorkerErrorType::kDisabled,
         std::string(error_prefix) +

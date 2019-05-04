@@ -191,8 +191,8 @@ static void RecordVideoCodecStats(container_names::MediaContainerName container,
                           video_config.visible_rect());
   UMA_HISTOGRAM_ENUMERATION("Media.VideoPixelFormatUnion",
                             video_config.format(), PIXEL_FORMAT_MAX + 1);
-  UMA_HISTOGRAM_ENUMERATION("Media.VideoFrameColorSpace",
-                            video_config.color_space(), COLOR_SPACE_MAX + 1);
+
+  // TODO(hubbe): make better color space statistics
 
   // Note the PRESUBMIT_IGNORE_UMA_MAX below, this silences the PRESUBMIT.py
   // check for uma enum max usage, since we're abusing
@@ -218,6 +218,24 @@ static void SetTimeProperty(MediaLogEvent* event,
     event->params.SetString(key, "kNoTimestamp");
   else
     event->params.SetDouble(key, value.InSecondsF());
+}
+
+static int ReadFrameAndDiscardEmpty(AVFormatContext* context,
+                                    AVPacket* packet) {
+  // Skip empty packets in a tight loop to avoid timing out fuzzers.
+  int result;
+  bool drop_packet;
+  do {
+    result = av_read_frame(context, packet);
+    drop_packet = (!packet->data || !packet->size) && result >= 0;
+    if (drop_packet) {
+      av_packet_unref(packet);
+      DLOG(WARNING) << "Dropping empty packet, size: " << packet->size
+                    << ", data: " << static_cast<void*>(packet->data);
+    }
+  } while (drop_packet);
+
+  return result;
 }
 
 std::unique_ptr<FFmpegDemuxerStream> FFmpegDemuxerStream::Create(
@@ -382,13 +400,19 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
   // video frame dropping is handled by the renderer when correcting for a/v
   // sync.
   if (is_audio && !fixup_chained_ogg_ && last_packet_pos_ != AV_NOPTS_VALUE) {
+    // Some containers have unknown position...
+    if (packet->pos == -1)
+      packet->pos = last_packet_pos_;
+
     if (packet->pos < last_packet_pos_) {
-      DVLOG(3) << "Dropped packet with out of order position";
+      DVLOG(3) << "Dropped packet with out of order position (" << packet->pos
+               << " < " << last_packet_pos_ << ")";
       return;
     }
-    if (packet->pos == last_packet_pos_ && packet_dts <= last_packet_dts_) {
-      DCHECK_NE(last_packet_dts_, AV_NOPTS_VALUE);
-      DVLOG(3) << "Dropped packet with out of order display timestamp";
+    if (last_packet_dts_ != AV_NOPTS_VALUE && packet->pos == last_packet_pos_ &&
+        packet_dts <= last_packet_dts_) {
+      DVLOG(3) << "Dropped packet with out of order display timestamp ("
+               << packet_dts << " < " << last_packet_dts_ << ")";
       return;
     }
   }
@@ -405,7 +429,7 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
     if (packet->flags & AV_PKT_FLAG_KEY)
       waiting_for_keyframe_ = false;
     else {
-      DVLOG(3) << "Dropped non-keyframe pts=" << packet->pts;
+      DLOG(WARNING) << "Dropped non-keyframe pts=" << packet->pts;
       return;
     }
   }
@@ -414,7 +438,7 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
   // Convert the packet if there is a bitstream filter.
   if (bitstream_converter_ &&
       !bitstream_converter_->ConvertPacket(packet.get())) {
-    MEDIA_LOG(ERROR, media_log_) << "Format conversion failed.";
+    DVLOG(1) << "Format conversion failed.";
   }
 #endif
 
@@ -1811,9 +1835,10 @@ void FFmpegDemuxer::ReadFrameIfNeeded() {
   pending_read_ = true;
   base::PostTaskAndReplyWithResult(
       blocking_task_runner_.get(), FROM_HERE,
-      base::Bind(&av_read_frame, glue_->format_context(), packet_ptr),
-      base::Bind(&FFmpegDemuxer::OnReadFrameDone, weak_factory_.GetWeakPtr(),
-                 base::Passed(&packet)));
+      base::BindOnce(&ReadFrameAndDiscardEmpty, glue_->format_context(),
+                     packet_ptr),
+      base::BindOnce(&FFmpegDemuxer::OnReadFrameDone,
+                     weak_factory_.GetWeakPtr(), std::move(packet)));
 }
 
 void FFmpegDemuxer::OnReadFrameDone(ScopedAVPacket packet, int result) {
@@ -1864,11 +1889,11 @@ void FFmpegDemuxer::OnReadFrameDone(ScopedAVPacket packet, int result) {
   // giving us a bad stream index.  See http://crbug.com/698549 for example.
   if (packet->stream_index >= 0 &&
       static_cast<size_t>(packet->stream_index) < streams_.size()) {
-    // Drop empty packets since they're ignored on the decoder side anyways.
-    if (!packet->data || !packet->size) {
-      DLOG(WARNING) << "Dropping empty packet, size: " << packet->size
-                    << ", data: " << static_cast<void*>(packet->data);
-    } else if (auto& demuxer_stream = streams_[packet->stream_index]) {
+    // This is ensured by ReadFrameAndDiscardEmpty.
+    DCHECK(packet->data);
+    DCHECK(packet->size);
+
+    if (auto& demuxer_stream = streams_[packet->stream_index]) {
       if (demuxer_stream->IsEnabled())
         demuxer_stream->EnqueuePacket(std::move(packet));
 

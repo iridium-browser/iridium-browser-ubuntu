@@ -16,9 +16,9 @@
 #include "base/debug/alias.h"
 #include "base/feature_list.h"
 #include "base/lazy_instance.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -27,16 +27,17 @@
 #include "build/build_config.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/api/messaging/message.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/cors_util.h"
 #include "extensions/common/extension_api.h"
 #include "extensions/common/extension_features.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_urls.h"
+#include "extensions/common/extensions_client.h"
 #include "extensions/common/features/behavior_feature.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_channel.h"
@@ -165,9 +166,9 @@ class ChromeNativeHandler : public ObjectBackedNativeHandler {
 
   // ObjectBackedNativeHandler:
   void AddRoutes() override {
-    RouteHandlerFunction(
-        "GetChrome",
-        base::Bind(&ChromeNativeHandler::GetChrome, base::Unretained(this)));
+    RouteHandlerFunction("GetChrome",
+                         base::BindRepeating(&ChromeNativeHandler::GetChrome,
+                                             base::Unretained(this)));
   }
 
   void GetChrome(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -177,7 +178,10 @@ class ChromeNativeHandler : public ObjectBackedNativeHandler {
                                 v8::NewStringType::kInternalized)
             .ToLocalChecked());
     v8::Local<v8::Object> global(context()->v8_context()->Global());
-    v8::Local<v8::Value> chrome(global->Get(chrome_string));
+    // TODO(crbug.com/913942): Possibly replace ToLocalChecked here with
+    // actual error handling.
+    v8::Local<v8::Value> chrome(
+        global->Get(context()->v8_context(), chrome_string).ToLocalChecked());
     if (chrome->IsUndefined()) {
       chrome = v8::Object::New(context()->isolate());
       global->Set(context()->v8_context(), chrome_string, chrome).ToChecked();
@@ -216,8 +220,6 @@ Dispatcher::Dispatcher(std::unique_ptr<DispatcherDelegate> delegate)
   // this enabled-ness is too late.
   WorkerThreadDispatcher::Get()->Init(RenderThread::Get());
 
-  RenderThread::Get()->RegisterExtension(SafeBuiltins::CreateV8Extension());
-
   // Register WebSecurityPolicy whitelists for the chrome-extension:// scheme.
   WebString extension_scheme(WebString::FromASCII(kExtensionScheme));
 
@@ -247,6 +249,10 @@ Dispatcher::Dispatcher(std::unique_ptr<DispatcherDelegate> delegate)
 }
 
 Dispatcher::~Dispatcher() {
+}
+
+void Dispatcher::OnRenderThreadStarted(content::RenderThread* thread) {
+  thread->RegisterExtension(extensions::SafeBuiltins::CreateV8Extension());
 }
 
 void Dispatcher::OnRenderFrameCreated(content::RenderFrame* render_frame) {
@@ -426,8 +432,10 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
   base::StringPiece script_resource =
       ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_SERVICE_WORKER_BINDINGS_JS);
-  v8::Local<v8::String> script = v8::String::NewExternal(
-      isolate, new StaticV8ExternalOneByteStringResource(script_resource));
+  v8::Local<v8::String> script =
+      v8::String::NewExternalOneByte(
+          isolate, new StaticV8ExternalOneByteStringResource(script_resource))
+          .ToLocalChecked();
 
   // Run service_worker.js to get the main function.
   v8::Local<v8::Function> main_function;
@@ -457,7 +465,7 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
       // The logging module.
       logging->NewInstance(),
   };
-  context->SafeCallFunction(main_function, arraysize(args), args);
+  context->SafeCallFunction(main_function, base::size(args), args);
 
   const base::TimeDelta elapsed = base::TimeTicks::Now() - start_time;
   UMA_HISTOGRAM_TIMES(
@@ -649,6 +657,7 @@ std::vector<Dispatcher::JsResourceInfo> Dispatcher::GetJsResources() {
       {"guestViewContainerElement", IDR_GUEST_VIEW_CONTAINER_ELEMENT_JS},
       {"guestViewDeny", IDR_GUEST_VIEW_DENY_JS},
       {"guestViewEvents", IDR_GUEST_VIEW_EVENTS_JS},
+      {"safeMethods", IDR_SAFE_METHODS_JS},
       {"imageUtil", IDR_IMAGE_UTIL_JS},
       {"setIcon", IDR_SET_ICON_JS},
       {"test", IDR_TEST_CUSTOM_BINDINGS_JS},
@@ -858,11 +867,8 @@ void Dispatcher::OnActivateExtension(const std::string& extension_id) {
     std::string& error = extension_load_errors_[extension_id];
     char minidump[256];
     base::debug::Alias(&minidump);
-    base::snprintf(minidump,
-                   arraysize(minidump),
-                   "e::dispatcher:%s:%s",
-                   extension_id.c_str(),
-                   error.c_str());
+    base::snprintf(minidump, base::size(minidump), "e::dispatcher:%s:%s",
+                   extension_id.c_str(), error.c_str());
     LOG(FATAL) << extension_id << " was never loaded: " << error;
   }
 
@@ -901,13 +907,11 @@ void Dispatcher::OnDispatchOnConnect(
     const PortId& target_port_id,
     const std::string& channel_name,
     const ExtensionMsg_TabConnectionInfo& source,
-    const ExtensionMsg_ExternalConnectionInfo& info,
-    const std::string& tls_channel_id) {
+    const ExtensionMsg_ExternalConnectionInfo& info) {
   DCHECK(!target_port_id.is_opener);
 
   bindings_system_->GetMessagingService()->DispatchOnConnect(
       *script_context_set_, target_port_id, channel_name, source, info,
-      tls_channel_id,
       NULL);  // All render frames.
 }
 
@@ -973,21 +977,38 @@ void Dispatcher::OnMessageInvoke(const std::string& extension_id,
 void Dispatcher::OnDispatchEvent(
     const ExtensionMsg_DispatchEvent_Params& params,
     const base::ListValue& event_args) {
+  content::RenderFrame* background_frame =
+      ExtensionFrameHelper::GetBackgroundPageFrame(params.extension_id);
+
   std::unique_ptr<WebScopedUserGesture> web_user_gesture;
-  if (params.is_user_gesture)
-    web_user_gesture.reset(new WebScopedUserGesture(nullptr));
+  // Synthesize a user gesture if this was in response to user action; this is
+  // necessary if the gesture was e.g. by clicking on the extension toolbar
+  // icon, context menu entry, etc.
+  //
+  // This will only add an active user gesture for the background page, so any
+  // listeners in different frames (like a popup or tab) won't be able to use
+  // the user gesture. This is intentional, since frames other than the
+  // background page should have their own user gestures, such as through button
+  // clicks.
+  if (params.is_user_gesture && background_frame) {
+    ScriptContext* background_context =
+        ScriptContextSet::GetMainWorldContextForFrame(background_frame);
+    if (background_context && bindings_system_->HasEventListenerInContext(
+                                  params.event_name, background_context)) {
+      web_user_gesture.reset(
+          new WebScopedUserGesture(background_frame->GetWebFrame()));
+    }
+  }
 
   DispatchEvent(params.extension_id, params.event_name, event_args,
                 &params.filtering_info);
 
-  // Tell the browser process when an event has been dispatched with a lazy
-  // background page active.
-  const Extension* extension =
-      RendererExtensionRegistry::Get()->GetByID(params.extension_id);
-  if (extension && BackgroundInfo::HasLazyBackgroundPage(extension)) {
-    content::RenderFrame* background_frame =
-        ExtensionFrameHelper::GetBackgroundPageFrame(params.extension_id);
-    if (background_frame) {
+  if (background_frame) {
+    // Tell the browser process when an event has been dispatched with a lazy
+    // background page active.
+    const Extension* extension =
+        RendererExtensionRegistry::Get()->GetByID(params.extension_id);
+    if (extension && BackgroundInfo::HasLazyBackgroundPage(extension)) {
       background_frame->Send(new ExtensionHostMsg_EventAck(
           background_frame->GetRoutingID(), params.event_id));
     }
@@ -1089,9 +1110,9 @@ void Dispatcher::OnUnloaded(const std::string& id) {
   // reloaded with a new messages map.
   EraseL10nMessagesMap(id);
 
-  // Update the origin access map so that any content scripts injected are no
-  // longer allowlisted for extra origins.
-  WebSecurityPolicy::ClearOriginAccessAllowListForOrigin(
+  // Update the origin access map so that any content scripts injected no longer
+  // have dedicated allow/block lists for extra origins.
+  WebSecurityPolicy::ClearOriginAccessListForOrigin(
       Extension::GetBaseURLFromExtensionId(id));
 
   // We don't do anything with existing platform-app stylesheets. They will
@@ -1208,74 +1229,30 @@ void Dispatcher::InitOriginPermissions(const Extension* extension) {
 }
 
 void Dispatcher::UpdateOriginPermissions(const Extension& extension) {
-  static const char* kSchemes[] = {
-    url::kHttpScheme,
-    url::kHttpsScheme,
-    url::kFileScheme,
-    content::kChromeUIScheme,
-    url::kFtpScheme,
-#if defined(OS_CHROMEOS)
-    content::kExternalFileScheme,
-#endif
-    extensions::kExtensionScheme,
-  };
-
   // Remove all old patterns associated with this extension.
   WebSecurityPolicy::ClearOriginAccessListForOrigin(extension.url());
 
-  delegate_->AddOriginAccessPermissions(extension,
-                                        IsExtensionActive(extension.id()));
-
-  URLPatternSet origin_permissions =
-      extension.permissions_data()->GetEffectiveHostPermissions();
-
-  // Permissions declared by the extension.
-  for (const URLPattern& pattern : origin_permissions) {
-    for (const char* scheme : kSchemes) {
-      if (pattern.MatchesScheme(scheme))
-        WebSecurityPolicy::AddOriginAccessAllowListEntry(
-            extension.url(), WebString::FromUTF8(scheme),
-            WebString::FromUTF8(pattern.host()), pattern.match_subdomains(),
-            network::mojom::CORSOriginAccessMatchPriority::kDefaultPriority);
-    }
+  std::vector<network::mojom::CorsOriginPatternPtr> allow_list =
+      CreateCorsOriginAccessAllowList(extension);
+  ExtensionsClient::Get()->AddOriginAccessPermissions(
+      extension, IsExtensionActive(extension.id()), &allow_list);
+  for (const auto& entry : allow_list) {
+    WebSecurityPolicy::AddOriginAccessAllowListEntry(
+        extension.url(), WebString::FromUTF8(entry->protocol),
+        WebString::FromUTF8(entry->domain),
+        entry->mode ==
+            network::mojom::CorsOriginAccessMatchMode::kAllowSubdomains,
+        entry->priority);
   }
 
-  // Hosts blocked by enterprise policy.
-  for (const URLPattern& pattern :
-       extension.permissions_data()->policy_blocked_hosts()) {
-    for (const char* scheme : kSchemes) {
-      if (pattern.MatchesScheme(scheme))
-        WebSecurityPolicy::AddOriginAccessBlockListEntry(
-            extension.url(), WebString::FromUTF8(scheme),
-            WebString::FromUTF8(pattern.host()), pattern.match_subdomains(),
-            network::mojom::CORSOriginAccessMatchPriority::kLowPriority);
-    }
+  for (const auto& entry : CreateCorsOriginAccessBlockList(extension)) {
+    WebSecurityPolicy::AddOriginAccessBlockListEntry(
+        extension.url(), WebString::FromUTF8(entry->protocol),
+        WebString::FromUTF8(entry->domain),
+        entry->mode ==
+            network::mojom::CorsOriginAccessMatchMode::kAllowSubdomains,
+        entry->priority);
   }
-
-  // Hosts exempted from the enterprise policy blocklist.
-  // This set intersection is necessary to prevent an enterprise policy from
-  // granting a host permission the extension didn't ask for.
-  URLPatternSet overlap = URLPatternSet::CreateIntersection(
-      extension.permissions_data()->policy_allowed_hosts(), origin_permissions,
-      URLPatternSet::IntersectionBehavior::kDetailed);
-  for (const URLPattern& pattern : overlap) {
-    for (const char* scheme : kSchemes) {
-      if (pattern.MatchesScheme(scheme))
-        WebSecurityPolicy::AddOriginAccessAllowListEntry(
-            extension.url(), WebString::FromUTF8(scheme),
-            WebString::FromUTF8(pattern.host()), pattern.match_subdomains(),
-            network::mojom::CORSOriginAccessMatchPriority::kMediumPriority);
-    }
-  };
-
-  const GURL webstore_launch_url = extension_urls::GetWebstoreLaunchURL();
-  WebSecurityPolicy::AddOriginAccessBlockListEntry(
-      extension.url(), WebString::FromUTF8(webstore_launch_url.scheme()),
-      WebString::FromUTF8(webstore_launch_url.host()), true,
-      network::mojom::CORSOriginAccessMatchPriority::kHighPriority);
-
-  // TODO(devlin): Should we also block the webstore update URL here? See
-  // https://crbug.com/826946 for a related instance.
 }
 
 void Dispatcher::EnableCustomElementWhiteList() {
@@ -1346,10 +1323,10 @@ void Dispatcher::UpdateContentCapabilities(ScriptContext* context) {
     if (info.url_patterns.MatchesURL(url)) {
       APIPermissionSet new_permissions;
       APIPermissionSet::Union(permissions, info.permissions, &new_permissions);
-      permissions = new_permissions;
+      permissions = std::move(new_permissions);
     }
   }
-  context->set_content_capabilities(permissions);
+  context->set_content_capabilities(std::move(permissions));
 }
 
 void Dispatcher::PopulateSourceMap() {

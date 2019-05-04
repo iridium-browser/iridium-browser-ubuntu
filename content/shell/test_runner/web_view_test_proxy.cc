@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "content/renderer/compositor/layer_tree_view.h"
 #include "content/shell/test_runner/accessibility_controller.h"
 #include "content/shell/test_runner/test_interfaces.h"
 #include "content/shell/test_runner/test_runner.h"
@@ -22,18 +23,27 @@ namespace test_runner {
 
 ProxyWebWidgetClient::ProxyWebWidgetClient(
     blink::WebWidgetClient* base_class_widget_client,
-    blink::WebWidgetClient* widget_test_client)
+    blink::WebWidgetClient* widget_test_client,
+    content::RenderWidget* render_widget)
     : base_class_widget_client_(base_class_widget_client),
-      widget_test_client_(widget_test_client) {}
+      widget_test_client_(widget_test_client),
+      render_widget_(render_widget) {}
 
 void ProxyWebWidgetClient::DidInvalidateRect(const blink::WebRect& r) {
   base_class_widget_client_->DidInvalidateRect(r);
 }
-bool ProxyWebWidgetClient::AllowsBrokenNullLayerTreeView() const {
-  return base_class_widget_client_->AllowsBrokenNullLayerTreeView();
-}
 void ProxyWebWidgetClient::ScheduleAnimation() {
-  widget_test_client_->ScheduleAnimation();
+  // When using threaded compositing, have the RenderWidget schedule a request
+  // for a frame, as we use the compositor's scheduler. Otherwise the testing
+  // WebWidgetClient schedules it.
+  // Note that for WebViewTestProxy the RenderWidget is not subclassed to
+  // override the WebWidgetClient, instead it is injected into RenderViewImpl,
+  // so if we call RenderWidget here we jump out of the test harness as
+  // intended.
+  if (!render_widget_->layer_tree_view()->CompositeIsSynchronousForTesting())
+    render_widget_->ScheduleAnimation();
+  else
+    widget_test_client_->ScheduleAnimation();
 }
 void ProxyWebWidgetClient::IntrinsicSizingInfoChanged(
     const blink::WebIntrinsicSizingInfo& info) {
@@ -78,15 +88,6 @@ void ProxyWebWidgetClient::SetToolTipText(const blink::WebString& text,
                                           blink::WebTextDirection hint) {
   widget_test_client_->SetToolTipText(text, hint);
   base_class_widget_client_->SetToolTipText(text, hint);
-}
-blink::WebScreenInfo ProxyWebWidgetClient::GetScreenInfo() {
-  blink::WebScreenInfo info = base_class_widget_client_->GetScreenInfo();
-  blink::WebScreenInfo test_info = widget_test_client_->GetScreenInfo();
-  if (test_info.orientation_type != blink::kWebScreenOrientationUndefined) {
-    info.orientation_type = test_info.orientation_type;
-    info.orientation_angle = test_info.orientation_angle;
-  }
-  return info;
 }
 bool ProxyWebWidgetClient::RequestPointerLock() {
   return widget_test_client_->RequestPointerLock();
@@ -133,11 +134,11 @@ void ProxyWebWidgetClient::ConvertViewportToWindow(blink::WebRect* rect) {
 void ProxyWebWidgetClient::ConvertWindowToViewport(blink::WebFloatRect* rect) {
   base_class_widget_client_->ConvertWindowToViewport(rect);
 }
-void ProxyWebWidgetClient::StartDragging(blink::WebReferrerPolicy policy,
+void ProxyWebWidgetClient::StartDragging(network::mojom::ReferrerPolicy policy,
                                          const blink::WebDragData& data,
                                          blink::WebDragOperationsMask mask,
                                          const SkBitmap& drag_image,
-                                         const blink::WebPoint& image_offset) {
+                                         const gfx::Point& image_offset) {
   widget_test_client_->StartDragging(policy, data, mask, drag_image,
                                      image_offset);
   // Don't forward this call to |base_class_widget_client_| because we don't
@@ -145,9 +146,15 @@ void ProxyWebWidgetClient::StartDragging(blink::WebReferrerPolicy policy,
 }
 
 WebViewTestProxyBase::WebViewTestProxyBase()
-    : accessibility_controller_(new AccessibilityController(this)),
-      text_input_controller_(new TextInputController(this)),
-      view_test_runner_(new TestRunnerForSpecificView(this)) {
+    : WebWidgetTestProxyBase(/*main_frame_widget=*/true),
+      accessibility_controller_(
+          std::make_unique<AccessibilityController>(this)),
+      text_input_controller_(std::make_unique<TextInputController>(this)),
+      // TODO(danakj): We should collapse WebViewTestProxy and
+      // WebViewTestProxyBase into one class really. They are both
+      // concrete types now.
+      view_test_runner_(std::make_unique<TestRunnerForSpecificView>(
+          static_cast<WebViewTestProxy*>(this))) {
   WebWidgetTestProxyBase::set_web_view_test_proxy_base(this);
 }
 
@@ -181,12 +188,15 @@ void WebViewTestProxy::Initialize(WebTestInterfaces* interfaces,
   // On WebViewTestProxyBase.
   set_delegate(delegate);
 
-  std::unique_ptr<WebWidgetTestClient> web_widget_client =
-      interfaces->CreateWebWidgetTestClient(web_widget_test_proxy_base());
-  view_test_client_ = interfaces->CreateWebViewTestClient(this, nullptr);
-  // This uses the widget_test_client set above on WebWidgetTestProxyBase.
-  proxy_widget_client_ = std::make_unique<ProxyWebWidgetClient>(
-      RenderViewImpl::WidgetClient(), web_widget_client.get());
+  auto widget_client_impl =
+      std::make_unique<WebWidgetTestClient>(web_widget_test_proxy_base());
+  // This passes calls through to the the |test_widget_client| as well as the
+  // production client pulled from RenderViewImpl as needed.
+  widget_client_ = std::make_unique<ProxyWebWidgetClient>(
+      RenderViewImpl::WidgetClient(), widget_client_impl.get(),
+      RenderViewImpl::GetWidget());
+  // This returns the |proxy_widget_client| as the WebWidgetClient.
+  view_test_client_ = std::make_unique<WebViewTestClient>(this);
 
   // On WebWidgetTestProxyBase.
   // It's weird that the WebView has the proxy client, but the
@@ -194,7 +204,7 @@ void WebViewTestProxy::Initialize(WebTestInterfaces* interfaces,
   // WebWidgetTestProxyBase does not itself use the WebWidgetClient, only its
   // subclasses do.
   web_widget_test_proxy_base()->set_widget_test_client(
-      std::move(web_widget_client));
+      std::move(widget_client_impl));
 
   // On WebViewTestProxyBase.
   set_test_interfaces(interfaces->GetTestInterfaces());
@@ -208,12 +218,15 @@ blink::WebView* WebViewTestProxy::CreateView(
     const blink::WebString& frame_name,
     blink::WebNavigationPolicy policy,
     bool suppress_opener,
-    blink::WebSandboxFlags sandbox_flags) {
+    blink::WebSandboxFlags sandbox_flags,
+    const blink::SessionStorageNamespaceId& session_storage_namespace_id) {
   if (!view_test_client_->CreateView(creator, request, features, frame_name,
-                                     policy, suppress_opener, sandbox_flags))
+                                     policy, suppress_opener, sandbox_flags,
+                                     session_storage_namespace_id))
     return nullptr;
   return RenderViewImpl::CreateView(creator, request, features, frame_name,
-                                    policy, suppress_opener, sandbox_flags);
+                                    policy, suppress_opener, sandbox_flags,
+                                    session_storage_namespace_id);
 }
 
 void WebViewTestProxy::PrintPage(blink::WebLocalFrame* frame) {
@@ -229,8 +242,18 @@ void WebViewTestProxy::DidFocus(blink::WebLocalFrame* calling_frame) {
   RenderViewImpl::DidFocus(calling_frame);
 }
 
+blink::WebScreenInfo WebViewTestProxy::GetScreenInfo() {
+  blink::WebScreenInfo info = RenderViewImpl::GetScreenInfo();
+  blink::WebScreenInfo test_info = view_test_client_->GetScreenInfo();
+  if (test_info.orientation_type != blink::kWebScreenOrientationUndefined) {
+    info.orientation_type = test_info.orientation_type;
+    info.orientation_angle = test_info.orientation_angle;
+  }
+  return info;
+}
+
 blink::WebWidgetClient* WebViewTestProxy::WidgetClient() {
-  return proxy_widget_client_.get();
+  return widget_client_.get();
 }
 
 WebViewTestProxy::~WebViewTestProxy() = default;

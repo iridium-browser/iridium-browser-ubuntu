@@ -11,10 +11,10 @@
 
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/retain_ptr.h"
-#include "core/fxge/dib/cfx_dibbase.h"
 #include "core/fxge/fx_dib.h"
 #include "xfa/fxfa/fxfa_basic.h"
 
+class CFXJSE_Value;
 class CXFA_FFDoc;
 class CXFA_FFPageView;
 class CXFA_FFWidget;
@@ -263,12 +263,11 @@ class IXFA_DocEnvironment {
   virtual bool Submit(CXFA_FFDoc* hDoc, CXFA_Submit* submit) = 0;
 #endif  // PDF_XFA_ELEMENT_SUBMIT_ENABLED
 
-  virtual bool GetPropertyFromNonXFAGlobalObject(
-      CXFA_FFDoc* hDoc,
-      const ByteStringView& szPropName,
-      CFXJSE_Value* pValue) = 0;
+  virtual bool GetPropertyFromNonXFAGlobalObject(CXFA_FFDoc* hDoc,
+                                                 ByteStringView szPropName,
+                                                 CFXJSE_Value* pValue) = 0;
   virtual bool SetPropertyInNonXFAGlobalObject(CXFA_FFDoc* hDoc,
-                                               const ByteStringView& szPropName,
+                                               ByteStringView szPropName,
                                                CFXJSE_Value* pValue) = 0;
   virtual RetainPtr<IFX_SeekableReadStream> OpenLinkedFile(
       CXFA_FFDoc* hDoc,

@@ -28,8 +28,7 @@ class BlameContext;
 namespace sequence_manager {
 
 namespace internal {
-struct AssociatedThreadId;
-class GracefulQueueShutdownHelper;
+class AssociatedThreadId;
 class SequenceManagerImpl;
 class TaskQueueImpl;
 }  // namespace internal
@@ -69,7 +68,7 @@ class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
 
   // TODO(scheduler-dev): Could we define a more clear list of priorities?
   // See https://crbug.com/847858.
-  enum QueuePriority {
+  enum QueuePriority : uint8_t {
     // Queues with control priority will run before any other queue, and will
     // explicitly starve other queues. Typically this should only be used for
     // private queues which perform control operations.
@@ -101,11 +100,7 @@ class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
 
   // Options for constructing a TaskQueue.
   struct Spec {
-    explicit Spec(const char* name)
-        : name(name),
-          should_monitor_quiescence(false),
-          time_domain(nullptr),
-          should_notify_observers(true) {}
+    explicit Spec(const char* name) : name(name) {}
 
     Spec SetShouldMonitorQuiescence(bool should_monitor) {
       should_monitor_quiescence = should_monitor;
@@ -117,16 +112,28 @@ class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
       return *this;
     }
 
+    // Delayed fences require Now() to be sampled when posting immediate tasks
+    // which is not free.
+    Spec SetDelayedFencesAllowed(bool allow_delayed_fences) {
+      delayed_fence_allowed = allow_delayed_fences;
+      return *this;
+    }
+
     Spec SetTimeDomain(TimeDomain* domain) {
       time_domain = domain;
       return *this;
     }
 
     const char* name;
-    bool should_monitor_quiescence;
-    TimeDomain* time_domain;
-    bool should_notify_observers;
+    bool should_monitor_quiescence = false;
+    TimeDomain* time_domain = nullptr;
+    bool should_notify_observers = true;
+    bool delayed_fence_allowed = false;
   };
+
+  // TODO(altimin): Make this private after TaskQueue/TaskQueueImpl refactoring.
+  TaskQueue(std::unique_ptr<internal::TaskQueueImpl> impl,
+            const TaskQueue::Spec& spec);
 
   // Information about task execution.
   //
@@ -276,6 +283,10 @@ class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
   // Only one fence can be scheduled at a time. Inserting a new fence
   // will automatically remove the previous one, regardless of fence type.
   void InsertFence(InsertFencePosition position);
+
+  // Delayed fences are only allowed for queues created with
+  // SetDelayedFencesAllowed(true) because this feature implies sampling Now()
+  // (which isn't free) for every PostTask, even those with zero delay.
   void InsertFenceAt(TimeTicks time);
 
   // Removes any previously added fence and unblocks execution of any tasks
@@ -306,8 +317,6 @@ class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
   }
 
  protected:
-  TaskQueue(std::unique_ptr<internal::TaskQueueImpl> impl,
-            const TaskQueue::Spec& spec);
   virtual ~TaskQueue();
 
   internal::TaskQueueImpl* GetTaskQueueImpl() const { return impl_.get(); }
@@ -336,9 +345,6 @@ class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
   std::unique_ptr<internal::TaskQueueImpl> impl_;
 
   const WeakPtr<internal::SequenceManagerImpl> sequence_manager_;
-
-  const scoped_refptr<internal::GracefulQueueShutdownHelper>
-      graceful_queue_shutdown_helper_;
 
   scoped_refptr<internal::AssociatedThreadId> associated_thread_;
   scoped_refptr<SingleThreadTaskRunner> default_task_runner_;

@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/base64.h"
 #include "base/command_line.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
@@ -31,6 +32,8 @@
 #include "components/autofill/core/browser/field_candidates.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/form_field.h"
+#include "components/autofill/core/browser/proto/legacy_proto_bridge.h"
+#include "components/autofill/core/browser/randomized_encoder.h"
 #include "components/autofill/core/browser/rationalization_util.h"
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_constants.h"
@@ -49,6 +52,7 @@
 namespace autofill {
 namespace {
 
+// Version of the client sent to the server.
 const char kClientVersion[] = "6.1.1715.1442/en (GGLL)";
 const char kBillingMode[] = "billing";
 const char kShippingMode[] = "shipping";
@@ -284,10 +288,35 @@ HtmlFieldType FieldTypeFromAutocompleteAttributeValue(
   return HTML_TYPE_UNRECOGNIZED;
 }
 
+// Helper function for explicit conversion between |ButtonTitleType| defined in
+// "button_title_type.h" and "server.proto".
+AutofillUploadContents_ButtonTitle_ButtonTitleType ToServerButtonTitleType(
+    autofill::ButtonTitleType input) {
+  switch (input) {
+    case ButtonTitleType::NONE:
+      return AutofillUploadContents::ButtonTitle::NONE;
+    case ButtonTitleType::BUTTON_ELEMENT_SUBMIT_TYPE:
+      return AutofillUploadContents::ButtonTitle::BUTTON_ELEMENT_SUBMIT_TYPE;
+    case ButtonTitleType::BUTTON_ELEMENT_BUTTON_TYPE:
+      return AutofillUploadContents::ButtonTitle::BUTTON_ELEMENT_BUTTON_TYPE;
+    case ButtonTitleType::INPUT_ELEMENT_SUBMIT_TYPE:
+      return AutofillUploadContents::ButtonTitle::INPUT_ELEMENT_SUBMIT_TYPE;
+    case ButtonTitleType::INPUT_ELEMENT_BUTTON_TYPE:
+      return AutofillUploadContents::ButtonTitle::INPUT_ELEMENT_BUTTON_TYPE;
+    case ButtonTitleType::HYPERLINK:
+      return AutofillUploadContents::ButtonTitle::HYPERLINK;
+    case ButtonTitleType::DIV:
+      return AutofillUploadContents::ButtonTitle::DIV;
+    case ButtonTitleType::SPAN:
+      return AutofillUploadContents::ButtonTitle::SPAN;
+  }
+  NOTREACHED();
+  return AutofillUploadContents::ButtonTitle::NONE;
+}
+
 std::ostream& operator<<(
     std::ostream& out,
     const autofill::AutofillQueryResponseContents& response) {
-  out << "upload_required: " << response.upload_required();
   for (const auto& field : response.field()) {
     out << "\nautofill_type: " << field.overall_type_prediction();
   }
@@ -333,11 +362,113 @@ void EncodePasswordAttributesVote(
   upload->set_password_length(password_length_vote);
 }
 
+void EncodeRandomizedValue(const RandomizedEncoder& encoder,
+                           FormSignature form_signature,
+                           FieldSignature field_signature,
+                           base::StringPiece data_type,
+                           base::StringPiece data_value,
+                           AutofillRandomizedValue* output) {
+  DCHECK(output);
+  output->set_encoding_type(encoder.encoding_type());
+  output->set_encoded_bits(
+      encoder.Encode(form_signature, field_signature, data_type, data_value));
+}
+
+void EncodeRandomizedValue(const RandomizedEncoder& encoder,
+                           FormSignature form_signature,
+                           FieldSignature field_signature,
+                           base::StringPiece data_type,
+                           base::StringPiece16 data_value,
+                           AutofillRandomizedValue* output) {
+  EncodeRandomizedValue(encoder, form_signature, field_signature, data_type,
+                        base::UTF16ToUTF8(data_value), output);
+}
+
+void PopulateRandomizedFormMetadata(const RandomizedEncoder& encoder,
+                                    const FormStructure& form,
+                                    AutofillRandomizedFormMetadata* metadata) {
+  const FormSignature form_signature = form.form_signature();
+  constexpr FieldSignature kNullFieldSignature =
+      0;  // Not relevant for form level metadata.
+  EncodeRandomizedValue(encoder, form_signature, kNullFieldSignature,
+                        RandomizedEncoder::FORM_ID, form.id_attribute(),
+                        metadata->mutable_id());
+  EncodeRandomizedValue(encoder, form_signature, kNullFieldSignature,
+                        RandomizedEncoder::FORM_NAME, form.name_attribute(),
+                        metadata->mutable_name());
+}
+
+void PopulateRandomizedFieldMetadata(
+    const RandomizedEncoder& encoder,
+    const FormStructure& form,
+    const AutofillField& field,
+    AutofillRandomizedFieldMetadata* metadata) {
+  const FormSignature form_signature = form.form_signature();
+  const FieldSignature field_signature = field.GetFieldSignature();
+  EncodeRandomizedValue(encoder, form_signature, field_signature,
+                        RandomizedEncoder::FIELD_ID, field.id_attribute,
+                        metadata->mutable_id());
+  EncodeRandomizedValue(encoder, form_signature, field_signature,
+                        RandomizedEncoder::FIELD_NAME, field.name_attribute,
+                        metadata->mutable_name());
+  EncodeRandomizedValue(encoder, form_signature, field_signature,
+                        RandomizedEncoder::FIELD_CONTROL_TYPE,
+                        field.form_control_type, metadata->mutable_type());
+  EncodeRandomizedValue(encoder, form_signature, field_signature,
+                        RandomizedEncoder::FIELD_LABEL, field.label,
+                        metadata->mutable_label());
+  EncodeRandomizedValue(encoder, form_signature, field_signature,
+                        RandomizedEncoder::FIELD_ARIA_LABEL, field.aria_label,
+                        metadata->mutable_aria_label());
+  EncodeRandomizedValue(encoder, form_signature, field_signature,
+                        RandomizedEncoder::FIELD_ARIA_DESCRIPTION,
+                        field.aria_description,
+                        metadata->mutable_aria_description());
+  EncodeRandomizedValue(encoder, form_signature, field_signature,
+                        RandomizedEncoder::FIELD_CSS_CLASS, field.css_classes,
+                        metadata->mutable_css_class());
+  EncodeRandomizedValue(encoder, form_signature, field_signature,
+                        RandomizedEncoder::FIELD_PLACEHOLDER, field.placeholder,
+                        metadata->mutable_placeholder());
+  // TODO(rogerm): Add hash of initial value.
+}
+
+void EncodeFormMetadataForQuery(const FormStructure& form,
+                                AutofillRandomizedFormMetadata* metadata) {
+  DCHECK(metadata);
+  metadata->mutable_id()->set_encoded_bits(
+      base::UTF16ToUTF8(form.id_attribute()));
+  metadata->mutable_name()->set_encoded_bits(
+      base::UTF16ToUTF8(form.name_attribute()));
+}
+
+void EncodeFieldMetadataForQuery(const FormFieldData& field,
+                                 AutofillRandomizedFieldMetadata* metadata) {
+  DCHECK(metadata);
+  metadata->mutable_id()->set_encoded_bits(
+      base::UTF16ToUTF8(field.id_attribute));
+  metadata->mutable_name()->set_encoded_bits(
+      base::UTF16ToUTF8(field.name_attribute));
+  metadata->mutable_type()->set_encoded_bits(field.form_control_type);
+  metadata->mutable_label()->set_encoded_bits(base::UTF16ToUTF8(field.label));
+  metadata->mutable_aria_label()->set_encoded_bits(
+      base::UTF16ToUTF8(field.aria_label));
+  metadata->mutable_aria_description()->set_encoded_bits(
+      base::UTF16ToUTF8(field.aria_description));
+  metadata->mutable_css_class()->set_encoded_bits(
+      base::UTF16ToUTF8(field.css_classes));
+  metadata->mutable_placeholder()->set_encoded_bits(
+      base::UTF16ToUTF8(field.placeholder));
+}
+
 }  // namespace
 
 FormStructure::FormStructure(const FormData& form)
-    : form_name_(form.name),
-      submission_event_(PasswordForm::SubmissionIndicatorEvent::NONE),
+    : id_attribute_(form.id_attribute),
+      name_attribute_(form.name_attribute),
+      form_name_(form.name),
+      button_titles_(form.button_titles),
+      submission_event_(SubmissionIndicatorEvent::NONE),
       source_url_(form.origin),
       target_url_(form.action),
       main_frame_origin_(form.main_frame_origin),
@@ -424,9 +555,7 @@ void FormStructure::DetermineHeuristicTypes() {
         1 << AutofillMetrics::FORM_CONTAINS_UPI_VPA_HINT;
   }
 
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillRationalizeFieldTypePredictions))
-    RationalizeFieldTypePredictions();
+  RationalizeFieldTypePredictions();
 
   AutofillMetrics::LogDetermineHeuristicTypesTiming(
       base::TimeTicks::Now() - determine_heuristic_types_start_time);
@@ -446,15 +575,17 @@ bool FormStructure::EncodeUploadRequest(
   upload->set_autofill_used(form_was_autofilled);
   upload->set_data_present(EncodeFieldTypes(available_field_types));
   upload->set_passwords_revealed(passwords_were_revealed_);
+  upload->set_has_form_tag(is_form_tag_);
+  if (!page_language_.empty() && randomized_encoder_ != nullptr) {
+    upload->set_language(page_language_);
+  }
 
-  auto triggering_event =
-      (submission_event_ != PasswordForm::SubmissionIndicatorEvent::NONE)
-          ? submission_event_
-          : ToSubmissionIndicatorEvent(submission_source_);
+  auto triggering_event = (submission_event_ != SubmissionIndicatorEvent::NONE)
+                              ? submission_event_
+                              : ToSubmissionIndicatorEvent(submission_source_);
 
-  DCHECK_LT(
-      submission_event_,
-      PasswordForm::SubmissionIndicatorEvent::SUBMISSION_INDICATOR_EVENT_COUNT);
+  DCHECK_LT(submission_event_,
+            SubmissionIndicatorEvent::SUBMISSION_INDICATOR_EVENT_COUNT);
   upload->set_submission_event(
       static_cast<AutofillUploadContents_SubmissionIndicatorEvent>(
           triggering_event));
@@ -468,6 +599,11 @@ bool FormStructure::EncodeUploadRequest(
     upload->set_action_signature(StrToHash64Bit(target_url_.host()));
     if (!form_name().empty())
       upload->set_form_name(base::UTF16ToUTF8(form_name()));
+    for (const ButtonTitleInfo& e : button_titles_) {
+      auto* button_title = upload->add_button_title();
+      button_title->set_title(base::UTF16ToUTF8(e.first));
+      button_title->set_type(ToServerButtonTitleType(e.second));
+    }
   }
 
   if (!login_form_signature.empty()) {
@@ -532,6 +668,31 @@ void FormStructure::ParseQueryResponse(
   ProcessQueryResponse(response, forms, form_interactions_ukm_logger);
 }
 
+void FormStructure::ParseApiQueryResponse(
+    base::StringPiece payload,
+    const std::vector<FormStructure*>& forms,
+    AutofillMetrics::FormInteractionsUkmLogger* form_interactions_ukm_logger) {
+  AutofillMetrics::LogServerQueryMetric(
+      AutofillMetrics::QUERY_RESPONSE_RECEIVED);
+
+  std::string decoded_payload;
+  if (!base::Base64Decode(payload, &decoded_payload)) {
+    VLOG(1) << "Could not decode payload from base64 to bytes";
+    return;
+  }
+
+  // Parse the response.
+  AutofillQueryResponse response;
+  if (!response.ParseFromString(decoded_payload))
+    return;
+
+  // TODO(vincb): Make an ostream overloaded function for this.
+  VLOG(1) << "Autofill query response from API was successfully parsed";
+
+  ProcessQueryResponse(CreateLegacyResponseFromApiResponse(response), forms,
+                       form_interactions_ukm_logger);
+}
+
 // static
 void FormStructure::ProcessQueryResponse(
     const AutofillQueryResponseContents& response,
@@ -545,9 +706,6 @@ void FormStructure::ProcessQueryResponse(
   // Copy the field types into the actual form.
   auto current_field = response.field().begin();
   for (FormStructure* form : forms) {
-    form->upload_required_ =
-        response.upload_required() ? UPLOAD_REQUIRED : UPLOAD_NOT_REQUIRED;
-
     bool query_response_has_no_server_data = true;
     for (auto& field : form->fields_) {
       if (form->ShouldSkipField(*field))
@@ -592,14 +750,8 @@ void FormStructure::ProcessQueryResponse(
         !query_response_has_no_server_data);
 
     form->UpdateAutofillCount();
-    if (base::FeatureList::IsEnabled(
-            features::kAutofillRationalizeRepeatedServerPredictions))
-      form->RationalizeRepeatedFields(form_interactions_ukm_logger);
-
-    if (base::FeatureList::IsEnabled(
-            features::kAutofillRationalizeFieldTypePredictions))
-      form->RationalizeFieldTypePredictions();
-
+    form->RationalizeRepeatedFields(form_interactions_ukm_logger);
+    form->RationalizeFieldTypePredictions();
     form->IdentifySections(false);
   }
 
@@ -788,7 +940,8 @@ void FormStructure::RetrieveFromCache(
   UpdateAutofillCount();
 
   // Update form parsed timestamp
-  form_parsed_timestamp_ = cached_form.form_parsed_timestamp_;
+  form_parsed_timestamp_ =
+      std::min(form_parsed_timestamp_, cached_form.form_parsed_timestamp_);
 
   // The form signature should match between query and upload requests to the
   // server. On many websites, form elements are dynamically added, removed, or
@@ -813,6 +966,7 @@ void FormStructure::LogQualityMetrics(
   bool did_autofill_all_possible_fields = true;
   bool did_autofill_some_possible_fields = false;
   bool is_for_credit_card = IsCompleteCreditCardForm();
+  bool has_upi_vpa_field = false;
 
   // Determine the correct suffix for the metric, depending on whether or
   // not a submission was observed.
@@ -823,6 +977,7 @@ void FormStructure::LogQualityMetrics(
   for (size_t i = 0; i < field_count(); ++i) {
     auto* const field = this->field(i);
     if (IsUPIVirtualPaymentAddress(field->value)) {
+      has_upi_vpa_field = true;
       AutofillMetrics::LogUserHappinessMetric(
           AutofillMetrics::USER_DID_ENTER_UPI_VPA, field->Type().group(),
           security_state::SecurityLevel::SECURITY_LEVEL_COUNT);
@@ -887,7 +1042,7 @@ void FormStructure::LogQualityMetrics(
       // dynamically added to the DOM.
       if (!load_time.is_null()) {
         // Submission should always chronologically follow form load.
-        DCHECK(submission_time > load_time);
+        DCHECK_GE(submission_time, load_time);
         base::TimeDelta elapsed = submission_time - load_time;
         if (did_autofill_some_possible_fields)
           AutofillMetrics::LogFormFillDurationFromLoadWithAutofill(elapsed);
@@ -907,8 +1062,8 @@ void FormStructure::LogQualityMetrics(
     }
 
     AutofillMetrics::LogAutofillFormSubmittedState(
-        state, is_for_credit_card, GetFormTypes(), form_parsed_timestamp_,
-        form_signature(), form_interactions_ukm_logger);
+        state, is_for_credit_card, has_upi_vpa_field, GetFormTypes(),
+        form_parsed_timestamp_, form_signature(), form_interactions_ukm_logger);
   }
 }
 
@@ -1574,6 +1729,11 @@ void FormStructure::EncodeFormForQuery(
   DCHECK(!IsMalformed());
 
   query_form->set_signature(form_signature());
+
+  if (is_rich_query_enabled_) {
+    EncodeFormMetadataForQuery(*this, query_form->mutable_form_metadata());
+  }
+
   for (const auto& field : fields_) {
     if (ShouldSkipField(*field))
       continue;
@@ -1581,6 +1741,11 @@ void FormStructure::EncodeFormForQuery(
     AutofillQueryContents::Form::Field* added_field = query_form->add_field();
 
     added_field->set_signature(field->GetFieldSignature());
+
+    if (is_rich_query_enabled_) {
+      EncodeFieldMetadataForQuery(*field,
+                                  added_field->mutable_field_metadata());
+    }
 
     if (IsAutofillFieldMetadataEnabled()) {
       added_field->set_type(field->form_control_type);
@@ -1593,6 +1758,11 @@ void FormStructure::EncodeFormForQuery(
 
 void FormStructure::EncodeFormForUpload(AutofillUploadContents* upload) const {
   DCHECK(!IsMalformed());
+
+  if (randomized_encoder_) {
+    PopulateRandomizedFormMetadata(*randomized_encoder_, *this,
+                                   upload->mutable_randomized_form_metadata());
+  }
 
   for (const auto& field : fields_) {
     // Don't upload checkable fields.
@@ -1635,14 +1805,20 @@ void FormStructure::EncodeFormForUpload(AutofillUploadContents* upload) const {
     if (field->properties_mask)
       added_field->set_properties_mask(field->properties_mask);
 
+    if (randomized_encoder_) {
+      PopulateRandomizedFieldMetadata(
+          *randomized_encoder_, *this, *field,
+          added_field->mutable_randomized_field_metadata());
+    }
+
     if (IsAutofillFieldMetadataEnabled()) {
       added_field->set_type(field->form_control_type);
 
       if (!field->name.empty())
         added_field->set_name(base::UTF16ToUTF8(field->name));
 
-      if (!field->id.empty())
-        added_field->set_id(base::UTF16ToUTF8(field->id));
+      if (!field->id_attribute.empty())
+        added_field->set_id(base::UTF16ToUTF8(field->id_attribute));
 
       if (!field->autocomplete_attribute.empty())
         added_field->set_autocomplete(field->autocomplete_attribute);
@@ -1658,10 +1834,10 @@ bool FormStructure::IsMalformed() const {
     return true;
 
   // Some badly formatted web sites repeat fields - limit number of fields to
-  // 100, which is far larger than any valid form and proto still fits into 2K.
+  // 250, which is far larger than any valid form and proto still fits into 10K.
   // Do not send requests for forms with more than this many fields, as they are
   // near certainly not valid/auto-fillable.
-  const size_t kMaxFieldsOnTheForm = 100;
+  const size_t kMaxFieldsOnTheForm = 250;
   if (field_count() > kMaxFieldsOnTheForm)
     return true;
   return false;
@@ -1849,6 +2025,11 @@ base::string16 FormStructure::GetIdentifierForRefill() const {
     return field(0)->unique_name();
 
   return base::string16();
+}
+
+void FormStructure::set_randomized_encoder(
+    std::unique_ptr<RandomizedEncoder> encoder) {
+  randomized_encoder_ = std::move(encoder);
 }
 
 }  // namespace autofill

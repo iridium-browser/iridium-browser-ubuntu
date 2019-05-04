@@ -11,13 +11,13 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
+#include "content/browser/android/navigation_handle_proxy.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/android/media_metadata_android.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
-#include "content/public/common/media_metadata.h"
 #include "jni/WebContentsObserverProxy_jni.h"
 
 using base::android::AttachCurrentThread;
@@ -130,9 +130,21 @@ void WebContentsObserverProxy::DidStartNavigation(
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jstring> jstring_url(
       ConvertUTF8ToJavaString(env, navigation_handle->GetURL().spec()));
+  NavigationHandleProxy navigation_handle_proxy(navigation_handle);
   Java_WebContentsObserverProxy_didStartNavigation(
       env, java_observer_, jstring_url, navigation_handle->IsInMainFrame(),
-      navigation_handle->IsSameDocument(), navigation_handle->IsErrorPage());
+      navigation_handle->IsSameDocument(), navigation_handle_proxy.JavaThis());
+}
+
+void WebContentsObserverProxy::DidRedirectNavigation(
+    NavigationHandle* navigation_handle) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> jstring_url(
+      ConvertUTF8ToJavaString(env, navigation_handle->GetURL().spec()));
+  NavigationHandleProxy navigation_handle_proxy(navigation_handle);
+  Java_WebContentsObserverProxy_didRedirectNavigation(
+      env, java_observer_, jstring_url, navigation_handle->IsInMainFrame(),
+      navigation_handle_proxy.JavaThis());
 }
 
 void WebContentsObserverProxy::DidFinishNavigation(
@@ -162,6 +174,8 @@ void WebContentsObserverProxy::DidFinishNavigation(
   ScopedJavaLocalRef<jstring> jerror_description =
       ConvertUTF8ToJavaString(env, "");
 
+  // Remove after fixing https://crbug/905461.
+  TRACE_EVENT0("browser", "Java_WebContentsObserverProxy_didFinishNavigation");
   Java_WebContentsObserverProxy_didFinishNavigation(
       env, java_observer_, jstring_url, navigation_handle->IsInMainFrame(),
       navigation_handle->IsErrorPage(), navigation_handle->HasCommitted(),

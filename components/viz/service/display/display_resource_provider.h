@@ -43,6 +43,7 @@ class GLES2Interface;
 namespace viz {
 class ContextProvider;
 class SharedBitmapManager;
+class SkiaOutputSurface;
 
 // This class provides abstractions for receiving and using resources from other
 // modules/threads/processes. It abstracts away GL textures vs GpuMemoryBuffers
@@ -78,22 +79,31 @@ class VIZ_SERVICE_EXPORT DisplayResourceProvider
 
 #if defined(OS_ANDROID)
   // Send an overlay promotion hint to all resources that requested it via
-  // |wants_promotion_hints_set_|.  |promotable_hints| contains all the
-  // resources that should be told that they're promotable.  Others will be told
-  // that they're not promotable right now.
+  // |requestor_set|.  |promotable_hints| contains all the resources that should
+  // be told that they're promotable.  Others will be told that they're not.
+  //
+  // We don't use |wants_promotion_hints_set_| in place of |requestor_set|,
+  // since we might have resources that aren't used for drawing.  Sending a hint
+  // for a resource that wasn't even considered for overlay would be misleading
+  // to the requestor; the resource might be overlayable except that nobody
+  // tried to do it.
   void SendPromotionHints(
-      const OverlayCandidateList::PromotionHintInfoMap& promotion_hints);
+      const OverlayCandidateList::PromotionHintInfoMap& promotion_hints,
+      const ResourceIdSet& requestor_set);
 
   // Indicates if this resource is backed by an Android SurfaceTexture, and thus
   // can't really be promoted to an overlay.
   bool IsBackedBySurfaceTexture(ResourceId id);
 
-  // Indicates if this resource wants to receive promotion hints.
-  bool WantsPromotionHintForTesting(ResourceId id);
-
   // Return the number of resources that request promotion hints.
   size_t CountPromotionHintRequestsForTesting();
 #endif
+
+  // Indicates if this resource wants to receive promotion hints.
+  bool DoesResourceWantPromotionHint(ResourceId id) const;
+
+  // Return true if and only if any resource wants a promotion hint.
+  bool DoAnyResourcesWantPromotionHints() const;
 
   bool IsResourceSoftwareBacked(ResourceId id);
   GLenum GetResourceTextureTarget(ResourceId id);
@@ -176,14 +186,22 @@ class VIZ_SERVICE_EXPORT DisplayResourceProvider
     DISALLOW_COPY_AND_ASSIGN(ScopedReadLockSkImage);
   };
 
-  // Maintains set of lock for external use.
+  // Maintains set of resources locked for external use by SkiaRenderer.
   class VIZ_SERVICE_EXPORT LockSetForExternalUse {
    public:
-    explicit LockSetForExternalUse(DisplayResourceProvider* resource_provider);
+    // There should be at most one instance of this class per
+    // |resource_provider|. Both |resource_provider| and |client| outlive this
+    // class.
+    LockSetForExternalUse(DisplayResourceProvider* resource_provider,
+                          SkiaOutputSurface* client);
     ~LockSetForExternalUse();
 
     // Lock a resource for external use.
     ResourceMetadata LockResource(ResourceId resource_id);
+
+    // Lock a resource and create a SkImage from it by using
+    // Client::CreateImage.
+    sk_sp<SkImage> LockResourceAndCreateSkImage(ResourceId resource_id);
 
     // Unlock all locked resources with a |sync_token|.
     // See UnlockForExternalUse for the detail. All resources must be unlocked
@@ -460,7 +478,10 @@ class VIZ_SERVICE_EXPORT DisplayResourceProvider
 
   ResourceMap resources_;
   ChildMap children_;
-  base::flat_map<ResourceId, sk_sp<SkImage>> resource_sk_image_;
+  base::flat_map<ResourceId, sk_sp<SkImage>> resource_sk_images_;
+  // If set, all |resource_sk_images_| were created with this client.
+  SkiaOutputSurface* external_use_client_ = nullptr;
+
   base::flat_map<int, std::vector<ResourceId>> batched_returning_resources_;
   scoped_refptr<ResourceFence> current_read_lock_fence_;
   // Keep track of whether deleted resources should be batched up or returned

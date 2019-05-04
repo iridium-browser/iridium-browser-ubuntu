@@ -4,7 +4,7 @@
 
 #include "components/autofill_assistant/browser/actions/unsupported_action.h"
 
-#include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -16,11 +16,9 @@ UnsupportedAction::UnsupportedAction(const ActionProto& proto)
 
 UnsupportedAction::~UnsupportedAction() {}
 
-void UnsupportedAction::ProcessAction(ActionDelegate* delegate,
-                                      ProcessActionCallback callback) {
-  processed_action_proto_ = std::make_unique<ProcessedActionProto>();
-  // TODO(crbug.com/806868): Add 'unsupported action' status to the protocol.
-  UpdateProcessedAction(UNKNOWN_ACTION_STATUS);
+void UnsupportedAction::InternalProcessAction(ActionDelegate* delegate,
+                                              ProcessActionCallback callback) {
+  UpdateProcessedAction(UNSUPPORTED_ACTION);
   std::move(callback).Run(std::move(processed_action_proto_));
 }
 

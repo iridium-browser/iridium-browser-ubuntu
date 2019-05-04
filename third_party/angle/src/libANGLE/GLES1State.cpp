@@ -17,14 +17,39 @@ namespace gl
 
 TextureCoordF::TextureCoordF() = default;
 
-TextureCoordF::TextureCoordF(float _s, float _t, float _r, float _q) : s(_s), t(_t), r(_r), q(_q)
-{
-}
+TextureCoordF::TextureCoordF(float _s, float _t, float _r, float _q) : s(_s), t(_t), r(_r), q(_q) {}
 
 bool TextureCoordF::operator==(const TextureCoordF &other) const
 {
     return s == other.s && t == other.t && r == other.r && q == other.q;
 }
+
+MaterialParameters::MaterialParameters() = default;
+
+LightModelParameters::LightModelParameters() = default;
+
+LightParameters::LightParameters() = default;
+
+LightParameters::LightParameters(const LightParameters &other) = default;
+
+FogParameters::FogParameters() = default;
+
+TextureEnvironmentParameters::TextureEnvironmentParameters() = default;
+
+TextureEnvironmentParameters::TextureEnvironmentParameters(
+    const TextureEnvironmentParameters &other) = default;
+
+PointParameters::PointParameters() = default;
+
+PointParameters::PointParameters(const PointParameters &other) = default;
+
+ClipPlaneParameters::ClipPlaneParameters() = default;
+
+ClipPlaneParameters::ClipPlaneParameters(bool enabled, const angle::Vector4 &equation)
+    : enabled(enabled), equation(equation)
+{}
+
+ClipPlaneParameters::ClipPlaneParameters(const ClipPlaneParameters &other) = default;
 
 GLES1State::GLES1State()
     : mGLState(nullptr),
@@ -55,8 +80,7 @@ GLES1State::GLES1State()
       mPointSmoothHint(HintSetting::DontCare),
       mPerspectiveCorrectionHint(HintSetting::DontCare),
       mFogHint(HintSetting::DontCare)
-{
-}
+{}
 
 GLES1State::~GLES1State() = default;
 
@@ -138,7 +162,8 @@ void GLES1State::initialize(const Context *context, const State *state)
 
     mLogicOp = LogicalOperation::Copy;
 
-    mClipPlanes.resize(caps.maxClipPlanes, {false, angle::Vector4(0.0f, 0.0f, 0.0f, 0.0f)});
+    mClipPlanes.resize(caps.maxClipPlanes,
+                       ClipPlaneParameters(false, angle::Vector4(0.0f, 0.0f, 0.0f, 0.0f)));
 
     mLineSmoothHint            = HintSetting::DontCare;
     mPointSmoothHint           = HintSetting::DontCare;
@@ -443,7 +468,9 @@ AttributesMask GLES1State::getVertexArraysAttributeMask() const
     AttributesMask attribsMask;
 
     ClientVertexArrayType nonTexcoordArrays[] = {
-        ClientVertexArrayType::Vertex, ClientVertexArrayType::Normal, ClientVertexArrayType::Color,
+        ClientVertexArrayType::Vertex,
+        ClientVertexArrayType::Normal,
+        ClientVertexArrayType::Color,
         ClientVertexArrayType::PointSize,
     };
 

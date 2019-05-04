@@ -23,7 +23,13 @@ class Document;
 class Element;
 class ExceptionState;
 class HTMLElement;
+class HTMLFormElement;
 class QualifiedName;
+
+enum class FormAssociationFlag {
+  kNo,
+  kYes,
+};
 
 class CORE_EXPORT CustomElementDefinition
     : public GarbageCollectedFinalized<CustomElementDefinition>,
@@ -35,7 +41,7 @@ class CORE_EXPORT CustomElementDefinition
 
   virtual ~CustomElementDefinition();
 
-  virtual void Trace(blink::Visitor*);
+  virtual void Trace(Visitor*);
   const char* NameInHeapSnapshot() const override {
     return "CustomElementDefinition";
   }
@@ -61,32 +67,40 @@ class CORE_EXPORT CustomElementDefinition
                              const QualifiedName&,
                              const CreateElementFlags);
 
-  void Upgrade(Element*);
+  void Upgrade(Element&);
 
   virtual bool HasConnectedCallback() const = 0;
   virtual bool HasDisconnectedCallback() const = 0;
   virtual bool HasAdoptedCallback() const = 0;
   bool HasAttributeChangedCallback(const QualifiedName&) const;
   bool HasStyleAttributeChangedCallback() const;
+  virtual bool HasFormAssociatedCallback() const = 0;
+  virtual bool HasFormResetCallback() const = 0;
+  virtual bool HasDisabledStateChangedCallback() const = 0;
 
-  virtual void RunConnectedCallback(Element*) = 0;
-  virtual void RunDisconnectedCallback(Element*) = 0;
-  virtual void RunAdoptedCallback(Element*,
-                                  Document* old_owner,
-                                  Document* new_owner) = 0;
-  virtual void RunAttributeChangedCallback(Element*,
+  virtual void RunConnectedCallback(Element&) = 0;
+  virtual void RunDisconnectedCallback(Element&) = 0;
+  virtual void RunAdoptedCallback(Element&,
+                                  Document& old_owner,
+                                  Document& new_owner) = 0;
+  virtual void RunAttributeChangedCallback(Element&,
                                            const QualifiedName&,
                                            const AtomicString& old_value,
                                            const AtomicString& new_value) = 0;
+  virtual void RunFormAssociatedCallback(Element& element,
+                                         HTMLFormElement* nullable_form) = 0;
+  virtual void RunFormResetCallback(Element& element) = 0;
+  virtual void RunDisabledStateChangedCallback(Element& element,
+                                               bool is_disabled) = 0;
 
-  void EnqueueUpgradeReaction(Element*,
+  void EnqueueUpgradeReaction(Element&,
                               bool upgrade_invisible_elements = false);
-  void EnqueueConnectedCallback(Element*);
-  void EnqueueDisconnectedCallback(Element*);
-  void EnqueueAdoptedCallback(Element*,
-                              Document* old_owner,
-                              Document* new_owner);
-  void EnqueueAttributeChangedCallback(Element*,
+  void EnqueueConnectedCallback(Element&);
+  void EnqueueDisconnectedCallback(Element&);
+  void EnqueueAdoptedCallback(Element&,
+                              Document& old_owner,
+                              Document& new_owner);
+  void EnqueueAttributeChangedCallback(Element&,
                                        const QualifiedName&,
                                        const AtomicString& old_value,
                                        const AtomicString& new_value);
@@ -103,13 +117,15 @@ class CORE_EXPORT CustomElementDefinition
   bool HasDefaultStyleSheets() const {
     return !default_style_sheets_.IsEmpty();
   }
+  bool DisableInternals() const { return disable_internals_; }
+  bool IsFormAssociated() const { return is_form_associated_; }
 
   class CORE_EXPORT ConstructionStackScope final {
     STACK_ALLOCATED();
     DISALLOW_COPY_AND_ASSIGN(ConstructionStackScope);
 
    public:
-    ConstructionStackScope(CustomElementDefinition*, Element*);
+    ConstructionStackScope(CustomElementDefinition&, Element&);
     ~ConstructionStackScope();
 
    private:
@@ -122,11 +138,13 @@ class CORE_EXPORT CustomElementDefinition
   CustomElementDefinition(const CustomElementDescriptor&);
 
   CustomElementDefinition(const CustomElementDescriptor&,
-                          const HashSet<AtomicString>& observed_attributes);
+                          const HashSet<AtomicString>& observed_attributes,
+                          const Vector<String>& disabled_features,
+                          FormAssociationFlag form_association_flag);
 
   void AddDefaultStylesTo(Element&);
 
-  virtual bool RunConstructor(Element*) = 0;
+  virtual bool RunConstructor(Element&) = 0;
 
   static void CheckConstructorResult(Element*,
                                      Document&,
@@ -139,10 +157,12 @@ class CORE_EXPORT CustomElementDefinition
   HashSet<AtomicString> observed_attributes_;
   bool has_style_attribute_changed_callback_;
   bool added_default_style_sheet_ = false;
+  bool disable_internals_ = false;
+  bool is_form_associated_ = false;
 
   HeapVector<Member<CSSStyleSheet>> default_style_sheets_;
 
-  void EnqueueAttributeChangedCallbackForAllAttributes(Element*);
+  void EnqueueAttributeChangedCallbackForAllAttributes(Element&);
 
   DISALLOW_COPY_AND_ASSIGN(CustomElementDefinition);
 };

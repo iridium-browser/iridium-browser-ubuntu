@@ -12,6 +12,7 @@
 
 #include <string>
 
+#include "absl/strings/match.h"
 #include "api/audio_codecs/audio_decoder_factory_template.h"
 #include "api/audio_codecs/audio_encoder_factory_template.h"
 #include "api/audio_codecs/ilbc/audio_decoder_ilbc.h"
@@ -22,9 +23,9 @@
 #include "api/audio_codecs/opus/audio_encoder_opus.h"
 #include "modules/audio_coding/codecs/cng/audio_encoder_cng.h"
 #include "modules/audio_coding/test/PCMFile.h"
-#include "modules/audio_coding/test/utility.h"
 #include "rtc_base/strings/string_builder.h"
-#include "test/testsupport/fileutils.h"
+#include "test/gtest.h"
+#include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 
@@ -81,20 +82,21 @@ bool TestVadDtx::RegisterCodec(const SdpAudioFormat& codec_format,
   auto encoder = encoder_factory_->MakeAudioEncoder(payload_type, codec_format,
                                                     absl::nullopt);
   if (vad_mode.has_value() &&
-      STR_CASE_CMP(codec_format.name.c_str(), "opus") != 0) {
-    AudioEncoderCng::Config config;
+      !absl::EqualsIgnoreCase(codec_format.name, "opus")) {
+    AudioEncoderCngConfig config;
     config.speech_encoder = std::move(encoder);
     config.num_channels = 1;
     config.payload_type = cn_payload_type;
     config.vad_mode = vad_mode.value();
-    encoder = absl::make_unique<AudioEncoderCng>(std::move(config));
+    encoder = CreateComfortNoiseEncoder(std::move(config));
     added_comfort_noise = true;
   }
   channel_->SetIsStereo(encoder->NumChannels() > 1);
   acm_send_->SetEncoder(std::move(encoder));
 
-  EXPECT_EQ(true,
-            acm_receive_->RegisterReceiveCodec(payload_type, codec_format));
+  std::map<int, SdpAudioFormat> receive_codecs = {{payload_type, codec_format}};
+  acm_receive_->SetReceiveCodecs(receive_codecs);
+
   return added_comfort_noise;
 }
 

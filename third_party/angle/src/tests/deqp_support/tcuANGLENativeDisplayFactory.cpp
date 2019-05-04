@@ -25,13 +25,13 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
-#include "OSPixmap.h"
-#include "OSWindow.h"
 #include "deClock.h"
 #include "deMemory.h"
 #include "egluDefs.hpp"
 #include "eglwLibrary.hpp"
 #include "tcuTexture.hpp"
+#include "util/OSPixmap.h"
+#include "util/OSWindow.h"
 
 // clang-format off
 #if (DE_OS == DE_OS_WIN32)
@@ -174,8 +174,7 @@ ANGLENativeDisplay::ANGLENativeDisplay(std::vector<EGLAttrib> attribs)
       mDeviceContext(EGL_DEFAULT_DISPLAY),
       mLibrary(ANGLE_EGL_LIBRARY_FULL_NAME),
       mPlatformAttributes(std::move(attribs))
-{
-}
+{}
 
 // NativePixmap
 
@@ -207,8 +206,7 @@ eglw::EGLNativePixmapType NativePixmap::getLegacyNative()
 
 NativePixmapFactory::NativePixmapFactory()
     : eglu::NativePixmapFactory("bitmap", "ANGLE Bitmap", kBitmapCapabilities)
-{
-}
+{}
 
 eglu::NativePixmap *NativePixmapFactory::createPixmap(eglu::NativeDisplay *nativeDisplay,
                                                       eglw::EGLDisplay display,
@@ -251,8 +249,7 @@ eglu::NativePixmap *NativePixmapFactory::createPixmap(eglu::NativeDisplay *nativ
 
 NativeWindowFactory::NativeWindowFactory(EventState *eventState)
     : eglu::NativeWindowFactory("window", "ANGLE Window", kWindowCapabilities), mEvents(eventState)
-{
-}
+{}
 
 eglu::NativeWindow *NativeWindowFactory::createWindow(eglu::NativeDisplay *nativeDisplay,
                                                       const eglu::WindowParams &params) const
@@ -275,7 +272,7 @@ eglu::NativeWindow *NativeWindowFactory::createWindow(eglu::NativeDisplay *nativ
 NativeWindow::NativeWindow(ANGLENativeDisplay *nativeDisplay,
                            const eglu::WindowParams &params,
                            EventState *eventState)
-    : eglu::NativeWindow(kWindowCapabilities), mWindow(CreateOSWindow()), mEvents(eventState)
+    : eglu::NativeWindow(kWindowCapabilities), mWindow(OSWindow::New()), mEvents(eventState)
 {
     bool initialized = mWindow->initialize(
         "dEQP ANGLE Tests",
@@ -308,7 +305,7 @@ void NativeWindow::setVisibility(eglu::WindowParams::Visibility visibility)
 
 NativeWindow::~NativeWindow()
 {
-    delete mWindow;
+    OSWindow::Delete(&mWindow);
 }
 
 eglw::EGLNativeWindowType NativeWindow::getLegacyNative()
@@ -351,7 +348,7 @@ void NativeWindow::readScreenPixels(tcu::TextureLevel *dst) const
     }
 }
 
-}  // anonymous
+}  // namespace
 
 ANGLENativeDisplayFactory::ANGLENativeDisplayFactory(
     const std::string &name,
@@ -378,4 +375,4 @@ eglu::NativeDisplay *ANGLENativeDisplayFactory::createDisplay(
     return new ANGLENativeDisplay(mPlatformAttributes);
 }
 
-}  // tcu
+}  // namespace tcu

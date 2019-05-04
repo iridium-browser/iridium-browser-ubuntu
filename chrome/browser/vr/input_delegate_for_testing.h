@@ -8,6 +8,7 @@
 #include <queue>
 
 #include "base/macros.h"
+#include "chrome/browser/vr/gesture_detector.h"
 #include "chrome/browser/vr/input_delegate.h"
 #include "chrome/browser/vr/model/controller_model.h"
 
@@ -37,9 +38,13 @@ class InputDelegateForTesting : public InputDelegate {
   void OnPause() override;
 
  private:
+  ControllerModel GetMostRecentModel();
+
   UiInterface* ui_;
   std::queue<ControllerModel> controller_model_queue_;
   ControllerModel cached_controller_model_;
+  ControllerModel previous_controller_model_;
+  std::unique_ptr<GestureDetector> gesture_detector_;
 
   DISALLOW_COPY_AND_ASSIGN(InputDelegateForTesting);
 };

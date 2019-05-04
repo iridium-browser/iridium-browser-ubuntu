@@ -185,9 +185,6 @@ class ImmersiveFullscreenControllerTest : public AshTestBase {
     controller_->Init(delegate_.get(), widget_, top_container_);
     ImmersiveFullscreenControllerTestApi(controller_.get()).SetupForTest();
 
-    // Explicitly enable the app window dragging feature for the tests.
-    scoped_feature_list_.InitAndEnableFeature(features::kDragAppsInTabletMode);
-
     // The mouse is moved so that it is not over |top_container_| by
     // AshTestBase.
   }
@@ -370,6 +367,8 @@ TEST_F(ImmersiveFullscreenControllerTest, RevealedLock) {
 
 // Test mouse event processing for top-of-screen reveal triggering.
 TEST_F(ImmersiveFullscreenControllerTest, OnMouseEvent) {
+  // Create 2nd display for off screen test.
+  UpdateDisplay("800x600, 800x600");
   // Set up initial state.
   SetEnabled(true);
   ASSERT_TRUE(controller()->IsEnabled());

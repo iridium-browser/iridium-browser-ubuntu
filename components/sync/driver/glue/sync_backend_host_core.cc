@@ -18,6 +18,7 @@
 #include "components/invalidation/public/object_id_invalidation_map.h"
 #include "components/sync/base/get_session_name.h"
 #include "components/sync/base/invalidation_adapter.h"
+#include "components/sync/base/sync_base_switches.h"
 #include "components/sync/device_info/local_device_info_provider_impl.h"
 #include "components/sync/engine/cycle/commit_counters.h"
 #include "components/sync/engine/cycle/status_counters.h"
@@ -30,6 +31,7 @@
 #include "components/sync/engine/sync_manager.h"
 #include "components/sync/engine/sync_manager_factory.h"
 #include "components/sync/syncable/directory.h"
+#include "components/sync/syncable/user_share.h"
 
 // Helper macros to log with the syncer thread name; useful when there
 // are multiple syncers involved.
@@ -49,6 +51,18 @@ namespace {
 void BindFetcherToDataTracker(net::URLFetcher* fetcher) {
   data_use_measurement::DataUseUserData::AttachToFetcher(
       fetcher, data_use_measurement::DataUseUserData::SYNC);
+}
+
+void RecordPerModelTypeInvalidation(int model_type, bool is_grouped) {
+  UMA_HISTOGRAM_ENUMERATION("Sync.InvalidationPerModelType", model_type,
+                            static_cast<int>(syncer::MODEL_TYPE_COUNT));
+  if (!is_grouped) {
+    // When recording metrics it's important to distinguish between
+    // many/one case, since "many" aka grouped case is only common in
+    // the deprecated implementation.
+    UMA_HISTOGRAM_ENUMERATION("Sync.NonGroupedInvalidation", model_type,
+                              static_cast<int>(syncer::MODEL_TYPE_COUNT));
+  }
 }
 
 }  // namespace
@@ -115,9 +129,11 @@ void SyncBackendHostCore::OnInitializationComplete(
   // the initializing downloading control types or initializing the encryption
   // handler in order to receive notifications triggered during encryption
   // startup.
-  DCHECK(encryption_observer_proxy_);
-  sync_manager_->GetEncryptionHandler()->AddObserver(
-      encryption_observer_proxy_.get());
+  DCHECK(!encryption_observer_proxies_.empty());
+  for (const std::unique_ptr<SyncEncryptionHandler::Observer>& proxy_observer :
+       encryption_observer_proxies_) {
+    sync_manager_->GetEncryptionHandler()->AddObserver(proxy_observer.get());
+  }
 
   // Sync manager initialization is complete, so we can schedule recurring
   // SaveChanges.
@@ -167,8 +183,7 @@ void SyncBackendHostCore::OnInitializationComplete(
   sync_manager_->ConfigureSyncer(
       reason, new_control_types, SyncManager::SyncFeatureState::INITIALIZING,
       base::Bind(&SyncBackendHostCore::DoInitialProcessControlTypes,
-                 weak_ptr_factory_.GetWeakPtr()),
-      base::Closure());
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void SyncBackendHostCore::OnConnectionStatusChange(ConnectionStatus status) {
@@ -249,9 +264,8 @@ void SyncBackendHostCore::DoOnIncomingInvalidation(
       DLOG(WARNING) << "Notification has invalid id: "
                     << ObjectIdToString(object_id);
     } else {
-      UMA_HISTOGRAM_ENUMERATION("Sync.InvalidationPerModelType",
-                                ModelTypeToHistogramInt(type),
-                                static_cast<int>(MODEL_TYPE_COUNT));
+      bool is_grouped = (ids.size() != 1);
+      RecordPerModelTypeInvalidation(ModelTypeToHistogramInt(type), is_grouped);
       SingleObjectInvalidationSet invalidation_set =
           invalidation_map.ForObject(object_id);
       for (Invalidation invalidation : invalidation_set) {
@@ -264,6 +278,11 @@ void SyncBackendHostCore::DoOnIncomingInvalidation(
                    << invalidation.version() << ", last seen version was "
                    << last_invalidation->second;
           continue;
+        }
+        if (!is_grouped && !invalidation.is_unknown_version()) {
+          UMA_HISTOGRAM_ENUMERATION("Sync.NonGroupedInvalidationKnownVersion",
+                                    ModelTypeToHistogramInt(type),
+                                    static_cast<int>(MODEL_TYPE_COUNT));
         }
         std::unique_ptr<InvalidationInterface> inv_adapter(
             new InvalidationAdapter(invalidation));
@@ -300,9 +319,9 @@ void SyncBackendHostCore::DoInitialize(SyncEngine::InitParams params) {
   DCHECK(params.registrar);
   registrar_ = std::move(params.registrar);
 
-  DCHECK(!encryption_observer_proxy_);
-  DCHECK(params.encryption_observer_proxy);
-  encryption_observer_proxy_ = std::move(params.encryption_observer_proxy);
+  DCHECK(encryption_observer_proxies_.empty());
+  DCHECK(!params.encryption_observer_proxies.empty());
+  encryption_observer_proxies_ = std::move(params.encryption_observer_proxies);
 
   sync_manager_ = params.sync_manager_factory->CreateSyncManager(name_);
   sync_manager_->AddObserver(this);
@@ -370,11 +389,9 @@ void SyncBackendHostCore::DoStartSyncing(base::Time last_poll_time) {
 }
 
 void SyncBackendHostCore::DoSetEncryptionPassphrase(
-    const std::string& passphrase,
-    bool is_explicit) {
+    const std::string& passphrase) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  sync_manager_->GetEncryptionHandler()->SetEncryptionPassphrase(passphrase,
-                                                                 is_explicit);
+  sync_manager_->GetEncryptionHandler()->SetEncryptionPassphrase(passphrase);
 }
 
 void SyncBackendHostCore::DoInitialProcessControlTypes() {
@@ -389,7 +406,8 @@ void SyncBackendHostCore::DoInitialProcessControlTypes() {
   // which is called at the end of every sync cycle.
   // TODO(zea): eventually add an experiment handler and initialize it here.
 
-  if (!sync_manager_->GetUserShare()) {  // Null in some tests.
+  const UserShare* user_share = sync_manager_->GetUserShare();
+  if (!user_share) {  // Null in some tests.
     DVLOG(1) << "Skipping initialization of DeviceInfo";
     host_.Call(FROM_HERE,
                &SyncBackendHostImpl::HandleInitializationFailureOnFrontendLoop);
@@ -403,12 +421,15 @@ void SyncBackendHostCore::DoInitialProcessControlTypes() {
     return;
   }
 
+  DCHECK_EQ(user_share->directory->cache_guid(), sync_manager_->cache_guid());
   host_.Call(FROM_HERE,
              &SyncBackendHostImpl::HandleInitializationSuccessOnFrontendLoop,
              registrar_->GetLastConfiguredTypes(), js_backend_,
              debug_info_listener_,
              base::Passed(sync_manager_->GetModelTypeConnectorProxy()),
-             sync_manager_->cache_guid(), GetSessionNameBlocking());
+             sync_manager_->cache_guid(), GetSessionNameBlocking(),
+             user_share->directory->store_birthday(),
+             user_share->directory->bag_of_chips());
 
   js_backend_.Reset();
   debug_info_listener_.Reset();
@@ -484,22 +505,18 @@ void SyncBackendHostCore::DoConfigureSyncer(
     ModelTypeConfigurer::ConfigureParams params) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!params.ready_task.is_null());
-  DCHECK(!params.retry_callback.is_null());
 
   registrar_->ConfigureDataTypes(params.enabled_types, params.disabled_types);
 
   base::Closure chained_ready_task(base::Bind(
       &SyncBackendHostCore::DoFinishConfigureDataTypes,
       weak_ptr_factory_.GetWeakPtr(), params.to_download, params.ready_task));
-  base::Closure chained_retry_task(
-      base::Bind(&SyncBackendHostCore::DoRetryConfiguration,
-                 weak_ptr_factory_.GetWeakPtr(), params.retry_callback));
 
   sync_manager_->ConfigureSyncer(params.reason, params.to_download,
                                  params.is_sync_feature_enabled
                                      ? SyncManager::SyncFeatureState::ON
                                      : SyncManager::SyncFeatureState::OFF,
-                                 chained_ready_task, chained_retry_task);
+                                 chained_ready_task);
 }
 
 void SyncBackendHostCore::DoFinishConfigureDataTypes(
@@ -521,13 +538,6 @@ void SyncBackendHostCore::DoFinishConfigureDataTypes(
              &SyncBackendHostImpl::FinishConfigureDataTypesOnFrontendLoop,
              enabled_types, succeeded_configuration_types,
              failed_configuration_types, ready_task);
-}
-
-void SyncBackendHostCore::DoRetryConfiguration(
-    const base::Closure& retry_callback) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  host_.Call(FROM_HERE, &SyncBackendHostImpl::RetryConfigurationOnFrontendLoop,
-             retry_callback);
 }
 
 void SyncBackendHostCore::SendBufferedProtocolEventsAndEnableForwarding() {
@@ -611,6 +621,16 @@ void SyncBackendHostCore::DoOnCookieJarChanged(bool account_mismatch,
                &SyncBackendHostImpl::OnCookieJarChangedDoneOnFrontendLoop,
                callback);
   }
+}
+
+void SyncBackendHostCore::DoOnInvalidatorClientIdChange(
+    const std::string& client_id) {
+  if (base::FeatureList::IsEnabled(switches::kSyncE2ELatencyMeasurement)) {
+    // Don't populate the ID, if client participates in latency measurement
+    // experiment.
+    return;
+  }
+  sync_manager_->UpdateInvalidationClientId(client_id);
 }
 
 bool SyncBackendHostCore::HasUnsyncedItemsForTest() const {

@@ -21,8 +21,8 @@
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/geometry/length.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
-#include "third_party/blink/renderer/platform/length.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
@@ -392,7 +392,7 @@ void LazyLoadFrameObserver::RecordInitialDeferralAction(
     was_recorded_as_deferred_ = true;
 }
 
-void LazyLoadFrameObserver::Trace(blink::Visitor* visitor) {
+void LazyLoadFrameObserver::Trace(Visitor* visitor) {
   visitor->Trace(element_);
   visitor->Trace(lazy_load_intersection_observer_);
   visitor->Trace(visibility_metrics_observer_);

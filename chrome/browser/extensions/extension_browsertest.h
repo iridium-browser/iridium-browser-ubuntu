@@ -15,6 +15,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/extensions/chrome_extension_test_notification_observer.h"
 #include "chrome/browser/extensions/install_verifier.h"
+#include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -132,12 +133,14 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest {
 
   // Launches |extension| as a window and returns the browser.
   Browser* LaunchAppBrowser(const Extension* extension);
+  // Launches |extension| as a tab and returns the browser.
+  Browser* LaunchBrowserForAppInTab(const Extension* extension);
 
   // Pack the extension in |dir_path| into a crx file and return its path.
   // Return an empty FilePath if there were errors.
-  base::FilePath PackExtension(const base::FilePath& dir_path,
-                               ExtensionCreator::RunFlags extra_run_flags =
-                                   ExtensionCreator::kNoRunFlags);
+  base::FilePath PackExtension(
+      const base::FilePath& dir_path,
+      int extra_run_flags = ExtensionCreator::kNoRunFlags);
 
   // Pack the extension in |dir_path| into a crx file at |crx_path|, using the
   // key |pem_path|. If |pem_path| does not exist, create a new key at
@@ -148,8 +151,7 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest {
       const base::FilePath& crx_path,
       const base::FilePath& pem_path,
       const base::FilePath& pem_out_path,
-      ExtensionCreator::RunFlags extra_run_flags =
-          ExtensionCreator::kNoRunFlags);
+      int extra_run_flags = ExtensionCreator::kNoRunFlags);
 
   // |expected_change| indicates how many extensions should be installed (or
   // disabled, if negative).
@@ -416,6 +418,8 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest {
   // Conditionally disable install verification.
   std::unique_ptr<ScopedInstallVerifierBypassForTest>
       ignore_install_verification_;
+
+  ExtensionUpdater::ScopedSkipScheduledCheckForTest skip_scheduled_check_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionBrowserTest);
 };

@@ -20,35 +20,37 @@ FileSystemDirectoryHandle::FileSystemDirectoryHandle(
 ScriptPromise FileSystemDirectoryHandle::getFile(
     ScriptState* script_state,
     const String& name,
-    const FileSystemGetFileOptions& options) {
-  FileSystemFlags flags;
-  flags.setCreateFlag(options.create());
+    const FileSystemGetFileOptions* options) {
+  FileSystemFlags* flags = FileSystemFlags::Create();
+  flags->setCreateFlag(options->create());
   auto* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise result = resolver->Promise();
-  filesystem()->GetFile(this, name, flags,
-                        new EntryCallbacks::OnDidGetEntryPromiseImpl(resolver),
-                        new PromiseErrorCallback(resolver));
+  filesystem()->GetFile(
+      this, name, flags,
+      MakeGarbageCollected<EntryCallbacks::OnDidGetEntryPromiseImpl>(resolver),
+      MakeGarbageCollected<PromiseErrorCallback>(resolver));
   return result;
 }
 
 ScriptPromise FileSystemDirectoryHandle::getDirectory(
     ScriptState* script_state,
     const String& name,
-    const FileSystemGetDirectoryOptions& options) {
-  FileSystemFlags flags;
-  flags.setCreateFlag(options.create());
+    const FileSystemGetDirectoryOptions* options) {
+  FileSystemFlags* flags = FileSystemFlags::Create();
+  flags->setCreateFlag(options->create());
   auto* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise result = resolver->Promise();
   filesystem()->GetDirectory(
-      this, name, flags, new EntryCallbacks::OnDidGetEntryPromiseImpl(resolver),
-      new PromiseErrorCallback(resolver));
+      this, name, flags,
+      MakeGarbageCollected<EntryCallbacks::OnDidGetEntryPromiseImpl>(resolver),
+      MakeGarbageCollected<PromiseErrorCallback>(resolver));
   return result;
 }
 
 // static
 ScriptPromise FileSystemDirectoryHandle::getSystemDirectory(
     ScriptState* script_state,
-    const GetSystemDirectoryOptions& options) {
+    const GetSystemDirectoryOptions* options) {
   auto* context = ExecutionContext::From(script_state);
 
   auto* resolver = ScriptPromiseResolver::Create(script_state);
@@ -57,8 +59,9 @@ ScriptPromise FileSystemDirectoryHandle::getSystemDirectory(
   LocalFileSystem::From(*context)->RequestFileSystem(
       context, mojom::blink::FileSystemType::kTemporary, /*size=*/0,
       FileSystemCallbacks::Create(
-          new FileSystemCallbacks::OnDidOpenFileSystemPromiseImpl(resolver),
-          new PromiseErrorCallback(resolver), context,
+          MakeGarbageCollected<
+              FileSystemCallbacks::OnDidOpenFileSystemPromiseImpl>(resolver),
+          MakeGarbageCollected<PromiseErrorCallback>(resolver), context,
           mojom::blink::FileSystemType::kTemporary),
       LocalFileSystem::kAsynchronous);
   return result;
@@ -73,7 +76,8 @@ void ReturnDataFunction(const v8::FunctionCallbackInfo<v8::Value>& info) {
 }  // namespace
 
 ScriptValue FileSystemDirectoryHandle::getEntries(ScriptState* script_state) {
-  auto* iterator = new FileSystemDirectoryIterator(filesystem(), fullPath());
+  auto* iterator = MakeGarbageCollected<FileSystemDirectoryIterator>(
+      filesystem(), fullPath());
   auto* isolate = script_state->GetIsolate();
   auto context = script_state->GetContext();
   v8::Local<v8::Object> result = v8::Object::New(isolate);
@@ -93,8 +97,9 @@ ScriptPromise FileSystemDirectoryHandle::removeRecursively(
   auto* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise result = resolver->Promise();
   filesystem()->RemoveRecursively(
-      this, new VoidCallbacks::OnDidSucceedPromiseImpl(resolver),
-      new PromiseErrorCallback(resolver));
+      this,
+      MakeGarbageCollected<VoidCallbacks::OnDidSucceedPromiseImpl>(resolver),
+      MakeGarbageCollected<PromiseErrorCallback>(resolver));
   return result;
 }
 

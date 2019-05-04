@@ -11,6 +11,7 @@ import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.compositor.TitleCache;
+import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
 import org.chromium.chrome.browser.compositor.layouts.components.VirtualView;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
@@ -25,7 +26,7 @@ import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
+import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.browser.toolbar.ToolbarManager;
@@ -188,11 +189,14 @@ public class LayoutManagerChrome extends LayoutManager implements OverviewModeBe
 
         Layout layoutBeingShown = getActiveLayout();
 
-        // Check if a layout is showing that should hide the contextual search bar.
-        if (mContextualSearchDelegate != null
-                && (isOverviewLayout(layoutBeingShown)
-                           || layoutBeingShown == mToolbarSwipeLayout)) {
-            mContextualSearchDelegate.dismissContextualSearchBar();
+        // Check if a layout is showing that should hide the overlay panels.
+        if (isOverviewLayout(layoutBeingShown) || layoutBeingShown == mToolbarSwipeLayout) {
+            if (mContextualSearchDelegate != null) {
+                mContextualSearchDelegate.dismissContextualSearchBar();
+            }
+            if (getEphemeralTabPanel() != null) {
+                getEphemeralTabPanel().closePanel(StateChangeReason.UNKNOWN, false);
+            }
         }
 
         // Check if we should notify OverviewModeObservers.

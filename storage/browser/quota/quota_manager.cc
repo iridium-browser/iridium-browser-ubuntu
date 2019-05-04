@@ -23,7 +23,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/task/post_task.h"
 #include "base/task_runner_util.h"
 #include "base/threading/thread_restrictions.h"
@@ -208,7 +208,7 @@ void DidGetUsageAndQuotaForWebApps(
     blink::mojom::QuotaStatusCode status,
     int64_t usage,
     int64_t quota,
-    base::flat_map<QuotaClient::ID, int64_t> usage_breakdown) {
+    blink::mojom::UsageBreakdownPtr usage_breakdown) {
   std::move(callback).Run(status, usage, quota);
 }
 
@@ -273,8 +273,11 @@ class QuotaManager::UsageAndQuotaHelper : public QuotaTask {
 
   void Aborted() override {
     weak_factory_.InvalidateWeakPtrs();
-    std::move(callback_).Run(blink::mojom::QuotaStatusCode::kErrorAbort, 0, 0,
-                             base::flat_map<QuotaClient::ID, int64_t>());
+    std::move(callback_).Run(
+        blink::mojom::QuotaStatusCode::kErrorAbort, /*status*/
+        0,                                          /*usage*/
+        0,                                          /*quota*/
+        nullptr);                                   /*usage_breakdown*/
     DeleteSoon();
   }
 
@@ -327,10 +330,9 @@ class QuotaManager::UsageAndQuotaHelper : public QuotaTask {
     barrier_closure.Run();
   }
 
-  void OnGotHostUsage(
-      const base::Closure& barrier_closure,
-      int64_t usage,
-      base::flat_map<QuotaClient::ID, int64_t> usage_breakdown) {
+  void OnGotHostUsage(const base::Closure& barrier_closure,
+                      int64_t usage,
+                      blink::mojom::UsageBreakdownPtr usage_breakdown) {
     host_usage_ = usage;
     host_usage_breakdown_ = std::move(usage_breakdown);
     barrier_closure.Run();
@@ -355,7 +357,7 @@ class QuotaManager::UsageAndQuotaHelper : public QuotaTask {
   int64_t total_space_ = 0;
   int64_t desired_host_quota_ = 0;
   int64_t host_usage_ = 0;
-  base::flat_map<QuotaClient::ID, int64_t> host_usage_breakdown_;
+  blink::mojom::UsageBreakdownPtr host_usage_breakdown_;
   QuotaSettings settings_;
   base::WeakPtrFactory<UsageAndQuotaHelper> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(UsageAndQuotaHelper);
@@ -724,6 +726,60 @@ class QuotaManager::HostDataDeleter : public QuotaTask {
   DISALLOW_COPY_AND_ASSIGN(HostDataDeleter);
 };
 
+class QuotaManager::StorageCleanupHelper : public QuotaTask {
+ public:
+  StorageCleanupHelper(QuotaManager* manager,
+                       StorageType type,
+                       int quota_client_mask,
+                       base::OnceClosure callback)
+      : QuotaTask(manager),
+        type_(type),
+        quota_client_mask_(quota_client_mask),
+        callback_(std::move(callback)),
+        weak_factory_(this) {}
+
+ protected:
+  void Run() override {
+    base::RepeatingClosure barrier = base::BarrierClosure(
+        manager()->clients_.size(),
+        base::BindOnce(&StorageCleanupHelper::CallCompleted,
+                       weak_factory_.GetWeakPtr()));
+
+    // This may synchronously trigger |callback_| at the end of the for loop,
+    // make sure we do nothing after this block.
+    for (auto* client : manager()->clients_) {
+      if (quota_client_mask_ & client->id()) {
+        client->PerformStorageCleanup(type_, barrier);
+      } else {
+        barrier.Run();
+      }
+    }
+  }
+
+  void Aborted() override {
+    weak_factory_.InvalidateWeakPtrs();
+    std::move(callback_).Run();
+    DeleteSoon();
+  }
+
+  void Completed() override {
+    weak_factory_.InvalidateWeakPtrs();
+    std::move(callback_).Run();
+    DeleteSoon();
+  }
+
+ private:
+  QuotaManager* manager() const {
+    return static_cast<QuotaManager*>(observer());
+  }
+
+  StorageType type_;
+  int quota_client_mask_;
+  base::OnceClosure callback_;
+  base::WeakPtrFactory<StorageCleanupHelper> weak_factory_;
+  DISALLOW_COPY_AND_ASSIGN(StorageCleanupHelper);
+};
+
 class QuotaManager::GetModifiedSinceHelper {
  public:
   bool GetModifiedSinceOnDBThread(StorageType type,
@@ -866,8 +922,11 @@ void QuotaManager::GetUsageAndQuotaWithBreakdown(
     UsageAndQuotaWithBreakdownCallback callback) {
   if (!IsSupportedType(type) ||
       (is_incognito_ && !IsSupportedIncognitoType(type))) {
-    std::move(callback).Run(blink::mojom::QuotaStatusCode::kErrorNotSupported,
-                            0, 0, base::flat_map<QuotaClient::ID, int64_t>());
+    std::move(callback).Run(
+        blink::mojom::QuotaStatusCode::kErrorNotSupported, /*status*/
+        0,                                                 /*usage*/
+        0,                                                 /*quota*/
+        nullptr);                                          /*usage_breakdown*/
     return;
   }
   LazyInitialize();
@@ -936,6 +995,14 @@ void QuotaManager::DeleteOriginData(const url::Origin& origin,
                                     StatusCallback callback) {
   DeleteOriginDataInternal(origin, type, quota_client_mask, false,
                            std::move(callback));
+}
+
+void QuotaManager::PerformStorageCleanup(StorageType type,
+                                         int quota_client_mask,
+                                         base::OnceClosure callback) {
+  StorageCleanupHelper* deleter = new StorageCleanupHelper(
+      this, type, quota_client_mask, std::move(callback));
+  deleter->Start();
 }
 
 void QuotaManager::DeleteHostData(const std::string& host,

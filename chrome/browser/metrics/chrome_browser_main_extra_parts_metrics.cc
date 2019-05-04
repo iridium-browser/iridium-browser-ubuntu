@@ -13,7 +13,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/time/time.h"
@@ -21,14 +21,14 @@
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_browser_main.h"
-#include "chrome/browser/mac/bluetooth_utility.h"
+#include "chrome/browser/metrics/bluetooth_available_utility.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/vr/service/xr_runtime_manager.h"
 #include "components/flags_ui/pref_service_flags_storage.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/service_manager_connection.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "ui/base/touch/touch_device.h"
+#include "ui/base/pointer/pointer_device.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/display/screen.h"
 
@@ -222,13 +222,13 @@ void RecordStartupMetrics() {
                         base::TimeTicks::IsHighResolution());
 #endif  // defined(OS_WIN)
 
-#if defined(OS_MACOSX)
-  bluetooth_utility::BluetoothAvailability availability =
-      bluetooth_utility::GetBluetoothAvailability();
-  UMA_HISTOGRAM_ENUMERATION("OSX.BluetoothAvailability",
-                            availability,
-                            bluetooth_utility::BLUETOOTH_AVAILABILITY_COUNT);
-#endif  // defined(OS_MACOSX)
+  // TODO(kenrb): Reporting Bluetooth availability is disabled on Windows
+  // because initializing the Bluetooth adapter causes too much jank.
+  // Re-enable when that is resolved.
+  // See https://crbug.com/929375.
+#if !defined(OS_WIN)
+  bluetooth_utility::ReportBluetoothAvailability();
+#endif
 
   // Record whether Chrome is the default browser or not.
   shell_integration::DefaultWebClientState default_state =

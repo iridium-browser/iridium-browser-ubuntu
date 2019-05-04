@@ -11,14 +11,22 @@
 #ifndef TEST_FAKE_VP8_ENCODER_H_
 #define TEST_FAKE_VP8_ENCODER_H_
 
+#include <stddef.h>
+#include <stdint.h>
 #include <memory>
 #include <vector>
 
-#include "modules/video_coding/codecs/vp8/include/vp8_temporal_layers.h"
-#include "test/fake_encoder.h"
-
-#include "rtc_base/criticalsection.h"
+#include "api/video/encoded_image.h"
+#include "api/video_codecs/video_codec.h"
+#include "api/video_codecs/video_encoder.h"
+#include "api/video_codecs/vp8_temporal_layers.h"
+#include "common_types.h"  // NOLINT(build/include)
+#include "modules/include/module_common_types.h"
+#include "modules/video_coding/include/video_codec_interface.h"
 #include "rtc_base/sequenced_task_checker.h"
+#include "rtc_base/thread_annotations.h"
+#include "system_wrappers/include/clock.h"
+#include "test/fake_encoder.h"
 
 namespace webrtc {
 namespace test {
@@ -37,11 +45,11 @@ class FakeVP8Encoder : public FakeEncoder, public EncodedImageCallback {
 
   int32_t Release() override;
 
-  const char* ImplementationName() const override { return "FakeVp8Encoder"; }
-
   Result OnEncodedImage(const EncodedImage& encodedImage,
                         const CodecSpecificInfo* codecSpecificInfo,
                         const RTPFragmentationHeader* fragments) override;
+
+  EncoderInfo GetEncoderInfo() const override;
 
  private:
   void SetupTemporalLayers(const VideoCodec& codec);
@@ -54,7 +62,7 @@ class FakeVP8Encoder : public FakeEncoder, public EncodedImageCallback {
   rtc::SequencedTaskChecker sequence_checker_;
   EncodedImageCallback* callback_ RTC_GUARDED_BY(sequence_checker_);
 
-  std::vector<std::unique_ptr<TemporalLayers>> temporal_layers_
+  std::vector<std::unique_ptr<Vp8TemporalLayers>> temporal_layers_
       RTC_GUARDED_BY(sequence_checker_);
 };
 

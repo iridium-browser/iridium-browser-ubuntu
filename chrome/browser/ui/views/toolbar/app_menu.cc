@@ -250,10 +250,6 @@ class InMenuButton : public LabelButton {
       : LabelButton(listener, text) {}
   ~InMenuButton() override {}
 
-  void set_role_is_button(bool role_is_button) {
-    role_is_button_ = role_is_button;
-  }
-
   void Init(InMenuButtonBackground::ButtonType type) {
     // An InMenuButton should always be focusable regardless of the platform.
     // Hence we don't use SetFocusForPlatform().
@@ -268,8 +264,7 @@ class InMenuButton : public LabelButton {
 
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
     LabelButton::GetAccessibleNodeData(node_data);
-    if (!role_is_button_)
-      node_data->role = ax::mojom::Role::kMenuItem;
+    node_data->role = ax::mojom::Role::kMenuItem;
   }
 
   // views::LabelButton
@@ -295,10 +290,6 @@ class InMenuButton : public LabelButton {
   }
 
  private:
-  // Indicates whether to expose this to accessibility as a Button.  If it is a
-  // button, the accelerator will not be added to the accessible label.
-  bool role_is_button_ = false;
-
   DISALLOW_COPY_AND_ASSIGN(InMenuButton);
 };
 
@@ -337,14 +328,15 @@ class AppMenuView : public views::View,
       int string_id,
       InMenuButtonBackground::ButtonType type,
       int index) {
-    return CreateButtonWithAccName(string_id, type, index, string_id, false);
+    return CreateButtonWithAccName(string_id, type, index, string_id,
+                                   /*add_accelerator_text*/ true);
   }
 
   InMenuButton* CreateButtonWithAccName(int string_id,
                                         InMenuButtonBackground::ButtonType type,
                                         int index,
                                         int acc_string_id,
-                                        bool role_is_button) {
+                                        bool add_accelerator_text) {
     // Should only be invoked during construction when |menu_| is valid.
     DCHECK(menu_);
     InMenuButton* button = new InMenuButton(
@@ -352,10 +344,9 @@ class AppMenuView : public views::View,
                                          '&', nullptr, nullptr));
     button->Init(type);
     button->SetAccessibleName(GetAccessibleNameForAppMenuItem(
-        menu_model_, index, acc_string_id, !role_is_button));
+        menu_model_, index, acc_string_id, add_accelerator_text));
     button->set_tag(index);
     button->SetEnabled(menu_model_->IsEnabledAt(index));
-    button->set_role_is_button(role_is_button);
 
     AddChildView(button);
     // all buttons on menu should must be a custom button in order for
@@ -502,7 +493,8 @@ class AppMenu::ZoomView : public AppMenuView {
 
     decrement_button_ = CreateButtonWithAccName(
         IDS_ZOOM_MINUS2, InMenuButtonBackground::LEADING_BORDER,
-        decrement_index, IDS_ACCNAME_ZOOM_MINUS2, true);
+        decrement_index, IDS_ACCNAME_ZOOM_MINUS2,
+        /*add_accelerator_text*/ false);
 
     zoom_label_ = new Label(base::FormatPercent(100));
     zoom_label_->SetAutoColorReadabilityEnabled(false);
@@ -520,7 +512,7 @@ class AppMenu::ZoomView : public AppMenuView {
 
     increment_button_ = CreateButtonWithAccName(
         IDS_ZOOM_PLUS2, InMenuButtonBackground::NO_BORDER, increment_index,
-        IDS_ACCNAME_ZOOM_PLUS2, true);
+        IDS_ACCNAME_ZOOM_PLUS2, /*add_accelerator_text*/ false);
 
     fullscreen_button_ = new FullscreenButton(this);
     // all buttons on menu should must be a custom button in order for
@@ -540,7 +532,8 @@ class AppMenu::ZoomView : public AppMenuView {
     fullscreen_button_->SetBackground(std::make_unique<InMenuButtonBackground>(
         InMenuButtonBackground::LEADING_BORDER));
     fullscreen_button_->SetAccessibleName(GetAccessibleNameForAppMenuItem(
-        menu_model, fullscreen_index, IDS_ACCNAME_FULLSCREEN, true));
+        menu_model, fullscreen_index, IDS_ACCNAME_FULLSCREEN,
+        /*add_accelerator_text*/ true));
     AddChildView(fullscreen_button_);
 
     // Need to set a font list for the zoom label width calculations.
@@ -827,9 +820,21 @@ void AppMenu::Init(ui::MenuModel* model) {
 
 void AppMenu::RunMenu(views::MenuButton* host) {
   base::RecordAction(UserMetricsAction("ShowAppMenu"));
-  menu_runner_->RunMenuAt(host->GetWidget(), host,
-                          host->GetAnchorBoundsInScreen(),
-                          views::MENU_ANCHOR_TOPRIGHT, ui::MENU_SOURCE_NONE);
+
+  // If we are displaying reopen tab in-product help, tell the menu runner to
+  // show alerts for the recent tabs submenu and the last closed tab menu item.
+  base::flat_set<int> alerted_commands;
+  if (showing_reopen_tab_promo_) {
+    alerted_commands.insert(IDC_RECENT_TABS_MENU);
+    alerted_commands.insert(AppMenuModel::kMinRecentTabsCommandId);
+  }
+
+  menu_runner_->RunMenuAt(
+      host->GetWidget(), host, host->GetAnchorBoundsInScreen(),
+      views::MENU_ANCHOR_TOPRIGHT, ui::MENU_SOURCE_NONE, alerted_commands);
+
+  for (AppMenuObserver& observer : observer_list_)
+    observer.AppMenuShown();
 }
 
 void AppMenu::CloseMenu() {
@@ -839,6 +844,10 @@ void AppMenu::CloseMenu() {
 
 bool AppMenu::IsShowing() const {
   return menu_runner_.get() && menu_runner_->IsRunning();
+}
+
+void AppMenu::ShowReopenTabPromo() {
+  showing_reopen_tab_promo_ = true;
 }
 
 void AppMenu::AddObserver(AppMenuObserver* observer) {
@@ -878,10 +887,9 @@ bool AppMenu::IsTriggerableEvent(views::MenuItemView* menu,
       MenuDelegate::IsTriggerableEvent(menu, e);
 }
 
-bool AppMenu::GetDropFormats(
-    MenuItemView* menu,
-    int* formats,
-    std::set<ui::Clipboard::FormatType>* format_types) {
+bool AppMenu::GetDropFormats(MenuItemView* menu,
+                             int* formats,
+                             std::set<ui::ClipboardFormatType>* format_types) {
   CreateBookmarkMenu();
   return bookmark_menu_delegate_.get() &&
       bookmark_menu_delegate_->GetDropFormats(menu, formats, format_types);
@@ -981,6 +989,10 @@ bool AppMenu::IsCommandEnabled(int command_id) const {
 }
 
 void AppMenu::ExecuteCommand(int command_id, int mouse_event_flags) {
+  for (AppMenuObserver& observer : observer_list_) {
+    observer.OnExecuteCommand(command_id);
+  }
+
   if (IsBookmarkCommand(command_id)) {
     UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.OpenBookmark",
                         menu_opened_timer_.Elapsed());
@@ -1051,6 +1063,9 @@ bool AppMenu::ShouldCloseOnDragComplete() {
 }
 
 void AppMenu::OnMenuClosed(views::MenuItemView* menu) {
+  for (AppMenuObserver& observer : observer_list_)
+    observer.AppMenuClosed();
+
   if (bookmark_menu_delegate_.get()) {
     BookmarkModel* model =
         BookmarkModelFactory::GetForBrowserContext(browser_->profile());

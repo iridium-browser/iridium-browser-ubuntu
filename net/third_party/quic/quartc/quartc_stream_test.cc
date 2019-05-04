@@ -4,17 +4,39 @@
 
 #include "net/third_party/quic/quartc/quartc_stream.h"
 
+#include <memory>
+#include <type_traits>
+#include <utility>
+
 #include "net/third_party/quic/core/crypto/quic_random.h"
+#include "net/third_party/quic/core/frames/quic_stream_frame.h"
+#include "net/third_party/quic/core/quic_alarm_factory.h"
+#include "net/third_party/quic/core/quic_buffer_allocator.h"
+#include "net/third_party/quic/core/quic_config.h"
+#include "net/third_party/quic/core/quic_connection.h"
+#include "net/third_party/quic/core/quic_crypto_stream.h"
 #include "net/third_party/quic/core/quic_data_writer.h"
+#include "net/third_party/quic/core/quic_error_codes.h"
+#include "net/third_party/quic/core/quic_packet_writer.h"
 #include "net/third_party/quic/core/quic_session.h"
 #include "net/third_party/quic/core/quic_simple_buffer_allocator.h"
+#include "net/third_party/quic/core/quic_time.h"
+#include "net/third_party/quic/core/quic_types.h"
+#include "net/third_party/quic/core/quic_versions.h"
+#include "net/third_party/quic/core/quic_write_blocked_list.h"
+#include "net/third_party/quic/platform/api/quic_clock.h"
+#include "net/third_party/quic/platform/api/quic_endian.h"
+#include "net/third_party/quic/platform/api/quic_flags.h"
+#include "net/third_party/quic/platform/api/quic_ip_address.h"
 #include "net/third_party/quic/platform/api/quic_ptr_util.h"
+#include "net/third_party/quic/platform/api/quic_socket_address.h"
+#include "net/third_party/quic/platform/api/quic_string.h"
 #include "net/third_party/quic/platform/api/quic_test.h"
 #include "net/third_party/quic/platform/api/quic_test_mem_slice_vector.h"
 #include "net/third_party/quic/quartc/quartc_factory.h"
 #include "net/third_party/quic/test_tools/mock_clock.h"
 #include "net/third_party/quic/test_tools/quic_test_utils.h"
-#include "net/third_party/spdy/core/spdy_protocol.h"
+#include "net/third_party/quiche/src/spdy/core/spdy_protocol.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -31,7 +53,10 @@ class MockQuicSession : public QuicSession {
   MockQuicSession(QuicConnection* connection,
                   const QuicConfig& config,
                   QuicString* write_buffer)
-      : QuicSession(connection, nullptr /*visitor*/, config),
+      : QuicSession(connection,
+                    nullptr /*visitor*/,
+                    config,
+                    CurrentSupportedVersions()),
         write_buffer_(write_buffer) {}
 
   ~MockQuicSession() override {}
@@ -58,13 +83,11 @@ class MockQuicSession : public QuicSession {
     return QuicConsumedData(write_length, state != StreamSendingState::NO_FIN);
   }
 
-  QuartcStream* CreateIncomingDynamicStream(QuicStreamId id) override {
+  QuartcStream* CreateIncomingStream(QuicStreamId id) override {
     return nullptr;
   }
 
-  QuartcStream* CreateOutgoingBidirectionalStream() override { return nullptr; }
-
-  QuartcStream* CreateOutgoingUnidirectionalStream() override {
+  QuartcStream* CreateIncomingStream(PendingStream pending) override {
     return nullptr;
   }
 
@@ -147,11 +170,19 @@ class MockQuartcStreamDelegate : public QuartcStream::Delegate {
     last_bytes_pending_retransmission_ = stream->BytesPendingRetransmission();
   }
 
-  void OnReceived(QuartcStream* stream,
-                  const char* data,
-                  size_t size) override {
+  size_t OnReceived(QuartcStream* stream,
+                    iovec* iov,
+                    size_t iov_length,
+                    bool fin) override {
     EXPECT_EQ(id_, stream->id());
-    read_buffer_->append(data, size);
+    EXPECT_EQ(stream->ReadOffset(), read_buffer_->size());
+    size_t bytes_consumed = 0;
+    for (size_t i = 0; i < iov_length; ++i) {
+      read_buffer_->append(static_cast<const char*>(iov[i].iov_base),
+                           iov[i].iov_len);
+      bytes_consumed += iov[i].iov_len;
+    }
+    return bytes_consumed;
   }
 
   void OnClose(QuartcStream* stream) override { closed_ = true; }
@@ -177,6 +208,13 @@ class MockQuartcStreamDelegate : public QuartcStream::Delegate {
 
 class QuartcStreamTest : public QuicTest, public QuicConnectionHelperInterface {
  public:
+  QuartcStreamTest() {
+    // Required to correctly handle StopReading().
+    SetQuicReloadableFlag(quic_stop_reading_when_level_triggered, true);
+  }
+
+  ~QuartcStreamTest() override = default;
+
   void CreateReliableQuicStream() {
     // Arbitrary values for QuicConnection.
     Perspective perspective = Perspective::IS_SERVER;
@@ -187,9 +225,10 @@ class QuartcStreamTest : public QuicTest, public QuicConnectionHelperInterface {
     alarm_factory_ = QuicMakeUnique<test::MockAlarmFactory>();
 
     connection_ = QuicMakeUnique<QuicConnection>(
-        0, QuicSocketAddress(ip, 0), this /*QuicConnectionHelperInterface*/,
-        alarm_factory_.get(), new DummyPacketWriter(), owns_writer, perspective,
-        CurrentSupportedVersions());
+        test::TestConnectionId(0), QuicSocketAddress(ip, 0),
+        this /*QuicConnectionHelperInterface*/, alarm_factory_.get(),
+        new DummyPacketWriter(), owns_writer, perspective,
+        ParsedVersionOfIndex(CurrentSupportedVersions(), 0));
     clock_.AdvanceTime(QuicTime::Delta::FromSeconds(1));
     session_ = QuicMakeUnique<MockQuicSession>(connection_.get(), QuicConfig(),
                                                &write_buffer_);
@@ -199,8 +238,6 @@ class QuartcStreamTest : public QuicTest, public QuicConnectionHelperInterface {
     stream_->SetDelegate(mock_stream_delegate_.get());
     session_->ActivateReliableStream(std::unique_ptr<QuartcStream>(stream_));
   }
-
-  ~QuartcStreamTest() override {}
 
   const QuicClock* GetClock() const override { return &clock_; }
 
@@ -309,7 +346,6 @@ TEST_F(QuartcStreamTest, FinishWriting) {
 // Read an entire string.
 TEST_F(QuartcStreamTest, ReadDataWhole) {
   CreateReliableQuicStream();
-  stream_->set_deliver_on_complete(false);
   QuicStreamFrame frame(kStreamId, false, 0, "Hello, World!");
   stream_->OnStreamFrame(frame);
 
@@ -319,7 +355,6 @@ TEST_F(QuartcStreamTest, ReadDataWhole) {
 // Read part of a string.
 TEST_F(QuartcStreamTest, ReadDataPartial) {
   CreateReliableQuicStream();
-  stream_->set_deliver_on_complete(false);
   QuicStreamFrame frame(kStreamId, false, 0, "Hello, World!");
   frame.data_length = 5;
   stream_->OnStreamFrame(frame);
@@ -343,28 +378,6 @@ TEST_F(QuartcStreamTest, StopReading) {
 
   EXPECT_EQ(0ul, read_buffer_.size());
   EXPECT_TRUE(stream_->fin_received());
-}
-
-// Streams set to deliver_on_complete do not deliver data to the delegate
-// until all data is available.
-TEST_F(QuartcStreamTest, DeliverOnComplete) {
-  CreateReliableQuicStream();
-  stream_->set_deliver_on_complete(true);
-
-  QuicStreamFrame first_frame(kStreamId, /*fin=*/false, 0, "Hello");
-  stream_->OnStreamFrame(first_frame);
-
-  EXPECT_EQ(0ul, read_buffer_.size());
-
-  QuicStreamFrame last_frame(kStreamId, /*fin=*/true, 7, "World!");
-  stream_->OnStreamFrame(last_frame);
-
-  EXPECT_EQ(0ul, read_buffer_.size());
-
-  QuicStreamFrame middle_frame(kStreamId, /*fin=*/false, 5, ", ");
-  stream_->OnStreamFrame(middle_frame);
-
-  EXPECT_EQ("Hello, World!", read_buffer_);
 }
 
 // Test that closing the stream results in a callback.
@@ -422,6 +435,147 @@ TEST_F(QuartcStreamTest, TestCancelOnLossEnabled) {
 
   EXPECT_EQ("Foo bar", write_buffer_);
   EXPECT_EQ(stream_->stream_error(), QUIC_STREAM_CANCELLED);
+}
+
+TEST_F(QuartcStreamTest, MaxRetransmissionsAbsent) {
+  CreateReliableQuicStream();
+
+  // This should be the default state.
+  EXPECT_EQ(stream_->max_retransmission_count(),
+            std::numeric_limits<int>::max());
+
+  char message[] = "Foo bar";
+  test::QuicTestMemSliceVector data({std::make_pair(message, 7)});
+  stream_->WriteMemSlices(data.span(), /*fin=*/false);
+
+  EXPECT_EQ("Foo bar", write_buffer_);
+
+  stream_->OnStreamFrameLost(0, 7, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo bar", write_buffer_);
+  EXPECT_EQ(stream_->stream_error(), QUIC_STREAM_NO_ERROR);
+}
+
+TEST_F(QuartcStreamTest, MaxRetransmissionsSet) {
+  CreateReliableQuicStream();
+  stream_->set_max_retransmission_count(2);
+
+  char message[] = "Foo bar";
+  test::QuicTestMemSliceVector data({std::make_pair(message, 7)});
+  stream_->WriteMemSlices(data.span(), /*fin=*/false);
+
+  EXPECT_EQ("Foo bar", write_buffer_);
+
+  stream_->OnStreamFrameLost(0, 7, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo bar", write_buffer_);
+
+  stream_->OnStreamFrameLost(0, 7, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo barFoo bar", write_buffer_);
+
+  stream_->OnStreamFrameLost(0, 7, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo barFoo bar", write_buffer_);
+  EXPECT_EQ(stream_->stream_error(), QUIC_STREAM_CANCELLED);
+}
+
+TEST_F(QuartcStreamTest, MaxRetransmissionsDisjointFrames) {
+  CreateReliableQuicStream();
+  stream_->set_max_retransmission_count(2);
+
+  char message[] = "Foo bar";
+  test::QuicTestMemSliceVector data({std::make_pair(message, 7)});
+  stream_->WriteMemSlices(data.span(), /*fin=*/false);
+
+  EXPECT_EQ("Foo bar", write_buffer_);
+
+  // Retransmit bytes [0, 3].
+  stream_->OnStreamFrameLost(0, 4, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo ", write_buffer_);
+
+  // Retransmit bytes [4, 6].  Everything has been retransmitted once.
+  stream_->OnStreamFrameLost(4, 3, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo bar", write_buffer_);
+
+  // Retransmit bytes [0, 6].  Everything can be retransmitted a second time.
+  stream_->OnStreamFrameLost(0, 7, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo barFoo bar", write_buffer_);
+}
+
+TEST_F(QuartcStreamTest, MaxRetransmissionsOverlappingFrames) {
+  CreateReliableQuicStream();
+  stream_->set_max_retransmission_count(2);
+
+  char message[] = "Foo bar";
+  test::QuicTestMemSliceVector data({std::make_pair(message, 7)});
+  stream_->WriteMemSlices(data.span(), /*fin=*/false);
+
+  EXPECT_EQ("Foo bar", write_buffer_);
+
+  // Retransmit bytes 0 to 3.
+  stream_->OnStreamFrameLost(0, 4, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo ", write_buffer_);
+
+  // Retransmit bytes 3 to 6.  Byte 3 has been retransmitted twice.
+  stream_->OnStreamFrameLost(3, 4, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo  bar", write_buffer_);
+
+  // Retransmit byte 3 a third time.  This should cause cancellation.
+  stream_->OnStreamFrameLost(3, 1, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo  bar", write_buffer_);
+  EXPECT_EQ(stream_->stream_error(), QUIC_STREAM_CANCELLED);
+}
+
+TEST_F(QuartcStreamTest, MaxRetransmissionsWithAckedFrame) {
+  CreateReliableQuicStream();
+  stream_->set_max_retransmission_count(1);
+
+  char message[] = "Foo bar";
+  test::QuicTestMemSliceVector data({std::make_pair(message, 7)});
+  stream_->WriteMemSlices(data.span(), /*fin=*/false);
+
+  EXPECT_EQ("Foo bar", write_buffer_);
+
+  // Retransmit bytes [0, 7).
+  stream_->OnStreamFrameLost(0, 7, false);
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo bar", write_buffer_);
+
+  // Ack bytes [0, 7).  These bytes should be pruned from the data tracked by
+  // the stream.
+  stream_->OnStreamFrameAcked(0, 7, false,
+                              QuicTime::Delta::FromMilliseconds(1));
+  stream_->OnCanWrite();
+
+  EXPECT_EQ("Foo barFoo bar", write_buffer_);
+
+  // Retransmit bytes [0, 7) again.
+  // QUIC will never mark frames as lost after they've been acked, but this lets
+  // us test that QuartcStream stopped tracking these bytes after the acked.
+  stream_->OnStreamFrameLost(0, 7, false);
+  stream_->OnCanWrite();
+
+  // QuartcStream should be cancelled, but it stopped tracking the lost bytes
+  // after they were acked, so it's not.
+  EXPECT_EQ(stream_->stream_error(), QUIC_STREAM_NO_ERROR);
 }
 
 TEST_F(QuartcStreamTest, TestBytesPendingRetransmission) {

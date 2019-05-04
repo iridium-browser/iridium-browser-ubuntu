@@ -14,8 +14,6 @@
 #import "sdk/objc/native/api/audio_device_module.h"
 #endif
 
-#include "system_wrappers/include/event_wrapper.h"
-
 #include "rtc_base/scoped_ref_ptr.h"
 
 typedef int32_t(^NeedMorePlayDataBlock)(const size_t nSamples,
@@ -128,16 +126,19 @@ static const NSUInteger kFullDuplexTimeInSec = 10;
 static const NSUInteger kNumIgnoreFirstCallbacks = 50;
 
 @interface RTCAudioDeviceModuleTests : XCTestCase {
-
   rtc::scoped_refptr<webrtc::AudioDeviceModule> audioDeviceModule;
-  webrtc::AudioParameters playoutParameters;
-  webrtc::AudioParameters recordParameters;
   MockAudioTransport mock;
 }
+
+@property(nonatomic, assign) webrtc::AudioParameters playoutParameters;
+@property(nonatomic, assign) webrtc::AudioParameters recordParameters;
 
 @end
 
 @implementation RTCAudioDeviceModuleTests
+
+@synthesize playoutParameters;
+@synthesize recordParameters;
 
 - (void)setUp {
   [super setUp];
@@ -254,10 +255,10 @@ static const NSUInteger kNumIgnoreFirstCallbacks = 50;
                                        int64_t *elapsed_time_ms,
                                        int64_t *ntp_time_ms) {
     nSamplesOut = nSamples;
-    XCTAssertEqual(nSamples, playoutParameters.frames_per_10ms_buffer());
+    XCTAssertEqual(nSamples, self.playoutParameters.frames_per_10ms_buffer());
     XCTAssertEqual(nBytesPerSample, kBytesPerSample);
-    XCTAssertEqual(nChannels, playoutParameters.channels());
-    XCTAssertEqual((int) samplesPerSec, playoutParameters.sample_rate());
+    XCTAssertEqual(nChannels, self.playoutParameters.channels());
+    XCTAssertEqual((int)samplesPerSec, self.playoutParameters.sample_rate());
     XCTAssertNotEqual((void*)NULL, audioSamples);
 
     return 0;
@@ -291,10 +292,10 @@ static const NSUInteger kNumIgnoreFirstCallbacks = 50;
                                         int64_t *elapsed_time_ms,
                                         int64_t *ntp_time_ms) {
     nSamplesOut = nSamples;
-    XCTAssertEqual(nSamples, playoutParameters.frames_per_10ms_buffer());
+    XCTAssertEqual(nSamples, self.playoutParameters.frames_per_10ms_buffer());
     XCTAssertEqual(nBytesPerSample, kBytesPerSample);
-    XCTAssertEqual(nChannels, playoutParameters.channels());
-    XCTAssertEqual((int) samplesPerSec, playoutParameters.sample_rate());
+    XCTAssertEqual(nChannels, self.playoutParameters.channels());
+    XCTAssertEqual((int)samplesPerSec, self.playoutParameters.sample_rate());
     XCTAssertNotEqual((void*)NULL, audioSamples);
     if (++num_callbacks == kNumCallbacks) {
       [playoutExpectation fulfill];
@@ -330,10 +331,10 @@ static const NSUInteger kNumIgnoreFirstCallbacks = 50;
                                        int64_t *elapsed_time_ms,
                                        int64_t *ntp_time_ms) {
     nSamplesOut = nSamples;
-    XCTAssertEqual(nSamples, playoutParameters.frames_per_10ms_buffer());
+    XCTAssertEqual(nSamples, self.playoutParameters.frames_per_10ms_buffer());
     XCTAssertEqual(nBytesPerSample, kBytesPerSample);
-    XCTAssertEqual(nChannels, playoutParameters.channels());
-    XCTAssertEqual((int) samplesPerSec, playoutParameters.sample_rate());
+    XCTAssertEqual(nChannels, self.playoutParameters.channels());
+    XCTAssertEqual((int)samplesPerSec, self.playoutParameters.sample_rate());
     XCTAssertNotEqual((void*)NULL, audioSamples);
     if (++num_callbacks == kNumCallbacks) {
       [playoutExpectation fulfill];
@@ -366,10 +367,10 @@ static const NSUInteger kNumIgnoreFirstCallbacks = 50;
                                        const bool keyPressed,
                                        uint32_t& newMicLevel) {
     XCTAssertNotEqual((void*)NULL, audioSamples);
-    XCTAssertEqual(nSamples, recordParameters.frames_per_10ms_buffer());
+    XCTAssertEqual(nSamples, self.recordParameters.frames_per_10ms_buffer());
     XCTAssertEqual(nBytesPerSample, kBytesPerSample);
-    XCTAssertEqual(nChannels, recordParameters.channels());
-    XCTAssertEqual((int) samplesPerSec, recordParameters.sample_rate());
+    XCTAssertEqual(nChannels, self.recordParameters.channels());
+    XCTAssertEqual((int)samplesPerSec, self.recordParameters.sample_rate());
     XCTAssertEqual(0, clockDrift);
     XCTAssertEqual(0u, currentMicLevel);
     XCTAssertFalse(keyPressed);
@@ -405,10 +406,10 @@ static const NSUInteger kNumIgnoreFirstCallbacks = 50;
                                        int64_t *elapsed_time_ms,
                                        int64_t *ntp_time_ms) {
     nSamplesOut = nSamples;
-    XCTAssertEqual(nSamples, playoutParameters.frames_per_10ms_buffer());
+    XCTAssertEqual(nSamples, self.playoutParameters.frames_per_10ms_buffer());
     XCTAssertEqual(nBytesPerSample, kBytesPerSample);
-    XCTAssertEqual(nChannels, playoutParameters.channels());
-    XCTAssertEqual((int) samplesPerSec, playoutParameters.sample_rate());
+    XCTAssertEqual(nChannels, self.playoutParameters.channels());
+    XCTAssertEqual((int)samplesPerSec, self.playoutParameters.sample_rate());
     XCTAssertNotEqual((void*)NULL, audioSamples);
     if (callbackCount++ >= kNumCallbacks) {
       [playoutExpectation fulfill];
@@ -428,10 +429,10 @@ static const NSUInteger kNumIgnoreFirstCallbacks = 50;
                                        const bool keyPressed,
                                        uint32_t& newMicLevel) {
     XCTAssertNotEqual((void*)NULL, audioSamples);
-    XCTAssertEqual(nSamples, recordParameters.frames_per_10ms_buffer());
+    XCTAssertEqual(nSamples, self.recordParameters.frames_per_10ms_buffer());
     XCTAssertEqual(nBytesPerSample, kBytesPerSample);
-    XCTAssertEqual(nChannels, recordParameters.channels());
-    XCTAssertEqual((int) samplesPerSec, recordParameters.sample_rate());
+    XCTAssertEqual(nChannels, self.recordParameters.channels());
+    XCTAssertEqual((int)samplesPerSec, self.recordParameters.sample_rate());
     XCTAssertEqual(0, clockDrift);
     XCTAssertEqual(0u, currentMicLevel);
     XCTAssertFalse(keyPressed);

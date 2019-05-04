@@ -18,8 +18,6 @@
 
 #include "components/history/core/browser/history_service.h"
 
-#include <utility>
-
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
@@ -27,16 +25,12 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/no_destructor.h"
 #include "base/single_thread_task_runner.h"
-#include "base/synchronization/lock.h"
 #include "base/task/post_task.h"
 #include "base/task_runner_util.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "base/trace_event/memory_dump_manager.h"
-#include "base/trace_event/memory_dump_provider.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "components/history/core/browser/download_row.h"
@@ -102,92 +96,6 @@ void ExpireWebHistoryComplete(bool success) {
   // TODO(davidben): ExpireLocalAndRemoteHistoryBetween callback should not fire
   // until this completes.
 }
-
-// Used for debugging 807009. This keeps a static of the number of instances of
-// AddPageMemoryDebuggingTask that have been created but not destroyed. This
-// count corresponds to the number of calls to AddPage() that have not yet been
-// processed by the HistoryBackend.
-class AddPageMemoryDebuggingTask {
- public:
-  // |real_task| is the task to actually call to HistoryBackend.
-  explicit AddPageMemoryDebuggingTask(base::OnceClosure real_task)
-      : real_task_(std::move(real_task)) {
-    base::AutoLock auto_lock(GetLock());
-    ++live_count_;
-  }
-
-  ~AddPageMemoryDebuggingTask() {
-    base::AutoLock auto_lock(GetLock());
-    DCHECK_GT(live_count_, 0);
-    --live_count_;
-  }
-
-  // Called on the background/db-thread to run the closure supplied to the
-  // constructor. The instance is deleted right after this call.
-  void RunOnDbThread() { std::move(real_task_).Run(); }
-
-  static int live_count() {
-    base::AutoLock auto_lock(GetLock());
-    return live_count_;
-  }
-
- private:
-  static base::Lock& GetLock() {
-    static base::NoDestructor<base::Lock> lock;
-    return *lock;
-  }
-
-  // The number of instances waiting to run.
-  static int live_count_;  // Guarded by getLock()
-
-  base::OnceClosure real_task_;
-
-  DISALLOW_COPY_AND_ASSIGN(AddPageMemoryDebuggingTask);
-};
-
-// static
-int AddPageMemoryDebuggingTask::live_count_ = 0;
-
-class HistoryMemoryDumpProvider : public base::trace_event::MemoryDumpProvider {
- public:
-  static HistoryMemoryDumpProvider* Get() {
-    if (!instance_)
-      instance_ = new HistoryMemoryDumpProvider();
-    return instance_;
-  }
-
-  // base::trace_event::MemoryDumpProvider:
-  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
-                    base::trace_event::ProcessMemoryDump* pmd) override {
-    // NOTE: this may be called on any thread, see constructor.
-    base::trace_event::MemoryAllocatorDump* dump =
-        pmd->CreateAllocatorDump("history/history_service");
-    dump->AddScalar("pending_add_pages",
-                    base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-                    AddPageMemoryDebuggingTask::live_count());
-    return true;
-  }
-
- private:
-  HistoryMemoryDumpProvider() {
-    // NOTE: the nullptr arg means OnMemoryDump() may be called from any
-    // thread.
-    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-        this, "HistoryService", nullptr);
-  }
-
-  ~HistoryMemoryDumpProvider() override {
-    base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
-        this);
-  }
-
-  static HistoryMemoryDumpProvider* instance_;
-
-  DISALLOW_COPY_AND_ASSIGN(HistoryMemoryDumpProvider);
-};
-
-// static
-HistoryMemoryDumpProvider* HistoryMemoryDumpProvider::instance_ = nullptr;
 
 }  // namespace
 
@@ -288,10 +196,7 @@ HistoryService::HistoryService(std::unique_ptr<HistoryClient> history_client,
       history_client_(std::move(history_client)),
       visit_delegate_(std::move(visit_delegate)),
       backend_loaded_(false),
-      weak_ptr_factory_(this) {
-  // Make sure the HistoryMemoryDumpProvider is created and registered.
-  HistoryMemoryDumpProvider::Get();
-}
+      weak_ptr_factory_(this) {}
 
 HistoryService::~HistoryService() {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -423,16 +328,6 @@ void HistoryService::SetOnBackendDestroyTask(const base::Closure& task) {
                      base::ThreadTaskRunnerHandle::Get(), task));
 }
 
-void HistoryService::TopHosts(size_t num_hosts,
-                              const TopHostsCallback& callback) const {
-  DCHECK(backend_task_runner_) << "History service being called after cleanup";
-  DCHECK(thread_checker_.CalledOnValidThread());
-  PostTaskAndReplyWithResult(
-      backend_task_runner_.get(), FROM_HERE,
-      base::Bind(&HistoryBackend::TopHosts, history_backend_, num_hosts),
-      callback);
-}
-
 void HistoryService::GetCountsAndLastVisitForOriginsForTesting(
     const std::set<GURL>& origins,
     const GetCountsAndLastVisitForOriginsCallback& callback) const {
@@ -442,17 +337,6 @@ void HistoryService::GetCountsAndLastVisitForOriginsForTesting(
       backend_task_runner_.get(), FROM_HERE,
       base::Bind(&HistoryBackend::GetCountsAndLastVisitForOrigins,
                  history_backend_, origins),
-      callback);
-}
-
-void HistoryService::HostRankIfAvailable(
-    const GURL& url,
-    const base::Callback<void(int)>& callback) const {
-  DCHECK(backend_task_runner_) << "History service being called after cleanup";
-  DCHECK(thread_checker_.CalledOnValidThread());
-  PostTaskAndReplyWithResult(
-      backend_task_runner_.get(), FROM_HERE,
-      base::Bind(&HistoryBackend::HostRankIfAvailable, history_backend_, url),
       callback);
 }
 
@@ -502,13 +386,9 @@ void HistoryService::AddPage(const HistoryAddPageArgs& add_page_args) {
     }
   }
 
-  auto real_task =
-      base::BindOnce(&HistoryBackend::AddPage, history_backend_, add_page_args);
-  std::unique_ptr<AddPageMemoryDebuggingTask> debug_task =
-      std::make_unique<AddPageMemoryDebuggingTask>(std::move(real_task));
   ScheduleTask(PRIORITY_NORMAL,
-               base::BindOnce(&AddPageMemoryDebuggingTask::RunOnDbThread,
-                              std::move(debug_task)));
+               base::BindOnce(&HistoryBackend::AddPage, history_backend_,
+                              add_page_args));
 }
 
 void HistoryService::AddPageNoVisitForBookmark(const GURL& url,
@@ -1034,14 +914,11 @@ void HistoryService::Cleanup() {
     //
     // TODO(ajwong): Cleanup HistoryBackend lifetime issues.
     //     See http://crbug.com/99767.
-    history_backend_->AddRef();
     base::Closure closing_task =
         base::Bind(&HistoryBackend::Closing, history_backend_);
     ScheduleTask(PRIORITY_NORMAL, closing_task);
     closing_task.Reset();
-    HistoryBackend* raw_ptr = history_backend_.get();
-    history_backend_ = nullptr;
-    backend_task_runner_->ReleaseSoon(FROM_HERE, raw_ptr);
+    backend_task_runner_->ReleaseSoon(FROM_HERE, std::move(history_backend_));
   }
 
   // Clear |backend_task_runner_| to make sure it's not used after Cleanup().
@@ -1057,21 +934,23 @@ bool HistoryService::Init(
   TRACE_EVENT0("browser,startup", "HistoryService::Init")
   SCOPED_UMA_HISTOGRAM_TIMER("History.HistoryServiceInitTime");
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!backend_task_runner_);
 
-  if (thread_) {
-    base::Thread::Options options;
-    options.timer_slack = base::TIMER_SLACK_MAXIMUM;
-    if (!thread_->StartWithOptions(options)) {
-      Cleanup();
-      return false;
+  // Unit tests can inject |backend_task_runner_| before this is called.
+  if (!backend_task_runner_) {
+    if (thread_) {
+      base::Thread::Options options;
+      options.timer_slack = base::TIMER_SLACK_MAXIMUM;
+      if (!thread_->StartWithOptions(options)) {
+        Cleanup();
+        return false;
+      }
+      backend_task_runner_ = thread_->task_runner();
+    } else {
+      backend_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::WithBaseSyncPrimitives(),
+           base::TaskPriority::USER_BLOCKING,
+           base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
     }
-    backend_task_runner_ = thread_->task_runner();
-  } else {
-    backend_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-        {base::MayBlock(), base::WithBaseSyncPrimitives(),
-         base::TaskPriority::USER_BLOCKING,
-         base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
   }
 
   // Create the history backend.
@@ -1211,27 +1090,28 @@ void HistoryService::ExpireHistoryBetween(
     const std::set<GURL>& restrict_urls,
     Time begin_time,
     Time end_time,
-    const base::Closure& callback,
+    bool user_initiated,
+    base::OnceClosure callback,
     base::CancelableTaskTracker* tracker) {
   DCHECK(backend_task_runner_) << "History service being called after cleanup";
   DCHECK(thread_checker_.CalledOnValidThread());
   tracker->PostTaskAndReply(
       backend_task_runner_.get(), FROM_HERE,
       base::BindOnce(&HistoryBackend::ExpireHistoryBetween, history_backend_,
-                     restrict_urls, begin_time, end_time),
-      callback);
+                     restrict_urls, begin_time, end_time, user_initiated),
+      std::move(callback));
 }
 
 void HistoryService::ExpireHistory(
     const std::vector<ExpireHistoryArgs>& expire_list,
-    const base::Closure& callback,
+    base::OnceClosure callback,
     base::CancelableTaskTracker* tracker) {
   DCHECK(backend_task_runner_) << "History service being called after cleanup";
   DCHECK(thread_checker_.CalledOnValidThread());
   tracker->PostTaskAndReply(backend_task_runner_.get(), FROM_HERE,
                             base::BindOnce(&HistoryBackend::ExpireHistory,
                                            history_backend_, expire_list),
-                            callback);
+                            std::move(callback));
 }
 
 void HistoryService::ExpireHistoryBeforeForTesting(
@@ -1252,7 +1132,8 @@ void HistoryService::ExpireLocalAndRemoteHistoryBetween(
     const std::set<GURL>& restrict_urls,
     Time begin_time,
     Time end_time,
-    const base::Closure& callback,
+    bool user_initiated,
+    base::OnceClosure callback,
     base::CancelableTaskTracker* tracker) {
   // TODO(dubroy): This should be factored out into a separate class that
   // dispatches deletions to the proper places.
@@ -1296,7 +1177,8 @@ void HistoryService::ExpireLocalAndRemoteHistoryBetween(
                                       base::Bind(&ExpireWebHistoryComplete),
                                       partial_traffic_annotation);
   }
-  ExpireHistoryBetween(restrict_urls, begin_time, end_time, callback, tracker);
+  ExpireHistoryBetween(restrict_urls, begin_time, end_time, user_initiated,
+                       std::move(callback), tracker);
 }
 
 void HistoryService::OnDBLoaded() {

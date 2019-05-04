@@ -6,8 +6,8 @@
 # in the file PATENTS.  All contributing project authors may
 # be found in the AUTHORS file in the root of the source tree.
 
-import("../../webrtc.gni")
 import("//third_party/protobuf/proto_library.gni")
+import("../../webrtc.gni")
 
 if (rtc_enable_protobuf) {
   proto_library("network_tester_config_proto") {
@@ -44,9 +44,11 @@ if (rtc_enable_protobuf) {
       "../../p2p",
       "../../rtc_base:checks",
       "../../rtc_base:protobuf_utils",
+      "../../rtc_base:rtc_base",
       "../../rtc_base:rtc_base_approved",
       "../../rtc_base:rtc_task_queue",
       "../../rtc_base:sequenced_task_checker",
+      "../../rtc_base/third_party/sigslot:sigslot",
       "//third_party/abseil-cpp/absl/types:optional",
     ]
 
@@ -80,7 +82,7 @@ if (rtc_enable_protobuf) {
 
     deps = [
       ":network_tester",
-      "../../rtc_base:rtc_base_tests_utils",
+      "../../rtc_base:gunit_helpers",
       "../../test:fileutils",
       "../../test:test_support",
       "//testing/gtest",

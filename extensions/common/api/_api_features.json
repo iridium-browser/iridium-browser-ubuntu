@@ -200,10 +200,12 @@
       "contexts": ["webui"],
       "matches": [
         "chrome://cast/*",
+        "chrome://discards/*",
         "chrome://extensions-frame/*",
         "chrome://extensions/*",
         "chrome://home/*",
         "chrome://chrome-signin/*",
+        "chrome://hats/*",
         "chrome://media-router/*",
         "chrome://mobilesetup/*",
         "chrome://oobe/*",
@@ -223,6 +225,9 @@
   "idle": {
     "dependencies": ["permission:idle"],
     "contexts": ["blessed_extension"]
+  },
+  "idle.getAutoLockDelay": {
+    "platforms": ["chromeos"]
   },
   "lockScreen.data": {
     "dependencies": ["permission:lockScreen"],
@@ -571,6 +576,8 @@
     "contexts": ["webui"],
     "matches": [
       "chrome://chrome-signin/*",
+      "chrome://discards/*",
+      "chrome://hats/*",
       "chrome://home/*",
       "chrome://media-router/*",
       "chrome://mobilesetup/*",
@@ -588,6 +595,8 @@
     "contexts": ["webui"],
     "matches": [
       "chrome://chrome-signin/*",
+      "chrome://discards/*",
+      "chrome://hats/*",
       "chrome://home/*",
       "chrome://media-router/*",
       "chrome://mobilesetup/*",
@@ -603,6 +612,8 @@
     "contexts": ["webui"],
     "matches": [
       "chrome://chrome-signin/*",
+      "chrome://discards/*",
+      "chrome://hats/*",
       "chrome://home/*",
       "chrome://media-router/*",
       "chrome://mobilesetup/*",

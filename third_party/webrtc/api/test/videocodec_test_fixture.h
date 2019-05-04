@@ -22,11 +22,11 @@
 namespace webrtc {
 namespace test {
 
-// Rates for the encoder and the frame number when to change profile.
+// Rates for the encoder and the frame number when to apply profile.
 struct RateProfile {
   size_t target_kbps;
   size_t input_fps;
-  size_t frame_index_rate_update;
+  size_t frame_num;
 };
 
 struct RateControlThresholds {
@@ -122,10 +122,6 @@ class VideoCodecTestFixture {
       H264PacketizationMode packetization_mode =
           webrtc::H264PacketizationMode::NonInterleaved;
     } h264_codec_settings;
-
-    // Should hardware accelerated codecs be used?
-    bool hw_encoder = false;
-    bool hw_decoder = false;
 
     // Custom checker that will be called for each frame.
     const EncodedFrameChecker* encoded_frame_checker = nullptr;

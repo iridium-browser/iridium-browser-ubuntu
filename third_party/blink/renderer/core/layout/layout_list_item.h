@@ -48,6 +48,8 @@ class LayoutListItem final : public LayoutBlockFlow {
 
   const char* GetName() const override { return "LayoutListItem"; }
 
+  void RecalcVisualOverflow() override;
+
  private:
   bool IsOfType(LayoutObjectType type) const override {
     return type == kLayoutObjectListItem || LayoutBlockFlow::IsOfType(type);
@@ -65,12 +67,12 @@ class LayoutListItem final : public LayoutBlockFlow {
   // Returns true if we re-attached and updated the location of the marker.
   bool UpdateMarkerLocation();
 
-  enum OverflowType { Layout, Visual };
-  void UpdateOverflow(OverflowType);
+  void UpdateOverflow();
 
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
 
-  void AddVisualOverflowFromChildren() override;
+  void ComputeVisualOverflow(bool recompute_floats) final;
+
   void AddLayoutOverflowFromChildren() override;
 
   void AlignMarkerInBlockDirection();

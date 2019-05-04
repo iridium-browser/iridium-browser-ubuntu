@@ -7,11 +7,10 @@
 #ifndef FXBARCODE_BC_WRITER_H_
 #define FXBARCODE_BC_WRITER_H_
 
-#include "core/fxcrt/fx_string.h"
-#include "core/fxge/dib/cfx_dibitmap.h"
 #include "core/fxge/fx_dib.h"
 #include "fxbarcode/BC_Library.h"
-#include "fxbarcode/utils.h"
+
+class CFX_DIBitmap;
 
 class CBC_Writer {
  public:
@@ -31,7 +30,6 @@ class CBC_Writer {
   virtual bool SetErrorCorrectionLevel(int32_t level);
 
  protected:
-  RetainPtr<CFX_DIBitmap> CreateDIBitmap(int32_t width, int32_t height);
   int32_t m_CharEncoding = 0;
   int32_t m_ModuleHeight = 1;
   int32_t m_ModuleWidth = 1;

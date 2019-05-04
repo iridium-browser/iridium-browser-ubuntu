@@ -13,29 +13,25 @@ namespace app_list_features {
 const base::Feature kEnableAnswerCard{"EnableAnswerCard",
                                       base::FEATURE_ENABLED_BY_DEFAULT};
 const base::Feature kEnableAppShortcutSearch{"EnableAppShortcutSearch",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
 const base::Feature kEnableBackgroundBlur{"EnableBackgroundBlur",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
 const base::Feature kEnablePlayStoreAppSearch{
     "EnablePlayStoreAppSearch", base::FEATURE_DISABLED_BY_DEFAULT};
-const base::Feature kEnableHomeLauncher{"EnableHomeLauncher",
-                                        base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kEnableAppDataSearch{"EnableAppDataSearch",
+                                         base::FEATURE_DISABLED_BY_DEFAULT};
 const base::Feature kEnableHomeLauncherGestures{
     "HomeLauncherGestures", base::FEATURE_ENABLED_BY_DEFAULT};
 const base::Feature kEnableSettingsShortcutSearch{
     "EnableSettingsShortcutSearch", base::FEATURE_DISABLED_BY_DEFAULT};
 const base::Feature kEnableAppsGridGapFeature{"EnableAppsGridGapFeature",
                                               base::FEATURE_ENABLED_BY_DEFAULT};
-const base::Feature kEnableNewStyleLauncher{"EnableNewStyleLauncher",
-                                            base::FEATURE_ENABLED_BY_DEFAULT};
-const base::Feature kEnableContinueReading{"EnableContinueReading",
-                                           base::FEATURE_ENABLED_BY_DEFAULT};
 const base::Feature kEnableZeroStateSuggestions{
     "EnableZeroStateSuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
 const base::Feature kEnableAppListSearchAutocomplete{
     "EnableAppListSearchAutocomplete", base::FEATURE_ENABLED_BY_DEFAULT};
 const base::Feature kEnableAppSearchResultRanker{
-    "EnableAppSearchResultRanker", base::FEATURE_DISABLED_BY_DEFAULT};
+    "EnableAppSearchResultRanker", base::FEATURE_ENABLED_BY_DEFAULT};
 
 bool IsAnswerCardEnabled() {
   // Not using local static variable to allow tests to change this value.
@@ -55,8 +51,8 @@ bool IsPlayStoreAppSearchEnabled() {
   return base::FeatureList::IsEnabled(kEnablePlayStoreAppSearch);
 }
 
-bool IsHomeLauncherEnabled() {
-  return base::FeatureList::IsEnabled(kEnableHomeLauncher);
+bool IsAppDataSearchEnabled() {
+  return base::FeatureList::IsEnabled(kEnableAppDataSearch);
 }
 
 bool IsHomeLauncherGesturesEnabled() {
@@ -69,14 +65,6 @@ bool IsSettingsShortcutSearchEnabled() {
 
 bool IsAppsGridGapFeatureEnabled() {
   return base::FeatureList::IsEnabled(kEnableAppsGridGapFeature);
-}
-
-bool IsNewStyleLauncherEnabled() {
-  return base::FeatureList::IsEnabled(kEnableNewStyleLauncher);
-}
-
-bool IsContinueReadingEnabled() {
-  return base::FeatureList::IsEnabled(kEnableContinueReading);
 }
 
 bool IsZeroStateSuggestionsEnabled() {

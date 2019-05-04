@@ -2,27 +2,22 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/chromeos/rules.gni")
 import("//testing/test.gni")
-import("//third_party/protobuf/proto_library.gni")
 
 assert(is_chromeos, "Non-Chrome-OS builds must not depend on //chromeos")
 
-source_set("settings") {
-  public_deps = [
-    ":cros_settings_names",
-  ]
+component("settings") {
+  defines = [ "IS_CHROMEOS_SETTINGS_IMPL" ]
   deps = [
     "//base",
     "//base:i18n",
     "//chromeos:chromeos_constants",
-    "//chromeos:chromeos_export",
-    "//chromeos/login",
-    "//dbus",
+    "//chromeos/login/login_state",
     "//third_party/icu",
-    "//third_party/protobuf:protobuf_lite",
   ]
   sources = [
+    "cros_settings_names.cc",
+    "cros_settings_names.h",
     "cros_settings_provider.cc",
     "cros_settings_provider.h",
     "system_settings_provider.cc",
@@ -32,18 +27,6 @@ source_set("settings") {
     "timezone_settings_helper.cc",
     "timezone_settings_helper.h",
   ]
-  defines = [ "CHROMEOS_IMPLEMENTATION" ]
-}
-
-source_set("cros_settings_names") {
-  deps = [
-    "//chromeos:chromeos_export",
-  ]
-  sources = [
-    "cros_settings_names.cc",
-    "cros_settings_names.h",
-  ]
-  defines = [ "CHROMEOS_IMPLEMENTATION" ]
 }
 
 source_set("unit_tests") {
@@ -52,11 +35,11 @@ source_set("unit_tests") {
     ":settings",
     "//base",
     "//base:i18n",
-    "//dbus",
+    "//base/test:test_support",
+    "//chromeos:chromeos_constants",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/icu",
-    "//third_party/protobuf:protobuf_lite",
   ]
   sources = [
     "timezone_settings_unittest.cc",

@@ -106,8 +106,7 @@ TEST_F(DocumentProviderTest, CheckFeaturePrerequisiteNoIncognito) {
   EXPECT_CALL(*client_.get(), SearchSuggestEnabled())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*client_.get(), IsAuthenticated()).WillRepeatedly(Return(true));
-  EXPECT_CALL(*client_.get(), IsUnifiedConsentGiven())
-      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*client_.get(), IsSyncActive()).WillRepeatedly(Return(true));
   EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillRepeatedly(Return(false));
 
   // Feature starts enabled.
@@ -118,21 +117,20 @@ TEST_F(DocumentProviderTest, CheckFeaturePrerequisiteNoIncognito) {
   EXPECT_FALSE(provider_->IsDocumentProviderAllowed(client_.get()));
 }
 
-TEST_F(DocumentProviderTest, CheckFeaturePrerequisiteNoConsentBit) {
+TEST_F(DocumentProviderTest, CheckFeaturePrerequisiteNoSync) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeature(omnibox::kDocumentProvider);
   EXPECT_CALL(*client_.get(), SearchSuggestEnabled())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*client_.get(), IsAuthenticated()).WillRepeatedly(Return(true));
-  EXPECT_CALL(*client_.get(), IsUnifiedConsentGiven())
-      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*client_.get(), IsSyncActive()).WillRepeatedly(Return(true));
   EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillRepeatedly(Return(false));
 
   // Feature starts enabled.
   EXPECT_TRUE(provider_->IsDocumentProviderAllowed(client_.get()));
 
-  // Feature should be disabled without a consent bit.
-  EXPECT_CALL(*client_.get(), IsUnifiedConsentGiven()).WillOnce(Return(false));
+  // Feature should be disabled without active sync.
+  EXPECT_CALL(*client_.get(), IsSyncActive()).WillOnce(Return(false));
   EXPECT_FALSE(provider_->IsDocumentProviderAllowed(client_.get()));
 }
 
@@ -142,8 +140,7 @@ TEST_F(DocumentProviderTest, CheckFeaturePrerequisiteClientSettingOff) {
   EXPECT_CALL(*client_.get(), SearchSuggestEnabled())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*client_.get(), IsAuthenticated()).WillRepeatedly(Return(true));
-  EXPECT_CALL(*client_.get(), IsUnifiedConsentGiven())
-      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*client_.get(), IsSyncActive()).WillRepeatedly(Return(true));
   EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillRepeatedly(Return(false));
 
   // Feature starts enabled.
@@ -162,8 +159,7 @@ TEST_F(DocumentProviderTest, CheckFeaturePrerequisiteDefaultSearch) {
   EXPECT_CALL(*client_.get(), SearchSuggestEnabled())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*client_.get(), IsAuthenticated()).WillRepeatedly(Return(true));
-  EXPECT_CALL(*client_.get(), IsUnifiedConsentGiven())
-      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*client_.get(), IsSyncActive()).WillRepeatedly(Return(true));
   EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillRepeatedly(Return(false));
 
   // Feature starts enabled.
@@ -191,8 +187,7 @@ TEST_F(DocumentProviderTest, CheckFeaturePrerequisiteServerBackoff) {
   EXPECT_CALL(*client_.get(), SearchSuggestEnabled())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*client_.get(), IsAuthenticated()).WillRepeatedly(Return(true));
-  EXPECT_CALL(*client_.get(), IsUnifiedConsentGiven())
-      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*client_.get(), IsSyncActive()).WillRepeatedly(Return(true));
   EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillRepeatedly(Return(false));
 
   // Feature starts enabled.
@@ -266,6 +261,168 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResults) {
             GURL("https://documentprovider.tld/doc?id=2"));
   EXPECT_EQ(matches[1].relevance, 700);  // From study default.
   EXPECT_TRUE(matches[1].stripped_destination_url.is_empty());
+
+  ASSERT_FALSE(provider_->backoff_for_session_);
+}
+
+TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTies) {
+  const char kGoodJSONResponseWithTies[] = R"({
+      "results": [
+        {
+          "title": "Document 1",
+          "url": "https://documentprovider.tld/doc?id=1",
+          "score": 1234,
+          "originalUrl": "https://shortened.url"
+        },
+        {
+          "title": "Document 2",
+          "score": 1234,
+          "url": "https://documentprovider.tld/doc?id=2"
+        },
+        {
+          "title": "Document 3",
+          "score": 1234,
+          "url": "https://documentprovider.tld/doc?id=3"
+        }
+      ]
+     })";
+
+  std::unique_ptr<base::DictionaryValue> response = base::DictionaryValue::From(
+      base::JSONReader::Read(kGoodJSONResponseWithTies));
+  ASSERT_TRUE(response != nullptr);
+
+  ACMatches matches;
+  provider_->ParseDocumentSearchResults(*response, &matches);
+  EXPECT_EQ(matches.size(), 3u);
+
+  // Server is suggesting relevances of [1234, 1234, 1234]
+  // We should break ties to [1234, 1233, 1232]
+  EXPECT_EQ(matches[0].contents, base::ASCIIToUTF16("Document 1"));
+  EXPECT_EQ(matches[0].destination_url,
+            GURL("https://documentprovider.tld/doc?id=1"));
+  EXPECT_EQ(matches[0].relevance, 1234);  // As the server specified.
+  EXPECT_EQ(matches[0].stripped_destination_url, GURL("https://shortened.url"));
+
+  EXPECT_EQ(matches[1].contents, base::ASCIIToUTF16("Document 2"));
+  EXPECT_EQ(matches[1].destination_url,
+            GURL("https://documentprovider.tld/doc?id=2"));
+  EXPECT_EQ(matches[1].relevance, 1233);  // Tie demoted
+  EXPECT_TRUE(matches[1].stripped_destination_url.is_empty());
+
+  EXPECT_EQ(matches[2].contents, base::ASCIIToUTF16("Document 3"));
+  EXPECT_EQ(matches[2].destination_url,
+            GURL("https://documentprovider.tld/doc?id=3"));
+  EXPECT_EQ(matches[2].relevance, 1232);  // Tie demoted, twice.
+  EXPECT_TRUE(matches[2].stripped_destination_url.is_empty());
+
+  ASSERT_FALSE(provider_->backoff_for_session_);
+}
+
+TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTiesCascade) {
+  const char kGoodJSONResponseWithTies[] = R"({
+      "results": [
+        {
+          "title": "Document 1",
+          "url": "https://documentprovider.tld/doc?id=1",
+          "score": 1234,
+          "originalUrl": "https://shortened.url"
+        },
+        {
+          "title": "Document 2",
+          "score": 1234,
+          "url": "https://documentprovider.tld/doc?id=2"
+        },
+        {
+          "title": "Document 3",
+          "score": 1233,
+          "url": "https://documentprovider.tld/doc?id=3"
+        }
+      ]
+     })";
+
+  std::unique_ptr<base::DictionaryValue> response = base::DictionaryValue::From(
+      base::JSONReader::Read(kGoodJSONResponseWithTies));
+  ASSERT_TRUE(response != nullptr);
+
+  ACMatches matches;
+  provider_->ParseDocumentSearchResults(*response, &matches);
+  EXPECT_EQ(matches.size(), 3u);
+
+  // Server is suggesting relevances of [1233, 1234, 1233, 1000, 1000]
+  // We should break ties to [1234, 1233, 1232, 1000, 999]
+  EXPECT_EQ(matches[0].contents, base::ASCIIToUTF16("Document 1"));
+  EXPECT_EQ(matches[0].destination_url,
+            GURL("https://documentprovider.tld/doc?id=1"));
+  EXPECT_EQ(matches[0].relevance, 1234);  // As the server specified.
+  EXPECT_EQ(matches[0].stripped_destination_url, GURL("https://shortened.url"));
+
+  EXPECT_EQ(matches[1].contents, base::ASCIIToUTF16("Document 2"));
+  EXPECT_EQ(matches[1].destination_url,
+            GURL("https://documentprovider.tld/doc?id=2"));
+  EXPECT_EQ(matches[1].relevance, 1233);  // Tie demoted
+  EXPECT_TRUE(matches[1].stripped_destination_url.is_empty());
+
+  EXPECT_EQ(matches[2].contents, base::ASCIIToUTF16("Document 3"));
+  EXPECT_EQ(matches[2].destination_url,
+            GURL("https://documentprovider.tld/doc?id=3"));
+  // Document 2's demotion caused an implicit tie.
+  // Ensure we demote this one as well.
+  EXPECT_EQ(matches[2].relevance, 1232);
+  EXPECT_TRUE(matches[2].stripped_destination_url.is_empty());
+
+  ASSERT_FALSE(provider_->backoff_for_session_);
+}
+
+TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTiesZeroLimit) {
+  const char kGoodJSONResponseWithTies[] = R"({
+      "results": [
+        {
+          "title": "Document 1",
+          "url": "https://documentprovider.tld/doc?id=1",
+          "score": 1,
+          "originalUrl": "https://shortened.url"
+        },
+        {
+          "title": "Document 2",
+          "score": 1,
+          "url": "https://documentprovider.tld/doc?id=2"
+        },
+        {
+          "title": "Document 3",
+          "score": 1,
+          "url": "https://documentprovider.tld/doc?id=3"
+        }
+      ]
+     })";
+
+  std::unique_ptr<base::DictionaryValue> response = base::DictionaryValue::From(
+      base::JSONReader::Read(kGoodJSONResponseWithTies));
+  ASSERT_TRUE(response != nullptr);
+
+  ACMatches matches;
+  provider_->ParseDocumentSearchResults(*response, &matches);
+  EXPECT_EQ(matches.size(), 3u);
+
+  // Server is suggesting relevances of [1, 1, 1]
+  // We should break ties, but not below zero, to [1, 0, 0]
+  EXPECT_EQ(matches[0].contents, base::ASCIIToUTF16("Document 1"));
+  EXPECT_EQ(matches[0].destination_url,
+            GURL("https://documentprovider.tld/doc?id=1"));
+  EXPECT_EQ(matches[0].relevance, 1);  // As the server specified.
+  EXPECT_EQ(matches[0].stripped_destination_url, GURL("https://shortened.url"));
+
+  EXPECT_EQ(matches[1].contents, base::ASCIIToUTF16("Document 2"));
+  EXPECT_EQ(matches[1].destination_url,
+            GURL("https://documentprovider.tld/doc?id=2"));
+  EXPECT_EQ(matches[1].relevance, 0);  // Tie demoted
+  EXPECT_TRUE(matches[1].stripped_destination_url.is_empty());
+
+  EXPECT_EQ(matches[2].contents, base::ASCIIToUTF16("Document 3"));
+  EXPECT_EQ(matches[2].destination_url,
+            GURL("https://documentprovider.tld/doc?id=3"));
+  // Tie is demoted further.
+  EXPECT_EQ(matches[2].relevance, 0);
+  EXPECT_TRUE(matches[2].stripped_destination_url.is_empty());
 
   ASSERT_FALSE(provider_->backoff_for_session_);
 }
@@ -369,3 +526,37 @@ TEST_F(DocumentProviderTest, GenerateLastModifiedString) {
             base::ASCIIToUTF16("8/27/17"));
 }
 #endif  // !defined(OS_IOS)
+
+TEST_F(DocumentProviderTest, GetURLForDeduping) {
+  // Checks that |url_string| is a URL for opening |expected_id|. An empty ID
+  // signifies |url_string| is not a Drive document.
+  auto CheckDeduper = [](const std::string& url_string,
+                         const std::string& expected_id) {
+    const GURL url(url_string);
+    const GURL got_output = DocumentProvider::GetURLForDeduping(url);
+
+    const GURL expected_output;
+    if (!expected_id.empty()) {
+      EXPECT_EQ(got_output,
+                GURL("https://drive.google.com/open?id=" + expected_id));
+    } else {
+      EXPECT_EQ(got_output, GURL());
+    }
+  };
+
+  // URLs that represent documents:
+  CheckDeduper("https://drive.google.com/open?id=the_doc-id", "the_doc-id");
+  CheckDeduper("https://docs.google.com/document/d/the_doc-id/edit",
+               "the_doc-id");
+  CheckDeduper(
+      "https://docs.google.com/presentation/d/the_doc-id/edit#slide=xyz",
+      "the_doc-id");
+  CheckDeduper(
+      "https://docs.google.com/spreadsheets/d/the_doc-id/preview?x=1#y=2",
+      "the_doc-id");
+
+  // URLs that do not represent documents:
+  CheckDeduper("https://docs.google.com/help?id=d123", "");
+  CheckDeduper("https://www.google.com", "");
+  CheckDeduper("https://docs.google.com/kittens/d/d123/preview?x=1#y=2", "");
+}

@@ -31,8 +31,7 @@ struct AutofillMetadata;
 // implements the FormGroup interface so that owners of this object can request
 // form information from the profile, and the profile will delegate the request
 // to the requested form group type.
-class AutofillProfile : public AutofillDataModel,
-                        public base::SupportsWeakPtr<AutofillProfile> {
+class AutofillProfile : public AutofillDataModel {
  public:
   enum RecordType {
     // A profile stored and editable locally.
@@ -78,6 +77,9 @@ class AutofillProfile : public AutofillDataModel,
   // AutofillDataModel:
   AutofillMetadata GetMetadata() const override;
   bool SetMetadata(const AutofillMetadata metadata) override;
+  // Returns whether the profile is deletable: if it is not verified and has not
+  // been used for longer than |kDisusedAddressDeletionTimeDelta|.
+  bool IsDeletable() const override;
 
   // FormGroup:
   void GetMatchingTypes(const base::string16& text,
@@ -123,6 +125,11 @@ class AutofillProfile : public AutofillDataModel,
   // Same as operator==, but ignores differences in guid and cares about
   // differences in usage stats.
   bool EqualsForSyncPurposes(const AutofillProfile& profile) const;
+
+  bool EqualsForUpdatePurposes(const AutofillProfile& profile) const;
+
+  // Compares the values of kSupportedTypesByClientForValidation fields.
+  bool EqualsForClientValidationPurpose(const AutofillProfile& profile) const;
 
   // Same as operator==, but cares about differences in usage stats.
   bool EqualsIncludingUsageStatsForTesting(
@@ -231,13 +238,14 @@ class AutofillProfile : public AutofillDataModel,
                                  ValidationSource source) const;
 
   // Sets the validity state of the specified autofill type.
+  // This should only be called from autofill profile validtion API or in tests.
   void SetValidityState(ServerFieldType type,
                         ValidityState validity,
-                        ValidationSource validation_source);
+                        ValidationSource validation_source) const;
 
   // Update the validity map based on the server side validity maps from the
   // prefs.
-  void UpdateServerValidityMap(const ProfileValidityMap& validity_states);
+  void UpdateServerValidityMap(const ProfileValidityMap& validity_states) const;
 
   // Returns whether autofill does the validation of the specified |type|.
   static bool IsClientValidationSupportedForType(ServerFieldType type);
@@ -248,7 +256,7 @@ class AutofillProfile : public AutofillDataModel,
 
   // Sets the validity state of the profile based on the specified
   // |bitfield_value| based on client validation source.
-  void SetClientValidityFromBitfieldValue(int bitfield_value);
+  void SetClientValidityFromBitfieldValue(int bitfield_value) const;
 
   // Returns true if type is a phone type and it's invalid, either explicitly,
   // or by looking at its components.
@@ -256,14 +264,19 @@ class AutofillProfile : public AutofillDataModel,
 
   const std::map<ServerFieldType, ValidityState>& GetServerValidityMap() const {
     return server_validity_states_;
-  };
+  }
 
   bool is_client_validity_states_updated() const {
     return is_client_validity_states_updated_;
   }
+
   void set_is_client_validity_states_updated(
-      bool is_client_validity_states_updated) {
+      bool is_client_validity_states_updated) const {
     is_client_validity_states_updated_ = is_client_validity_states_updated;
+  }
+
+  base::WeakPtr<const AutofillProfile> GetWeakPtr() const {
+    return weak_ptr_factory_.GetWeakPtr();
   }
 
  private:
@@ -323,13 +336,14 @@ class AutofillProfile : public AutofillDataModel,
 
   // This flag denotes whether the client_validity_states_ are updated according
   // to the changes in the autofill profile values.
-  bool is_client_validity_states_updated_ = false;
+  mutable bool is_client_validity_states_updated_ = false;
 
   // A map identifying what fields are valid according to server validation.
-  std::map<ServerFieldType, ValidityState> server_validity_states_;
+  mutable std::map<ServerFieldType, ValidityState> server_validity_states_;
 
   // A map identifying what fields are valid according to client validation.
-  std::map<ServerFieldType, ValidityState> client_validity_states_;
+  mutable std::map<ServerFieldType, ValidityState> client_validity_states_;
+  mutable base::WeakPtrFactory<AutofillProfile> weak_ptr_factory_;
 };
 
 // So we can compare AutofillProfiles with EXPECT_EQ().

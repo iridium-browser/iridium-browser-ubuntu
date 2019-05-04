@@ -99,7 +99,8 @@ struct Capabilities {
 
   // Accepts all W3C defined capabilities (including those not yet supported by
   // ChromeDriver) and all ChromeDriver-specific extensions.
-  Status Parse(const base::DictionaryValue& desired_caps);
+  Status Parse(const base::DictionaryValue& desired_caps,
+               bool w3c_compliant = true);
 
   // Check if all specified capabilities are supported by ChromeDriver.
   // The long term goal is to support all standard capabilities, thus making
@@ -123,6 +124,8 @@ struct Capabilities {
   base::TimeDelta script_timeout = Session::kDefaultScriptTimeout;
   base::TimeDelta page_load_timeout = Session::kDefaultPageLoadTimeout;
   base::TimeDelta implicit_wait_timeout = Session::kDefaultImplicitWaitTimeout;
+
+  bool strict_file_interactability;
 
   std::string unhandled_prompt_behavior;
 

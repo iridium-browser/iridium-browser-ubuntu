@@ -5,6 +5,7 @@
 #include "chrome/browser/download/offline_item_utils.h"
 
 #include "chrome/grit/generated_resources.h"
+#include "components/download/public/common/download_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/download_item_utils.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
@@ -76,8 +77,7 @@ OfflineItem OfflineItemUtils::CreateOfflineItem(const std::string& name_space,
   item.externally_removed = download_item->GetFileExternallyRemoved();
   item.creation_time = download_item->GetStartTime();
   item.last_accessed_time = download_item->GetLastAccessTime();
-  item.is_openable = download_item->CanOpenDownload() &&
-                     blink::IsSupportedMimeType(download_item->GetMimeType());
+  item.is_openable = download_item->CanOpenDownload();
   item.file_path = download_item->GetTargetFilePath();
   item.mime_type = download_item->GetMimeType();
 
@@ -86,6 +86,7 @@ OfflineItem OfflineItemUtils::CreateOfflineItem(const std::string& name_space,
   item.is_off_the_record = off_the_record;
 
   item.is_resumable = download_item->CanResume();
+  item.allow_metered = download_item->AllowMetered();
   item.received_bytes = download_item->GetReceivedBytes();
   item.is_dangerous = download_item->IsDangerous();
 
@@ -93,7 +94,6 @@ OfflineItem OfflineItemUtils::CreateOfflineItem(const std::string& name_space,
   bool time_remaining_known = download_item->TimeRemaining(&time_delta);
   item.time_remaining_ms = time_remaining_known ? time_delta.InMilliseconds()
                                                 : kUnknownRemainingTime;
-  // TODO(crbug.com/857549): Add allow_metered, fail_state, pending_state.
   item.fail_state =
       ConvertDownloadInterruptReasonToFailState(download_item->GetLastReason());
   switch (download_item->GetState()) {
@@ -109,14 +109,21 @@ OfflineItem OfflineItemUtils::CreateOfflineItem(const std::string& name_space,
     case DownloadItem::CANCELLED:
       item.state = OfflineItemState::CANCELLED;
       break;
-    case DownloadItem::INTERRUPTED:
-      item.state = download_item->CanResume() ? OfflineItemState::INTERRUPTED
-                                              : OfflineItemState::FAILED;
-      break;
+    case DownloadItem::INTERRUPTED: {
+      item.state =
+          download_item->IsPaused()
+              ? OfflineItemState::PAUSED
+              : (download_item->CanResume() ? OfflineItemState::INTERRUPTED
+                                            : OfflineItemState::FAILED);
+    } break;
     default:
       NOTREACHED();
   }
 
+  // TODO(crbug.com/857549): Set pending_state correctly.
+  item.pending_state = item.state == OfflineItemState::INTERRUPTED
+                           ? PendingState::PENDING_NETWORK
+                           : PendingState::NOT_PENDING;
   item.progress.value = download_item->GetReceivedBytes();
   if (download_item->PercentComplete() != -1)
     item.progress.max = download_item->GetTotalBytes();
@@ -139,66 +146,32 @@ bool OfflineItemUtils::IsDownload(const ContentId& id) {
 FailState OfflineItemUtils::ConvertDownloadInterruptReasonToFailState(
     download::DownloadInterruptReason reason) {
   switch (reason) {
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED:
-      return FailState::FILE_FAILED;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED:
-      return FailState::FILE_ACCESS_DENIED;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE:
-      return FailState::FILE_NO_SPACE;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG:
-      return FailState::FILE_NAME_TOO_LONG;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_TOO_LARGE:
-      return FailState::FILE_TOO_LARGE;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_VIRUS_INFECTED:
-      return FailState::FILE_VIRUS_INFECTED;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR:
-      return FailState::FILE_TRANSIENT_ERROR;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED:
-      return FailState::FILE_BLOCKED;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED:
-      return FailState::FILE_SECURITY_CHECK_FAILED;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_TOO_SHORT:
-      return FailState::FILE_TOO_SHORT;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_HASH_MISMATCH:
-      return FailState::FILE_HASH_MISMATCH;
-    case download::DOWNLOAD_INTERRUPT_REASON_FILE_SAME_AS_SOURCE:
-      return FailState::FILE_SAME_AS_SOURCE;
-    case download::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED:
-      return FailState::NETWORK_FAILED;
-    case download::DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT:
-      return FailState::NETWORK_TIMEOUT;
-    case download::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED:
-      return FailState::NETWORK_DISCONNECTED;
-    case download::DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN:
-      return FailState::NETWORK_SERVER_DOWN;
-    case download::DOWNLOAD_INTERRUPT_REASON_NETWORK_INVALID_REQUEST:
-      return FailState::NETWORK_INVALID_REQUEST;
-    case download::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED:
-      return FailState::SERVER_FAILED;
-    case download::DOWNLOAD_INTERRUPT_REASON_SERVER_NO_RANGE:
-      return FailState::SERVER_NO_RANGE;
-    case download::DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT:
-      return FailState::SERVER_BAD_CONTENT;
-    case download::DOWNLOAD_INTERRUPT_REASON_SERVER_UNAUTHORIZED:
-      return FailState::SERVER_UNAUTHORIZED;
-    case download::DOWNLOAD_INTERRUPT_REASON_SERVER_CERT_PROBLEM:
-      return FailState::SERVER_CERT_PROBLEM;
-    case download::DOWNLOAD_INTERRUPT_REASON_SERVER_FORBIDDEN:
-      return FailState::SERVER_FORBIDDEN;
-    case download::DOWNLOAD_INTERRUPT_REASON_SERVER_UNREACHABLE:
-      return FailState::SERVER_UNREACHABLE;
-    case download::DOWNLOAD_INTERRUPT_REASON_SERVER_CONTENT_LENGTH_MISMATCH:
-      return FailState::SERVER_CONTENT_LENGTH_MISMATCH;
-    case download::DOWNLOAD_INTERRUPT_REASON_SERVER_CROSS_ORIGIN_REDIRECT:
-      return FailState::SERVER_CROSS_ORIGIN_REDIRECT;
-    case download::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED:
-      return FailState::USER_CANCELED;
-    case download::DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN:
-      return FailState::USER_SHUTDOWN;
-    case download::DOWNLOAD_INTERRUPT_REASON_CRASH:
-      return FailState::CRASH;
     case download::DOWNLOAD_INTERRUPT_REASON_NONE:
-      return FailState::NO_FAILURE;
+      return offline_items_collection::FailState::NO_FAILURE;
+#define INTERRUPT_REASON(name, value)              \
+  case download::DOWNLOAD_INTERRUPT_REASON_##name: \
+    return offline_items_collection::FailState::name;
+#include "components/download/public/common/download_interrupt_reason_values.h"
+#undef INTERRUPT_REASON
+  }
+}
+
+// static
+download::DownloadInterruptReason
+OfflineItemUtils::ConvertFailStateToDownloadInterruptReason(
+    offline_items_collection::FailState fail_state) {
+  switch (fail_state) {
+    case offline_items_collection::FailState::NO_FAILURE:
+    // These two enum values are not converted from download interrupted reason,
+    // maps them to none error.
+    case offline_items_collection::FailState::CANNOT_DOWNLOAD:
+    case offline_items_collection::FailState::NETWORK_INSTABILITY:
+      return download::DOWNLOAD_INTERRUPT_REASON_NONE;
+#define INTERRUPT_REASON(name, value)             \
+  case offline_items_collection::FailState::name: \
+    return download::DOWNLOAD_INTERRUPT_REASON_##name;
+#include "components/download/public/common/download_interrupt_reason_values.h"
+#undef INTERRUPT_REASON
   }
 }
 

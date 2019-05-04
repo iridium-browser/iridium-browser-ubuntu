@@ -5,6 +5,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
@@ -22,8 +23,7 @@
 
 namespace content {
 
-WebContentsDelegate::WebContentsDelegate() {
-}
+WebContentsDelegate::WebContentsDelegate() = default;
 
 WebContents* WebContentsDelegate::OpenURLFromTab(WebContents* source,
                                                  const OpenURLParams& params) {
@@ -83,8 +83,7 @@ void WebContentsDelegate::CanDownload(
   callback.Run(true);
 }
 
-bool WebContentsDelegate::HandleContextMenu(
-    const content::ContextMenuParams& params) {
+bool WebContentsDelegate::HandleContextMenu(const ContextMenuParams& params) {
   return false;
 }
 
@@ -92,6 +91,12 @@ KeyboardEventProcessingResult WebContentsDelegate::PreHandleKeyboardEvent(
     WebContents* source,
     const NativeWebKeyboardEvent& event) {
   return KeyboardEventProcessingResult::NOT_HANDLED;
+}
+
+bool WebContentsDelegate::HandleKeyboardEvent(
+    WebContents* source,
+    const NativeWebKeyboardEvent& event) {
+  return false;
 }
 
 bool WebContentsDelegate::PreHandleGestureEvent(
@@ -138,6 +143,14 @@ std::unique_ptr<BluetoothChooser> WebContentsDelegate::RunBluetoothChooser(
   return nullptr;
 }
 
+std::unique_ptr<SerialChooser> WebContentsDelegate::RunSerialChooser(
+    RenderFrameHost* frame,
+    std::vector<blink::mojom::SerialPortFilterPtr> filters,
+    SerialChooser::Callback callback) {
+  std::move(callback).Run(nullptr);
+  return nullptr;
+}
+
 bool WebContentsDelegate::EmbedsFullscreenWidget() const {
   return false;
 }
@@ -152,7 +165,7 @@ blink::WebDisplayMode WebContentsDelegate::GetDisplayMode(
   return blink::kWebDisplayModeBrowser;
 }
 
-content::ColorChooser* WebContentsDelegate::OpenColorChooser(
+ColorChooser* WebContentsDelegate::OpenColorChooser(
     WebContents* web_contents,
     SkColor color,
     const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) {
@@ -176,17 +189,18 @@ void WebContentsDelegate::EnumerateDirectory(
 void WebContentsDelegate::RequestMediaAccessPermission(
     WebContents* web_contents,
     const MediaStreamRequest& request,
-    MediaResponseCallback callback) {
+    content::MediaResponseCallback callback) {
   LOG(ERROR) << "WebContentsDelegate::RequestMediaAccessPermission: "
              << "Not supported.";
-  std::move(callback).Run(MediaStreamDevices(), MEDIA_DEVICE_NOT_SUPPORTED,
-                          std::unique_ptr<MediaStreamUI>());
+  std::move(callback).Run(blink::MediaStreamDevices(),
+                          blink::MEDIA_DEVICE_NOT_SUPPORTED,
+                          std::unique_ptr<content::MediaStreamUI>());
 }
 
 bool WebContentsDelegate::CheckMediaAccessPermission(
     RenderFrameHost* render_frame_host,
     const GURL& security_origin,
-    MediaStreamType type) {
+    blink::MediaStreamType type) {
   LOG(ERROR) << "WebContentsDelegate::CheckMediaAccessPermission: "
              << "Not supported.";
   return false;
@@ -194,7 +208,7 @@ bool WebContentsDelegate::CheckMediaAccessPermission(
 
 std::string WebContentsDelegate::GetDefaultMediaDeviceID(
     WebContents* web_contents,
-    MediaStreamType type) {
+    blink::MediaStreamType type) {
   return std::string();
 }
 
@@ -202,8 +216,6 @@ std::string WebContentsDelegate::GetDefaultMediaDeviceID(
 bool WebContentsDelegate::ShouldBlockMediaRequest(const GURL& url) {
   return false;
 }
-
-void WebContentsDelegate::SetOverlayMode(bool use_overlay_mode) {}
 #endif
 
 bool WebContentsDelegate::RequestPpapiBrokerPermission(
@@ -251,10 +263,6 @@ blink::WebSecurityStyle WebContentsDelegate::GetSecurityStyle(
   return blink::kWebSecurityStyleUnknown;
 }
 
-void WebContentsDelegate::RequestAppBannerFromDevTools(
-    content::WebContents* web_contents) {
-}
-
 bool WebContentsDelegate::ShouldAllowRunningInsecureContent(
     WebContents* web_contents,
     bool allowed_per_prefs,
@@ -276,22 +284,26 @@ bool WebContentsDelegate::DoBrowserControlsShrinkRendererSize(
   return false;
 }
 
-void WebContentsDelegate::SetTopControlsGestureScrollInProgress(
-    bool in_progress) {}
-
-gfx::Size WebContentsDelegate::EnterPictureInPicture(const viz::SurfaceId&,
+gfx::Size WebContentsDelegate::EnterPictureInPicture(WebContents* web_contents,
+                                                     const viz::SurfaceId&,
                                                      const gfx::Size&) {
   return gfx::Size();
 }
 
-void WebContentsDelegate::ExitPictureInPicture() {}
+bool WebContentsDelegate::ShouldAllowLazyLoad() {
+  return true;
+}
 
-std::unique_ptr<content::WebContents> WebContentsDelegate::SwapWebContents(
-    content::WebContents* old_contents,
-    std::unique_ptr<content::WebContents> new_contents,
+std::unique_ptr<WebContents> WebContentsDelegate::SwapWebContents(
+    WebContents* old_contents,
+    std::unique_ptr<WebContents> new_contents,
     bool did_start_load,
     bool did_finish_load) {
   return new_contents;
 }
 
+bool WebContentsDelegate::ShouldShowStaleContentOnEviction(
+    WebContents* source) {
+  return false;
+}
 }  // namespace content

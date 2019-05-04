@@ -18,7 +18,6 @@ from chromite.lib import cros_collections
 from chromite.lib import cros_logging as logging
 from chromite.lib import failure_message_lib
 from chromite.lib import metrics
-from chromite.lib import tree_status
 
 
 BUILD_STATUS_URL = (
@@ -89,31 +88,31 @@ def GetBuildersWithNoneMessages(statuses, failing):
   return [x for x in failing if statuses[x].message is None]
 
 
-def GetSlavesAbortedBySelfDestructedMaster(master_build_id, db):
+def GetSlavesAbortedBySelfDestructedMaster(master_build_id, buildstore):
   """Get the build configs of the slaves aborted by self-destruction.
 
   Args:
     master_build_id: The build id of the master build to fetch information.
-    db: An instance of cidb.CIDBConnection.
+    buildstore: A BuildStore instance to make DB calls.
 
   Returns:
     A set of build configs of the slaves recorded in CIDB. An empty set if no
     db connection created.
   """
-  if not db:
+  if not buildstore.AreClientsReady():
     return set()
 
-  messages = db.GetBuildMessages(
+  messages = buildstore.GetCIDBHandle().GetBuildMessages(
       master_build_id,
       message_type=constants.MESSAGE_TYPE_IGNORED_REASON,
       message_subtype=constants.MESSAGE_SUBTYPE_SELF_DESTRUCTION)
   # tentative fix for crbug.com/890651
   if not messages:
-    logging.warning("No build message retrieved for master_build_id=%s" %
+    logging.warning('No build message retrieved for master_build_id=%s',
                     master_build_id)
     return set()
   slave_build_ids = [int(m['message_value']) for m in messages]
-  build_statuses = db.GetBuildStatuses(slave_build_ids)
+  build_statuses = buildstore.GetBuildStatuses(build_ids=slave_build_ids)
   return set(b['build_config'] for b in build_statuses)
 
 
@@ -322,8 +321,11 @@ class SlaveBuilderStatus(object):
         None if buildbucket_info_dict is None else
         [bb_info.buildbucket_id for bb_info in buildbucket_info_dict.values()])
 
-    stage_failures = self.db.GetSlaveFailures(
-        self.master_build_id, buildbucket_ids=slave_buildbucket_ids)
+    child_build_ids = [
+        c['id']
+        for c in self.db.GetBuildStatusesWithBuildbucketIds(
+            slave_buildbucket_ids)]
+    stage_failures = self.db.GetBuildsFailures(child_build_ids)
     stage_failures_by_build = cros_collections.GroupNamedtuplesByKey(
         stage_failures, 'build_config')
 
@@ -398,7 +400,7 @@ class SlaveBuilderStatus(object):
         return constants.BUILDER_STATUS_INFLIGHT
 
   # TODO(nxia): Buildbucket response returns luci-milo instead buildbot urls.
-  def _GetDashboardUrl(self, build_config, cidb_info_dict,
+  def _GetDashboardUrl(self, build_config, _cidb_info_dict,
                        buildbucket_info_dict):
     """Get dashboard url of a given build.
 
@@ -413,15 +415,7 @@ class SlaveBuilderStatus(object):
       Dashboard url of the given build. None if no entry found for this given
       build in CIDB and buildbucket_info_dict is None.
     """
-    site_config = config_lib.GetConfig()
-    if build_config in cidb_info_dict:
-      build_number = cidb_info_dict[build_config].build_number
-
-      return tree_status.ConstructDashboardURL(
-          site_config[build_config].active_waterfall,
-          build_config,
-          build_number)
-    elif buildbucket_info_dict is not None:
+    if buildbucket_info_dict is not None:
       # If no entry found in CIDB, get the buildbot url from Buildbucket.
       return buildbucket_info_dict[build_config].url
 

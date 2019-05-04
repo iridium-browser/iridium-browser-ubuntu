@@ -14,7 +14,6 @@
 #include "SkDevice.h"
 #include "SkGlyphRunPainter.h"
 #include "SkImageInfo.h"
-#include "SkPixelRef.h"
 #include "SkRasterClip.h"
 #include "SkRasterClipStack.h"
 #include "SkRect.h"
@@ -26,7 +25,6 @@ class SkImageFilterCache;
 class SkMatrix;
 class SkPaint;
 class SkPath;
-class SkPixelRef;
 class SkPixmap;
 class SkRasterHandleAllocator;
 class SkRRect;
@@ -114,6 +112,8 @@ protected:
     sk_sp<SkSpecialImage> makeSpecial(const SkImage*) override;
     sk_sp<SkSpecialImage> snapSpecial() override;
     void setImmutable() override { fBitmap.setImmutable(); }
+
+    sk_sp<SkSpecialImage> snapBackImage(const SkIRect&) override;
 
     ///////////////////////////////////////////////////////////////////////////
 

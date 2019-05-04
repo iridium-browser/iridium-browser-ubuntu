@@ -12,14 +12,15 @@
 #include "base/files/important_file_writer.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
-#include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher_impl.h"
+#include "google_apis/gaia/oauth2_token_service_delegate.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "third_party/protobuf/src/google/protobuf/message_lite.h"
 
@@ -29,7 +30,10 @@ namespace {
 
 constexpr base::FilePath::CharType kTokensFileName[] =
     FILE_PATH_LITERAL("AccountManagerTokens.bin");
-constexpr int kTokensFileMaxSizeInBytes = 100000;  // ~100 KB
+constexpr int kTokensFileMaxSizeInBytes = 100000;  // ~100 KB.
+
+constexpr char kNumAccountsMetricName[] = "AccountManager.NumAccounts";
+constexpr int kMaxNumAccountsMetric = 10;
 
 AccountManager::TokenMap LoadTokensFromDisk(
     const base::FilePath& tokens_file_path) {
@@ -92,7 +96,19 @@ std::vector<AccountManager::AccountKey> GetAccountKeys(
   return accounts;
 }
 
+void RecordNumAccountsMetric(const int num_accounts) {
+  base::UmaHistogramExactLinear(kNumAccountsMetricName, num_accounts,
+                                kMaxNumAccountsMetric + 1);
+}
+
 }  // namespace
+
+// static
+const char AccountManager::kActiveDirectoryDummyToken[] = "dummy_ad_token";
+
+// static
+const char* const AccountManager::kInvalidToken =
+    OAuth2TokenServiceDelegate::kInvalidRefreshToken;
 
 class AccountManager::GaiaTokenRevocationRequest : public GaiaAuthConsumer {
  public:
@@ -106,7 +122,7 @@ class AccountManager::GaiaTokenRevocationRequest : public GaiaAuthConsumer {
         weak_factory_(this) {
     DCHECK(!refresh_token_.empty());
     gaia_auth_fetcher_ = std::make_unique<GaiaAuthFetcher>(
-        this, GaiaConstants::kChromeOSSource, url_loader_factory);
+        this, gaia::GaiaSource::kChromeOS, url_loader_factory);
     base::RepeatingClosure start_revoke_token = base::BindRepeating(
         &GaiaTokenRevocationRequest::Start, weak_factory_.GetWeakPtr());
     delay_network_call_runner.Run(start_revoke_token);
@@ -160,6 +176,10 @@ bool AccountManager::AccountKey::operator<(const AccountKey& other) const {
 
 bool AccountManager::AccountKey::operator==(const AccountKey& other) const {
   return id == other.id && account_type == other.account_type;
+}
+
+bool AccountManager::AccountKey::operator!=(const AccountKey& other) const {
+  return !(*this == other);
 }
 
 AccountManager::Observer::Observer() = default;
@@ -225,6 +245,8 @@ void AccountManager::InsertTokensAndRunInitializationCallbacks(
   for (const auto& token : tokens_) {
     NotifyTokenObservers(token.first);
   }
+
+  RecordNumAccountsMetric(tokens_.size());
 }
 
 AccountManager::~AccountManager() {
@@ -285,6 +307,11 @@ void AccountManager::RemoveAccountInternal(const AccountKey& account_key) {
 void AccountManager::UpsertToken(const AccountKey& account_key,
                                  const std::string& token) {
   DCHECK_NE(init_state_, InitializationState::kNotStarted);
+
+  if (account_key.account_type ==
+      account_manager::AccountType::ACCOUNT_TYPE_ACTIVE_DIRECTORY) {
+    DCHECK_EQ(token, kActiveDirectoryDummyToken);
+  }
 
   base::OnceClosure closure =
       base::BindOnce(&AccountManager::UpsertTokenInternal,
@@ -367,7 +394,8 @@ bool AccountManager::IsTokenAvailable(const AccountKey& account_key) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   auto it = tokens_.find(account_key);
-  return it != tokens_.end() && !it->second.empty();
+  return it != tokens_.end() && !it->second.empty() &&
+         it->second != kActiveDirectoryDummyToken;
 }
 
 void AccountManager::MaybeRevokeTokenOnServer(const AccountKey& account_key) {
@@ -378,13 +406,9 @@ void AccountManager::MaybeRevokeTokenOnServer(const AccountKey& account_key) {
 
   const std::string& token = it->second;
 
-  // Stored tokens can be empty for accounts recently migrated to
-  // AccountManager, for which we do not have LSTs yet. These accounts require
-  // re-authentication from the user, but are in a valid state (and hence don't
-  // do a DCHECK here for |!token.empty()|).
-  if (account_key.account_type ==
-          account_manager::AccountType::ACCOUNT_TYPE_GAIA &&
-      !token.empty()) {
+  if ((account_key.account_type ==
+       account_manager::AccountType::ACCOUNT_TYPE_GAIA) &&
+      !token.empty() && (token != kInvalidToken)) {
     RevokeGaiaTokenOnServer(token);
   }
 }

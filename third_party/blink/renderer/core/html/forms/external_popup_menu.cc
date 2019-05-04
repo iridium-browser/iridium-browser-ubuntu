@@ -73,7 +73,7 @@ ExternalPopupMenu::ExternalPopupMenu(LocalFrame& frame,
 
 ExternalPopupMenu::~ExternalPopupMenu() = default;
 
-void ExternalPopupMenu::Trace(blink::Visitor* visitor) {
+void ExternalPopupMenu::Trace(Visitor* visitor) {
   visitor->Trace(owner_element_);
   visitor->Trace(local_frame_);
   PopupMenu::Trace(visitor);
@@ -133,7 +133,8 @@ void ExternalPopupMenu::Show() {
 }
 
 void ExternalPopupMenu::DispatchEvent(TimerBase*) {
-  web_view_.HandleInputEvent(blink::WebCoalescedInputEvent(*synthetic_event_));
+  web_view_.MainFrameWidget()->HandleInputEvent(
+      blink::WebCoalescedInputEvent(*synthetic_event_));
   synthetic_event_.reset();
 }
 

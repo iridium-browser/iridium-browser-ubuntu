@@ -70,7 +70,8 @@ class ArCoreImpl : public ArCore {
   ArCoreImpl();
   ~ArCoreImpl() override;
 
-  bool Initialize() override;
+  bool Initialize(
+      base::android::ScopedJavaLocalRef<jobject> application_context) override;
   void SetDisplayGeometry(const gfx::Size& frame_size,
                           display::Display::Rotation display_rotation) override;
   void SetCameraTexture(GLuint camera_texture_id) override;
@@ -81,14 +82,9 @@ class ArCoreImpl : public ArCore {
   void Pause() override;
   void Resume() override;
   bool RequestHitTest(const mojom::XRRayPtr& ray,
-                      const gfx::Size& image_size,
                       std::vector<mojom::XRHitResultPtr>* hit_results) override;
 
  private:
-  bool TransformRayToScreenSpace(const mojom::XRRayPtr& ray,
-                                 const gfx::Size& image_size,
-                                 gfx::PointF* screen_point);
-
   bool IsOnGlThread();
   base::WeakPtr<ArCoreImpl> GetWeakPtr() {
     return weak_ptr_factory_.GetWeakPtr();
@@ -105,6 +101,11 @@ class ArCoreImpl : public ArCore {
   // Must be last.
   base::WeakPtrFactory<ArCoreImpl> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(ArCoreImpl);
+};
+
+class ArCoreImplFactory : public ArCoreFactory {
+ public:
+  std::unique_ptr<ArCore> Create() override;
 };
 
 }  // namespace device

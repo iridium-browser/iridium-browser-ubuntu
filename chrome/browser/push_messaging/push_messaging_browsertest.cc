@@ -12,7 +12,6 @@
 #include "base/barrier_closure.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -90,7 +89,7 @@ const char kEncodedApplicationServerKey[] =
 
 std::string GetTestApplicationServerKey() {
   return std::string(kApplicationServerKey,
-                     kApplicationServerKey + arraysize(kApplicationServerKey));
+                     kApplicationServerKey + base::size(kApplicationServerKey));
 }
 
 void LegacyRegisterCallback(const base::Closure& done_callback,
@@ -1652,13 +1651,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PermissionStateSaysDenied) {
   EXPECT_EQ("permission status - denied", script_result);
 }
 
-// TODO(peter): Flaky on Win buildbots. https://crbug.com/838759
-#if defined(OS_WIN)
-#define MAYBE_UnsubscribeSuccess DISABLED_UnsubscribeSuccess
-#else
-#define MAYBE_UnsubscribeSuccess UnsubscribeSucces
-#endif
-IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, MAYBE_UnsubscribeSuccess) {
+IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, UnsubscribeSuccess) {
   std::string script_result;
 
   std::string token1;

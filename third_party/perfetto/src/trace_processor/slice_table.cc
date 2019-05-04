@@ -16,14 +16,7 @@
 
 #include "src/trace_processor/slice_table.h"
 
-#include <sqlite3.h>
-#include <string.h>
-
-#include <algorithm>
-#include <bitset>
-#include <numeric>
-
-#include "src/trace_processor/trace_storage.h"
+#include "src/trace_processor/storage_columns.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -35,86 +28,36 @@ void SliceTable::RegisterTable(sqlite3* db, const TraceStorage* storage) {
   Table::Register<SliceTable>(db, storage, "slices");
 }
 
-Table::Schema SliceTable::CreateSchema(int, const char* const*) {
-  return Schema(
-      {
-          Table::Column(Column::kTimestamp, "ts", ColumnType::kUlong),
-          Table::Column(Column::kDuration, "dur", ColumnType::kUlong),
-          Table::Column(Column::kUtid, "utid", ColumnType::kUint),
-          Table::Column(Column::kCategory, "cat", ColumnType::kString),
-          Table::Column(Column::kName, "name", ColumnType::kString),
-          Table::Column(Column::kDepth, "depth", ColumnType::kInt),
-          Table::Column(Column::kStackId, "stack_id", ColumnType::kUlong),
-          Table::Column(Column::kParentStackId, "parent_stack_id",
-                        ColumnType::kUlong),
-      },
-      {Column::kUtid, Column::kTimestamp, Column::kDepth});
+StorageSchema SliceTable::CreateStorageSchema() {
+  const auto& slices = storage_->nestable_slices();
+  return StorageSchema::Builder()
+      .AddOrderedNumericColumn("ts", &slices.start_ns())
+      .AddNumericColumn("dur", &slices.durations())
+      .AddNumericColumn("utid", &slices.utids())
+      .AddStringColumn("cat", &slices.cats(), &storage_->string_pool())
+      .AddStringColumn("name", &slices.names(), &storage_->string_pool())
+      .AddNumericColumn("depth", &slices.depths())
+      .AddNumericColumn("stack_id", &slices.stack_ids())
+      .AddNumericColumn("parent_stack_id", &slices.parent_stack_ids())
+      .Build({"utid", "ts", "depth"});
 }
 
-std::unique_ptr<Table::Cursor> SliceTable::CreateCursor(const QueryConstraints&,
-                                                        sqlite3_value**) {
-  return std::unique_ptr<Table::Cursor>(new Cursor(storage_));
+uint32_t SliceTable::RowCount() {
+  return static_cast<uint32_t>(storage_->nestable_slices().slice_count());
 }
 
-int SliceTable::BestIndex(const QueryConstraints&, BestIndexInfo* info) {
-  info->order_by_consumed = false;  // Delegate sorting to SQLite.
+int SliceTable::BestIndex(const QueryConstraints& qc, BestIndexInfo* info) {
   info->estimated_cost =
       static_cast<uint32_t>(storage_->nestable_slices().slice_count());
-  return SQLITE_OK;
-}
 
-SliceTable::Cursor::Cursor(const TraceStorage* storage) : storage_(storage) {
-  num_rows_ = storage->nestable_slices().slice_count();
-}
-
-SliceTable::Cursor::~Cursor() = default;
-
-int SliceTable::Cursor::Next() {
-  row_++;
-  return SQLITE_OK;
-}
-
-int SliceTable::Cursor::Eof() {
-  return row_ >= num_rows_;
-}
-
-int SliceTable::Cursor::Column(sqlite3_context* context, int col) {
-  const auto& slices = storage_->nestable_slices();
-  switch (col) {
-    case Column::kTimestamp:
-      sqlite3_result_int64(context,
-                           static_cast<sqlite3_int64>(slices.start_ns()[row_]));
-      break;
-    case Column::kDuration:
-      sqlite3_result_int64(
-          context, static_cast<sqlite3_int64>(slices.durations()[row_]));
-      break;
-    case Column::kUtid:
-      sqlite3_result_int64(context,
-                           static_cast<sqlite3_int64>(slices.utids()[row_]));
-      break;
-    case Column::kCategory:
-      sqlite3_result_text(context,
-                          storage_->GetString(slices.cats()[row_]).c_str(), -1,
-                          nullptr);
-      break;
-    case Column::kName:
-      sqlite3_result_text(context,
-                          storage_->GetString(slices.names()[row_]).c_str(), -1,
-                          nullptr);
-      break;
-    case Column::kDepth:
-      sqlite3_result_int64(context,
-                           static_cast<sqlite3_int64>(slices.depths()[row_]));
-      break;
-    case Column::kStackId:
-      sqlite3_result_int64(
-          context, static_cast<sqlite3_int64>(slices.stack_ids()[row_]));
-      break;
-    case Column::kParentStackId:
-      sqlite3_result_int64(
-          context, static_cast<sqlite3_int64>(slices.parent_stack_ids()[row_]));
-      break;
+  // Only the string columns are handled by SQLite
+  info->order_by_consumed = true;
+  size_t name_index = schema().ColumnIndexFromName("name");
+  size_t cat_index = schema().ColumnIndexFromName("cat");
+  for (size_t i = 0; i < qc.constraints().size(); i++) {
+    info->omit[i] =
+        qc.constraints()[i].iColumn != static_cast<int>(name_index) &&
+        qc.constraints()[i].iColumn != static_cast<int>(cat_index);
   }
   return SQLITE_OK;
 }

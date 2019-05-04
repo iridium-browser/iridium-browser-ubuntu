@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_DOCUMENT_SUBRESOURCE_FILTER_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_DOCUMENT_SUBRESOURCE_FILTER_H_
 
-#include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-shared.h"
 
 namespace blink {
 
@@ -35,8 +35,6 @@ class WebDocumentSubresourceFilter {
   // Returns true if disallowed resource loads should be logged to the devtools
   // console.
   virtual bool ShouldLogToConsole() = 0;
-
-  virtual bool GetIsAssociatedWithAdSubframe() const = 0;
 
   // Report that the resource request corresponding to |request_id|  was tagged
   // as an ad.

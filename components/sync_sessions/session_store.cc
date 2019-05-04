@@ -16,6 +16,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/pickle.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "components/sync/base/time.h"
 #include "components/sync/device_info/device_info.h"
 #include "components/sync/device_info/device_info_util.h"
@@ -114,7 +115,7 @@ class FactoryImpl : public base::SupportsWeakPtr<FactoryImpl> {
 
   void Create(const syncer::DeviceInfo& device_info,
               SessionStore::FactoryCompletionCallback callback) {
-    const std::string cache_guid = device_info.guid();
+    const std::string& cache_guid = device_info.guid();
     DCHECK(!cache_guid.empty());
 
     SessionStore::SessionInfo session_info;
@@ -160,7 +161,8 @@ class FactoryImpl : public base::SupportsWeakPtr<FactoryImpl> {
       return;
     }
 
-    store->ReadAllMetadata(base::BindOnce(
+    ModelTypeStore* store_raw = store.get();
+    store_raw->ReadAllMetadata(base::BindOnce(
         &FactoryImpl::OnReadAllMetadata, base::AsWeakPtr(this), session_info,
         std::move(callback), std::move(store), std::move(record_list)));
   }
@@ -172,6 +174,8 @@ class FactoryImpl : public base::SupportsWeakPtr<FactoryImpl> {
       std::unique_ptr<ModelTypeStore::RecordList> record_list,
       const base::Optional<syncer::ModelError>& error,
       std::unique_ptr<syncer::MetadataBatch> metadata_batch) {
+    // Remove after fixing https://crbug.com/902203.
+    TRACE_EVENT0("browser", "FactoryImpl::OnReadAllMetadata");
     if (error) {
       std::move(callback).Run(error, /*store=*/nullptr,
                               /*metadata_batch=*/nullptr);
@@ -240,7 +244,8 @@ std::string SessionStore::WriteBatch::PutAndUpdateTracker(
   return PutWithoutUpdatingTracker(specifics);
 }
 
-void SessionStore::WriteBatch::DeleteForeignEntityAndUpdateTracker(
+std::vector<std::string>
+SessionStore::WriteBatch::DeleteForeignEntityAndUpdateTracker(
     const std::string& storage_key) {
   std::string session_tag;
   int tab_node_id;
@@ -248,11 +253,23 @@ void SessionStore::WriteBatch::DeleteForeignEntityAndUpdateTracker(
   DCHECK(success);
   DCHECK_NE(session_tag, session_tracker_->GetLocalSessionTag());
 
+  std::vector<std::string> deleted_storage_keys;
+  deleted_storage_keys.push_back(storage_key);
+
   if (tab_node_id == TabNodePool::kInvalidTabNodeID) {
-    // Removal of a foreign header entity.
-    // TODO(mastiz): This cascades with the removal of tabs too. Should we
-    // reflect this as batch_->DeleteData()? The old code didn't, presumably
-    // because we expect the rest of the removals to follow.
+    // Removal of a foreign header entity cascades the deletion of all tabs in
+    // the same session too.
+    for (int cascading_tab_node_id :
+         session_tracker_->LookupTabNodeIds(session_tag)) {
+      std::string tab_storage_key =
+          GetTabStorageKey(session_tag, cascading_tab_node_id);
+      // Note that DeleteForeignSession() below takes care of removing all tabs
+      // from the tracker, so no DeleteForeignTab() needed.
+      batch_->DeleteData(tab_storage_key);
+      deleted_storage_keys.push_back(std::move(tab_storage_key));
+    }
+
+    // Delete session itself.
     session_tracker_->DeleteForeignSession(session_tag);
   } else {
     // Removal of a foreign tab entity.
@@ -260,6 +277,7 @@ void SessionStore::WriteBatch::DeleteForeignEntityAndUpdateTracker(
   }
 
   batch_->DeleteData(storage_key);
+  return deleted_storage_keys;
 }
 
 std::string SessionStore::WriteBatch::PutWithoutUpdatingTracker(
@@ -452,7 +470,7 @@ SessionStore::SessionStore(
   }
 }
 
-SessionStore::~SessionStore() {}
+SessionStore::~SessionStore() = default;
 
 std::unique_ptr<syncer::DataBatch> SessionStore::GetSessionDataForKeys(
     const std::vector<std::string>& storage_keys) const {

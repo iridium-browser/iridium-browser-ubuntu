@@ -4,7 +4,7 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/test/launcher/test_launcher.h"
 #include "base/test/test_suite.h"
 #include "chromecast/app/cast_main_delegate.h"
@@ -35,7 +35,7 @@ class CastTestLauncherDelegate : public content::TestLauncherDelegate {
 
  protected:
   content::ContentMainDelegate* CreateContentMainDelegate() override {
-    return new CastMainDelegate();
+    return new CastMainDelegate(0, nullptr);
   }
 
  private:

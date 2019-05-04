@@ -247,7 +247,10 @@ void CookieManager::ExecCookieTaskSync(
                            base::WaitableEvent::InitialState::NOT_SIGNALED);
   ExecCookieTask(base::BindOnce(
       std::move(task), BoolCallbackAdapter(SignalEventClosure(&completion))));
-  base::ThreadRestrictions::ScopedAllowWait wait;
+
+  // Waiting is necessary when implementing synchronous APIs for the WebView
+  // embedder.
+  base::ScopedAllowBaseSyncPrimitivesOutsideBlockingScope wait;
   completion.Wait();
 }
 
@@ -258,7 +261,7 @@ void CookieManager::ExecCookieTaskSync(
                            base::WaitableEvent::InitialState::NOT_SIGNALED);
   ExecCookieTask(base::BindOnce(
       std::move(task), IntCallbackAdapter(SignalEventClosure(&completion))));
-  base::ThreadRestrictions::ScopedAllowWait wait;
+  base::ScopedAllowBaseSyncPrimitivesOutsideBlockingScope wait;
   completion.Wait();
 }
 
@@ -270,7 +273,7 @@ void CookieManager::ExecCookieTaskSync(
                            base::WaitableEvent::InitialState::NOT_SIGNALED);
   ExecCookieTask(
       base::BindOnce(std::move(task), SignalEventClosure(&completion)));
-  base::ThreadRestrictions::ScopedAllowWait wait;
+  base::ScopedAllowBaseSyncPrimitivesOutsideBlockingScope wait;
   completion.Wait();
 }
 
@@ -389,6 +392,8 @@ void CookieManager::GetCookieListAsyncHelper(const GURL& host,
                                              base::OnceClosure complete) {
   net::CookieOptions options;
   options.set_include_httponly();
+  options.set_same_site_cookie_mode(
+      net::CookieOptions::SameSiteCookieMode::INCLUDE_STRICT_AND_LAX);
 
   GetCookieStore()->GetCookieListWithOptionsAsync(
       host, options,

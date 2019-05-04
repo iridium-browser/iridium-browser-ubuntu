@@ -39,7 +39,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/message_center_observer.h"
 #include "ui/message_center/notification_blocker.h"
 #include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/message_center/public/cpp/notification.h"
@@ -131,20 +130,36 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCreateSimpleNotification) {
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, NotificationBlockerTest) {
   ToggledNotificationBlocker blocker;
+  TestMessageCenterObserver observer;
 
   ASSERT_TRUE(embedded_test_server()->Start());
+  message_center::MessageCenter::Get()->AddObserver(&observer);
 
   // Creates a simple notification.
   AllowAllOrigins();
   ui_test_utils::NavigateToURL(browser(), GetTestPageURL());
 
+  EXPECT_EQ(0, GetNotificationPopupCount());
+  blocker.SetNotificationsEnabled(false);
+
   std::string result = CreateSimpleNotification(browser(), true);
+  EXPECT_NE("-1", result);
+  EXPECT_EQ(0, GetNotificationPopupCount());
+  EXPECT_EQ("", observer.last_displayed_id());
+
+  blocker.SetNotificationsEnabled(true);
+  EXPECT_EQ(1, GetNotificationPopupCount());
+  EXPECT_NE("", observer.last_displayed_id());
+
+  result = CreateSimpleNotification(browser(), true);
   EXPECT_NE("-1", result);
   result = CreateSimpleNotification(browser(), true);
   EXPECT_NE("-1", result);
 
   blocker.SetNotificationsEnabled(false);
   EXPECT_EQ(0, GetNotificationPopupCount());
+
+  message_center::MessageCenter::Get()->RemoveObserver(&observer);
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCloseNotification) {
@@ -565,6 +580,9 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestShouldDisplayNormal) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestShouldDisplayFullscreen) {
+#if defined(OS_MACOSX)
+  ui::test::ScopedFakeNSWindowFullscreen fake_fullscreen;
+#endif
   ASSERT_TRUE(embedded_test_server()->Start());
 
   AllowAllOrigins();
@@ -647,6 +665,9 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestShouldDisplayMultiFullscreen) {
 // Verify that a notification is actually displayed when the webpage that
 // creates it is fullscreen with the fullscreen notification flag turned on.
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestShouldDisplayPopupNotification) {
+#if defined(OS_MACOSX)
+  ui::test::ScopedFakeNSWindowFullscreen fake_fullscreen;
+#endif
   ASSERT_TRUE(embedded_test_server()->Start());
 
   // Creates a simple notification.

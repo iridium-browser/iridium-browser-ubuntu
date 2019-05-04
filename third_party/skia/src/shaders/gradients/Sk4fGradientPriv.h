@@ -9,15 +9,15 @@
 #define Sk4fGradientPriv_DEFINED
 
 #include "SkColor.h"
+#include "SkColorData.h"
 #include "SkHalf.h"
 #include "SkImageInfo.h"
 #include "SkNx.h"
-#include "SkPM4f.h"
 #include "SkUtils.h"
 
 // Templates shared by various 4f gradient flavors.
 
-namespace {
+namespace {  // NOLINT(google-build-namespaces)
 
 enum class ApplyPremul { True, False };
 

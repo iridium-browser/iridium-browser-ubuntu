@@ -30,6 +30,12 @@ class BASE_EXPORT TraceEventETWExport {
   // Note that this may return NULL post-AtExit processing.
   static TraceEventETWExport* GetInstance();
 
+  // Retrieves the singleton iff it was previously instantiated by a
+  // GetInstance() call. Avoids creating the instance only to check that it
+  // wasn't disabled. Note that, like GetInstance(), this may also return NULL
+  // post-AtExit processing.
+  static TraceEventETWExport* GetInstanceIfExists();
+
   // Enables/disables exporting of events to ETW. If disabled,
   // AddEvent and AddCustomEvent will simply return when called.
   static void EnableETWExport();
@@ -41,16 +47,11 @@ class BASE_EXPORT TraceEventETWExport {
 
   // Exports an event to ETW. This is mainly used in
   // TraceLog::AddTraceEventWithThreadIdAndTimestamp to export internal events.
-  static void AddEvent(
-      char phase,
-      const unsigned char* category_group_enabled,
-      const char* name,
-      unsigned long long id,
-      int num_args,
-      const char* const* arg_names,
-      const unsigned char* arg_types,
-      const unsigned long long* arg_values,
-      const std::unique_ptr<ConvertableToTraceFormat>* convertable_values);
+  static void AddEvent(char phase,
+                       const unsigned char* category_group_enabled,
+                       const char* name,
+                       unsigned long long id,
+                       const TraceArguments* args);
 
   // Exports an ETW event that marks the end of a complete event.
   static void AddCompleteEndEvent(const char* name);
@@ -61,6 +62,7 @@ class BASE_EXPORT TraceEventETWExport {
  private:
   // Ensure only the provider can construct us.
   friend struct StaticMemorySingletonTraits<TraceEventETWExport>;
+
   // To have access to UpdateKeyword().
   class ETWKeywordUpdateThread;
   TraceEventETWExport();

@@ -7,14 +7,17 @@
 #import "base/test/ios/wait_util.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/grit/ios_strings.h"
+#import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/app/tab_test_util.h"
 #include "ios/chrome/test/earl_grey/accessibility_util.h"
+#import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/chrome/test/scoped_eg_synchronization_disabler.h"
 #include "ios/testing/embedded_test_server_handlers.h"
+#import "ios/web/public/test/earl_grey/web_view_matchers.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
@@ -24,6 +27,10 @@
 #endif
 
 using chrome_test_util::ButtonWithAccessibilityLabelId;
+using chrome_test_util::GetCurrentWebState;
+using chrome_test_util::OpenLinkInNewTabButton;
+using web::test::ElementSelector;
+using web::WebViewInWebState;
 
 namespace {
 
@@ -114,9 +121,7 @@ bool WaitForDownloadButton() {
 // presented. EarlGrey does not allow testing "Open in..." dialog, because it
 // is run in a separate process. Performs download in Incognito.
 - (void)testSucessfullDownloadInIncognito {
-  chrome_test_util::OpenNewIncognitoTab();
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
-
+  [ChromeEarlGrey openNewIncognitoTab];
   [ChromeEarlGrey loadURL:self.testServer->GetURL("/")];
   [ChromeEarlGrey waitForWebViewContainingText:"Download"];
   [ChromeEarlGrey tapWebViewElementWithID:@"download"];
@@ -164,17 +169,42 @@ bool WaitForDownloadButton() {
     // does not wait until the download progress bar becomes idle (which will
     // not happen until the download is complete).
     ScopedSynchronizationDisabler disabler;
-    chrome_test_util::OpenNewTab();
-    [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+    [ChromeEarlGrey openNewTab];
   }
 
   // Load a URL in a separate Tab and close that tab.
   [ChromeEarlGrey loadURL:GURL(kChromeUITermsURL)];
   const char kTermsText[] = "Google Chrome Terms of Service";
   [ChromeEarlGrey waitForWebViewContainingText:kTermsText];
-  chrome_test_util::CloseCurrentTab();
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [ChromeEarlGrey closeCurrentTab];
+  GREYAssert(WaitForOpenInButton(), @"Open in... button did not show up");
+}
 
+// Tests "Open in New Tab" on download link.
+- (void)testDownloadInNewTab {
+  [ChromeEarlGrey loadURL:self.testServer->GetURL("/")];
+  [ChromeEarlGrey waitForWebViewContainingText:"Download"];
+
+  // Open context menu for download link.
+  [[EarlGrey selectElementWithMatcher:WebViewInWebState(GetCurrentWebState())]
+      performAction:chrome_test_util::LongPressElementForContextMenu(
+                        ElementSelector::ElementSelectorId("download"),
+                        /*menu_should_appear=*/true)];
+
+  // Tap "Open In New Tab".
+  [[EarlGrey selectElementWithMatcher:OpenLinkInNewTabButton()]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OpenLinkInNewTabButton()]
+      performAction:grey_tap()];
+
+  // Wait until the new tab is open and switch to that tab.
+  [ChromeEarlGrey waitForMainTabCount:2];
+  chrome_test_util::SelectTabAtIndexInCurrentMode(1U);
+  GREYAssert(WaitForDownloadButton(), @"Download button did not show up");
+
+  // Proceed with download.
+  [[EarlGrey selectElementWithMatcher:DownloadButton()]
+      performAction:grey_tap()];
   GREYAssert(WaitForOpenInButton(), @"Open in... button did not show up");
 }
 

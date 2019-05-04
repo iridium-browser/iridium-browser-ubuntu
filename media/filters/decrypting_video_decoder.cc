@@ -24,25 +24,18 @@ const char DecryptingVideoDecoder::kDecoderName[] = "DecryptingVideoDecoder";
 DecryptingVideoDecoder::DecryptingVideoDecoder(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
     MediaLog* media_log)
-    : task_runner_(task_runner),
-      media_log_(media_log),
-      state_(kUninitialized),
-      decryptor_(NULL),
-      key_added_while_decode_pending_(false),
-      support_clear_content_(false),
-      weak_factory_(this) {}
+    : task_runner_(task_runner), media_log_(media_log), weak_factory_(this) {}
 
 std::string DecryptingVideoDecoder::GetDisplayName() const {
   return kDecoderName;
 }
 
-void DecryptingVideoDecoder::Initialize(
-    const VideoDecoderConfig& config,
-    bool /* low_delay */,
-    CdmContext* cdm_context,
-    const InitCB& init_cb,
-    const OutputCB& output_cb,
-    const WaitingForDecryptionKeyCB& waiting_for_decryption_key_cb) {
+void DecryptingVideoDecoder::Initialize(const VideoDecoderConfig& config,
+                                        bool /* low_delay */,
+                                        CdmContext* cdm_context,
+                                        const InitCB& init_cb,
+                                        const OutputCB& output_cb,
+                                        const WaitingCB& waiting_cb) {
   DVLOG(2) << __func__ << ": " << config.AsHumanReadableString();
 
   DCHECK(task_runner_->BelongsToCurrentThread());
@@ -74,8 +67,8 @@ void DecryptingVideoDecoder::Initialize(
   weak_this_ = weak_factory_.GetWeakPtr();
   config_ = config;
 
-  DCHECK(waiting_for_decryption_key_cb);
-  waiting_for_decryption_key_cb_ = waiting_for_decryption_key_cb;
+  DCHECK(waiting_cb);
+  waiting_cb_ = waiting_cb;
 
   if (state_ == kUninitialized) {
     if (!cdm_context->GetDecryptor()) {
@@ -283,7 +276,7 @@ void DecryptingVideoDecoder::DeliverFrame(
     TRACE_EVENT_ASYNC_BEGIN0(
         "media", "DecryptingVideoDecoder::WaitingForDecryptionKey", this);
     state_ = kWaitingForKey;
-    waiting_for_decryption_key_cb_.Run();
+    waiting_cb_.Run(WaitingReason::kNoDecryptionKey);
     return;
   }
 
@@ -304,23 +297,8 @@ void DecryptingVideoDecoder::DeliverFrame(
   // If color space is not set, use the color space in the |config_|.
   if (!frame->ColorSpace().IsValid()) {
     DVLOG(3) << "Setting color space using information in the config.";
-    if (config_.color_space_info() != VideoColorSpace()) {
+    if (config_.color_space_info().IsSpecified())
       frame->set_color_space(config_.color_space_info().ToGfxColorSpace());
-    } else {
-      switch (config_.color_space()) {
-        case COLOR_SPACE_UNSPECIFIED:
-          break;
-        case COLOR_SPACE_HD_REC709:
-          frame->set_color_space(gfx::ColorSpace::CreateREC709());
-          break;
-        case COLOR_SPACE_SD_REC601:
-          frame->set_color_space(gfx::ColorSpace::CreateREC601());
-          break;
-        case COLOR_SPACE_JPEG:
-          frame->set_color_space(gfx::ColorSpace::CreateJpeg());
-          break;
-      }
-    }
   }
 
   output_cb_.Run(frame);

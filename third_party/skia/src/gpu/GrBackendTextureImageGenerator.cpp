@@ -43,8 +43,13 @@ GrBackendTextureImageGenerator::Make(sk_sp<GrTexture> texture, GrSurfaceOrigin o
     context->contextPriv().getResourceCache()->insertCrossContextGpuResource(texture.get());
 
     GrBackendTexture backendTexture = texture->getBackendTexture();
-    if (!context->contextPriv().caps()->validateBackendTexture(backendTexture, colorType,
-                                                               &backendTexture.fConfig)) {
+    GrBackendFormat backendFormat = backendTexture.getBackendFormat();
+    if (!backendFormat.isValid()) {
+        return nullptr;
+    }
+    backendTexture.fConfig =
+            context->contextPriv().caps()->getConfigFromBackendFormat(backendFormat, colorType);
+    if (backendTexture.fConfig == kUnknown_GrPixelConfig) {
         return nullptr;
     }
 
@@ -133,14 +138,12 @@ sk_sp<GrTextureProxy> GrBackendTextureImageGenerator::onGenerateTexture(
     GrBackendTexture backendTexture = fBackendTexture;
     RefHelper* refHelper = fRefHelper;
 
-    GrTextureType textureType = GrTextureType::k2D;
-    GrGLTextureInfo glInfo;
-    if (backendTexture.getGLTextureInfo(&glInfo)) {
-        textureType = GrGLTexture::TextureTypeFromTarget(glInfo.fTarget);
-    }
+    GrBackendFormat format = backendTexture.getBackendFormat();
+    SkASSERT(format.isValid());
+
     sk_sp<GrTextureProxy> proxy = proxyProvider->createLazyProxy(
-            [refHelper, releaseProcHelper, semaphore, backendTexture]
-            (GrResourceProvider* resourceProvider) {
+            [refHelper, releaseProcHelper, semaphore,
+             backendTexture](GrResourceProvider* resourceProvider) {
                 if (!resourceProvider) {
                     return sk_sp<GrTexture>();
                 }
@@ -164,8 +167,8 @@ sk_sp<GrTextureProxy> GrBackendTextureImageGenerator::onGenerateTexture(
                     // informs us that the context is done with it. This is unfortunate - we'll have
                     // two texture objects referencing the same GPU object. However, no client can
                     // ever see the original texture, so this should be safe.
-                    tex = resourceProvider->wrapBackendTexture(backendTexture,
-                                                               kBorrow_GrWrapOwnership);
+                    tex = resourceProvider->wrapBackendTexture(
+                            backendTexture, kBorrow_GrWrapOwnership, kRead_GrIOType, true);
                     if (!tex) {
                         return sk_sp<GrTexture>();
                     }
@@ -176,7 +179,8 @@ sk_sp<GrTextureProxy> GrBackendTextureImageGenerator::onGenerateTexture(
 
                 return tex;
             },
-            desc, fSurfaceOrigin, mipMapped, textureType, SkBackingFit::kExact, SkBudgeted::kNo);
+            format, desc, fSurfaceOrigin, mipMapped, GrInternalSurfaceFlags::kReadOnly,
+            SkBackingFit::kExact, SkBudgeted::kNo);
 
     if (!proxy) {
         return nullptr;
@@ -193,10 +197,16 @@ sk_sp<GrTextureProxy> GrBackendTextureImageGenerator::onGenerateTexture(
         // layout change in Vulkan and we do not change the layout of borrowed images.
         GrMipMapped mipMapped = willNeedMipMaps ? GrMipMapped::kYes : GrMipMapped::kNo;
 
+        GrBackendFormat format = proxy->backendFormat().makeTexture2D();
+        if (!format.isValid()) {
+            return nullptr;
+        }
+
         sk_sp<GrRenderTargetContext> rtContext(
             context->contextPriv().makeDeferredRenderTargetContext(
-                SkBackingFit::kExact, info.width(), info.height(), proxy->config(), nullptr, 1,
-                mipMapped, proxy->origin(), nullptr, SkBudgeted::kYes));
+                format, SkBackingFit::kExact, info.width(), info.height(),
+                proxy->config(), nullptr, 1, mipMapped, proxy->origin(), nullptr,
+                SkBudgeted::kYes));
 
         if (!rtContext) {
             return nullptr;

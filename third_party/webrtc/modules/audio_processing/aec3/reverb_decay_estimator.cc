@@ -10,11 +10,13 @@
 
 #include "modules/audio_processing/aec3/reverb_decay_estimator.h"
 
+#include <stddef.h>
 #include <algorithm>
 #include <cmath>
 #include <numeric>
 
 #include "api/array_view.h"
+#include "api/audio/echo_canceller3_config.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
 #include "rtc_base/checks.h"
 #include "system_wrappers/include/field_trial.h"
@@ -285,7 +287,7 @@ void ReverbDecayEstimator::LateReverbLinearRegressor::Reset(
   // Arithmetic sum of $2 \sum_{i=0.5}^{(N-1)/2}i^2$ calculated directly.
   nn_ = SymmetricArithmetricSum(N);
   // The linear regression approach assumes symmetric index around 0.
-  count_ = N > 0 ? count_ = -N * 0.5f + 0.5f : 0.f;
+  count_ = N > 0 ? -N * 0.5f + 0.5f : 0.f;
   N_ = N;
   n_ = 0;
 }

@@ -14,23 +14,23 @@
 #include "base/android/jni_string.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/containers/hash_tables.h"
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/sys_byteorder.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "jni/MediaDrmBridge_jni.h"
 #include "media/base/android/android_util.h"
 #include "media/base/android/media_codec_util.h"
 #include "media/base/android/media_drm_bridge_client.h"
 #include "media/base/android/media_drm_bridge_delegate.h"
+#include "media/base/android/media_drm_key_type.h"
 #include "media/base/cdm_key_information.h"
 #include "media/base/media_switches.h"
 #include "media/base/provision_fetcher.h"
@@ -71,14 +71,6 @@ enum class KeyStatus : uint32_t {
   KEY_STATUS_INTERNAL_ERROR = 4,
 };
 
-// These must be in sync with Android MediaDrm KEY_TYPE_XXX constants:
-// https://developer.android.com/reference/android/media/MediaDrm.html#KEY_TYPE_OFFLINE
-// KEY_TYPE_RELEASE is handled internally in Java.
-enum class KeyType : uint32_t {
-  KEY_TYPE_STREAMING = 1,
-  KEY_TYPE_OFFLINE = 2,
-};
-
 const uint8_t kWidevineUuid[16] = {
     0xED, 0xEF, 0x8B, 0xA9, 0x79, 0xD6, 0x4A, 0xCE,  //
     0xA3, 0xC8, 0x27, 0xDC, 0xD5, 0x1D, 0x21, 0xED};
@@ -102,18 +94,18 @@ std::string ConvertInitDataType(media::EmeInitDataType init_data_type) {
   }
 }
 
-// Convert CdmSessionType to KeyType supported by MediaDrm.
-KeyType ConvertCdmSessionType(CdmSessionType session_type) {
+// Convert CdmSessionType to MediaDrmKeyType supported by MediaDrm.
+MediaDrmKeyType ConvertCdmSessionType(CdmSessionType session_type) {
   switch (session_type) {
     case CdmSessionType::kTemporary:
-      return KeyType::KEY_TYPE_STREAMING;
+      return MediaDrmKeyType::STREAMING;
     case CdmSessionType::kPersistentLicense:
-      return KeyType::KEY_TYPE_OFFLINE;
+      return MediaDrmKeyType::OFFLINE;
 
     default:
       LOG(WARNING) << "Unsupported session type "
                    << static_cast<int>(session_type);
-      return KeyType::KEY_TYPE_STREAMING;
+      return MediaDrmKeyType::STREAMING;
   }
 }
 
@@ -169,7 +161,7 @@ class KeySystemManager {
 KeySystemManager::KeySystemManager() {
   // Widevine is always supported in Android.
   key_system_uuid_map_[kWidevineKeySystem] =
-      UUID(kWidevineUuid, kWidevineUuid + arraysize(kWidevineUuid));
+      UUID(kWidevineUuid, kWidevineUuid + base::size(kWidevineUuid));
   MediaDrmBridgeClient* client = GetMediaDrmBridgeClient();
   if (client)
     client->AddKeySystemUUIDMappings(&key_system_uuid_map_);
@@ -271,14 +263,6 @@ bool AreMediaDrmApisAvailable() {
   return true;
 }
 
-bool IsPersistentLicenseTypeSupportedByMediaDrm() {
-  return MediaDrmBridge::IsAvailable() &&
-         // In development. See http://crbug.com/493521
-         base::FeatureList::IsEnabled(kMediaDrmPersistentLicense) &&
-         base::android::BuildInfo::GetInstance()->sdk_int() >=
-             base::android::SDK_VERSION_MARSHMALLOW;
-}
-
 }  // namespace
 
 // MediaDrm is not generally usable without MediaCodec. Thus, both the MediaDrm
@@ -297,11 +281,20 @@ bool MediaDrmBridge::IsKeySystemSupported(const std::string& key_system) {
 }
 
 // static
+bool MediaDrmBridge::IsPerOriginProvisioningSupported() {
+  return base::android::BuildInfo::GetInstance()->sdk_int() >=
+         base::android::SDK_VERSION_MARSHMALLOW;
+}
+
+// static
 bool MediaDrmBridge::IsPersistentLicenseTypeSupported(
-    const std::string& key_system) {
+    const std::string& /* key_system */) {
   // TODO(yucliu): Check |key_system| if persistent license is supported by
   // MediaDrm.
-  return IsPersistentLicenseTypeSupportedByMediaDrm();
+  return MediaDrmBridge::IsAvailable() &&
+         // In development. See http://crbug.com/493521
+         base::FeatureList::IsEnabled(kMediaDrmPersistentLicense) &&
+         IsPerOriginProvisioningSupported();
 }
 
 // static
@@ -350,7 +343,7 @@ scoped_refptr<MediaDrmBridge> MediaDrmBridge::CreateInternal(
       std::move(storage), create_fetcher_cb, session_message_cb,
       session_closed_cb, session_keys_change_cb, session_expiration_update_cb));
 
-  if (media_drm_bridge->j_media_drm_.is_null())
+  if (!media_drm_bridge->j_media_drm_)
     return nullptr;
 
   return media_drm_bridge;
@@ -440,7 +433,7 @@ void MediaDrmBridge::CreateSessionAndGenerateRequest(
     }
   }
 
-  if (j_init_data.is_null()) {
+  if (!j_init_data) {
     j_init_data =
         base::android::ToJavaByteArray(env, init_data.data(), init_data.size());
   }
@@ -462,7 +455,8 @@ void MediaDrmBridge::LoadSession(
   DCHECK(task_runner_->BelongsToCurrentThread());
   DVLOG(2) << __func__;
 
-  DCHECK(IsPersistentLicenseTypeSupportedByMediaDrm());
+  // Key system is not used, so just pass an empty string here.
+  DCHECK(IsPersistentLicenseTypeSupported(""));
 
   if (session_type != CdmSessionType::kPersistentLicense) {
     promise->reject(
@@ -568,14 +562,15 @@ bool MediaDrmBridge::IsSecureCodecRequired() {
   return true;
 }
 
-void MediaDrmBridge::ResetDeviceCredentials(
-    const ResetCredentialsCB& callback) {
+void MediaDrmBridge::Provision(
+    base::OnceCallback<void(bool)> provisioning_complete_cb) {
   DVLOG(1) << __func__;
+  DCHECK(provisioning_complete_cb);
+  DCHECK(!provisioning_complete_cb_);
+  provisioning_complete_cb_ = std::move(provisioning_complete_cb);
 
-  DCHECK(!reset_credentials_cb_);
-  reset_credentials_cb_ = callback;
   JNIEnv* env = AttachCurrentThread();
-  Java_MediaDrmBridge_resetDeviceCredentials(env, j_media_drm_);
+  Java_MediaDrmBridge_provision(env, j_media_drm_);
 }
 
 void MediaDrmBridge::Unprovision() {
@@ -649,7 +644,7 @@ void MediaDrmBridge::OnMediaCryptoReady(
                      base::Passed(CreateJavaObjectPtr(j_media_crypto.obj()))));
 }
 
-void MediaDrmBridge::OnStartProvisioning(
+void MediaDrmBridge::OnProvisionRequest(
     JNIEnv* env,
     const JavaParamRef<jobject>& j_media_drm,
     const JavaParamRef<jstring>& j_default_url,
@@ -663,6 +658,18 @@ void MediaDrmBridge::OnStartProvisioning(
                                 weak_factory_.GetWeakPtr(),
                                 ConvertJavaStringToUTF8(env, j_default_url),
                                 std::move(request_data)));
+}
+
+void MediaDrmBridge::OnProvisioningComplete(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& j_media_drm,
+    bool success) {
+  DVLOG(1) << __func__;
+
+  // This should only be called as result of a call to Provision().
+  DCHECK(provisioning_complete_cb_);
+  task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(std::move(provisioning_complete_cb_), success));
 }
 
 void MediaDrmBridge::OnPromiseResolved(JNIEnv* env,
@@ -749,7 +756,7 @@ void MediaDrmBridge::OnSessionKeysChange(
     ScopedJavaLocalRef<jbyteArray> j_key_id =
         Java_KeyStatus_getKeyId(env, j_key_status);
     std::vector<uint8_t> key_id;
-    JavaByteArrayToByteVector(env, j_key_id.obj(), &key_id);
+    JavaByteArrayToByteVector(env, j_key_id, &key_id);
     DCHECK(!key_id.empty());
 
     jint j_status_code = Java_KeyStatus_getStatusCode(env, j_key_status);
@@ -803,16 +810,6 @@ void MediaDrmBridge::OnSessionExpirationUpdate(
                      base::Time::FromDoubleT(expiry_time_ms / 1000.0)));
 }
 
-void MediaDrmBridge::OnResetDeviceCredentialsCompleted(
-    JNIEnv* env,
-    const JavaParamRef<jobject>&,
-    bool success) {
-  DVLOG(2) << __func__ << ": success:" << success;
-  DCHECK(reset_credentials_cb_);
-  task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(std::move(reset_credentials_cb_), success));
-}
-
 //------------------------------------------------------------------------------
 // The following are private methods.
 
@@ -855,11 +852,10 @@ MediaDrmBridge::MediaDrmBridge(
       // TODO(yucliu): Remove the check once persistent storage is fully
       // supported and check if origin is valid.
       base::FeatureList::IsEnabled(kMediaDrmPersistentLicense) &&
-      // MediaDrm implements origin isolated storage on Marshmallow.
-      base::android::BuildInfo::GetInstance()->sdk_int() >=
-          base::android::SDK_VERSION_MARSHMALLOW &&
+      // Per-origin provisioning must be supported for origin isolated storage.
+      IsPerOriginProvisioningSupported() &&
       // origin id can be empty when MediaDrmBridge is created by
-      // CreateWithoutSessionSupport, which is used to reset credentials.
+      // CreateWithoutSessionSupport, which is used for unprovisioning.
       !origin_id.empty();
 
   ScopedJavaLocalRef<jstring> j_security_origin = ConvertUTF8ToJavaString(
@@ -880,7 +876,7 @@ MediaDrmBridge::~MediaDrmBridge() {
 
   // After the call to Java_MediaDrmBridge_destroy() Java won't call native
   // methods anymore, this is ensured by MediaDrmBridge.java.
-  if (!j_media_drm_.is_null())
+  if (j_media_drm_)
     Java_MediaDrmBridge_destroy(env, j_media_drm_);
 
   player_tracker_.NotifyCdmUnset();

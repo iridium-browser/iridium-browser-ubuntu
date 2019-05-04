@@ -79,7 +79,7 @@ void TapOnWebElementWithID(const std::string& elementID) {
 
 // Delegate mock to confirm the observer callbacks.
 @property(nonatomic, strong)
-    OCMockObject<KeyboardObserverHelperDelegate>* keyboardObserverDelegateMock;
+    OCMockObject<KeyboardObserverHelperConsumer>* keyboardObserverDelegateMock;
 
 @end
 
@@ -89,8 +89,8 @@ void TapOnWebElementWithID(const std::string& elementID) {
   [super setUp];
   self.keyboardObserver = [[KeyboardObserverHelper alloc] init];
   self.keyboardObserverDelegateMock =
-      OCMProtocolMock(@protocol(KeyboardObserverHelperDelegate));
-  self.keyboardObserver.delegate = self.keyboardObserverDelegateMock;
+      OCMProtocolMock(@protocol(KeyboardObserverHelperConsumer));
+  self.keyboardObserver.consumer = self.keyboardObserverDelegateMock;
 
   web::test::SetUpFileBasedHttpServer();
   GURL URL = web::test::HttpServer::MakeUrl(
@@ -149,7 +149,8 @@ void TapOnWebElementWithID(const std::string& elementID) {
 }
 
 // Tests that when the keyboard actually dismiss the right callback is done.
-- (void)testKeyboardDidHide {
+// TODO(crbug.com/914374): Address flakiness and reenable.
+- (void)DISABLED_testKeyboardDidHide {
   // Brings up the keyboard by tapping on one of the form's field.
   TapOnWebElementWithID(kFormElementID1);
 

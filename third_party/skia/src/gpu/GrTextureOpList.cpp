@@ -25,6 +25,7 @@ GrTextureOpList::GrTextureOpList(GrResourceProvider* resourceProvider,
                                  GrAuditTrail* auditTrail)
         : INHERITED(resourceProvider, std::move(opMemoryPool), proxy, auditTrail) {
     SkASSERT(fOpMemoryPool);
+    SkASSERT(!proxy->readOnly());
 }
 
 void GrTextureOpList::deleteOp(int index) {
@@ -116,7 +117,7 @@ bool GrTextureOpList::onExecute(GrOpFlushState* flushState) {
             GrXferProcessor::DstProxy()
         };
         flushState->setOpArgs(&opArgs);
-        fRecordedOps[i]->execute(flushState);
+        fRecordedOps[i]->execute(flushState, fRecordedOps[i].get()->bounds());
         flushState->setOpArgs(nullptr);
     }
 
@@ -197,7 +198,7 @@ void GrTextureOpList::gatherProxyIntervals(GrResourceAllocator* alloc) const {
     for (int i = 0; i < fRecordedOps.count(); ++i) {
         const GrOp* op = fRecordedOps[i].get(); // only diff from the GrRenderTargetOpList version
         if (op) {
-            op->visitProxies(gather);
+            op->visitProxies(gather, GrOp::VisitorType::kAllocatorGather);
         }
 
         // Even though the op may have been moved we still need to increment the op count to
@@ -219,7 +220,6 @@ void GrTextureOpList::recordOp(std::unique_ptr<GrOp> op) {
         op->bounds().fLeft, op->bounds().fRight,
         op->bounds().fTop, op->bounds().fBottom);
     GrOP_INFO(SkTabString(op->dumpInfo(), 1).c_str());
-    GR_AUDIT_TRAIL_OP_RESULT_NEW(fAuditTrail, op.get());
 
     fRecordedOps.emplace_back(std::move(op));
 }

@@ -11,10 +11,19 @@
 #ifndef TEST_CONFIGURABLE_FRAME_SIZE_ENCODER_H_
 #define TEST_CONFIGURABLE_FRAME_SIZE_ENCODER_H_
 
+#include <stddef.h>
+#include <stdint.h>
+#include <functional>
 #include <memory>
 #include <vector>
 
+#include "absl/types/optional.h"
+#include "api/video/video_bitrate_allocation.h"
+#include "api/video/video_frame.h"
+#include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_encoder.h"
+#include "common_types.h"  // NOLINT(build/include)
+#include "modules/video_coding/include/video_codec_interface.h"
 
 namespace webrtc {
 namespace test {
@@ -36,8 +45,6 @@ class ConfigurableFrameSizeEncoder : public VideoEncoder {
       EncodedImageCallback* callback) override;
 
   int32_t Release() override;
-
-  int32_t SetChannelParameters(uint32_t packet_loss, int64_t rtt) override;
 
   int32_t SetRateAllocation(const VideoBitrateAllocation& allocation,
                             uint32_t framerate) override;

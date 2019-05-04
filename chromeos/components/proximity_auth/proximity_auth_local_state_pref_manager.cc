@@ -10,7 +10,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/values.h"
-#include "chromeos/components/proximity_auth/logging/logging.h"
+#include "chromeos/components/multidevice/logging/logging.h"
 #include "chromeos/components/proximity_auth/proximity_auth_pref_names.h"
 #include "chromeos/services/multidevice_setup/public/cpp/prefs.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -119,7 +119,7 @@ bool ProximityAuthLocalStatePrefManager::IsChromeOSLoginAllowed() const {
       !user_prefs->GetBooleanWithoutPathExpansion(
           chromeos::multidevice_setup::kSmartLockSigninAllowedPrefName,
           &pref_value)) {
-    PA_LOG(INFO) << "Failed to get is_chrome_login_allowed, not disallowing";
+    PA_LOG(VERBOSE) << "Failed to get is_chrome_login_allowed, not disallowing";
     return true;
   }
   return pref_value;

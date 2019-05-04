@@ -413,8 +413,11 @@ public:
   bool convertToImmediateForm(MachineInstr &MI,
                               MachineInstr **KilledDef = nullptr) const;
   void replaceInstrWithLI(MachineInstr &MI, const LoadImmediateInfo &LII) const;
+  void replaceInstrOperandWithImm(MachineInstr &MI, unsigned OpNo,
+                                  int64_t Imm) const;
 
-  bool instrHasImmForm(const MachineInstr &MI, ImmInstrInfo &III) const;
+  bool instrHasImmForm(const MachineInstr &MI, ImmInstrInfo &III,
+                       bool PostRA) const;
 
   /// getRegNumForOperand - some operands use different numbering schemes
   /// for the same registers. For example, a VSX instruction may have any of

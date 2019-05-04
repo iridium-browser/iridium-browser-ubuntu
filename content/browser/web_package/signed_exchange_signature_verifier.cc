@@ -52,10 +52,10 @@ constexpr uint8_t kMessageHeader[] =
     // draft-specific string beginning with "HTTP Exchange 1 " instead."
     // [spec text]
     // 5.3. "A single 0 byte which serves as a separator." [spec text]
-    "HTTP Exchange 1 b2";
+    "HTTP Exchange 1 b3";
 
-constexpr int kFourWeeksInSeconds = base::TimeDelta::FromDays(28).InSeconds();
-constexpr int kOneWeekInSeconds = base::TimeDelta::FromDays(7).InSeconds();
+constexpr base::TimeDelta kOneWeek = base::TimeDelta::FromDays(7);
+constexpr base::TimeDelta kFourWeeks = base::TimeDelta::FromDays(4 * 7);
 
 base::Optional<crypto::SignatureVerifier::SignatureAlgorithm>
 GetSignatureAlgorithm(scoped_refptr<net::X509Certificate> cert,
@@ -137,6 +137,7 @@ void AppendToBuf8BytesBigEndian(std::vector<uint8_t>* buf, uint64_t n) {
 }
 
 base::Optional<std::vector<uint8_t>> GenerateSignedMessage(
+    SignedExchangeVersion version,
     const SignedExchangeEnvelope& envelope) {
   TRACE_EVENT_BEGIN0(TRACE_DISABLED_BY_DEFAULT("loading"),
                      "GenerateSignedMessage");
@@ -161,10 +162,10 @@ base::Optional<std::vector<uint8_t>> GenerateSignedMessage(
 
   // Step 5.5. "The 8-byte big-endian encoding of the length in bytes of
   // validity-url, followed by the bytes of validity-url." [spec text]
-  const auto& validity_url_spec = signature.validity_url.spec();
-  AppendToBuf8BytesBigEndian(&message, validity_url_spec.size());
-  message.insert(message.end(), std::begin(validity_url_spec),
-                 std::end(validity_url_spec));
+  const auto& validity_url_bytes = signature.validity_url.raw_string;
+  AppendToBuf8BytesBigEndian(&message, validity_url_bytes.size());
+  message.insert(message.end(), std::begin(validity_url_bytes),
+                 std::end(validity_url_bytes));
 
   // Step 5.6. "The 8-byte big-endian encoding of date." [spec text]
   AppendToBuf8BytesBigEndian(&message, signature.date);
@@ -174,11 +175,11 @@ base::Optional<std::vector<uint8_t>> GenerateSignedMessage(
 
   // Step 5.8. "The 8-byte big-endian encoding of the length in bytes of
   // requestUrl, followed by the bytes of requestUrl." [spec text]
-  const auto& request_url_spec = envelope.request_url().spec();
+  const auto& request_url_bytes = envelope.request_url().raw_string;
 
-  AppendToBuf8BytesBigEndian(&message, request_url_spec.size());
-  message.insert(message.end(), std::begin(request_url_spec),
-                 std::end(request_url_spec));
+  AppendToBuf8BytesBigEndian(&message, request_url_bytes.size());
+  message.insert(message.end(), std::begin(request_url_bytes),
+                 std::end(request_url_bytes));
 
   // Step 5.9. "The 8-byte big-endian encoding of the length in bytes of
   // headers, followed by the bytes of headers." [spec text]
@@ -206,7 +207,7 @@ bool VerifyTimestamps(const SignedExchangeEnvelope& envelope,
 
   // 3. "If expires is more than 7 days (604800 seconds) after date, return
   // "invalid"." [spec text]
-  if ((expires_time - creation_time).InSeconds() > kOneWeekInSeconds)
+  if ((expires_time - creation_time).InSeconds() > kOneWeek.InSeconds())
     return false;
 
   // 4. "If the current time is before date or after expires, return
@@ -214,21 +215,21 @@ bool VerifyTimestamps(const SignedExchangeEnvelope& envelope,
   if (verification_time < creation_time) {
     UMA_HISTOGRAM_CUSTOM_COUNTS(
         "SignedExchange.SignatureVerificationError.NotYetValid",
-        (creation_time - verification_time).InSeconds(), 1, kFourWeeksInSeconds,
-        50);
+        (creation_time - verification_time).InSeconds(), 1,
+        kFourWeeks.InSeconds(), 50);
     return false;
   }
   if (expires_time < verification_time) {
     UMA_HISTOGRAM_CUSTOM_COUNTS(
         "SignedExchange.SignatureVerificationError.Expired",
-        (verification_time - expires_time).InSeconds(), 1, kFourWeeksInSeconds,
-        50);
+        (verification_time - expires_time).InSeconds(), 1,
+        kFourWeeks.InSeconds(), 50);
     return false;
   }
 
   UMA_HISTOGRAM_CUSTOM_COUNTS("SignedExchange.TimeUntilExpiration",
                               (expires_time - verification_time).InSeconds(), 1,
-                              kOneWeekInSeconds, 50);
+                              kOneWeek.InSeconds(), 50);
   return true;
 }
 
@@ -246,6 +247,7 @@ bool ShouldIgnoreTimestampError(
 }  // namespace
 
 SignedExchangeSignatureVerifier::Result SignedExchangeSignatureVerifier::Verify(
+    SignedExchangeVersion version,
     const SignedExchangeEnvelope& envelope,
     scoped_refptr<net::X509Certificate> certificate,
     const base::Time& verification_time,
@@ -287,7 +289,7 @@ SignedExchangeSignatureVerifier::Result SignedExchangeSignatureVerifier::Verify(
     return Result::kErrCertificateSHA256Mismatch;
   }
 
-  auto message = GenerateSignedMessage(envelope);
+  auto message = GenerateSignedMessage(version, envelope);
   if (!message) {
     signed_exchange_utils::ReportErrorAndTraceEvent(
         devtools_proxy, "Failed to reconstruct signed message.");

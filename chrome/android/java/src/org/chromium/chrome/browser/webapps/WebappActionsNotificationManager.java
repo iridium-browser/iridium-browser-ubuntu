@@ -7,12 +7,11 @@ package org.chromium.chrome.browser.webapps;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.support.v4.app.NotificationCompat;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.R;
@@ -22,7 +21,7 @@ import org.chromium.chrome.browser.notifications.NotificationConstants;
 import org.chromium.chrome.browser.notifications.NotificationUmaTracker;
 import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.ui.widget.Toast;
+import org.chromium.ui.base.Clipboard;
 
 /**
  * Manages the notification shown by Chrome when running standalone Web Apps. It accomplishes
@@ -67,7 +66,9 @@ class WebappActionsNotificationManager {
     }
 
     private Notification createNotification() {
-        int intentFlags = WebappLauncherActivity.getWebappActivityIntentFlags();
+        int intentFlags = Intent.FLAG_ACTIVITY_NEW_TASK
+                | ApiCompatibilityUtils.getActivityNewDocumentFlag()
+                | Intent.FLAG_ACTIVITY_CLEAR_TOP;
         int pendingIntentFlags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_ONE_SHOT;
 
         PendingIntent focusIntent = PendingIntent.getActivity(mWebappActivity, 0,
@@ -126,12 +127,7 @@ class WebappActionsNotificationManager {
             return true;
         } else if (ACTION_FOCUS.equals(intent.getAction())) {
             Tab tab = mWebappActivity.getActivityTab();
-            if (tab != null) {
-                ClipboardManager clipboard = (ClipboardManager) mWebappActivity.getSystemService(
-                        Context.CLIPBOARD_SERVICE);
-                clipboard.setPrimaryClip(ClipData.newPlainText("url", tab.getOriginalUrl()));
-                Toast.makeText(mWebappActivity, R.string.url_copied, Toast.LENGTH_SHORT).show();
-            }
+            if (tab != null) Clipboard.getInstance().copyUrlToClipboard(tab.getOriginalUrl());
             RecordUserAction.record("Webapp.NotificationFocused");
             return true;
         }

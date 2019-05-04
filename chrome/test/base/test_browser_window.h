@@ -70,6 +70,8 @@ class TestBrowserWindow : public BrowserWindow {
                           content::WebContents* new_contents,
                           int index,
                           int reason) override {}
+  void OnTabDetached(content::WebContents* contents, bool was_active) override {
+  }
   void ZoomChangedForActiveTab(bool can_show_bubble) override {}
   gfx::Rect GetRestoredBounds() const override;
   ui::WindowShowState GetRestoredState() const override;
@@ -85,13 +87,15 @@ class TestBrowserWindow : public BrowserWindow {
   bool IsFullscreenBubbleVisible() const override;
   LocationBar* GetLocationBar() const override;
   PageActionIconContainer* GetPageActionIconContainer() override;
-  void SetFocusToLocationBar(bool select_all) override {}
+  void SetFocusToLocationBar() override {}
   void UpdateReloadStopState(bool is_loading, bool force) override {}
   void UpdateToolbar(content::WebContents* contents) override {}
+  void UpdateToolbarVisibility(bool visible, bool animate) override {}
   void ResetToolbarTabState(content::WebContents* contents) override {}
   void FocusToolbar() override {}
   ToolbarActionsBar* GetToolbarActionsBar() override;
   void ToolbarSizeChanged(bool is_animating) override {}
+  void TabDraggingStatusChanged(bool is_dragging) override {}
   void FocusAppMenu() override {}
   void FocusBookmarksToolbar() override {}
   void FocusInactivePopupForAccessibility() override {}
@@ -99,8 +103,8 @@ class TestBrowserWindow : public BrowserWindow {
   void ShowAppMenu() override {}
   content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) override;
-  void HandleKeyboardEvent(
-      const content::NativeWebKeyboardEvent& event) override {}
+  bool HandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event) override;
   bool IsBookmarkBarVisible() const override;
   bool IsBookmarkBarAnimating() const override;
   bool IsTabStripEditable() const override;
@@ -114,7 +118,9 @@ class TestBrowserWindow : public BrowserWindow {
       bool disable_stay_in_chrome,
       IntentPickerResponse callback) override {}
   void SetIntentPickerViewVisibility(bool visible) override {}
-#endif  // defined(OS_CHROMEOS)
+#else  // !defined(OS_CHROMEOS)
+  BadgeServiceDelegate* GetBadgeServiceDelegate() const override;
+#endif
   autofill::SaveCardBubbleView* ShowSaveCreditCardBubble(
       content::WebContents* contents,
       autofill::SaveCardBubbleController* controller,
@@ -131,7 +137,7 @@ class TestBrowserWindow : public BrowserWindow {
 #if BUILDFLAG(ENABLE_ONE_CLICK_SIGNIN)
   void ShowOneClickSigninConfirmation(
       const base::string16& email,
-      const StartSyncCallback& start_sync_callback) override {}
+      base::OnceCallback<void(bool)> confirmed_callback) override {}
 #endif
   bool IsDownloadShelfVisible() const override;
   DownloadShelf* GetDownloadShelf() override;
@@ -140,7 +146,7 @@ class TestBrowserWindow : public BrowserWindow {
       Browser::DownloadClosePreventionType dialog_type,
       bool app_modal,
       const base::Callback<void(bool)>& callback) override {}
-  void UserChangedTheme() override {}
+  void UserChangedTheme(BrowserThemeChangeType theme_change_type) override {}
   void CutCopyPaste(int command_id) override {}
   FindBar* CreateFindBar() override;
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost()
@@ -166,6 +172,11 @@ class TestBrowserWindow : public BrowserWindow {
           callback) override {}
   std::string GetWorkspace() const override;
   bool IsVisibleOnAllWorkspaces() const override;
+  void ShowEmojiPanel() override {}
+
+#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
+  void ShowInProductHelpPromo(InProductHelpFeature iph_feature) override {}
+#endif
 
  protected:
   void DestroyBrowser() override {}
@@ -183,14 +194,12 @@ class TestBrowserWindow : public BrowserWindow {
     base::TimeTicks GetMatchSelectionTimestamp() const override;
     void AcceptInput() override {}
     void AcceptInput(base::TimeTicks match_selection_timestamp) override {}
-    void FocusLocation(bool select_all) override {}
+    void FocusLocation() override {}
     void FocusSearch() override {}
     void UpdateContentSettingsIcons() override {}
-    void UpdateManagePasswordsIconAndBubble() override {}
     void UpdateSaveCreditCardIcon() override {}
     void UpdateLocalCardMigrationIcon() override {}
     void UpdateBookmarkStarVisibility() override {}
-    void UpdateLocationBarVisibility(bool visible, bool animate) override {}
     void SaveStateToContents(content::WebContents* contents) override {}
     void Revert() override {}
     const OmniboxView* GetOmniboxView() const override;
@@ -201,8 +210,21 @@ class TestBrowserWindow : public BrowserWindow {
     DISALLOW_COPY_AND_ASSIGN(TestLocationBar);
   };
 
+  class TestPageActionIconContainer : public PageActionIconContainer {
+   public:
+    TestPageActionIconContainer() {}
+    ~TestPageActionIconContainer() override {}
+
+    // PageActionIconContainer:
+    void UpdatePageActionIcon(PageActionIconType type) override {}
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(TestPageActionIconContainer);
+  };
+
   TestDownloadShelf download_shelf_;
   TestLocationBar location_bar_;
+  TestPageActionIconContainer page_action_icon_container_;
 
   DISALLOW_COPY_AND_ASSIGN(TestBrowserWindow);
 };

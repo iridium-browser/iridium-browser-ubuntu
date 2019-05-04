@@ -52,7 +52,7 @@ class NET_EXPORT_PRIVATE MemBackendImpl final : public Backend {
   bool SetMaxSize(int64_t max_bytes);
 
   // Returns the maximum size for a file to reside on the cache.
-  int MaxFileSize() const;
+  int64_t MaxFileSize() const override;
 
   // These next methods (before the implementation of the Backend interface) are
   // called by MemEntryImpl to update the state of the backend during the entry
@@ -86,6 +86,10 @@ class NET_EXPORT_PRIVATE MemBackendImpl final : public Backend {
   // Backend interface.
   net::CacheType GetCacheType() const override;
   int32_t GetEntryCount() const override;
+  net::Error OpenOrCreateEntry(const std::string& key,
+                               net::RequestPriority request_priority,
+                               EntryWithOpened* entry_struct,
+                               CompletionOnceCallback callback) override;
   net::Error OpenEntry(const std::string& key,
                        net::RequestPriority request_priority,
                        Entry** entry,

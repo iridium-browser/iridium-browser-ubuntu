@@ -6,7 +6,6 @@
 
 #include "build/build_config.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/service_manager/public/cpp/service_context.h"
 #include "services/video_capture/device_factory_provider_impl.h"
 #include "services/video_capture/public/mojom/constants.mojom.h"
 #include "services/video_capture/public/uma/video_capture_service_event.h"
@@ -14,30 +13,40 @@
 
 namespace video_capture {
 
-ServiceImpl::ServiceImpl(base::Optional<base::TimeDelta> shutdown_delay)
-    : shutdown_delay_(shutdown_delay), weak_factory_(this) {}
+namespace {
+
+#if defined(OS_ANDROID)
+// On Android, we do not use automatic service shutdown, because when shutting
+// down the service, we lose caching of the supported formats, and re-querying
+// these can take several seconds on certain Android devices.
+constexpr base::Optional<base::TimeDelta> kDefaultIdleTimeout;
+#else
+constexpr base::Optional<base::TimeDelta> kDefaultIdleTimeout =
+    base::TimeDelta::FromSeconds(5);
+#endif
+
+}  // namespace
+
+ServiceImpl::ServiceImpl(
+    service_manager::mojom::ServiceRequest request,
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner)
+    : ServiceImpl(std::move(request),
+                  std::move(ui_task_runner),
+                  kDefaultIdleTimeout) {}
+
+ServiceImpl::ServiceImpl(
+    service_manager::mojom::ServiceRequest request,
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+    base::Optional<base::TimeDelta> idle_timeout)
+    : binding_(this, std::move(request)),
+      keepalive_(&binding_, idle_timeout),
+      ui_task_runner_(std::move(ui_task_runner)) {
+  keepalive_.AddObserver(this);
+}
 
 ServiceImpl::~ServiceImpl() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (destruction_cb_)
-    std::move(destruction_cb_).Run();
-}
-
-// static
-std::unique_ptr<service_manager::Service> ServiceImpl::Create() {
-#if defined(OS_ANDROID)
-  // On Android, we do not use automatic service shutdown, because when shutting
-  // down the service, we lose caching of the supported formats, and re-querying
-  // these can take several seconds on certain Android devices.
-  return std::make_unique<ServiceImpl>(base::Optional<base::TimeDelta>());
-#else
-  return std::make_unique<ServiceImpl>(base::TimeDelta::FromSeconds(5));
-#endif
-}
-
-void ServiceImpl::SetDestructionObserver(base::OnceClosure observer_cb) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  destruction_cb_ = std::move(observer_cb);
+  keepalive_.RemoveObserver(this);
 }
 
 void ServiceImpl::SetFactoryProviderClientConnectedObserver(
@@ -60,7 +69,7 @@ void ServiceImpl::SetShutdownTimeoutCancelledObserver(
 
 bool ServiceImpl::HasNoContextRefs() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return ref_factory_->HasNoRefs();
+  return keepalive_.HasNoRefs();
 }
 
 void ServiceImpl::OnStart() {
@@ -69,21 +78,14 @@ void ServiceImpl::OnStart() {
   video_capture::uma::LogVideoCaptureServiceEvent(
       video_capture::uma::SERVICE_STARTED);
 
-  // Do not replace |ref_factory_| if one has already been set via
-  // SetServiceContextRefProviderForTesting().
-  if (!ref_factory_) {
-    ref_factory_ = std::make_unique<service_manager::ServiceKeepalive>(
-        context(), shutdown_delay_, this);
-  }
-
   registry_.AddInterface<mojom::DeviceFactoryProvider>(
       // Unretained |this| is safe because |registry_| is owned by |this|.
-      base::Bind(&ServiceImpl::OnDeviceFactoryProviderRequest,
-                 base::Unretained(this)));
+      base::BindRepeating(&ServiceImpl::OnDeviceFactoryProviderRequest,
+                          base::Unretained(this)));
   registry_.AddInterface<mojom::TestingControls>(
       // Unretained |this| is safe because |registry_| is owned by |this|.
-      base::Bind(&ServiceImpl::OnTestingControlsRequest,
-                 base::Unretained(this)));
+      base::BindRepeating(&ServiceImpl::OnTestingControlsRequest,
+                          base::Unretained(this)));
 
   // Unretained |this| is safe because |factory_provider_bindings_| is owned by
   // |this|.
@@ -104,12 +106,12 @@ bool ServiceImpl::OnServiceManagerConnectionLost() {
   return true;
 }
 
-void ServiceImpl::OnTimeoutExpired() {
+void ServiceImpl::OnIdleTimeout() {
   video_capture::uma::LogVideoCaptureServiceEvent(
       video_capture::uma::SERVICE_SHUTTING_DOWN_BECAUSE_NO_CLIENT);
 }
 
-void ServiceImpl::OnTimeoutCancelled() {
+void ServiceImpl::OnIdleTimeoutCancelled() {
   video_capture::uma::LogVideoCaptureServiceEvent(
       video_capture::uma::SERVICE_SHUTDOWN_TIMEOUT_CANCELED);
   if (shutdown_timeout_cancelled_cb_)
@@ -121,7 +123,7 @@ void ServiceImpl::OnDeviceFactoryProviderRequest(
   DCHECK(thread_checker_.CalledOnValidThread());
   LazyInitializeDeviceFactoryProvider();
   if (factory_provider_bindings_.empty())
-    device_factory_provider_->SetServiceRef(ref_factory_->CreateRef());
+    device_factory_provider_->SetServiceRef(keepalive_.CreateRef());
   factory_provider_bindings_.AddBinding(device_factory_provider_.get(),
                                         std::move(request));
 
@@ -134,7 +136,7 @@ void ServiceImpl::OnTestingControlsRequest(
     mojom::TestingControlsRequest request) {
   DCHECK(thread_checker_.CalledOnValidThread());
   mojo::MakeStrongBinding(
-      std::make_unique<TestingControlsImpl>(ref_factory_->CreateRef()),
+      std::make_unique<TestingControlsImpl>(keepalive_.CreateRef()),
       std::move(request));
 }
 
@@ -142,7 +144,8 @@ void ServiceImpl::LazyInitializeDeviceFactoryProvider() {
   if (device_factory_provider_)
     return;
 
-  device_factory_provider_ = std::make_unique<DeviceFactoryProviderImpl>();
+  device_factory_provider_ =
+      std::make_unique<DeviceFactoryProviderImpl>(ui_task_runner_);
 }
 
 void ServiceImpl::OnProviderClientDisconnected() {

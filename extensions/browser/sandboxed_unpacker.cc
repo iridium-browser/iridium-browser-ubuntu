@@ -232,7 +232,10 @@ SandboxedUnpacker::SandboxedUnpacker(
       extensions_dir_(extensions_dir),
       location_(location),
       creation_flags_(creation_flags),
-      unpacker_io_task_runner_(unpacker_io_task_runner) {
+      unpacker_io_task_runner_(unpacker_io_task_runner),
+      data_decoder_service_filter_(service_manager::ServiceFilter::ByNameWithId(
+          data_decoder::mojom::kServiceName,
+          base::Token::CreateRandom())) {
   // Tracking for crbug.com/692069. The location must be valid. If it's invalid,
   // the utility process kills itself for a bad IPC.
   CHECK_GT(location, Manifest::INVALID_LOCATION);
@@ -240,12 +243,6 @@ SandboxedUnpacker::SandboxedUnpacker(
 
   // The connector should not be bound to any thread yet.
   DCHECK(!connector_->IsBound());
-
-  // Use a random instance ID to guarantee the connection is to a new data
-  // decoder service (running in its own process).
-  data_decoder_identity_ = service_manager::Identity(
-      data_decoder::mojom::kServiceName, service_manager::mojom::kInheritUserID,
-      base::UnguessableToken::Create().ToString());
 }
 
 bool SandboxedUnpacker::CreateTempDirectory() {
@@ -296,7 +293,8 @@ void SandboxedUnpacker::StartWithCrx(const CRXFileInfo& crx_info) {
                         extension_root_);
 
   // Extract the public key and validate the package.
-  if (!ValidateSignature(crx_info.path, expected_hash))
+  if (!ValidateSignature(crx_info.path, expected_hash,
+                         crx_info.required_format))
     return;  // ValidateSignature() already reported the error.
 
   // Copy the crx file into our working directory.
@@ -530,7 +528,8 @@ void SandboxedUnpacker::UnpackExtensionSucceeded(
   std::set<base::FilePath> image_paths =
       ExtensionsClient::Get()->GetBrowserImagePaths(extension_.get());
   image_sanitizer_ = ImageSanitizer::CreateAndStart(
-      connector_.get(), data_decoder_identity_, extension_root_, image_paths,
+      connector_.get(), data_decoder_service_filter_, extension_root_,
+      image_paths,
       base::BindRepeating(&SandboxedUnpacker::ImageSanitizerDecodedImage, this),
       base::BindOnce(&SandboxedUnpacker::ImageSanitizationDone, this,
                      std::move(manifest)));
@@ -631,7 +630,7 @@ void SandboxedUnpacker::SanitizeMessageCatalogs(
     const std::set<base::FilePath>& message_catalog_paths) {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
   json_file_sanitizer_ = JsonFileSanitizer::CreateAndStart(
-      connector_.get(), data_decoder_identity_, message_catalog_paths,
+      connector_.get(), data_decoder_service_filter_, message_catalog_paths,
       base::BindOnce(&SandboxedUnpacker::MessageCatalogsSanitized, this,
                      std::move(manifest)));
 }
@@ -692,7 +691,8 @@ void SandboxedUnpacker::IndexAndPersistJSONRulesetIfNeeded(
   }
 
   declarative_net_request::IndexAndPersistRules(
-      connector_.get(), &data_decoder_identity_, *extension_,
+      connector_.get(), *data_decoder_service_filter_.instance_id(),
+      *extension_,
       base::BindOnce(&SandboxedUnpacker::OnJSONRulesetIndexed, this,
                      std::move(manifest)));
 }
@@ -715,7 +715,7 @@ void SandboxedUnpacker::OnJSONRulesetIndexed(
 data_decoder::mojom::JsonParser* SandboxedUnpacker::GetJsonParserPtr() {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
   if (!json_parser_ptr_) {
-    connector_->BindInterface(data_decoder_identity_, &json_parser_ptr_);
+    connector_->BindInterface(data_decoder_service_filter_, &json_parser_ptr_);
     json_parser_ptr_.set_connection_error_handler(base::BindOnce(
         &SandboxedUnpacker::ReportFailure, this,
         SandboxedUnpackerFailureReason::
@@ -820,6 +820,9 @@ base::string16 SandboxedUnpacker::FailureReasonToString16(
     case SandboxedUnpackerFailureReason::ERROR_INDEXING_DNR_RULESET:
       return ASCIIToUTF16("ERROR_INDEXING_DNR_RULESET");
 
+    case SandboxedUnpackerFailureReason::CRX_REQUIRED_PROOF_MISSING:
+      return ASCIIToUTF16("CRX_REQUIRED_PROOF_MISSING");
+
     case SandboxedUnpackerFailureReason::DEPRECATED_ABORTED_DUE_TO_SHUTDOWN:
     case SandboxedUnpackerFailureReason::DEPRECATED_ERROR_PARSING_DNR_RULESET:
     case SandboxedUnpackerFailureReason::NUM_FAILURE_REASONS:
@@ -836,8 +839,10 @@ void SandboxedUnpacker::FailWithPackageError(
                                            FailureReasonToString16(reason)));
 }
 
-bool SandboxedUnpacker::ValidateSignature(const base::FilePath& crx_path,
-                                          const std::string& expected_hash) {
+bool SandboxedUnpacker::ValidateSignature(
+    const base::FilePath& crx_path,
+    const std::string& expected_hash,
+    const crx_file::VerifierFormat required_format) {
   std::vector<uint8_t> hash;
   if (!expected_hash.empty()) {
     if (!base::HexStringToBytes(expected_hash, &hash)) {
@@ -847,8 +852,8 @@ bool SandboxedUnpacker::ValidateSignature(const base::FilePath& crx_path,
     }
   }
   const crx_file::VerifierResult result = crx_file::Verify(
-      crx_path, crx_file::VerifierFormat::CRX2_OR_CRX3,
-      std::vector<std::vector<uint8_t>>(), hash, &public_key_, &extension_id_);
+      crx_path, required_format, std::vector<std::vector<uint8_t>>(), hash,
+      &public_key_, &extension_id_);
 
   switch (result) {
     case crx_file::VerifierResult::OK_FULL: {
@@ -881,9 +886,8 @@ bool SandboxedUnpacker::ValidateSignature(const base::FilePath& crx_path,
           SandboxedUnpackerFailureReason::CRX_EXPECTED_HASH_INVALID);
       break;
     case crx_file::VerifierResult::ERROR_REQUIRED_PROOF_MISSING:
-      // We should never get this result, as we do not call
-      // verifier.RequireKeyProof.
-      NOTREACHED();
+      FailWithPackageError(
+          SandboxedUnpackerFailureReason::CRX_REQUIRED_PROOF_MISSING);
       break;
     case crx_file::VerifierResult::ERROR_FILE_HASH_FAILED:
       // We should never get this result unless we had specifically asked for

@@ -41,9 +41,15 @@ void ParseFieldTrial(
     std::initializer_list<FieldTrialParameterInterface*> fields,
     std::string trial_string) {
   std::map<std::string, FieldTrialParameterInterface*> field_map;
+  FieldTrialParameterInterface* keyless_field = nullptr;
   for (FieldTrialParameterInterface* field : fields) {
     field->MarkAsUsed();
-    field_map[field->Key()] = field;
+    if (field->Key().empty()) {
+      RTC_DCHECK(!keyless_field);
+      keyless_field = field;
+    } else {
+      field_map[field->Key()] = field;
+    }
   }
   size_t i = 0;
   while (i < trial_string.length()) {
@@ -61,6 +67,11 @@ void ParseFieldTrial(
       if (!field->second->Parse(std::move(opt_value))) {
         RTC_LOG(LS_WARNING) << "Failed to read field with key: '" << key
                             << "' in trial: \"" << trial_string << "\"";
+      }
+    } else if (!opt_value && keyless_field && !key.empty()) {
+      if (!keyless_field->Parse(key)) {
+        RTC_LOG(LS_WARNING) << "Failed to read empty key field with value '"
+                            << key << "' in trial: \"" << trial_string << "\"";
       }
     } else {
       RTC_LOG(LS_INFO) << "No field with key: '" << key
@@ -168,6 +179,9 @@ template class FieldTrialParameter<bool>;
 template class FieldTrialParameter<double>;
 template class FieldTrialParameter<int>;
 template class FieldTrialParameter<std::string>;
+
+template class FieldTrialConstrained<double>;
+template class FieldTrialConstrained<int>;
 
 template class FieldTrialOptional<double>;
 template class FieldTrialOptional<int>;

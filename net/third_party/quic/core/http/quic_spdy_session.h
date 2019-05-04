@@ -16,7 +16,7 @@
 #include "net/third_party/quic/platform/api/quic_export.h"
 #include "net/third_party/quic/platform/api/quic_string.h"
 #include "net/third_party/quic/platform/api/quic_string_piece.h"
-#include "net/third_party/spdy/core/http2_frame_decoder_adapter.h"
+#include "net/third_party/quiche/src/spdy/core/http2_frame_decoder_adapter.h"
 
 namespace quic {
 
@@ -49,7 +49,8 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession : public QuicSession {
   // Does not take ownership of |connection| or |visitor|.
   QuicSpdySession(QuicConnection* connection,
                   QuicSession::Visitor* visitor,
-                  const QuicConfig& config);
+                  const QuicConfig& config,
+                  const ParsedQuicVersionVector& supported_versions);
   QuicSpdySession(const QuicSpdySession&) = delete;
   QuicSpdySession& operator=(const QuicSpdySession&) = delete;
 
@@ -135,21 +136,26 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession : public QuicSession {
   }
 
  protected:
-  // Override CreateIncomingDynamicStream(),
-  // CreateOutgoingBidirectionalStream() and
+  // Override CreateIncomingStream(), CreateOutgoingBidirectionalStream() and
   // CreateOutgoingUnidirectionalStream() with QuicSpdyStream return type to
   // make sure that all data streams are QuicSpdyStreams.
-  QuicSpdyStream* CreateIncomingDynamicStream(QuicStreamId id) override = 0;
-  QuicSpdyStream* CreateOutgoingBidirectionalStream() override = 0;
-  QuicSpdyStream* CreateOutgoingUnidirectionalStream() override = 0;
+  QuicSpdyStream* CreateIncomingStream(QuicStreamId id) override = 0;
+  QuicSpdyStream* CreateIncomingStream(PendingStream pending) override = 0;
+  virtual QuicSpdyStream* CreateOutgoingBidirectionalStream() = 0;
+  virtual QuicSpdyStream* CreateOutgoingUnidirectionalStream() = 0;
 
   QuicSpdyStream* GetSpdyDataStream(const QuicStreamId stream_id);
 
   // If an incoming stream can be created, return true.
-  virtual bool ShouldCreateIncomingDynamicStream(QuicStreamId id) = 0;
+  virtual bool ShouldCreateIncomingStream(QuicStreamId id) = 0;
 
-  // If an outgoing stream can be created, return true.
-  virtual bool ShouldCreateOutgoingDynamicStream() = 0;
+  // If an outgoing bidirectional/unidirectional stream can be created, return
+  // true.
+  virtual bool ShouldCreateOutgoingBidirectionalStream() = 0;
+  virtual bool ShouldCreateOutgoingUnidirectionalStream() = 0;
+
+  // Overridden to buffer incoming streams for version 99.
+  bool ShouldBufferIncomingStream(QuicStreamId id) const override;
 
   // This was formerly QuicHeadersStream::WriteHeaders.  Needs to be
   // separate from QuicSpdySession::WriteHeaders because tests call

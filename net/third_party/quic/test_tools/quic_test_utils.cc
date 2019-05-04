@@ -25,7 +25,7 @@
 #include "net/third_party/quic/test_tools/crypto_test_utils.h"
 #include "net/third_party/quic/test_tools/quic_config_peer.h"
 #include "net/third_party/quic/test_tools/quic_connection_peer.h"
-#include "net/third_party/spdy/core/spdy_frame_builder.h"
+#include "net/third_party/quiche/src/spdy/core/spdy_frame_builder.h"
 #include "third_party/boringssl/src/include/openssl/sha.h"
 
 using testing::_;
@@ -33,6 +33,34 @@ using testing::Invoke;
 
 namespace quic {
 namespace test {
+
+QuicConnectionId TestConnectionId() {
+  // Chosen by fair dice roll.
+  // Guaranteed to be random.
+  return TestConnectionId(42);
+}
+
+QuicConnectionId TestConnectionId(uint64_t connection_number) {
+  if (!QuicConnectionIdUseNetworkByteOrder()) {
+    return QuicConnectionIdFromUInt64(connection_number);
+  }
+  const uint64_t connection_id64_net =
+      QuicEndian::HostToNet64(connection_number);
+  return QuicConnectionId(reinterpret_cast<const char*>(&connection_id64_net),
+                          sizeof(connection_id64_net));
+}
+
+uint64_t TestConnectionIdToUInt64(QuicConnectionId connection_id) {
+  if (!QuicConnectionIdUseNetworkByteOrder()) {
+    return QuicConnectionIdToUInt64(connection_id);
+  }
+  DCHECK_EQ(connection_id.length(), kQuicDefaultConnectionIdLength);
+  uint64_t connection_id64_net = 0;
+  memcpy(&connection_id64_net, connection_id.data(),
+         std::min<size_t>(static_cast<size_t>(connection_id.length()),
+                          sizeof(connection_id64_net)));
+  return QuicEndian::NetToHost64(connection_id64_net);
+}
 
 QuicAckFrame InitAckFrame(const std::vector<QuicAckBlock>& ack_blocks) {
   DCHECK_GT(ack_blocks.size(), 0u);
@@ -51,12 +79,12 @@ QuicAckFrame InitAckFrame(const std::vector<QuicAckBlock>& ack_blocks) {
   return ack;
 }
 
-QuicAckFrame InitAckFrame(QuicPacketNumber largest_acked) {
+QuicAckFrame InitAckFrame(uint64_t largest_acked) {
   return InitAckFrame({{1, largest_acked + 1}});
 }
 
 QuicAckFrame MakeAckFrameWithAckBlocks(size_t num_ack_blocks,
-                                       QuicPacketNumber least_unacked) {
+                                       uint64_t least_unacked) {
   QuicAckFrame ack;
   ack.largest_acked = 2 * num_ack_blocks + least_unacked;
   // Add enough received packets to get num_ack_blocks ack blocks.
@@ -125,7 +153,7 @@ void SimpleRandom::RandBytes(void* data, size_t len) {
 
 MockFramerVisitor::MockFramerVisitor() {
   // By default, we want to accept packets.
-  ON_CALL(*this, OnProtocolVersionMismatch(_))
+  ON_CALL(*this, OnProtocolVersionMismatch(_, _))
       .WillByDefault(testing::Return(false));
 
   // By default, we want to accept packets.
@@ -169,7 +197,8 @@ MockFramerVisitor::MockFramerVisitor() {
 
 MockFramerVisitor::~MockFramerVisitor() {}
 
-bool NoOpFramerVisitor::OnProtocolVersionMismatch(ParsedQuicVersion version) {
+bool NoOpFramerVisitor::OnProtocolVersionMismatch(ParsedQuicVersion version,
+                                                  PacketHeaderFormat form) {
   return false;
 }
 
@@ -242,6 +271,11 @@ bool NoOpFramerVisitor::OnApplicationCloseFrame(
 
 bool NoOpFramerVisitor::OnNewConnectionIdFrame(
     const QuicNewConnectionIdFrame& frame) {
+  return true;
+}
+
+bool NoOpFramerVisitor::OnRetireConnectionIdFrame(
+    const QuicRetireConnectionIdFrame& frame) {
   return true;
 }
 
@@ -335,23 +369,23 @@ void MockQuicConnectionHelper::AdvanceTime(QuicTime::Delta delta) {
 MockQuicConnection::MockQuicConnection(MockQuicConnectionHelper* helper,
                                        MockAlarmFactory* alarm_factory,
                                        Perspective perspective)
-    : MockQuicConnection(QuicEndian::NetToHost64(kTestConnectionId),
+    : MockQuicConnection(TestConnectionId(),
                          QuicSocketAddress(TestPeerIPAddress(), kTestPort),
                          helper,
                          alarm_factory,
                          perspective,
-                         AllSupportedVersions()) {}
+                         ParsedVersionOfIndex(CurrentSupportedVersions(), 0)) {}
 
 MockQuicConnection::MockQuicConnection(QuicSocketAddress address,
                                        MockQuicConnectionHelper* helper,
                                        MockAlarmFactory* alarm_factory,
                                        Perspective perspective)
-    : MockQuicConnection(QuicEndian::NetToHost64(kTestConnectionId),
+    : MockQuicConnection(TestConnectionId(),
                          address,
                          helper,
                          alarm_factory,
                          perspective,
-                         AllSupportedVersions()) {}
+                         ParsedVersionOfIndex(CurrentSupportedVersions(), 0)) {}
 
 MockQuicConnection::MockQuicConnection(QuicConnectionId connection_id,
                                        MockQuicConnectionHelper* helper,
@@ -362,14 +396,14 @@ MockQuicConnection::MockQuicConnection(QuicConnectionId connection_id,
                          helper,
                          alarm_factory,
                          perspective,
-                         CurrentSupportedVersions()) {}
+                         ParsedVersionOfIndex(CurrentSupportedVersions(), 0)) {}
 
 MockQuicConnection::MockQuicConnection(
     MockQuicConnectionHelper* helper,
     MockAlarmFactory* alarm_factory,
     Perspective perspective,
     const ParsedQuicVersionVector& supported_versions)
-    : MockQuicConnection(QuicEndian::NetToHost64(kTestConnectionId),
+    : MockQuicConnection(TestConnectionId(),
                          QuicSocketAddress(TestPeerIPAddress(), kTestPort),
                          helper,
                          alarm_factory,
@@ -402,7 +436,8 @@ void MockQuicConnection::AdvanceTime(QuicTime::Delta delta) {
   static_cast<MockQuicConnectionHelper*>(helper())->AdvanceTime(delta);
 }
 
-bool MockQuicConnection::OnProtocolVersionMismatch(ParsedQuicVersion version) {
+bool MockQuicConnection::OnProtocolVersionMismatch(ParsedQuicVersion version,
+                                                   PacketHeaderFormat form) {
   return false;
 }
 
@@ -438,7 +473,10 @@ MockQuicSession::MockQuicSession(QuicConnection* connection)
 
 MockQuicSession::MockQuicSession(QuicConnection* connection,
                                  bool create_mock_crypto_stream)
-    : QuicSession(connection, nullptr, DefaultQuicConfig()) {
+    : QuicSession(connection,
+                  nullptr,
+                  DefaultQuicConfig(),
+                  CurrentSupportedVersions()) {
   if (create_mock_crypto_stream) {
     crypto_stream_ = QuicMakeUnique<MockQuicCryptoStream>(this);
   }
@@ -510,7 +548,10 @@ MockQuicSpdySession::MockQuicSpdySession(QuicConnection* connection)
 
 MockQuicSpdySession::MockQuicSpdySession(QuicConnection* connection,
                                          bool create_mock_crypto_stream)
-    : QuicSpdySession(connection, nullptr, DefaultQuicConfig()) {
+    : QuicSpdySession(connection,
+                      nullptr,
+                      DefaultQuicConfig(),
+                      connection->supported_versions()) {
   if (create_mock_crypto_stream) {
     crypto_stream_ = QuicMakeUnique<MockQuicCryptoStream>(this);
   }
@@ -548,9 +589,11 @@ size_t MockQuicSpdySession::WriteHeaders(
 TestQuicSpdyServerSession::TestQuicSpdyServerSession(
     QuicConnection* connection,
     const QuicConfig& config,
+    const ParsedQuicVersionVector& supported_versions,
     const QuicCryptoServerConfig* crypto_config,
     QuicCompressedCertsCache* compressed_certs_cache)
     : QuicServerSessionBase(config,
+                            supported_versions,
                             connection,
                             &visitor_,
                             &helper_,
@@ -558,8 +601,8 @@ TestQuicSpdyServerSession::TestQuicSpdyServerSession(
                             compressed_certs_cache) {
   Initialize();
   ON_CALL(helper_, GenerateConnectionIdForReject(_))
-      .WillByDefault(
-          testing::Return(connection->random_generator()->RandUint64()));
+      .WillByDefault(testing::Return(
+          QuicUtils::CreateRandomConnectionId(connection->random_generator())));
   ON_CALL(helper_, CanAcceptClientHello(_, _, _, _, _))
       .WillByDefault(testing::Return(true));
 }
@@ -597,9 +640,13 @@ const QuicCryptoServerStream* TestQuicSpdyServerSession::GetCryptoStream()
 TestQuicSpdyClientSession::TestQuicSpdyClientSession(
     QuicConnection* connection,
     const QuicConfig& config,
+    const ParsedQuicVersionVector& supported_versions,
     const QuicServerId& server_id,
     QuicCryptoClientConfig* crypto_config)
-    : QuicSpdyClientSessionBase(connection, &push_promise_index_, config) {
+    : QuicSpdyClientSessionBase(connection,
+                                &push_promise_index_,
+                                config,
+                                supported_versions) {
   crypto_stream_ = QuicMakeUnique<QuicCryptoClientStream>(
       server_id, this, crypto_test_utils::ProofVerifyContextForTesting(),
       crypto_config, this);
@@ -739,7 +786,7 @@ QuicEncryptedPacket* ConstructEncryptedPacket(
     QuicConnectionId source_connection_id,
     bool version_flag,
     bool reset_flag,
-    QuicPacketNumber packet_number,
+    uint64_t packet_number,
     const QuicString& data) {
   return ConstructEncryptedPacket(
       destination_connection_id, source_connection_id, version_flag, reset_flag,
@@ -752,7 +799,7 @@ QuicEncryptedPacket* ConstructEncryptedPacket(
     QuicConnectionId source_connection_id,
     bool version_flag,
     bool reset_flag,
-    QuicPacketNumber packet_number,
+    uint64_t packet_number,
     const QuicString& data,
     QuicConnectionIdLength destination_connection_id_length,
     QuicConnectionIdLength source_connection_id_length,
@@ -768,7 +815,7 @@ QuicEncryptedPacket* ConstructEncryptedPacket(
     QuicConnectionId source_connection_id,
     bool version_flag,
     bool reset_flag,
-    QuicPacketNumber packet_number,
+    uint64_t packet_number,
     const QuicString& data,
     QuicConnectionIdLength destination_connection_id_length,
     QuicConnectionIdLength source_connection_id_length,
@@ -785,7 +832,7 @@ QuicEncryptedPacket* ConstructEncryptedPacket(
     QuicConnectionId source_connection_id,
     bool version_flag,
     bool reset_flag,
-    QuicPacketNumber packet_number,
+    uint64_t packet_number,
     const QuicString& data,
     QuicConnectionIdLength destination_connection_id_length,
     QuicConnectionIdLength source_connection_id_length,
@@ -801,7 +848,12 @@ QuicEncryptedPacket* ConstructEncryptedPacket(
   header.reset_flag = reset_flag;
   header.packet_number_length = packet_number_length;
   header.packet_number = packet_number;
-  QuicFrame frame(QuicStreamFrame(1, false, 0, QuicStringPiece(data)));
+  QuicFrame frame(QuicStreamFrame(
+      QuicUtils::GetCryptoStreamId(
+          versions != nullptr
+              ? (*versions)[0].transport_version
+              : CurrentSupportedVersions()[0].transport_version),
+      false, 0, QuicStringPiece(data)));
   QuicFrames frames;
   frames.push_back(frame);
   QuicFramer framer(
@@ -832,7 +884,7 @@ QuicEncryptedPacket* ConstructMisFramedEncryptedPacket(
     QuicConnectionId source_connection_id,
     bool version_flag,
     bool reset_flag,
-    QuicPacketNumber packet_number,
+    uint64_t packet_number,
     const QuicString& data,
     QuicConnectionIdLength destination_connection_id_length,
     QuicConnectionIdLength source_connection_id_length,
@@ -1018,8 +1070,9 @@ void CreateClientSessionForTest(
                           : DefaultQuicConfig();
   *client_connection = new PacketSavingConnection(
       helper, alarm_factory, Perspective::IS_CLIENT, supported_versions);
-  *client_session = new TestQuicSpdyClientSession(
-      *client_connection, config, server_id, crypto_client_config);
+  *client_session = new TestQuicSpdyClientSession(*client_connection, config,
+                                                  supported_versions, server_id,
+                                                  crypto_client_config);
   (*client_connection)->AdvanceTime(connection_start_time);
 }
 
@@ -1040,11 +1093,12 @@ void CreateServerSessionForTest(
       << "Connections must start at non-zero times, otherwise the "
       << "strike-register will be unhappy.";
 
-  *server_connection = new PacketSavingConnection(
-      helper, alarm_factory, Perspective::IS_SERVER, supported_versions);
+  *server_connection =
+      new PacketSavingConnection(helper, alarm_factory, Perspective::IS_SERVER,
+                                 ParsedVersionOfIndex(supported_versions, 0));
   *server_session = new TestQuicSpdyServerSession(
-      *server_connection, DefaultQuicConfig(), server_crypto_config,
-      compressed_certs_cache);
+      *server_connection, DefaultQuicConfig(), supported_versions,
+      server_crypto_config, compressed_certs_cache);
 
   // We advance the clock initially because the default time is zero and the
   // strike register worries that we've just overflowed a uint32_t time.
@@ -1052,19 +1106,31 @@ void CreateServerSessionForTest(
 }
 
 QuicStreamId NextStreamId(QuicTransportVersion version) {
-  // TODO(ckrasic) - when version for http stream pairs re-lands, this
-  // will be conditional.
-  return 2;
+  return QuicUtils::StreamIdDelta(version);
 }
 
-QuicStreamId GetNthClientInitiatedStreamId(QuicTransportVersion version,
-                                           int n) {
-  return 5 + NextStreamId(version) * n;
+QuicStreamId GetNthClientInitiatedBidirectionalStreamId(
+    QuicTransportVersion version,
+    int n) {
+  return QuicUtils::GetFirstBidirectionalStreamId(version,
+                                                  Perspective::IS_CLIENT) +
+         NextStreamId(version) * (n + 1);
 }
 
-QuicStreamId GetNthServerInitiatedStreamId(QuicTransportVersion version,
-                                           int n) {
-  return 2 + NextStreamId(version) * n;
+QuicStreamId GetNthServerInitiatedUnidirectionalStreamId(
+    QuicTransportVersion version,
+    int n) {
+  return QuicUtils::GetFirstUnidirectionalStreamId(version,
+                                                   Perspective::IS_SERVER) +
+         NextStreamId(version) * n;
+}
+
+StreamType DetermineStreamType(QuicStreamId id,
+                               QuicTransportVersion version,
+                               bool is_incoming,
+                               StreamType default_type) {
+  return version == QUIC_VERSION_99 ? QuicUtils::GetStreamType(id, is_incoming)
+                                    : default_type;
 }
 
 }  // namespace test

@@ -10,7 +10,6 @@
 #include "ash/public/cpp/app_menu_constants.h"
 #include "ash/public/cpp/shelf_item.h"
 #include "ash/public/cpp/shelf_model.h"
-#include "ash/test/ash_test_base.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -31,10 +30,11 @@
 #include "chrome/browser/ui/ash/launcher/extension_launcher_context_menu.h"
 #include "chrome/browser/ui/ash/launcher/internal_app_shelf_context_menu.h"
 #include "chrome/browser/ui/ash/tablet_mode_client.h"
+#include "chrome/test/base/chrome_ash_test_base.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/arc/metrics/arc_metrics_constants.h"
 #include "components/arc/test/fake_app_instance.h"
-#include "components/exo/shell_surface.h"
+#include "components/exo/shell_surface_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -63,7 +63,7 @@ std::string GetAppNameInShelfGroup(uint32_t task_id) {
   return base::StringPrintf("AppInShelfGroup%d", task_id);
 }
 
-class LauncherContextMenuTest : public ash::AshTestBase {
+class LauncherContextMenuTest : public ChromeAshTestBase {
  protected:
   LauncherContextMenuTest() = default;
   ~LauncherContextMenuTest() override = default;
@@ -71,7 +71,7 @@ class LauncherContextMenuTest : public ash::AshTestBase {
   void SetUp() override {
     arc_test_.SetUp(&profile_);
     session_manager_ = std::make_unique<session_manager::SessionManager>();
-    ash::AshTestBase::SetUp();
+    ChromeAshTestBase::SetUp();
     model_ = std::make_unique<ash::ShelfModel>();
     launcher_controller_ =
         std::make_unique<ChromeLauncherController>(&profile_, model_.get());
@@ -102,8 +102,7 @@ class LauncherContextMenuTest : public ash::AshTestBase {
     widget->Init(params);
     widget->Show();
     widget->Activate();
-    exo::ShellSurface::SetApplicationId(widget->GetNativeWindow(),
-                                        window_app_id);
+    exo::SetShellApplicationId(widget->GetNativeWindow(), window_app_id);
     return widget;
   }
 
@@ -137,7 +136,7 @@ class LauncherContextMenuTest : public ash::AshTestBase {
 
   void TearDown() override {
     launcher_controller_.reset();
-    ash::AshTestBase::TearDown();
+    ChromeAshTestBase::TearDown();
   }
 
   ArcAppTest& arc_test() { return arc_test_; }

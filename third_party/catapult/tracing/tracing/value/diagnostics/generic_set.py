@@ -7,13 +7,14 @@ import json
 from tracing.value.diagnostics import diagnostic
 
 
-# TODO(#4143): Make this comment a docstring.
-# A GenericSet diagnostic can contain any Plain-Ol'-Data objects that can be
-# serialized using json.dumps(): None, boolean, number, string, list, dict.
-# Dicts, lists, and booleans are deduplicated by their JSON representation.
-# Dicts and lists are not hashable.
-# (1 == True) and (0 == False) in Python, but not in JSON.
 class GenericSet(diagnostic.Diagnostic):
+  """Contains any Plain-Ol'-Data objects.
+
+  Contents are serialized using json.dumps(): None, boolean, number, string,
+  list, dict. Dicts, lists, and booleans are deduplicated by their JSON
+  representation. Dicts and lists are not hashable.  (1 == True) and (0 ==
+  False) in Python, but not in JSON.
+  """
   __slots__ = '_values', '_comparable_set'
 
   def __init__(self, values):
@@ -31,6 +32,9 @@ class GenericSet(diagnostic.Diagnostic):
 
   def __eq__(self, other):
     return self._GetComparableSet() == other._GetComparableSet()
+
+  def __hash__(self):
+    return id(self)
 
   def SetValues(self, values):
     # Use a list because Python sets cannot store dicts or lists because they

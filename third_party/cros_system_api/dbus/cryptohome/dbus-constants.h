@@ -24,6 +24,7 @@ const char kCryptohomeMount[] = "Mount";
 const char kCryptohomeMountGuest[] = "MountGuest";
 const char kCryptohomeMountGuestEx[] = "MountGuestEx";
 const char kCryptohomeUnmount[] = "Unmount";
+const char kCryptohomeUnmountEx[] = "UnmountEx";
 const char kCryptohomeTpmIsReady[] = "TpmIsReady";
 const char kCryptohomeTpmIsEnabled[] = "TpmIsEnabled";
 const char kCryptohomeTpmIsOwned[] = "TpmIsOwned";
@@ -35,8 +36,6 @@ const char kCryptohomePkcs11GetTpmTokenInfo[] = "Pkcs11GetTpmTokenInfo";
 const char kCryptohomePkcs11GetTpmTokenInfoForUser[] =
     "Pkcs11GetTpmTokenInfoForUser";
 const char kCryptohomePkcs11IsTpmTokenReady[] = "Pkcs11IsTpmTokenReady";
-const char kCryptohomePkcs11IsTpmTokenReadyForUser[] =
-    "Pkcs11IsTpmTokenReadyForUser";
 const char kCryptohomeAsyncMigrateKey[] = "AsyncMigrateKey";
 const char kCryptohomeAsyncMount[] = "AsyncMount";
 const char kCryptohomeAsyncMountGuest[] = "AsyncMountGuest";
@@ -103,9 +102,6 @@ const char kCryptohomeTpmAttestationDeleteKeys[] =
     "TpmAttestationDeleteKeys";
 const char kCryptohomeTpmAttestationGetEnrollmentId[] =
     "TpmAttestationGetEnrollmentId";
-// TODO(isandrk): Deprecated, remove on (or before) 2017/09/21 - after the
-// Chromium side has been changed to use the new TpmGetVersionStructured.
-const char kCryptohomeTpmGetVersion[] = "TpmGetVersion";
 const char kCryptohomeTpmGetVersionStructured[] = "TpmGetVersionStructured";
 const char kCryptohomeGetKeyDataEx[] = "GetKeyDataEx";
 const char kCryptohomeCheckKeyEx[] = "CheckKeyEx";

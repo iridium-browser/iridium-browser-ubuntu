@@ -20,7 +20,6 @@ IndexedDBFakeBackingStore::IndexedDBFakeBackingStore()
                             url::Origin::Create(GURL("http://localhost:81")),
                             base::FilePath(),
                             std::unique_ptr<LevelDBDatabase>(),
-                            std::unique_ptr<LevelDBComparator>(),
                             base::SequencedTaskRunnerHandle::Get().get()) {}
 IndexedDBFakeBackingStore::IndexedDBFakeBackingStore(
     IndexedDBFactory* factory,
@@ -29,7 +28,6 @@ IndexedDBFakeBackingStore::IndexedDBFakeBackingStore(
                             url::Origin::Create(GURL("http://localhost:81")),
                             base::FilePath(),
                             std::unique_ptr<LevelDBDatabase>(),
-                            std::unique_ptr<LevelDBComparator>(),
                             task_runner) {}
 IndexedDBFakeBackingStore::~IndexedDBFakeBackingStore() {}
 
@@ -112,7 +110,7 @@ IndexedDBFakeBackingStore::OpenObjectStoreKeyCursor(
     int64_t database_id,
     int64_t object_store_id,
     const IndexedDBKeyRange& key_range,
-    blink::WebIDBCursorDirection,
+    blink::mojom::IDBCursorDirection,
     leveldb::Status* s) {
   return std::unique_ptr<IndexedDBBackingStore::Cursor>();
 }
@@ -122,7 +120,7 @@ IndexedDBFakeBackingStore::OpenObjectStoreCursor(
     int64_t database_id,
     int64_t object_store_id,
     const IndexedDBKeyRange& key_range,
-    blink::WebIDBCursorDirection,
+    blink::mojom::IDBCursorDirection,
     leveldb::Status* s) {
   return std::unique_ptr<IndexedDBBackingStore::Cursor>();
 }
@@ -133,7 +131,7 @@ IndexedDBFakeBackingStore::OpenIndexKeyCursor(
     int64_t object_store_id,
     int64_t index_id,
     const IndexedDBKeyRange& key_range,
-    blink::WebIDBCursorDirection,
+    blink::mojom::IDBCursorDirection,
     leveldb::Status* s) {
   return std::unique_ptr<IndexedDBBackingStore::Cursor>();
 }
@@ -144,7 +142,7 @@ IndexedDBFakeBackingStore::OpenIndexCursor(
     int64_t object_store_id,
     int64_t index_id,
     const IndexedDBKeyRange& key_range,
-    blink::WebIDBCursorDirection,
+    blink::mojom::IDBCursorDirection,
     leveldb::Status* s) {
   return std::unique_ptr<IndexedDBBackingStore::Cursor>();
 }

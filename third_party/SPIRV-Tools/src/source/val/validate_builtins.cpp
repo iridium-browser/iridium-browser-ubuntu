@@ -167,6 +167,8 @@ class BuiltInsValidator {
                                                   const Instruction& inst);
   spv_result_t ValidateVertexIndexAtDefinition(const Decoration& decoration,
                                                const Instruction& inst);
+  spv_result_t ValidateVertexIdOrInstanceIdAtDefinition(
+      const Decoration& decoration, const Instruction& inst);
   spv_result_t ValidateWorkgroupSizeAtDefinition(const Decoration& decoration,
                                                  const Instruction& inst);
   // Used for GlobalInvocationId, LocalInvocationId, NumWorkgroups, WorkgroupId.
@@ -201,6 +203,11 @@ class BuiltInsValidator {
       const Instruction& referenced_from_inst);
 
   spv_result_t ValidateInvocationIdAtReference(
+      const Decoration& decoration, const Instruction& built_in_inst,
+      const Instruction& referenced_inst,
+      const Instruction& referenced_from_inst);
+
+  spv_result_t ValidateInstanceIdAtReference(
       const Decoration& decoration, const Instruction& built_in_inst,
       const Instruction& referenced_inst,
       const Instruction& referenced_from_inst);
@@ -1610,6 +1617,46 @@ spv_result_t BuiltInsValidator::ValidatePositionAtReference(
     }
   }
 
+  if (spvIsWebGPUEnv(_.context()->target_env)) {
+    const SpvStorageClass storage_class = GetStorageClass(referenced_from_inst);
+    if (storage_class != SpvStorageClassMax &&
+        storage_class != SpvStorageClassOutput) {
+      return _.diag(SPV_ERROR_INVALID_DATA, &referenced_from_inst)
+             << "WebGPU spec allows BuiltIn Position to be only used for "
+                "variables with Output storage class. "
+             << GetReferenceDesc(decoration, built_in_inst, referenced_inst,
+                                 referenced_from_inst)
+             << " " << GetStorageClassDesc(referenced_from_inst);
+    }
+
+    for (const SpvExecutionModel execution_model : execution_models_) {
+      switch (execution_model) {
+        case SpvExecutionModelVertex: {
+          if (spv_result_t error = ValidateF32Vec(
+                  decoration, built_in_inst, 4,
+                  [this, &referenced_from_inst](
+                      const std::string& message) -> spv_result_t {
+                    return _.diag(SPV_ERROR_INVALID_DATA, &referenced_from_inst)
+                           << "According to the WebGPU spec BuiltIn Position "
+                              "variable needs to be a 4-component 32-bit float "
+                              "vector. "
+                           << message;
+                  })) {
+            return error;
+          }
+          break;
+        }
+        default: {
+          return _.diag(SPV_ERROR_INVALID_DATA, &referenced_from_inst)
+                 << "WebGPU spec allows BuiltIn Position to be used only "
+                    "with the Vertex execution model. "
+                 << GetReferenceDesc(decoration, built_in_inst, referenced_inst,
+                                     referenced_from_inst, execution_model);
+        }
+      }
+    }
+  }
+
   if (function_id_ == 0) {
     // Propagate this rule to all dependant ids in the global scope.
     id_to_at_reference_checks_[referenced_from_inst.id()].push_back(std::bind(
@@ -1688,11 +1735,12 @@ spv_result_t BuiltInsValidator::ValidatePrimitiveIdAtReference(
         case SpvExecutionModelTessellationEvaluation:
         case SpvExecutionModelGeometry:
         case SpvExecutionModelMeshNV:
-        case SpvExecutionModelRayGenerationNVX:
-        case SpvExecutionModelIntersectionNVX:
-        case SpvExecutionModelAnyHitNVX:
-        case SpvExecutionModelClosestHitNVX:
-        case SpvExecutionModelMissNVX: {
+        case SpvExecutionModelRayGenerationNV:
+        case SpvExecutionModelIntersectionNV:
+        case SpvExecutionModelAnyHitNV:
+        case SpvExecutionModelClosestHitNV:
+        case SpvExecutionModelMissNV:
+        case SpvExecutionModelCallableNV: {
           // Ok.
           break;
         }
@@ -2084,6 +2132,57 @@ spv_result_t BuiltInsValidator::ValidateVertexIndexAtDefinition(
   return ValidateVertexIndexAtReference(decoration, inst, inst, inst);
 }
 
+spv_result_t BuiltInsValidator::ValidateVertexIdOrInstanceIdAtDefinition(
+    const Decoration& decoration, const Instruction& inst) {
+  const SpvBuiltIn label = SpvBuiltIn(decoration.params()[0]);
+  bool allow_instance_id = _.HasCapability(SpvCapabilityRayTracingNV) &&
+                           label == SpvBuiltInInstanceId;
+  if (spvIsVulkanEnv(_.context()->target_env) && !allow_instance_id) {
+    return _.diag(SPV_ERROR_INVALID_DATA, &inst)
+           << "Vulkan spec doesn't allow BuiltIn VertexId/InstanceId "
+              "to be used.";
+  }
+
+  if (label == SpvBuiltInInstanceId) {
+    return ValidateInstanceIdAtReference(decoration, inst, inst, inst);
+  }
+  return SPV_SUCCESS;
+}
+
+spv_result_t BuiltInsValidator::ValidateInstanceIdAtReference(
+    const Decoration& decoration, const Instruction& built_in_inst,
+    const Instruction& referenced_inst,
+    const Instruction& referenced_from_inst) {
+  if (spvIsVulkanEnv(_.context()->target_env)) {
+    for (const SpvExecutionModel execution_model : execution_models_) {
+      switch (execution_model) {
+        case SpvExecutionModelIntersectionNV:
+        case SpvExecutionModelClosestHitNV:
+        case SpvExecutionModelAnyHitNV:
+          // Do nothing, valid stages
+          break;
+        default:
+          return _.diag(SPV_ERROR_INVALID_DATA, &referenced_from_inst)
+                 << "Vulkan spec allows BuiltIn InstanceId to be used "
+                    "only with IntersectionNV, ClosestHitNV and AnyHitNV "
+                    "execution models. "
+                 << GetReferenceDesc(decoration, built_in_inst, referenced_inst,
+                                     referenced_from_inst);
+          break;
+      }
+    }
+  }
+
+  if (function_id_ == 0) {
+    // Propagate this rule to all dependant ids in the global scope.
+    id_to_at_reference_checks_[referenced_from_inst.id()].push_back(std::bind(
+        &BuiltInsValidator::ValidateInstanceIdAtReference, this, decoration,
+        built_in_inst, referenced_from_inst, std::placeholders::_1));
+  }
+
+  return SPV_SUCCESS;
+}
+
 spv_result_t BuiltInsValidator::ValidateVertexIndexAtReference(
     const Decoration& decoration, const Instruction& built_in_inst,
     const Instruction& referenced_inst,
@@ -2440,7 +2539,9 @@ spv_result_t BuiltInsValidator::ValidateSingleBuiltInAtDefinition(
       return ValidateWorkgroupSizeAtDefinition(decoration, inst);
     }
     case SpvBuiltInVertexId:
-    case SpvBuiltInInstanceId:
+    case SpvBuiltInInstanceId: {
+      return ValidateVertexIdOrInstanceIdAtDefinition(decoration, inst);
+    }
     case SpvBuiltInLocalInvocationIndex:
     case SpvBuiltInWorkDim:
     case SpvBuiltInGlobalSize:
@@ -2488,21 +2589,23 @@ spv_result_t BuiltInsValidator::ValidateSingleBuiltInAtDefinition(
     case SpvBuiltInMeshViewIndicesNV:
     case SpvBuiltInBaryCoordNV:
     case SpvBuiltInBaryCoordNoPerspNV:
-    case SpvBuiltInFragmentSizeNV:
-    case SpvBuiltInInvocationsPerPixelNV:
-    case SpvBuiltInLaunchIdNVX:
-    case SpvBuiltInLaunchSizeNVX:
-    case SpvBuiltInWorldRayOriginNVX:
-    case SpvBuiltInWorldRayDirectionNVX:
-    case SpvBuiltInObjectRayOriginNVX:
-    case SpvBuiltInObjectRayDirectionNVX:
-    case SpvBuiltInRayTminNVX:
-    case SpvBuiltInRayTmaxNVX:
-    case SpvBuiltInInstanceCustomIndexNVX:
-    case SpvBuiltInObjectToWorldNVX:
-    case SpvBuiltInWorldToObjectNVX:
-    case SpvBuiltInHitTNVX:
-    case SpvBuiltInHitKindNVX: {
+    case SpvBuiltInFragmentSizeNV:         // alias SpvBuiltInFragSizeEXT
+    case SpvBuiltInInvocationsPerPixelNV:  // alias
+                                           // SpvBuiltInFragInvocationCountEXT
+    case SpvBuiltInLaunchIdNV:
+    case SpvBuiltInLaunchSizeNV:
+    case SpvBuiltInWorldRayOriginNV:
+    case SpvBuiltInWorldRayDirectionNV:
+    case SpvBuiltInObjectRayOriginNV:
+    case SpvBuiltInObjectRayDirectionNV:
+    case SpvBuiltInRayTminNV:
+    case SpvBuiltInRayTmaxNV:
+    case SpvBuiltInInstanceCustomIndexNV:
+    case SpvBuiltInObjectToWorldNV:
+    case SpvBuiltInWorldToObjectNV:
+    case SpvBuiltInHitTNV:
+    case SpvBuiltInHitKindNV:
+    case SpvBuiltInIncomingRayFlagsNV: {
       // No validation rules (for the moment).
       break;
     }
@@ -2593,14 +2696,15 @@ spv_result_t BuiltInsValidator::Run() {
 
 // Validates correctness of built-in variables.
 spv_result_t ValidateBuiltIns(ValidationState_t& _) {
-  if (!spvIsVulkanEnv(_.context()->target_env)) {
-    // Early return. All currently implemented rules are based on Vulkan spec.
+  if (!spvIsVulkanOrWebGPUEnv(_.context()->target_env)) {
+    // Early return. All currently implemented rules are based on Vulkan or
+    // WebGPU spec.
     //
     // TODO: If you are adding validation rules for environments other than
-    // Vulkan (or general rules which are not environment independent), then you
-    // need to modify or remove this condition. Consider also adding early
-    // returns into BuiltIn-specific rules, so that the system doesn't spawn new
-    // rules which don't do anything.
+    // Vulkan or WebGPU (or general rules which are not environment
+    // independent), then you need to modify or remove this condition. Consider
+    // also adding early returns into BuiltIn-specific rules, so that the system
+    // doesn't spawn new rules which don't do anything.
     return SPV_SUCCESS;
   }
 

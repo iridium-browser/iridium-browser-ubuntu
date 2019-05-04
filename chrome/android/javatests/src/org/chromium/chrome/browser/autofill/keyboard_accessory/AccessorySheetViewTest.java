@@ -9,24 +9,24 @@ import static android.support.test.espresso.assertion.ViewAssertions.doesNotExis
 import static android.support.test.espresso.assertion.ViewAssertions.matches;
 import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
 import static android.support.test.espresso.matcher.ViewMatchers.isRoot;
+import static android.support.test.espresso.matcher.ViewMatchers.withId;
 import static android.support.test.espresso.matcher.ViewMatchers.withText;
 
-import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertNotNull;
-import static junit.framework.Assert.assertNull;
-
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.ACTIVE_TAB_INDEX;
 import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.HEIGHT;
 import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.NO_ACTIVE_TAB;
 import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.TABS;
+import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.TOP_SHADOW_VISIBLE;
 import static org.chromium.chrome.browser.autofill.keyboard_accessory.AccessorySheetProperties.VISIBLE;
 import static org.chromium.chrome.test.util.ViewUtils.waitForView;
 
 import android.support.test.filters.MediumTest;
-import android.support.v4.view.ViewPager;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewStub;
@@ -44,13 +44,14 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.autofill.keyboard_accessory.KeyboardAccessoryData.Tab;
-import org.chromium.chrome.browser.modelutil.LazyConstructionPropertyMcp;
-import org.chromium.chrome.browser.modelutil.ListModel;
-import org.chromium.chrome.browser.modelutil.PropertyModel;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.util.ViewUtils;
 import org.chromium.ui.DeferredViewStubInflationProvider;
 import org.chromium.ui.ViewProvider;
+import org.chromium.ui.modelutil.LazyConstructionPropertyMcp;
+import org.chromium.ui.modelutil.ListModel;
+import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -63,7 +64,7 @@ import java.util.concurrent.ExecutionException;
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class AccessorySheetViewTest {
     private PropertyModel mModel;
-    private BlockingQueue<ViewPager> mViewPager;
+    private BlockingQueue<AccessorySheetView> mViewPager;
 
     @Rule
     public ChromeActivityTestRule<ChromeTabbedActivity> mActivityTestRule =
@@ -77,13 +78,16 @@ public class AccessorySheetViewTest {
                     R.id.keyboard_accessory_sheet_stub);
             int height = mActivityTestRule.getActivity().getResources().getDimensionPixelSize(
                     R.dimen.keyboard_accessory_sheet_height);
-            mModel = new PropertyModel.Builder(TABS, ACTIVE_TAB_INDEX, VISIBLE, HEIGHT)
+            mModel = new PropertyModel
+                             .Builder(TABS, ACTIVE_TAB_INDEX, VISIBLE, HEIGHT, TOP_SHADOW_VISIBLE)
                              .with(HEIGHT, height)
                              .with(TABS, new ListModel<>())
                              .with(ACTIVE_TAB_INDEX, NO_ACTIVE_TAB)
                              .with(VISIBLE, false)
+                             .with(TOP_SHADOW_VISIBLE, false)
                              .build();
-            ViewProvider<ViewPager> provider = new DeferredViewStubInflationProvider<>(viewStub);
+            ViewProvider<AccessorySheetView> provider =
+                    new DeferredViewStubInflationProvider<>(viewStub);
             mViewPager = new ArrayBlockingQueue<>(1);
             LazyConstructionPropertyMcp.create(
                     mModel, VISIBLE, provider, AccessorySheetViewBinder::bind);
@@ -100,7 +104,7 @@ public class AccessorySheetViewTest {
 
         // After setting the visibility to true, the view should exist and be visible.
         ThreadUtils.runOnUiThreadBlocking(() -> { mModel.set(VISIBLE, true); });
-        ViewPager viewPager = mViewPager.take();
+        AccessorySheetView viewPager = mViewPager.take();
         assertEquals(viewPager.getVisibility(), View.VISIBLE);
 
         // After hiding the view, the view should still exist but be invisible.
@@ -193,6 +197,27 @@ public class AccessorySheetViewTest {
             mModel.set(ACTIVE_TAB_INDEX, 0);
         });
         onView(isRoot()).check((r, e) -> waitForView((ViewGroup) r, withText(kSecondTab)));
+    }
+
+    @Test
+    @MediumTest
+    public void testTopShadowVisiblitySetByModel() {
+        mModel.get(TABS).add(createTestTabWithTextView("SomeTab"));
+        mModel.set(TOP_SHADOW_VISIBLE, false);
+        ThreadUtils.runOnUiThreadBlocking(() -> mModel.set(VISIBLE, true)); // Render view.
+        onView(isRoot()).check((r, e) -> {
+            waitForView(
+                    (ViewGroup) r, withId(R.id.accessory_sheet_shadow), ViewUtils.VIEW_INVISIBLE);
+        });
+
+        ThreadUtils.runOnUiThreadBlocking(() -> mModel.set(TOP_SHADOW_VISIBLE, true));
+        onView(withId(R.id.accessory_sheet_shadow)).check(matches(isDisplayed()));
+
+        ThreadUtils.runOnUiThreadBlocking(() -> mModel.set(TOP_SHADOW_VISIBLE, false));
+        onView(isRoot()).check((r, e) -> {
+            waitForView(
+                    (ViewGroup) r, withId(R.id.accessory_sheet_shadow), ViewUtils.VIEW_INVISIBLE);
+        });
     }
 
     private Tab createTestTabWithTextView(String textViewCaption) {

@@ -361,7 +361,7 @@ std::vector<Frame> NativeStackSamplerMac::RecordStackFrames(
     if (stack_size > stack_buffer->size())
       return empty_frames;
 
-    profile_builder->RecordAnnotations();
+    profile_builder->RecordMetadata();
 
     CopyStackAndRewritePointers(
         reinterpret_cast<uintptr_t*>(stack_buffer->buffer()),
@@ -518,17 +518,11 @@ std::unique_ptr<NativeStackSampler> NativeStackSampler::Create(
 
 // static
 size_t NativeStackSampler::GetStackBufferSize() {
-  // In platform_thread_mac's GetDefaultThreadStackSize(), RLIMIT_STACK is used
-  // for all stacks, not just the main thread's, so it is good for use here.
-  struct rlimit stack_rlimit;
-  if (getrlimit(RLIMIT_STACK, &stack_rlimit) == 0 &&
-      stack_rlimit.rlim_cur != RLIM_INFINITY) {
-    return stack_rlimit.rlim_cur;
-  }
+  size_t stack_size = PlatformThread::GetDefaultThreadStackSize();
 
   // If getrlimit somehow fails, return the default macOS main thread stack size
   // of 8 MB (DFLSSIZ in <i386/vmparam.h>) with extra wiggle room.
-  return 12 * 1024 * 1024;
+  return stack_size > 0 ? stack_size : 12 * 1024 * 1024;
 }
 
 }  // namespace base

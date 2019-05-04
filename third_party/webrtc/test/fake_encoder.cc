@@ -11,30 +11,55 @@
 #include "test/fake_encoder.h"
 
 #include <string.h>
-
 #include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <string>
 
+#include "api/video/video_content_type.h"
 #include "common_types.h"  // NOLINT(build/include)
-#include "modules/video_coding/codecs/vp8/include/vp8_temporal_layers.h"
+#include "modules/video_coding/codecs/h264/include/h264_globals.h"
 #include "modules/video_coding/include/video_codec_interface.h"
+#include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/checks.h"
 #include "system_wrappers/include/sleep.h"
 
 namespace webrtc {
 namespace test {
+namespace {
+const int kKeyframeSizeFactor = 5;
 
-const int kKeyframeSizeFactor = 10;
+// Inverse of proportion of frames assigned to each temporal layer for all
+// possible temporal layers numbers.
+const int kTemporalLayerRateFactor[4][4] = {
+    {1, 0, 0, 0},  // 1/1
+    {2, 2, 0, 0},  // 1/2 + 1/2
+    {4, 4, 2, 0},  // 1/4 + 1/4 + 1/2
+    {8, 8, 4, 2},  // 1/8 + 1/8 + 1/4 + 1/2
+};
 
-FakeEncoder::FakeEncoder(Clock* clock)
+void WriteCounter(unsigned char* payload, uint32_t counter) {
+  payload[0] = (counter & 0x00FF);
+  payload[1] = (counter & 0xFF00) >> 8;
+  payload[2] = (counter & 0xFF0000) >> 16;
+  payload[3] = (counter & 0xFF000000) >> 24;
+}
+
+};  // namespace
+
+FakeEncoder::FakeEncoder(Clock* clock) : FakeEncoder(clock, 100000) {}
+
+FakeEncoder::FakeEncoder(Clock* clock, size_t buffer_size)
     : clock_(clock),
       callback_(nullptr),
       configured_input_framerate_(-1),
       max_target_bitrate_kbps_(-1),
       pending_keyframe_(true),
+      counter_(0),
       debt_bytes_(0) {
   // Generate some arbitrary not-all-zero data
-  for (size_t i = 0; i < sizeof(encoded_buffer_); ++i) {
+  encoded_buffer_.resize(buffer_size);
+  for (size_t i = 0; i < encoded_buffer_.size(); ++i) {
     encoded_buffer_[i] = static_cast<uint8_t>(i);
   }
   for (bool& used : used_layers_) {
@@ -46,6 +71,7 @@ void FakeEncoder::SetMaxBitrate(int max_kbps) {
   RTC_DCHECK_GE(max_kbps, -1);  // max_kbps == -1 disables it.
   rtc::CritScope cs(&crit_sect_);
   max_target_bitrate_kbps_ = max_kbps;
+  SetRateAllocation(target_bitrate_, configured_input_framerate_);
 }
 
 int32_t FakeEncoder::InitEncode(const VideoCodec* config,
@@ -71,6 +97,7 @@ int32_t FakeEncoder::Encode(const VideoFrame& input_image,
   int framerate;
   VideoCodecMode mode;
   bool keyframe;
+  uint32_t counter;
   {
     rtc::CritScope cs(&crit_sect_);
     max_framerate = config_.maxFramerate;
@@ -88,13 +115,14 @@ int32_t FakeEncoder::Encode(const VideoFrame& input_image,
     }
     keyframe = pending_keyframe_;
     pending_keyframe_ = false;
+    counter = counter_++;
   }
 
   FrameInfo frame_info =
       NextFrame(frame_types, keyframe, num_simulcast_streams, target_bitrate,
                 simulcast_streams, framerate);
   for (uint8_t i = 0; i < frame_info.layers.size(); ++i) {
-    constexpr int kMinPayLoadLength = 10;
+    constexpr int kMinPayLoadLength = 14;
     if (frame_info.layers[i].size < kMinPayLoadLength) {
       // Drop this temporal layer.
       continue;
@@ -105,9 +133,12 @@ int32_t FakeEncoder::Encode(const VideoFrame& input_image,
     specifics.codecType = kVideoCodecGeneric;
     std::unique_ptr<uint8_t[]> encoded_buffer(
         new uint8_t[frame_info.layers[i].size]);
-    memcpy(encoded_buffer.get(), encoded_buffer_, frame_info.layers[i].size);
+    memcpy(encoded_buffer.get(), encoded_buffer_.data(),
+           frame_info.layers[i].size - 4);
+    // Write a counter to the image to make each frame unique.
+    WriteCounter(encoded_buffer.get() + frame_info.layers[i].size - 4, counter);
     EncodedImage encoded(encoded_buffer.get(), frame_info.layers[i].size,
-                         sizeof(encoded_buffer_));
+                         encoded_buffer_.size());
     encoded.SetTimestamp(input_image.timestamp());
     encoded.capture_time_ms_ = input_image.render_time_ms();
     encoded._frameType =
@@ -119,7 +150,6 @@ int32_t FakeEncoder::Encode(const VideoFrame& input_image,
                                 ? VideoContentType::SCREENSHARE
                                 : VideoContentType::UNSPECIFIED;
     encoded.SetSpatialIndex(i);
-    specifics.codec_name = ImplementationName();
     if (callback->OnEncodedImage(encoded, &specifics, nullptr).error !=
         EncodedImageCallback::Result::OK) {
       return -1;
@@ -168,7 +198,9 @@ FakeEncoder::FrameInfo FakeEncoder::NextFrame(
     if (frame_info.keyframe) {
       layer_info.temporal_id = 0;
       size_t avg_frame_size =
-          (target_bitrate.GetBitrate(i, 0) + 7) / (8 * framerate);
+          (target_bitrate.GetBitrate(i, 0) + 7) *
+          kTemporalLayerRateFactor[frame_info.layers.size() - 1][i] /
+          (8 * framerate);
 
       // The first frame is a key frame and should be larger.
       // Store the overshoot bytes and distribute them over the coming frames,
@@ -177,7 +209,8 @@ FakeEncoder::FrameInfo FakeEncoder::NextFrame(
       layer_info.size = kKeyframeSizeFactor * avg_frame_size;
     } else {
       size_t avg_frame_size =
-          (target_bitrate.GetBitrate(i, layer_info.temporal_id) + 7) /
+          (target_bitrate.GetBitrate(i, layer_info.temporal_id) + 7) *
+          kTemporalLayerRateFactor[frame_info.layers.size() - 1][i] /
           (8 * framerate);
       layer_info.size = avg_frame_size;
       if (debt_bytes_ > 0) {
@@ -200,10 +233,6 @@ int32_t FakeEncoder::RegisterEncodeCompleteCallback(
 }
 
 int32_t FakeEncoder::Release() {
-  return 0;
-}
-
-int32_t FakeEncoder::SetChannelParameters(uint32_t packet_loss, int64_t rtt) {
   return 0;
 }
 
@@ -238,8 +267,10 @@ int32_t FakeEncoder::SetRateAllocation(
 }
 
 const char* FakeEncoder::kImplementationName = "fake_encoder";
-const char* FakeEncoder::ImplementationName() const {
-  return kImplementationName;
+VideoEncoder::EncoderInfo FakeEncoder::GetEncoderInfo() const {
+  EncoderInfo info;
+  info.implementation_name = kImplementationName;
+  return info;
 }
 
 int FakeEncoder::GetConfiguredInputFramerate() const {
@@ -276,7 +307,7 @@ EncodedImageCallback::Result FakeH264Encoder::OnEncodedImage(
   }
   RTPFragmentationHeader fragmentation;
   if (current_idr_counter % kIdrFrequency == 0 &&
-      encoded_image._length > kSpsSize + kPpsSize + 1) {
+      encoded_image.size() > kSpsSize + kPpsSize + 1) {
     const size_t kNumSlices = 3;
     fragmentation.VerifyAndAllocateFragmentationHeader(kNumSlices);
     fragmentation.fragmentationOffset[0] = 0;
@@ -285,27 +316,27 @@ EncodedImageCallback::Result FakeH264Encoder::OnEncodedImage(
     fragmentation.fragmentationLength[1] = kPpsSize;
     fragmentation.fragmentationOffset[2] = kSpsSize + kPpsSize;
     fragmentation.fragmentationLength[2] =
-        encoded_image._length - (kSpsSize + kPpsSize);
+        encoded_image.size() - (kSpsSize + kPpsSize);
     const size_t kSpsNalHeader = 0x67;
     const size_t kPpsNalHeader = 0x68;
     const size_t kIdrNalHeader = 0x65;
-    encoded_image._buffer[fragmentation.fragmentationOffset[0]] = kSpsNalHeader;
-    encoded_image._buffer[fragmentation.fragmentationOffset[1]] = kPpsNalHeader;
-    encoded_image._buffer[fragmentation.fragmentationOffset[2]] = kIdrNalHeader;
+    encoded_image.data()[fragmentation.fragmentationOffset[0]] = kSpsNalHeader;
+    encoded_image.data()[fragmentation.fragmentationOffset[1]] = kPpsNalHeader;
+    encoded_image.data()[fragmentation.fragmentationOffset[2]] = kIdrNalHeader;
   } else {
     const size_t kNumSlices = 1;
     fragmentation.VerifyAndAllocateFragmentationHeader(kNumSlices);
     fragmentation.fragmentationOffset[0] = 0;
-    fragmentation.fragmentationLength[0] = encoded_image._length;
+    fragmentation.fragmentationLength[0] = encoded_image.size();
     const size_t kNalHeader = 0x41;
-    encoded_image._buffer[fragmentation.fragmentationOffset[0]] = kNalHeader;
+    encoded_image.data()[fragmentation.fragmentationOffset[0]] = kNalHeader;
   }
   uint8_t value = 0;
   int fragment_counter = 0;
-  for (size_t i = 0; i < encoded_image._length; ++i) {
+  for (size_t i = 0; i < encoded_image.size(); ++i) {
     if (fragment_counter == fragmentation.fragmentationVectorSize ||
         i != fragmentation.fragmentationOffset[fragment_counter]) {
-      encoded_image._buffer[i] = value++;
+      encoded_image.data()[i] = value++;
     } else {
       ++fragment_counter;
     }

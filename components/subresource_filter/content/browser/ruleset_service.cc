@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/feature_list.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -16,19 +15,19 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/rand_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
 #include "base/task_runner_util.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/trace_event/trace_event.h"
-#include "base/trace_event/trace_event_argument.h"
+#include "base/trace_event/traced_value.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "components/subresource_filter/content/browser/ruleset_publisher.h"
+#include "components/subresource_filter/content/browser/ruleset_publisher_impl.h"
 #include "components/subresource_filter/content/common/subresource_filter_messages.h"
 #include "components/subresource_filter/core/browser/copying_file_stream.h"
-#include "components/subresource_filter/core/browser/ruleset_service_delegate.h"
 #include "components/subresource_filter/core/browser/subresource_filter_constants.h"
 #include "components/subresource_filter/core/common/common_features.h"
 #include "components/subresource_filter/core/common/indexed_ruleset.h"
@@ -37,27 +36,12 @@
 #include "components/url_pattern_index/proto/rules.pb.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
-#include "ipc/ipc_platform_file.h"
 #include "third_party/protobuf/src/google/protobuf/io/zero_copy_stream_impl_lite.h"
 
 namespace subresource_filter {
 
-// Constant definitions and helper functions ---------------------------------
-
 namespace {
-
-// Names of the preferences storing the most recent ruleset version that
-// was successfully stored to disk.
-const char kSubresourceFilterRulesetContentVersion[] =
-    "subresource_filter.ruleset_version.content";
-const char kSubresourceFilterRulesetFormatVersion[] =
-    "subresource_filter.ruleset_version.format";
-const char kSubresourceFilterRulesetChecksum[] =
-    "subresource_filter.ruleset_version.checksum";
 
 void RecordIndexAndWriteRulesetResult(
     RulesetService::IndexAndWriteRulesetResult result) {
@@ -100,88 +84,7 @@ class SentinelFile {
   DISALLOW_COPY_AND_ASSIGN(SentinelFile);
 };
 
-void SendRulesetToRenderProcess(base::File* file,
-                                content::RenderProcessHost* rph) {
-  DCHECK(rph);
-  DCHECK(file);
-  DCHECK(file->IsValid());
-  rph->Send(new SubresourceFilterMsg_SetRulesetForProcess(
-      IPC::TakePlatformFileForTransit(file->Duplicate())));
-}
-
-// The file handle is closed when the argument goes out of scope.
-void CloseFile(base::File) {}
-
-// Posts the |file| handle to the file thread so it can be closed.
-void CloseFileOnFileThread(base::File* file) {
-  if (!file->IsValid())
-    return;
-  base::PostTaskWithTraits(FROM_HERE,
-                           {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
-                           base::BindOnce(&CloseFile, std::move(*file)));
-}
-
 }  // namespace
-
-// UnindexedRulesetInfo -------------------------------------------------------
-
-UnindexedRulesetInfo::UnindexedRulesetInfo() = default;
-UnindexedRulesetInfo::~UnindexedRulesetInfo() = default;
-
-// IndexedRulesetVersion ------------------------------------------------------
-
-IndexedRulesetVersion::IndexedRulesetVersion() = default;
-IndexedRulesetVersion::IndexedRulesetVersion(const std::string& content_version,
-                                             int format_version)
-    : content_version(content_version), format_version(format_version) {}
-IndexedRulesetVersion::~IndexedRulesetVersion() = default;
-IndexedRulesetVersion& IndexedRulesetVersion::operator=(
-    const IndexedRulesetVersion&) = default;
-
-// static
-void IndexedRulesetVersion::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterStringPref(kSubresourceFilterRulesetContentVersion,
-                               std::string());
-  registry->RegisterIntegerPref(kSubresourceFilterRulesetFormatVersion, 0);
-  registry->RegisterIntegerPref(kSubresourceFilterRulesetChecksum, 0);
-}
-
-// static
-int IndexedRulesetVersion::CurrentFormatVersion() {
-  return RulesetIndexer::kIndexedFormatVersion;
-}
-
-void IndexedRulesetVersion::ReadFromPrefs(PrefService* local_state) {
-  format_version =
-      local_state->GetInteger(kSubresourceFilterRulesetFormatVersion);
-  content_version =
-      local_state->GetString(kSubresourceFilterRulesetContentVersion);
-  checksum = local_state->GetInteger(kSubresourceFilterRulesetChecksum);
-}
-
-bool IndexedRulesetVersion::IsValid() const {
-  return format_version != 0 && !content_version.empty();
-}
-
-bool IndexedRulesetVersion::IsCurrentFormatVersion() const {
-  return format_version == CurrentFormatVersion();
-}
-
-void IndexedRulesetVersion::SaveToPrefs(PrefService* local_state) const {
-  local_state->SetInteger(kSubresourceFilterRulesetFormatVersion,
-                          format_version);
-  local_state->SetString(kSubresourceFilterRulesetContentVersion,
-                         content_version);
-  local_state->SetInteger(kSubresourceFilterRulesetChecksum, checksum);
-}
-
-std::unique_ptr<base::trace_event::TracedValue>
-IndexedRulesetVersion::ToTracedValue() const {
-  auto value = std::make_unique<base::trace_event::TracedValue>();
-  value->SetString("content_version", content_version);
-  value->SetInteger("format_version", format_version);
-  return value;
-}
 
 // IndexedRulesetLocator ------------------------------------------------------
 
@@ -261,19 +164,18 @@ decltype(&base::ReplaceFile) RulesetService::g_replace_file_func =
 RulesetService::RulesetService(
     PrefService* local_state,
     scoped_refptr<base::SequencedTaskRunner> background_task_runner,
-    RulesetServiceDelegate* delegate,
-    const base::FilePath& indexed_ruleset_base_dir)
+    const base::FilePath& indexed_ruleset_base_dir,
+    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
+    std::unique_ptr<RulesetPublisher> publisher)
     : local_state_(local_state),
       background_task_runner_(std::move(background_task_runner)),
-      delegate_(delegate),
-      is_after_startup_(false),
+      is_initialized_(false),
       indexed_ruleset_base_dir_(indexed_ruleset_base_dir) {
-  DCHECK(delegate_);
   DCHECK_NE(local_state_->GetInitializationStatus(),
             PrefService::INITIALIZATION_STATUS_WAITING);
-}
-
-void RulesetService::Initialize() {
+  publisher_ = publisher ? std::move(publisher)
+                         : std::make_unique<RulesetPublisherImpl>(
+                               this, blocking_task_runner);
   IndexedRulesetVersion most_recently_indexed_version;
   most_recently_indexed_version.ReadFromPrefs(local_state_);
   TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("loading"),
@@ -286,8 +188,10 @@ void RulesetService::Initialize() {
     IndexedRulesetVersion().SaveToPrefs(local_state_);
   }
 
-  delegate_->PostAfterStartupTask(
-      base::BindOnce(&RulesetService::InitializeAfterStartup, AsWeakPtr()));
+  DCHECK(publisher_->BestEffortTaskRunner()->BelongsToCurrentThread());
+  publisher_->BestEffortTaskRunner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&RulesetService::FinishInitialization, AsWeakPtr()));
 }
 
 RulesetService::~RulesetService() {}
@@ -309,9 +213,9 @@ void RulesetService::IndexAndStoreAndPublishRulesetIfNeeded(
     return;
   }
 
-  // During start-up, retain information about the most recently supplied
-  // unindexed ruleset, to be processed after start-up is complete.
-  if (!is_after_startup_) {
+  // Before initialization, retain information about the most recently supplied
+  // unindexed ruleset, to be processed during initialization.
+  if (!is_initialized_) {
     queued_unindexed_ruleset_info_ = unindexed_ruleset_info;
     return;
   }
@@ -486,8 +390,8 @@ RulesetService::IndexAndWriteRulesetResult RulesetService::WriteRuleset(
   return IndexAndWriteRulesetResult::SUCCESS;
 }
 
-void RulesetService::InitializeAfterStartup() {
-  is_after_startup_ = true;
+void RulesetService::FinishInitialization() {
+  is_initialized_ = true;
 
   IndexedRulesetVersion most_recently_indexed_version;
   most_recently_indexed_version.ReadFromPrefs(local_state_);
@@ -532,7 +436,7 @@ void RulesetService::OpenAndPublishRuleset(
           IndexedRulesetLocator::GetSubdirectoryPathForVersion(
               indexed_ruleset_base_dir_, version));
 
-  delegate_->TryOpenAndSetRulesetFile(
+  publisher_->TryOpenAndSetRulesetFile(
       file_path, version.checksum,
       base::BindOnce(&RulesetService::OnRulesetSet, AsWeakPtr()));
 }
@@ -547,98 +451,7 @@ void RulesetService::OnRulesetSet(base::File file) {
     return;
   }
 
-  delegate_->PublishNewRulesetVersion(std::move(file));
-}
-
-// ContentRulesetService ------------------------------------------------------
-
-ContentRulesetService::ContentRulesetService(
-    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner)
-    : ruleset_dealer_(std::make_unique<VerifiedRulesetDealer::Handle>(
-          std::move(blocking_task_runner))) {
-  // Must rely on notifications as RenderProcessHostObserver::RenderProcessReady
-  // would only be called after queued IPC messages (potentially triggering a
-  // navigation) had already been sent to the new renderer.
-  notification_registrar_.Add(
-      this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
-      content::NotificationService::AllBrowserContextsAndSources());
-}
-
-ContentRulesetService::~ContentRulesetService() {
-  CloseFileOnFileThread(&ruleset_data_);
-}
-
-void ContentRulesetService::SetRulesetPublishedCallbackForTesting(
-    base::OnceClosure callback) {
-  ruleset_published_callback_ = std::move(callback);
-}
-
-void ContentRulesetService::PostAfterStartupTask(base::OnceClosure task) {
-  content::BrowserThread::PostAfterStartupTask(
-      FROM_HERE,
-      base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::UI}),
-      std::move(task));
-}
-
-void ContentRulesetService::TryOpenAndSetRulesetFile(
-    const base::FilePath& file_path,
-    int expected_checksum,
-    base::OnceCallback<void(base::File)> callback) {
-  ruleset_dealer_->TryOpenAndSetRulesetFile(file_path, expected_checksum,
-                                            std::move(callback));
-}
-
-void ContentRulesetService::PublishNewRulesetVersion(base::File ruleset_data) {
-  DCHECK(ruleset_data.IsValid());
-  CloseFileOnFileThread(&ruleset_data_);
-
-  // If Ad Tagging is running, then every request does a lookup and it's
-  // important that we verify the ruleset early on.
-  if (base::FeatureList::IsEnabled(kAdTagging)) {
-    // Even though the handle will immediately be destroyed, it will still
-    // validate the ruleset on its task runner.
-    VerifiedRuleset::Handle ruleset_handle(ruleset_dealer_.get());
-  }
-
-  ruleset_data_ = std::move(ruleset_data);
-  for (auto it = content::RenderProcessHost::AllHostsIterator(); !it.IsAtEnd();
-       it.Advance()) {
-    SendRulesetToRenderProcess(&ruleset_data_, it.GetCurrentValue());
-  }
-
-  if (!ruleset_published_callback_.is_null())
-    std::move(ruleset_published_callback_).Run();
-}
-
-void ContentRulesetService::SetAndInitializeRulesetService(
-    std::unique_ptr<RulesetService> ruleset_service) {
-  ruleset_service_ = std::move(ruleset_service);
-  ruleset_service_->Initialize();
-}
-
-void ContentRulesetService::IndexAndStoreAndPublishRulesetIfNeeded(
-    const UnindexedRulesetInfo& unindexed_ruleset_info) {
-  DCHECK(ruleset_service_);
-  ruleset_service_->IndexAndStoreAndPublishRulesetIfNeeded(
-      unindexed_ruleset_info);
-}
-
-void ContentRulesetService::SetIsAfterStartupForTesting() {
-  DCHECK(ruleset_service_);
-  ruleset_service_->set_is_after_startup_for_testing();
-}
-
-void ContentRulesetService::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_EQ(type, content::NOTIFICATION_RENDERER_PROCESS_CREATED);
-  if (!ruleset_data_.IsValid())
-    return;
-  SendRulesetToRenderProcess(
-      &ruleset_data_,
-      content::Source<content::RenderProcessHost>(source).ptr());
+  publisher_->PublishNewRulesetVersion(std::move(file));
 }
 
 }  // namespace subresource_filter

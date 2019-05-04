@@ -59,8 +59,9 @@ class AccessibilityTreeFormatterAuraLinux
 };
 
 // static
-AccessibilityTreeFormatter* AccessibilityTreeFormatter::Create() {
-  return new AccessibilityTreeFormatterAuraLinux();
+std::unique_ptr<AccessibilityTreeFormatter>
+AccessibilityTreeFormatter::Create() {
+  return std::make_unique<AccessibilityTreeFormatterAuraLinux>();
 }
 
 AccessibilityTreeFormatterAuraLinux::AccessibilityTreeFormatterAuraLinux() {
@@ -308,10 +309,6 @@ base::string16 AccessibilityTreeFormatterAuraLinux::ProcessTreeForOutput(
     if (it->GetAsString(&state_value))
       WriteAttribute(false, state_value, &line);
   }
-
-  int id_value;
-  node.GetInteger("id", &id_value);
-  WriteAttribute(false, base::StringPrintf("id=%d", id_value), &line);
 
   for (const char* attribute_name : ATK_OBJECT_ATTRIBUTES) {
     std::string attribute_value;

@@ -30,19 +30,19 @@ namespace AV1JNTCOMPAVG {
 typedef void (*jntcompavg_func)(uint8_t *comp_pred, const uint8_t *pred,
                                 int width, int height, const uint8_t *ref,
                                 int ref_stride,
-                                const JNT_COMP_PARAMS *jcp_param);
+                                const DIST_WTD_COMP_PARAMS *jcp_param);
 
 typedef void (*jntcompavgupsampled_func)(
     MACROBLOCKD *xd, const struct AV1Common *const cm, int mi_row, int mi_col,
     const MV *const mv, uint8_t *comp_pred, const uint8_t *pred, int width,
     int height, int subpel_x_q3, int subpel_y_q3, const uint8_t *ref,
-    int ref_stride, const JNT_COMP_PARAMS *jcp_param, int subpel_search);
+    int ref_stride, const DIST_WTD_COMP_PARAMS *jcp_param, int subpel_search);
 
 typedef void (*highbdjntcompavgupsampled_func)(
     MACROBLOCKD *xd, const struct AV1Common *const cm, int mi_row, int mi_col,
     const MV *const mv, uint8_t *comp_pred8, const uint8_t *pred8, int width,
     int height, int subpel_x_q3, int subpel_y_q3, const uint8_t *ref8,
-    int ref_stride, int bd, const JNT_COMP_PARAMS *jcp_param,
+    int ref_stride, int bd, const DIST_WTD_COMP_PARAMS *jcp_param,
     int subpel_search);
 
 typedef ::testing::tuple<jntcompavg_func, BLOCK_SIZE> JNTCOMPAVGParam;
@@ -107,8 +107,8 @@ class AV1JNTCOMPAVGTest : public ::testing::TestWithParam<JNTCOMPAVGParam> {
     const int in_w = block_size_wide[block_idx];
     const int in_h = block_size_high[block_idx];
 
-    JNT_COMP_PARAMS jnt_comp_params;
-    jnt_comp_params.use_jnt_comp_avg = 1;
+    DIST_WTD_COMP_PARAMS jnt_comp_params;
+    jnt_comp_params.use_dist_wtd_comp_avg = 1;
 
     for (int ii = 0; ii < 2; ii++) {
       for (int jj = 0; jj < 4; jj++) {
@@ -152,8 +152,8 @@ class AV1JNTCOMPAVGTest : public ::testing::TestWithParam<JNTCOMPAVGParam> {
     const int in_w = block_size_wide[block_idx];
     const int in_h = block_size_high[block_idx];
 
-    JNT_COMP_PARAMS jnt_comp_params;
-    jnt_comp_params.use_jnt_comp_avg = 1;
+    DIST_WTD_COMP_PARAMS jnt_comp_params;
+    jnt_comp_params.use_dist_wtd_comp_avg = 1;
 
     jnt_comp_params.fwd_offset = quant_dist_lookup_table[0][0][0];
     jnt_comp_params.bck_offset = quant_dist_lookup_table[0][0][1];
@@ -211,11 +211,12 @@ class AV1JNTCOMPAVGUPSAMPLEDTest
     const int in_w = block_size_wide[block_idx];
     const int in_h = block_size_high[block_idx];
 
-    JNT_COMP_PARAMS jnt_comp_params;
-    jnt_comp_params.use_jnt_comp_avg = 1;
+    DIST_WTD_COMP_PARAMS jnt_comp_params;
+    jnt_comp_params.use_dist_wtd_comp_avg = 1;
     int sub_x_q3, sub_y_q3;
     int subpel_search;
-    for (subpel_search = 1; subpel_search <= 2; ++subpel_search) {
+    for (subpel_search = USE_4_TAPS; subpel_search <= USE_8_TAPS;
+         ++subpel_search) {
       for (sub_x_q3 = 0; sub_x_q3 < 8; ++sub_x_q3) {
         for (sub_y_q3 = 0; sub_y_q3 < 8; ++sub_y_q3) {
           for (int ii = 0; ii < 2; ii++) {
@@ -271,8 +272,8 @@ class AV1JNTCOMPAVGUPSAMPLEDTest
     const int in_w = block_size_wide[block_idx];
     const int in_h = block_size_high[block_idx];
 
-    JNT_COMP_PARAMS jnt_comp_params;
-    jnt_comp_params.use_jnt_comp_avg = 1;
+    DIST_WTD_COMP_PARAMS jnt_comp_params;
+    jnt_comp_params.use_dist_wtd_comp_avg = 1;
 
     jnt_comp_params.fwd_offset = quant_dist_lookup_table[0][0][0];
     jnt_comp_params.bck_offset = quant_dist_lookup_table[0][0][1];
@@ -283,7 +284,7 @@ class AV1JNTCOMPAVGUPSAMPLEDTest
     const int num_loops = 1000000000 / (in_w + in_h);
     aom_usec_timer timer;
     aom_usec_timer_start(&timer);
-    int subpel_search = 2;  // set to 1 to test 4-tap filter.
+    int subpel_search = USE_8_TAPS;  // set to USE_4_TAPS to test 4-tap filter.
 
     for (int i = 0; i < num_loops; ++i)
       aom_jnt_comp_avg_upsampled_pred_c(NULL, NULL, 0, 0, NULL, output, pred8,
@@ -337,8 +338,8 @@ class AV1HighBDJNTCOMPAVGTest
     const int in_w = block_size_wide[block_idx];
     const int in_h = block_size_high[block_idx];
 
-    JNT_COMP_PARAMS jnt_comp_params;
-    jnt_comp_params.use_jnt_comp_avg = 1;
+    DIST_WTD_COMP_PARAMS jnt_comp_params;
+    jnt_comp_params.use_dist_wtd_comp_avg = 1;
 
     for (int ii = 0; ii < 2; ii++) {
       for (int jj = 0; jj < 4; jj++) {
@@ -386,8 +387,8 @@ class AV1HighBDJNTCOMPAVGTest
     const int in_w = block_size_wide[block_idx];
     const int in_h = block_size_high[block_idx];
 
-    JNT_COMP_PARAMS jnt_comp_params;
-    jnt_comp_params.use_jnt_comp_avg = 1;
+    DIST_WTD_COMP_PARAMS jnt_comp_params;
+    jnt_comp_params.use_dist_wtd_comp_avg = 1;
 
     jnt_comp_params.fwd_offset = quant_dist_lookup_table[0][0][0];
     jnt_comp_params.bck_offset = quant_dist_lookup_table[0][0][1];
@@ -436,8 +437,8 @@ class AV1HighBDJNTCOMPAVGUPSAMPLEDTest
     const int bd = GET_PARAM(0);
     uint16_t pred8[kMaxSize * kMaxSize];
     uint16_t ref8[kMaxSize * kMaxSize];
-    uint16_t output[kMaxSize * kMaxSize];
-    uint16_t output2[kMaxSize * kMaxSize];
+    DECLARE_ALIGNED(16, uint16_t, output[kMaxSize * kMaxSize]);
+    DECLARE_ALIGNED(16, uint16_t, output2[kMaxSize * kMaxSize]);
 
     for (int i = 0; i < h; ++i)
       for (int j = 0; j < w; ++j) {
@@ -447,11 +448,12 @@ class AV1HighBDJNTCOMPAVGUPSAMPLEDTest
     const int in_w = block_size_wide[block_idx];
     const int in_h = block_size_high[block_idx];
 
-    JNT_COMP_PARAMS jnt_comp_params;
-    jnt_comp_params.use_jnt_comp_avg = 1;
+    DIST_WTD_COMP_PARAMS jnt_comp_params;
+    jnt_comp_params.use_dist_wtd_comp_avg = 1;
     int sub_x_q3, sub_y_q3;
     int subpel_search;
-    for (subpel_search = 1; subpel_search <= 2; ++subpel_search) {
+    for (subpel_search = USE_4_TAPS; subpel_search <= USE_8_TAPS;
+         ++subpel_search) {
       for (sub_x_q3 = 0; sub_x_q3 < 8; ++sub_x_q3) {
         for (sub_y_q3 = 0; sub_y_q3 < 8; ++sub_y_q3) {
           for (int ii = 0; ii < 2; ii++) {
@@ -498,8 +500,8 @@ class AV1HighBDJNTCOMPAVGUPSAMPLEDTest
     const int bd = GET_PARAM(0);
     uint16_t pred8[kMaxSize * kMaxSize];
     uint16_t ref8[kMaxSize * kMaxSize];
-    uint16_t output[kMaxSize * kMaxSize];
-    uint16_t output2[kMaxSize * kMaxSize];
+    DECLARE_ALIGNED(16, uint16_t, output[kMaxSize * kMaxSize]);
+    DECLARE_ALIGNED(16, uint16_t, output2[kMaxSize * kMaxSize]);
 
     for (int i = 0; i < h; ++i)
       for (int j = 0; j < w; ++j) {
@@ -509,8 +511,8 @@ class AV1HighBDJNTCOMPAVGUPSAMPLEDTest
     const int in_w = block_size_wide[block_idx];
     const int in_h = block_size_high[block_idx];
 
-    JNT_COMP_PARAMS jnt_comp_params;
-    jnt_comp_params.use_jnt_comp_avg = 1;
+    DIST_WTD_COMP_PARAMS jnt_comp_params;
+    jnt_comp_params.use_dist_wtd_comp_avg = 1;
 
     jnt_comp_params.fwd_offset = quant_dist_lookup_table[0][0][0];
     jnt_comp_params.bck_offset = quant_dist_lookup_table[0][0][1];
@@ -519,7 +521,7 @@ class AV1HighBDJNTCOMPAVGUPSAMPLEDTest
     const int num_loops = 1000000000 / (in_w + in_h);
     aom_usec_timer timer;
     aom_usec_timer_start(&timer);
-    int subpel_search = 2;  // set to 1 to test 4-tap filter.
+    int subpel_search = USE_8_TAPS;  // set to USE_4_TAPS to test 4-tap filter.
     for (int i = 0; i < num_loops; ++i)
       aom_highbd_jnt_comp_avg_upsampled_pred_c(
           NULL, NULL, 0, 0, NULL, CONVERT_TO_BYTEPTR(output),

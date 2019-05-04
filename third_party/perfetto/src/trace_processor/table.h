@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include "perfetto/base/optional.h"
 #include "src/trace_processor/query_constraints.h"
 
 namespace perfetto {
@@ -42,18 +43,17 @@ class Table : public sqlite3_vtab {
   // Allowed types for columns in a table.
   enum ColumnType {
     kString = 1,
-    kUlong = 2,
-    kUint = 3,
+    kUint = 2,
+    kLong = 3,
     kInt = 4,
+    kDouble = 5,
+    kUnknown = 6,
   };
 
   // Describes a column of this table.
   class Column {
    public:
-    Column(size_t index,
-           std::string name,
-           ColumnType type,
-           bool hidden = false);
+    Column(size_t idx, std::string name, ColumnType type, bool hidden = false);
 
     size_t index() const { return index_; }
     const std::string& name() const { return name_; }
@@ -103,15 +103,6 @@ class Table : public sqlite3_vtab {
     std::unique_ptr<Cursor> cursor_;
   };
 
- protected:
-  // Populated by a BestIndex call to allow subclasses to tweak SQLite's
-  // handling of sets of constraints.
-  struct BestIndexInfo {
-    bool order_by_consumed = false;
-    uint32_t estimated_cost = 0;
-    std::vector<bool> omit;
-  };
-
   // The schema of the table. Created by subclasses to allow the table class to
   // do filtering and inform SQLite about the CREATE table statement.
   class Schema {
@@ -120,12 +111,12 @@ class Table : public sqlite3_vtab {
     Schema(std::vector<Column>, std::vector<size_t> primary_keys);
 
     // This class is explicitly copiable.
-    Schema(const Schema&) noexcept;
+    Schema(const Schema&);
     Schema& operator=(const Schema& t);
 
-    std::string ToCreateTableStmt();
+    std::string ToCreateTableStmt() const;
 
-    const std::vector<Column>& columns() { return columns_; }
+    const std::vector<Column>& columns() const { return columns_; }
     const std::vector<size_t> primary_keys() { return primary_keys_; }
 
    private:
@@ -136,19 +127,33 @@ class Table : public sqlite3_vtab {
     std::vector<size_t> primary_keys_;
   };
 
+ protected:
+  // Populated by a BestIndex call to allow subclasses to tweak SQLite's
+  // handling of sets of constraints.
+  struct BestIndexInfo {
+    bool order_by_consumed = false;
+    uint32_t estimated_cost = 0;
+    std::vector<bool> omit;
+  };
+
   Table();
 
   // Called by derived classes to register themselves with the SQLite db.
+  // |read_write| specifies whether the table can also be written to.
+  // |requires_args| should be true if the table requires arguments in order to
+  // be instantiated.
   template <typename T>
   static void Register(sqlite3* db,
                        const TraceStorage* storage,
                        const std::string& name,
-                       bool read_write = false) {
-    RegisterInternal(db, storage, name, read_write, GetFactory<T>());
+                       bool read_write = false,
+                       bool requires_args = false) {
+    RegisterInternal(db, storage, name, read_write, requires_args,
+                     GetFactory<T>());
   }
 
   // Methods to be implemented by derived table classes.
-  virtual Schema CreateSchema(int argc, const char* const* argv) = 0;
+  virtual base::Optional<Schema> Init(int argc, const char* const* argv) = 0;
   virtual std::unique_ptr<Cursor> CreateCursor(const QueryConstraints& qc,
                                                sqlite3_value** argv) = 0;
   virtual int BestIndex(const QueryConstraints& qc, BestIndexInfo* info) = 0;
@@ -159,6 +164,13 @@ class Table : public sqlite3_vtab {
 
   // At registration time, the function should also pass true for |read_write|.
   virtual int Update(int, sqlite3_value**, sqlite3_int64*);
+
+  void SetErrorMessage(char* error) {
+    sqlite3_free(zErrMsg);
+    zErrMsg = error;
+  }
+
+  const Schema& schema() { return schema_; }
 
  private:
   template <typename TableType>
@@ -172,6 +184,7 @@ class Table : public sqlite3_vtab {
                                const TraceStorage*,
                                const std::string& name,
                                bool read_write,
+                               bool requires_args,
                                Factory);
 
   // Overriden functions from sqlite3_vtab.

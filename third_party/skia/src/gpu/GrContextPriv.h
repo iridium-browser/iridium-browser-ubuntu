@@ -12,6 +12,7 @@
 #include "GrSurfaceContext.h"
 #include "text/GrAtlasManager.h"
 
+class GrBackendFormat;
 class GrBackendRenderTarget;
 class GrOpMemoryPool;
 class GrOnFlushCallbackObject;
@@ -43,7 +44,8 @@ public:
                                                       sk_sp<SkColorSpace> = nullptr,
                                                       const SkSurfaceProps* = nullptr);
 
-    sk_sp<GrSurfaceContext> makeDeferredSurfaceContext(const GrSurfaceDesc&,
+    sk_sp<GrSurfaceContext> makeDeferredSurfaceContext(const GrBackendFormat&,
+                                                       const GrSurfaceDesc&,
                                                        GrSurfaceOrigin,
                                                        GrMipMapped,
                                                        SkBackingFit,
@@ -74,6 +76,9 @@ public:
                                                                  int sampleCnt,
                                                                  sk_sp<SkColorSpace> colorSpace,
                                                                  const SkSurfaceProps* = nullptr);
+
+    sk_sp<GrRenderTargetContext> makeVulkanSecondaryCBRenderTargetContext(
+            const SkImageInfo&, const GrVkDrawableInfo&, const SkSurfaceProps* = nullptr);
 
     bool disableGpuYUVConversion() const { return fContext->fDisableGpuYUVConversion; }
     bool sharpenMipmappedTextures() const { return fContext->fSharpenMipmappedTextures; }
@@ -177,7 +182,7 @@ public:
                             GrColorType srcColorType, SkColorSpace* srcColorSpace,
                             const void* buffer, size_t rowBytes, uint32_t pixelOpsFlags = 0);
 
-    GrBackend getBackend() const { return fContext->fBackend; }
+    GrBackendApi getBackend() const { return fContext->fBackend; }
 
     SkTaskGroup* getTaskGroup() { return fContext->fTaskGroup.get(); }
 
@@ -192,7 +197,7 @@ public:
     GrGpu* getGpu() { return fContext->fGpu.get(); }
     const GrGpu* getGpu() const { return fContext->fGpu.get(); }
 
-    GrGlyphCache* getGlyphCache() { return fContext->fGlyphCache; }
+    GrStrikeCache* getGlyphCache() { return fContext->fGlyphCache; }
     GrTextBlobCache* getTextBlobCache() { return fContext->fTextBlobCache.get(); }
 
     // This accessor should only ever be called by the GrOpFlushState.
@@ -217,6 +222,7 @@ public:
      * renderTargetContexts created via this entry point.
      */
     sk_sp<GrRenderTargetContext> makeDeferredRenderTargetContext(
+                                                 const GrBackendFormat& format,
                                                  SkBackingFit fit,
                                                  int width, int height,
                                                  GrPixelConfig config,
@@ -233,6 +239,7 @@ public:
      * SRGB-ness will be preserved.
      */
     sk_sp<GrRenderTargetContext> makeDeferredRenderTargetContextWithFallback(
+                                                 const GrBackendFormat& format,
                                                  SkBackingFit fit,
                                                  int width, int height,
                                                  GrPixelConfig config,

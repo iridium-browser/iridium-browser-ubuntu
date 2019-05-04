@@ -32,18 +32,17 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.blink_public.web.WebReferrerPolicy;
 import org.chromium.chrome.browser.browserservices.BrowserSessionContentUtils;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationDelegateImpl;
 import org.chromium.chrome.browser.externalnav.IntentWithGesturesHandler;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
-import org.chromium.chrome.browser.omnibox.AutocompleteController;
+import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController;
 import org.chromium.chrome.browser.rappor.RapporServiceBridge;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
+import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.document.ActivityDelegate;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.util.UrlUtilities;
@@ -52,6 +51,7 @@ import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.content_public.common.Referrer;
 import org.chromium.net.HttpUtil;
+import org.chromium.network.mojom.ReferrerPolicy;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.webapk.lib.common.WebApkConstants;
 
@@ -60,6 +60,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Handles all browser-related Intents.
@@ -280,7 +281,8 @@ public class IntentHandler {
 
     @IntDef({TabOpenType.OPEN_NEW_TAB, TabOpenType.REUSE_URL_MATCHING_TAB_ELSE_NEW_TAB,
             TabOpenType.REUSE_APP_ID_MATCHING_TAB_ELSE_NEW_TAB, TabOpenType.CLOBBER_CURRENT_TAB,
-            TabOpenType.BRING_TAB_TO_FRONT, TabOpenType.OPEN_NEW_INCOGNITO_TAB})
+            TabOpenType.BRING_TAB_TO_FRONT, TabOpenType.OPEN_NEW_INCOGNITO_TAB,
+            TabOpenType.REUSE_TAB_MATCHING_ID_ELSE_NEW_TAB})
     @Retention(RetentionPolicy.SOURCE)
     public @interface TabOpenType {
         int OPEN_NEW_TAB = 0;
@@ -292,8 +294,13 @@ public class IntentHandler {
         int BRING_TAB_TO_FRONT = 4;
         // Opens a new incognito tab.
         int OPEN_NEW_INCOGNITO_TAB = 5;
+        // Tab is reused only if the tab ID exists (tab ID is specified with the integer extra
+        // REUSE_TAB_MATCHING_ID_STRING), and if the tab matches the requested URL.
+        // Otherwise, the URL is opened in a new tab.
+        int REUSE_TAB_MATCHING_ID_ELSE_NEW_TAB = 6;
 
         String BRING_TAB_TO_FRONT_STRING = "BRING_TAB_TO_FRONT";
+        String REUSE_TAB_MATCHING_ID_STRING = "REUSE_TAB_MATCHING_ID";
     }
 
     /**
@@ -432,7 +439,7 @@ public class IntentHandler {
      * @param intent Target intent.
      * @return Whether the Intent was successfully handled.
      */
-    boolean onNewIntent(Intent intent) {
+    public boolean onNewIntent(Intent intent) {
         updateDeferredIntent(null);
 
         assert intentHasValidUrl(intent);
@@ -449,7 +456,7 @@ public class IntentHandler {
         }
 
         String referrerUrl = getReferrerUrlIncludingExtraHeaders(intent);
-        String extraHeaders = getExtraHeadersFromIntent(intent);
+        String extraHeaders = getExtraHeadersFromIntent(intent, true);
 
         if (isIntentForMhtmlFileOrContent(intent) && tabOpenType == TabOpenType.OPEN_NEW_TAB
                 && referrerUrl == null && extraHeaders == null) {
@@ -551,15 +558,15 @@ public class IntentHandler {
         if (referrer != null) {
             params.setReferrer(new Referrer(referrer, getReferrerPolicyFromIntent(intent)));
         }
-        String headers = getExtraHeadersFromIntent(intent);
+        String headers = getExtraHeadersFromIntent(intent, true);
         if (headers != null) params.setVerbatimHeaders(headers);
     }
 
-    public static @WebReferrerPolicy int getReferrerPolicyFromIntent(Intent intent) {
-        int policy = IntentUtils.safeGetIntExtra(
-                intent, EXTRA_REFERRER_POLICY, WebReferrerPolicy.DEFAULT);
-        if (policy < 0 || policy >= WebReferrerPolicy.LAST) {
-            policy = WebReferrerPolicy.DEFAULT;
+    public static int getReferrerPolicyFromIntent(Intent intent) {
+        int policy =
+                IntentUtils.safeGetIntExtra(intent, EXTRA_REFERRER_POLICY, ReferrerPolicy.DEFAULT);
+        if (policy < 0 || policy >= ReferrerPolicy.LAST) {
+            policy = ReferrerPolicy.DEFAULT;
         }
         return policy;
     }
@@ -587,7 +594,7 @@ public class IntentHandler {
                                     .authority(authority)
                                     .build()
                                     .toString(),
-                WebReferrerPolicy.DEFAULT);
+                ReferrerPolicy.DEFAULT);
     }
 
     /**
@@ -727,21 +734,57 @@ public class IntentHandler {
     }
 
     /**
+     * Sets the Extra field 'EXTRA_HEADERS' on intent. If |extraHeaders| is empty or null,
+     * removes 'EXTRA_HEADERS' from intent.
+     *
+     * @param extraHeaders   A map containing the set of headers. May be null.
+     * @param intent         The intent to modify.
+     */
+    public static void setIntentExtraHeaders(
+            @Nullable Map<String, String> extraHeaders, Intent intent) {
+        if (extraHeaders == null || extraHeaders.isEmpty()) {
+            intent.removeExtra(Browser.EXTRA_HEADERS);
+        } else {
+            Bundle bundle = new Bundle();
+            for (Map.Entry<String, String> header : extraHeaders.entrySet()) {
+                bundle.putString(header.getKey(), header.getValue());
+            }
+            intent.putExtra(Browser.EXTRA_HEADERS, bundle);
+        }
+    }
+
+    /**
+     * Calls {@link #getExtraHeadersFromIntent(Intent, boolean)} with shouldLogHeaders as false.
+     */
+    public static String getExtraHeadersFromIntent(Intent intent) {
+        return getExtraHeadersFromIntent(intent, false);
+    }
+
+    /**
      * Returns a String (or null) containing the extra headers sent by the intent, if any.
      *
      * This methods skips the referrer header.
      *
      * @param intent The intent containing the bundle extra with the HTTP headers.
+     * @param shouldLogHeaders Whether we should perform logging on the types of headers that the
+     *                         Intent contains. This should only be done for Intents as they come
+     *                         in to Chrome.
      */
-    public static String getExtraHeadersFromIntent(Intent intent) {
+    public static String getExtraHeadersFromIntent(Intent intent, boolean shouldLogHeaders) {
         Bundle bundleExtraHeaders = IntentUtils.safeGetBundleExtra(intent, Browser.EXTRA_HEADERS);
         if (bundleExtraHeaders == null) return null;
         StringBuilder extraHeaders = new StringBuilder();
+
+        // We do some logging to determine what kinds of headers developers are inserting.
+        IntentHeadersRecorder recorder = shouldLogHeaders ? new IntentHeadersRecorder() : null;
+
         for (String key : bundleExtraHeaders.keySet()) {
             String value = bundleExtraHeaders.getString(key);
 
             // Strip the custom header that can only be added by ourselves.
             if ("x-chrome-intent-type".equals(key.toLowerCase(Locale.US))) continue;
+
+            if (shouldLogHeaders) recorder.recordHeader(key, value);
 
             if (!HttpUtil.isAllowedHeader(key, value)) continue;
 
@@ -749,6 +792,10 @@ public class IntentHandler {
             extraHeaders.append(key);
             extraHeaders.append(": ");
             extraHeaders.append(value);
+        }
+
+        if (shouldLogHeaders) {
+            recorder.report(IntentHandler.notSecureIsIntentChromeOrFirstParty(intent));
         }
         return extraHeaders.length() == 0 ? null : extraHeaders.toString();
     }
@@ -993,6 +1040,12 @@ public class IntentHandler {
         if (appId == null
                 || IntentUtils.safeGetBooleanExtra(intent, Browser.EXTRA_CREATE_NEW_TAB, false)) {
             return TabOpenType.OPEN_NEW_TAB;
+        }
+
+        int tabId = IntentUtils.safeGetIntExtra(
+                intent, TabOpenType.REUSE_TAB_MATCHING_ID_STRING, Tab.INVALID_TAB_ID);
+        if (tabId != Tab.INVALID_TAB_ID) {
+            return TabOpenType.REUSE_TAB_MATCHING_ID_ELSE_NEW_TAB;
         }
 
         // Intents from chrome open in the same tab by default, all others only clobber

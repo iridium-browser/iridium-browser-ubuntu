@@ -49,8 +49,6 @@
 
 namespace blink {
 
-using namespace HTMLNames;
-
 LayoutTable::LayoutTable(Element* element)
     : LayoutBlock(element),
       head_(nullptr),
@@ -242,7 +240,7 @@ void LayoutTable::AddCaption(const LayoutTableCaption* caption) {
 }
 
 void LayoutTable::RemoveCaption(const LayoutTableCaption* old_caption) {
-  size_t index = captions_.Find(old_caption);
+  wtf_size_t index = captions_.Find(old_caption);
   DCHECK_NE(index, kNotFound);
   if (index == kNotFound)
     return;
@@ -273,7 +271,7 @@ void LayoutTable::RemoveColumn(const LayoutTableCol*) {
 }
 
 bool LayoutTable::IsLogicalWidthAuto() const {
-  Length style_logical_width = StyleRef().LogicalWidth();
+  const Length& style_logical_width = StyleRef().LogicalWidth();
   return (!style_logical_width.IsSpecified() ||
           !style_logical_width.IsPositive()) &&
          !style_logical_width.IsIntrinsic();
@@ -288,7 +286,7 @@ void LayoutTable::UpdateLogicalWidth() {
   if (PreferredLogicalWidthsDirty())
     ComputePreferredLogicalWidths();
 
-  if (IsFlexItemIncludingDeprecated() || IsGridItem()) {
+  if (IsFlexItemIncludingDeprecatedAndNG() || IsGridItem()) {
     // TODO(jfernandez): Investigate whether the grid layout algorithm provides
     // all the logic needed and that we're not skipping anything essential due
     // to the early return here.
@@ -316,10 +314,9 @@ void LayoutTable::UpdateLogicalWidth() {
           ? PerpendicularContainingBlockLogicalHeight()
           : available_logical_width;
 
-  Length style_logical_width = StyleRef().LogicalWidth();
   if (!IsLogicalWidthAuto()) {
     SetLogicalWidth(ConvertStyleLogicalWidthToComputedWidth(
-        style_logical_width, container_width_in_inline_direction));
+        StyleRef().LogicalWidth(), container_width_in_inline_direction));
   } else {
     // Subtract out any fixed margins from our available width for auto width
     // tables.
@@ -353,7 +350,7 @@ void LayoutTable::UpdateLogicalWidth() {
   }
 
   // Ensure we aren't bigger than our max-width style.
-  Length style_max_logical_width = StyleRef().LogicalMaxWidth();
+  const Length& style_max_logical_width = StyleRef().LogicalMaxWidth();
   if ((style_max_logical_width.IsSpecified() &&
        !style_max_logical_width.IsNegative()) ||
       style_max_logical_width.IsIntrinsic()) {
@@ -371,7 +368,7 @@ void LayoutTable::UpdateLogicalWidth() {
       LayoutUnit(std::max(LogicalWidth(), MinPreferredLogicalWidth()).Floor()));
 
   // Ensure we aren't smaller than our min-width style.
-  Length style_min_logical_width = StyleRef().LogicalMinWidth();
+  const Length& style_min_logical_width = StyleRef().LogicalMinWidth();
   if ((style_min_logical_width.IsSpecified() &&
        !style_min_logical_width.IsNegative()) ||
       style_min_logical_width.IsIntrinsic()) {
@@ -515,7 +512,7 @@ void LayoutTable::LayoutSection(
 
 LayoutUnit LayoutTable::LogicalHeightFromStyle() const {
   LayoutUnit computed_logical_height;
-  Length logical_height_length = StyleRef().LogicalHeight();
+  const Length& logical_height_length = StyleRef().LogicalHeight();
   if (logical_height_length.IsIntrinsic() ||
       (logical_height_length.IsSpecified() &&
        logical_height_length.IsPositive())) {
@@ -523,7 +520,7 @@ LayoutUnit LayoutTable::LogicalHeightFromStyle() const {
         ConvertStyleLogicalHeightToComputedHeight(logical_height_length);
   }
 
-  Length logical_max_height_length = StyleRef().LogicalMaxHeight();
+  const Length& logical_max_height_length = StyleRef().LogicalMaxHeight();
   if (logical_max_height_length.IsIntrinsic() ||
       (logical_max_height_length.IsSpecified() &&
        !logical_max_height_length.IsNegative())) {
@@ -533,7 +530,7 @@ LayoutUnit LayoutTable::LogicalHeightFromStyle() const {
         std::min(computed_logical_height, computed_max_logical_height);
   }
 
-  Length logical_min_height_length = StyleRef().LogicalMinHeight();
+  const Length& logical_min_height_length = StyleRef().LogicalMinHeight();
   if (logical_min_height_length.IsIntrinsic() ||
       (logical_min_height_length.IsSpecified() &&
        !logical_min_height_length.IsNegative())) {
@@ -570,32 +567,47 @@ void LayoutTable::SimplifiedNormalFlowLayout() {
        section = SectionBelow(section)) {
     section->LayoutIfNeeded();
     section->LayoutRows();
-    section->ComputeOverflowFromDescendants();
+    section->ComputeLayoutOverflowFromDescendants();
     section->UpdateAfterLayout();
-    section->AddVisualEffectOverflow();
   }
 }
 
-bool LayoutTable::RecalcOverflow() {
-  RecalcSelfOverflow();
+bool LayoutTable::RecalcLayoutOverflow() {
+  RecalcSelfLayoutOverflow();
 
-  if (!ChildNeedsOverflowRecalc())
+  if (!ChildNeedsLayoutOverflowRecalc())
     return false;
   ClearChildNeedsLayoutOverflowRecalc();
-  ClearChildNeedsVisualOverflowRecalc();
 
   // If the table sections we keep pointers to have gone away then the table
   // will be rebuilt and overflow will get recalculated anyway so return early.
   if (NeedsSectionRecalc())
     return false;
 
-  bool children_overflow_changed = false;
+  bool children_layout_overflow_changed = false;
   for (LayoutTableSection* section = TopSection(); section;
        section = SectionBelow(section)) {
-    children_overflow_changed =
-        section->RecalcOverflow() || children_overflow_changed;
+    children_layout_overflow_changed =
+        section->RecalcLayoutOverflow() || children_layout_overflow_changed;
   }
-  return RecalcPositionedDescendantsOverflow() || children_overflow_changed;
+  return RecalcPositionedDescendantsLayoutOverflow() ||
+         children_layout_overflow_changed;
+}
+
+void LayoutTable::RecalcVisualOverflow() {
+  for (auto* caption : captions_) {
+    if (!caption->HasSelfPaintingLayer())
+      caption->RecalcVisualOverflow();
+  }
+
+  for (LayoutTableSection* section = TopSection(); section;
+       section = SectionBelow(section)) {
+    if (!section->HasSelfPaintingLayer())
+      section->RecalcVisualOverflow();
+  }
+
+  RecalcPositionedDescendantsVisualOverflow();
+  RecalcSelfVisualOverflow();
 }
 
 void LayoutTable::UpdateLayout() {
@@ -623,9 +635,10 @@ void LayoutTable::UpdateLayout() {
     UpdateLogicalWidth();
 
     if (LogicalWidth() != old_logical_width) {
-      for (unsigned i = 0; i < captions_.size(); i++)
+      for (unsigned i = 0; i < captions_.size(); i++) {
         layouter.SetNeedsLayout(captions_[i],
-                                LayoutInvalidationReason::kTableChanged);
+                                layout_invalidation_reason::kTableChanged);
+      }
     }
     // FIXME: The optimisation below doesn't work since the internal table
     // layout could have changed. We need to add a flag to the table
@@ -795,7 +808,6 @@ void LayoutTable::UpdateLayout() {
       SetLogicalHeight(LogicalHeight() + section->LogicalHeight());
 
       section->UpdateAfterLayout();
-      section->AddVisualEffectOverflow();
 
       section = SectionBelow(section);
     }
@@ -816,7 +828,7 @@ void LayoutTable::UpdateLayout() {
                              old_logical_height != LogicalHeight();
     LayoutPositionedObjects(dimension_changed);
 
-    ComputeOverflow(ClientLogicalBottom());
+    ComputeLayoutOverflow(ClientLogicalBottom());
     UpdateAfterLayout();
 
     if (state.IsPaginated() && IsPageLogicalHeightKnown()) {
@@ -842,7 +854,7 @@ void LayoutTable::AdjustWidthsForCollapsedColumns(
   unsigned n_eff_cols = NumEffectiveColumns();
 
   // Update vector of collapsed widths.
-  for (size_t i = 0; i < n_eff_cols; ++i) {
+  for (unsigned i = 0; i < n_eff_cols; ++i) {
     // TODO(joysyu): Here, we are at O(n^2) for every table that has ever had a
     // collapsed column. ColElementAtAbsoluteColumn() is currently O(n);
     // ideally, it would be O(1). We have to improve the runtime before shipping
@@ -861,7 +873,7 @@ void LayoutTable::AdjustWidthsForCollapsedColumns(
 
   // Adjust column positions according to collapsed widths.
   int total_collapsed_width = 0;
-  for (size_t i = 0; i < n_eff_cols; ++i) {
+  for (unsigned i = 0; i < n_eff_cols; ++i) {
     total_collapsed_width += col_collapsed_width[i];
     SetEffectiveColumnPosition(
         i + 1, EffectiveColumnPositions()[i + 1] - total_collapsed_width);
@@ -907,6 +919,20 @@ void LayoutTable::InvalidateCollapsedBordersForAllCellsIfNeeded() {
         cell->InvalidateCollapsedBorderValues();
       }
     }
+  }
+}
+
+void LayoutTable::ComputeVisualOverflow(bool) {
+  LayoutRect previous_visual_overflow_rect = VisualOverflowRect();
+  ClearVisualOverflow();
+  AddVisualOverflowFromChildren();
+
+  AddVisualEffectOverflow();
+  AddVisualOverflowFromTheme();
+
+  if (VisualOverflowRect() != previous_visual_overflow_rect) {
+    SetShouldCheckForPaintInvalidation();
+    GetFrameView()->SetIntersectionObservationState(LocalFrameView::kDesired);
   }
 }
 
@@ -1509,7 +1535,7 @@ LayoutUnit LayoutTable::FirstLineBoxBaseline() const {
   // 'inline-table'). This is also needed to properly determine the baseline of
   // a cell if it has a table child.
 
-  if (IsWritingModeRoot())
+  if (IsWritingModeRoot() || ShouldApplyLayoutContainment())
     return LayoutUnit(-1);
 
   RecalcSectionsIfNeeded();

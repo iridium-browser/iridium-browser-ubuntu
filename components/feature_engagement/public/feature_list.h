@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/feature_list.h"
+#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "components/feature_engagement/buildflags.h"
 #include "components/feature_engagement/public/feature_constants.h"
@@ -40,7 +41,7 @@ namespace {
 #define VARIATION_ENTRY(base_feature)                                \
   {                                                                  \
     base_feature##Variation[0].param_value, base_feature##Variation, \
-        arraysize(base_feature##Variation), nullptr                  \
+        base::size(base_feature##Variation), nullptr                 \
   }
 
 // Defines a flags_ui::FeatureEntry::FeatureParam for each feature.
@@ -76,6 +77,8 @@ DEFINE_VARIATION_PARAM(kIPHHomePageButtonFeature, "IPH_HomePageButton");
 DEFINE_VARIATION_PARAM(kIPHHomepageTileFeature, "IPH_HomepageTile");
 DEFINE_VARIATION_PARAM(kIPHNewTabPageButtonFeature, "IPH_NewTabPageButton");
 DEFINE_VARIATION_PARAM(kIPHPreviewsOmniboxUIFeature, "IPH_PreviewsOmniboxUI");
+DEFINE_VARIATION_PARAM(kIPHTranslateMenuButtonFeature,
+                       "IPH_TranslateMenuButton");
 #endif  // defined(OS_ANDROID)
 #if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
 DEFINE_VARIATION_PARAM(kIPHBookmarkFeature, "IPH_Bookmark");
@@ -121,6 +124,7 @@ constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHHomepageTileFeature),
         VARIATION_ENTRY(kIPHNewTabPageButtonFeature),
         VARIATION_ENTRY(kIPHPreviewsOmniboxUIFeature),
+        VARIATION_ENTRY(kIPHTranslateMenuButtonFeature),
 #elif BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
         VARIATION_ENTRY(kIPHBookmarkFeature),
         VARIATION_ENTRY(kIPHIncognitoWindowFeature),

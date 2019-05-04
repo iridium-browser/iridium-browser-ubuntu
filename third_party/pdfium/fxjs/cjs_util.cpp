@@ -20,6 +20,7 @@
 #include "fxjs/cjs_object.h"
 #include "fxjs/cjs_publicmethods.h"
 #include "fxjs/cjs_runtime.h"
+#include "fxjs/fx_date_helpers.h"
 #include "fxjs/js_define.h"
 #include "fxjs/js_resources.h"
 
@@ -54,6 +55,16 @@ const TbConvert TbConvertTable[] = {
     {L"tt", L"%P"},   {L"h", L"%l"},
 #endif
 };
+
+enum CaseMode { kPreserveCase, kUpperCase, kLowerCase };
+
+wchar_t TranslateCase(wchar_t input, CaseMode eMode) {
+  if (eMode == kLowerCase && FXSYS_iswupper(input))
+    return input | 0x20;
+  if (eMode == kUpperCase && FXSYS_iswlower(input))
+    return input & ~0x20;
+  return input;
+}
 
 }  // namespace
 
@@ -159,13 +170,13 @@ CJS_Result CJS_Util::printd(CJS_Runtime* pRuntime,
   if (v8_date.IsEmpty() || std::isnan(pRuntime->ToDouble(v8_date)))
     return CJS_Result::Failure(JSMessage::kSecondParamInvalidDateError);
 
-  double date = JS_LocalTime(pRuntime->ToDouble(v8_date));
-  int year = JS_GetYearFromTime(date);
-  int month = JS_GetMonthFromTime(date) + 1;  // One-based.
-  int day = JS_GetDayFromTime(date);
-  int hour = JS_GetHourFromTime(date);
-  int min = JS_GetMinFromTime(date);
-  int sec = JS_GetSecFromTime(date);
+  double date = FX_LocalTime(pRuntime->ToDouble(v8_date));
+  int year = FX_GetYearFromTime(date);
+  int month = FX_GetMonthFromTime(date) + 1;  // One-based.
+  int day = FX_GetDayFromTime(date);
+  int hour = FX_GetHourFromTime(date);
+  int min = FX_GetMinFromTime(date);
+  int sec = FX_GetSecFromTime(date);
 
   if (params[0]->IsNumber()) {
     WideString swResult;
@@ -211,45 +222,45 @@ CJS_Result CJS_Util::printd(CJS_Runtime* pRuntime,
                       TbConvertTable[i].lpszCppMark);
       iStart = iEnd;
     }
-    }
+  }
 
-    if (year < 0)
-      return CJS_Result::Failure(JSMessage::kValueError);
+  if (year < 0)
+    return CJS_Result::Failure(JSMessage::kValueError);
 
-    const TbConvertAdditional cTableAd[] = {
-        {L"m", month}, {L"d", day},
-        {L"H", hour},  {L"h", hour > 12 ? hour - 12 : hour},
-        {L"M", min},   {L"s", sec},
-    };
+  const TbConvertAdditional cTableAd[] = {
+      {L"m", month}, {L"d", day},
+      {L"H", hour},  {L"h", hour > 12 ? hour - 12 : hour},
+      {L"M", min},   {L"s", sec},
+  };
 
-    for (size_t i = 0; i < FX_ArraySize(cTableAd); ++i) {
-      int iStart = 0;
-      int iEnd;
-      while ((iEnd = cFormat.find(cTableAd[i].lpszJSMark, iStart)) != -1) {
-        if (iEnd > 0) {
-          if (cFormat[iEnd - 1] == L'%') {
-            iStart = iEnd + 1;
-            continue;
-          }
+  for (size_t i = 0; i < FX_ArraySize(cTableAd); ++i) {
+    int iStart = 0;
+    int iEnd;
+    while ((iEnd = cFormat.find(cTableAd[i].lpszJSMark, iStart)) != -1) {
+      if (iEnd > 0) {
+        if (cFormat[iEnd - 1] == L'%') {
+          iStart = iEnd + 1;
+          continue;
         }
-        cFormat.replace(iEnd, wcslen(cTableAd[i].lpszJSMark),
-                        WideString::Format(L"%d", cTableAd[i].iValue).c_str());
-        iStart = iEnd;
       }
+      cFormat.replace(iEnd, wcslen(cTableAd[i].lpszJSMark),
+                      WideString::Format(L"%d", cTableAd[i].iValue).c_str());
+      iStart = iEnd;
     }
+  }
 
-    struct tm time = {};
-    time.tm_year = year - 1900;
-    time.tm_mon = month - 1;
-    time.tm_mday = day;
-    time.tm_hour = hour;
-    time.tm_min = min;
-    time.tm_sec = sec;
+  struct tm time = {};
+  time.tm_year = year - 1900;
+  time.tm_mon = month - 1;
+  time.tm_mday = day;
+  time.tm_hour = hour;
+  time.tm_min = min;
+  time.tm_sec = sec;
 
-    wchar_t buf[64] = {};
-    FXSYS_wcsftime(buf, 64, cFormat.c_str(), &time);
-    cFormat = buf;
-    return CJS_Result::Success(pRuntime->NewString(cFormat.c_str()));
+  wchar_t buf[64] = {};
+  FXSYS_wcsftime(buf, 64, cFormat.c_str(), &time);
+  cFormat = buf;
+  return CJS_Result::Success(pRuntime->NewString(cFormat.c_str()));
 }
 
 CJS_Result CJS_Util::printx(CJS_Runtime* pRuntime,
@@ -258,24 +269,15 @@ CJS_Result CJS_Util::printx(CJS_Runtime* pRuntime,
     return CJS_Result::Failure(JSMessage::kParamError);
 
   return CJS_Result::Success(
-      pRuntime->NewString(printx(pRuntime->ToWideString(params[0]),
-                                 pRuntime->ToWideString(params[1]))
+      pRuntime->NewString(StringPrintx(pRuntime->ToWideString(params[0]),
+                                       pRuntime->ToWideString(params[1]))
                               .AsStringView()));
 }
 
-enum CaseMode { kPreserveCase, kUpperCase, kLowerCase };
-
-static wchar_t TranslateCase(wchar_t input, CaseMode eMode) {
-  if (eMode == kLowerCase && FXSYS_iswupper(input))
-    return input | 0x20;
-  if (eMode == kUpperCase && FXSYS_iswlower(input))
-    return input & ~0x20;
-  return input;
-}
-
-WideString CJS_Util::printx(const WideString& wsFormat,
-                            const WideString& wsSource) {
+WideString CJS_Util::StringPrintx(const WideString& wsFormat,
+                                  const WideString& wsSource) {
   WideString wsResult;
+  wsResult.Reserve(wsFormat.GetLength());
   size_t iSourceIdx = 0;
   size_t iFormatIdx = 0;
   CaseMode eCaseMode = kPreserveCase;
@@ -335,7 +337,7 @@ WideString CJS_Util::printx(const WideString& wsFormat,
       } break;
       case '9': {
         if (iSourceIdx < wsSource.GetLength()) {
-          if (std::iswdigit(wsSource[iSourceIdx])) {
+          if (FXSYS_IsDecimalDigit(wsSource[iSourceIdx])) {
             wsResult += wsSource[iSourceIdx];
             ++iFormatIdx;
           }
@@ -368,9 +370,9 @@ CJS_Result CJS_Util::scand(CJS_Runtime* pRuntime,
 
   WideString sFormat = pRuntime->ToWideString(params[0]);
   WideString sDate = pRuntime->ToWideString(params[1]);
-  double dDate = JS_GetDateTime();
+  double dDate = FX_GetDateTime();
   if (sDate.GetLength() > 0)
-    dDate = CJS_PublicMethods::MakeRegularDate(sDate, sFormat, nullptr);
+    dDate = CJS_PublicMethods::ParseDateUsingFormat(sDate, sFormat, nullptr);
   if (std::isnan(dDate))
     return CJS_Result::Success(pRuntime->NewUndefined());
 
@@ -420,7 +422,7 @@ int CJS_Util::ParseDataType(std::wstring* sFormat) {
       case WIDTH:
         if (c == L'*')
           return -1;
-        if (std::iswdigit(c)) {
+        if (FXSYS_IsDecimalDigit(c)) {
           // Stay in same state.
         } else if (c == L'.') {
           state = PRECISION;
@@ -432,7 +434,7 @@ int CJS_Util::ParseDataType(std::wstring* sFormat) {
       case PRECISION:
         if (c == L'*')
           return -1;
-        if (std::iswdigit(c)) {
+        if (FXSYS_IsDecimalDigit(c)) {
           // Stay in same state.
           ++precision_digits;
         } else {

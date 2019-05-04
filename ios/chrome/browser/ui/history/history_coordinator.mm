@@ -4,9 +4,9 @@
 
 #include "ios/chrome/browser/ui/history/history_coordinator.h"
 
-#include "components/browser_sync/profile_sync_service.h"
 #include "components/history/core/browser/browsing_history_service.h"
 #include "components/keyed_service/core/service_access_type.h"
+#include "components/sync/driver/sync_service.h"
 #include "ios/chrome/browser/history/history_service_factory.h"
 #include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #import "ios/chrome/browser/ui/context_menu/context_menu_coordinator.h"
@@ -17,7 +17,7 @@
 #import "ios/chrome/browser/ui/history/history_transitioning_delegate.h"
 #include "ios/chrome/browser/ui/history/ios_browsing_history_driver.h"
 #import "ios/chrome/browser/ui/table_view/table_view_navigation_controller.h"
-#include "ios/chrome/browser/ui/ui_util.h"
+#include "ios/chrome/browser/ui/util/ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."

@@ -66,8 +66,7 @@ std::vector<AccountIds> AccountTracker::GetAccounts() const {
 }
 
 void AccountTracker::OnRefreshTokenUpdatedForAccount(
-    const AccountInfo& account_info,
-    bool is_valid) {
+    const AccountInfo& account_info) {
   TRACE_EVENT1("identity", "AccountTracker::OnRefreshTokenUpdatedForAccount",
                "account_id", account_info.account_id);
 
@@ -219,7 +218,7 @@ AccountIdFetcher::~AccountIdFetcher() {
 }
 
 void AccountIdFetcher::Start() {
-  OAuth2TokenService::ScopeSet scopes;
+  identity::ScopeSet scopes;
   scopes.insert("https://www.googleapis.com/auth/userinfo.profile");
   access_token_fetcher_ = identity_manager_->CreateAccessTokenFetcherForAccount(
       account_key_, "gaia_account_tracker", scopes,

@@ -89,8 +89,28 @@ void FullscreenControllerImpl::DecrementDisabledCounter() {
   model_.DecrementDisabledCounter();
 }
 
+void FullscreenControllerImpl::BrowserTraitCollectionChangedBegin() {
+  mediator_.StopFrameChangeCompensation();
+}
+
+void FullscreenControllerImpl::BrowserTraitCollectionChangedEnd() {
+  mediator_.StartFrameChangeCompensation();
+}
+
 CGFloat FullscreenControllerImpl::GetProgress() const {
   return model_.progress();
+}
+
+UIEdgeInsets FullscreenControllerImpl::GetMinViewportInsets() const {
+  return model_.min_toolbar_insets();
+}
+
+UIEdgeInsets FullscreenControllerImpl::GetMaxViewportInsets() const {
+  return model_.max_toolbar_insets();
+}
+
+UIEdgeInsets FullscreenControllerImpl::GetCurrentViewportInsets() const {
+  return model_.current_toolbar_insets();
 }
 
 void FullscreenControllerImpl::EnterFullscreen() {

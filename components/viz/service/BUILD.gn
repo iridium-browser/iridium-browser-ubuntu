@@ -103,6 +103,8 @@ viz_component("service") {
     "display_embedder/gl_output_surface.h",
     "display_embedder/gl_output_surface_buffer_queue.cc",
     "display_embedder/gl_output_surface_buffer_queue.h",
+    "display_embedder/gl_output_surface_offscreen.cc",
+    "display_embedder/gl_output_surface_offscreen.h",
     "display_embedder/gpu_display_provider.cc",
     "display_embedder/gpu_display_provider.h",
     "display_embedder/in_process_gpu_memory_buffer_manager.cc",
@@ -149,8 +151,6 @@ viz_component("service") {
     "hit_test/hit_test_aggregator_delegate.h",
     "hit_test/hit_test_manager.cc",
     "hit_test/hit_test_manager.h",
-    "main/viz_compositor_thread_runner.cc",
-    "main/viz_compositor_thread_runner.h",
     "surfaces/latest_local_surface_id_lookup_delegate.h",
     "surfaces/referenced_surface_tracker.cc",
     "surfaces/referenced_surface_tracker.h",
@@ -167,6 +167,7 @@ viz_component("service") {
     "surfaces/surface_hittest_delegate.h",
     "surfaces/surface_manager.cc",
     "surfaces/surface_manager.h",
+    "surfaces/surface_manager_delegate.h",
     "surfaces/surface_reference.cc",
     "surfaces/surface_reference.h",
     "viz_service_export.h",
@@ -319,16 +320,22 @@ viz_source_set("gpu_service_dependencies") {
     "//media/mojo/services",
     "//services/viz/privileged/interfaces/gl",
     "//skia",
+    "//ui/latency:latency",
   ]
 
   defines = [ "VIZ_SERVICE_IMPLEMENTATION" ]
 
+  deps = []
   if (is_chromeos) {
-    deps = [
+    deps += [
       "//components/arc/video_accelerator",
       "//gpu/command_buffer/service:gles2",
       "//media/mojo/services",
     ]
+  }
+
+  if (use_ozone) {
+    deps += [ "//ui/ozone" ]
   }
 
   if (enable_vulkan) {
@@ -360,6 +367,7 @@ viz_source_set("unit_tests") {
     "display/texture_deleter_unittest.cc",
     "display_embedder/buffer_queue_unittest.cc",
     "display_embedder/server_shared_bitmap_manager_unittest.cc",
+    "display_embedder/skia_output_surface_impl_unittest.cc",
     "frame_sinks/compositor_frame_sink_support_unittest.cc",
     "frame_sinks/direct_layer_tree_frame_sink_unittest.cc",
     "frame_sinks/frame_sink_manager_unittest.cc",

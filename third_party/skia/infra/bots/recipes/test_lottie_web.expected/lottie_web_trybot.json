@@ -236,13 +236,13 @@
     ],
     "env": {
       "CHROME_HEADLESS": "1",
+      "DOCKER_CONFIG": "/home/chrome-bot/.docker",
       "PATH": "<PATH>:RECIPE_PACKAGE_REPO[depot_tools]"
     },
     "name": "Create lottie-web Gold output with Docker"
   },
   {
-    "name": "$result",
-    "recipe_result": null,
-    "status_code": 0
+    "jsonResult": null,
+    "name": "$result"
   }
 ]

@@ -7,8 +7,8 @@ package org.chromium.chrome.browser.contextual_suggestions;
 import android.view.View.OnClickListener;
 
 import org.chromium.chrome.browser.dependency_injection.ActivityScope;
-import org.chromium.chrome.browser.modelutil.PropertyObservable;
 import org.chromium.chrome.browser.widget.ListMenuButton;
+import org.chromium.ui.modelutil.PropertyObservable;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -46,6 +46,13 @@ class ContextualSuggestionsModel
         // Once this model is migrated to PropertyModel, the implementation will be correct.
         return Arrays.asList(PropertyKey.CLOSE_BUTTON_ON_CLICK_LISTENER,
                 PropertyKey.MENU_BUTTON_DELEGATE, PropertyKey.TITLE);
+    }
+
+    @Override
+    public Collection<PropertyKey> getAllProperties() {
+        return Arrays.asList(PropertyKey.CLOSE_BUTTON_ON_CLICK_LISTENER,
+                PropertyKey.MENU_BUTTON_DELEGATE, PropertyKey.TITLE,
+                PropertyKey.TOOLBAR_SHADOW_VISIBILITY);
     }
 
     /** @param clusters The current list of clusters. */

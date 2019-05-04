@@ -24,12 +24,13 @@
 #include "services/service_manager/embedder/result_codes.h"
 #include "services/service_manager/sandbox/mac/audio.sb.h"
 #include "services/service_manager/sandbox/mac/cdm.sb.h"
-#include "services/service_manager/sandbox/mac/common_v2.sb.h"
+#include "services/service_manager/sandbox/mac/common.sb.h"
 #include "services/service_manager/sandbox/mac/gpu_v2.sb.h"
 #include "services/service_manager/sandbox/mac/nacl_loader.sb.h"
+#include "services/service_manager/sandbox/mac/network.sb.h"
 #include "services/service_manager/sandbox/mac/pdf_compositor.sb.h"
-#include "services/service_manager/sandbox/mac/ppapi_v2.sb.h"
-#include "services/service_manager/sandbox/mac/renderer_v2.sb.h"
+#include "services/service_manager/sandbox/mac/ppapi.sb.h"
+#include "services/service_manager/sandbox/mac/renderer.sb.h"
 #include "services/service_manager/sandbox/mac/utility.sb.h"
 #include "services/service_manager/sandbox/sandbox.h"
 #include "services/service_manager/sandbox/sandbox_type.h"
@@ -73,13 +74,13 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
       command_line_->HasSwitch(service_manager::switches::kNoSandbox) ||
       service_manager::IsUnsandboxedSandboxType(sandbox_type);
 
-  bool use_v2 =
-      !no_sandbox && (sandbox_type != service_manager::SANDBOX_TYPE_GPU);
+  bool use_v2 = (sandbox_type != service_manager::SANDBOX_TYPE_GPU) ||
+                base::FeatureList::IsEnabled(features::kMacV2GPUSandbox);
 
   if (use_v2 && !no_sandbox) {
     // Generate the profile string.
     std::string profile =
-        std::string(service_manager::kSeatbeltPolicyString_common_v2);
+        std::string(service_manager::kSeatbeltPolicyString_common);
 
     switch (sandbox_type) {
       case service_manager::SANDBOX_TYPE_CDM:
@@ -92,10 +93,10 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
         profile += service_manager::kSeatbeltPolicyString_nacl_loader;
         break;
       case service_manager::SANDBOX_TYPE_PPAPI:
-        profile += service_manager::kSeatbeltPolicyString_ppapi_v2;
+        profile += service_manager::kSeatbeltPolicyString_ppapi;
         break;
       case service_manager::SANDBOX_TYPE_RENDERER:
-        profile += service_manager::kSeatbeltPolicyString_renderer_v2;
+        profile += service_manager::kSeatbeltPolicyString_renderer;
         break;
       case service_manager::SANDBOX_TYPE_PDF_COMPOSITOR:
         profile += service_manager::kSeatbeltPolicyString_pdf_compositor;
@@ -103,14 +104,12 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
       case service_manager::SANDBOX_TYPE_AUDIO:
         profile += service_manager::kSeatbeltPolicyString_audio;
         break;
+      case service_manager::SANDBOX_TYPE_NETWORK:
+        profile += service_manager::kSeatbeltPolicyString_network;
+        break;
       case service_manager::SANDBOX_TYPE_UTILITY:
       case service_manager::SANDBOX_TYPE_PROFILING:
         profile += service_manager::kSeatbeltPolicyString_utility;
-        break;
-      case service_manager::SANDBOX_TYPE_NETWORK:
-        // Put a separate CHECK() for the network sandbox so that crash reports
-        // will show which invalid case was hit.
-        CHECK(false);
         break;
       case service_manager::SANDBOX_TYPE_INVALID:
       case service_manager::SANDBOX_TYPE_FIRST_TYPE:
@@ -137,6 +136,9 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
       case service_manager::SANDBOX_TYPE_AUDIO:
         SetupCommonSandboxParameters(seatbelt_exec_client_.get());
         break;
+      case service_manager::SANDBOX_TYPE_NETWORK:
+        SetupNetworkSandboxParameters(seatbelt_exec_client_.get());
+        break;
       case service_manager::SANDBOX_TYPE_PPAPI:
         SetupPPAPISandboxParameters(seatbelt_exec_client_.get());
         break;
@@ -146,7 +148,8 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
                                       *command_line_.get());
         break;
       default:
-        CHECK(false);
+        CHECK(false) << "Unhandled parameters for sandbox_type "
+                     << sandbox_type;
     }
 
     int pipe = seatbelt_exec_client_->GetReadFD();
@@ -154,10 +157,6 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
       LOG(ERROR) << "The file descriptor for the sandboxed child is invalid.";
       return false;
     }
-
-    base::FilePath helper_executable;
-    CHECK(
-        base::PathService::Get(content::CHILD_PROCESS_EXE, &helper_executable));
 
     options->fds_to_remap.push_back(std::make_pair(pipe, pipe));
 
@@ -258,7 +257,7 @@ void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
 // static
 void ChildProcessLauncherHelper::SetRegisteredFilesForService(
     const std::string& service_name,
-    catalog::RequiredFileMap required_files) {
+    std::map<std::string, base::FilePath> required_files) {
   // No file passing from the manifest on Mac yet.
   DCHECK(required_files.empty());
 }

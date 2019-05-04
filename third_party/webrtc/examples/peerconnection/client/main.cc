@@ -9,13 +9,15 @@
  */
 
 #include "examples/peerconnection/client/conductor.h"
-#include "examples/peerconnection/client/flagdefs.h"
+#include "examples/peerconnection/client/flag_defs.h"
 #include "examples/peerconnection/client/main_wnd.h"
 #include "examples/peerconnection/client/peer_connection_client.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/ssladapter.h"
-#include "rtc_base/win32socketinit.h"
-#include "rtc_base/win32socketserver.h"
+#include "rtc_base/ssl_adapter.h"
+#include "rtc_base/win32_socket_init.h"
+#include "rtc_base/win32_socket_server.h"
+#include "system_wrappers/include/field_trial.h"
+#include "test/field_trial.h"
 
 int PASCAL wWinMain(HINSTANCE instance,
                     HINSTANCE prev_instance,
@@ -35,6 +37,11 @@ int PASCAL wWinMain(HINSTANCE instance,
     rtc::FlagList::Print(NULL, false);
     return 0;
   }
+
+  webrtc::test::ValidateFieldTrialsStringOrDie(FLAG_force_fieldtrials);
+  // InitFieldTrialsFromString stores the char*, so the char array must outlive
+  // the application.
+  webrtc::field_trial::InitFieldTrialsFromString(FLAG_force_fieldtrials);
 
   // Abort if the user specifies a port that is outside the allowed
   // range [1, 65535].

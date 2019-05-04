@@ -21,13 +21,9 @@
   "tests": [
     {
       "include": "perf_tests.json",
-      "os": "11.4.1",
-      "dimensions": [
-        {
-          "os": "Mac",
-          "pool": "Chrome"
-        }
-      ]
+      "device type": "iPhone 7",
+      "os": "11.0.3",
+      "max runtime seconds": 7200
     }
   ]
 }

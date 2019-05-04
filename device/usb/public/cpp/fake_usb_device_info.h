@@ -7,12 +7,14 @@
 
 #include <stdint.h>
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "device/usb/public/mojom/device.mojom.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
+#include "url/gurl.h"
 
 namespace device {
 
@@ -27,25 +29,54 @@ class FakeUsbDeviceInfo : public base::RefCounted<FakeUsbDeviceInfo> {
     virtual void OnDeviceRemoved(scoped_refptr<FakeUsbDeviceInfo> device);
   };
 
-  FakeUsbDeviceInfo(uint16_t vendor_id, uint16_t product_id);
+  FakeUsbDeviceInfo(uint16_t usb_version,
+                    uint8_t device_class,
+                    uint8_t device_subclass,
+                    uint8_t device_protocol,
+                    uint16_t device_version,
+                    uint16_t vendor_id,
+                    uint16_t product_id,
+                    const std::string& manufacturer_string,
+                    const std::string& product_string,
+                    const std::string& serial_number);
   FakeUsbDeviceInfo(uint16_t vendor_id,
                     uint16_t product_id,
                     const std::string& manufacturer_string,
                     const std::string& product_string,
                     const std::string& serial_number);
+  FakeUsbDeviceInfo(uint16_t vendor_id,
+                    uint16_t product_id,
+                    const std::string& manufacturer_string,
+                    const std::string& product_string,
+                    const std::string& serial_number,
+                    std::vector<mojom::UsbConfigurationInfoPtr> configurations);
+  FakeUsbDeviceInfo(uint16_t vendor_id,
+                    uint16_t product_id,
+                    const std::string& manufacturer_string,
+                    const std::string& product_string,
+                    const std::string& serial_number,
+                    const GURL& webusb_landing_page);
+  FakeUsbDeviceInfo(uint16_t vendor_id, uint16_t product_id);
+  FakeUsbDeviceInfo(uint16_t vendor_id,
+                    uint16_t product_id,
+                    uint8_t device_class,
+                    std::vector<mojom::UsbConfigurationInfoPtr> configurations);
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
   void NotifyDeviceRemoved();
 
   std::string guid() { return device_info_.guid; }
-  mojom::UsbDeviceInfoPtr GetDeviceInfo() { return device_info_.Clone(); }
+  const mojom::UsbDeviceInfo& GetDeviceInfo() { return device_info_; }
+  void AddConfig(mojom::UsbConfigurationInfoPtr config);
+  bool SetActiveConfig(uint8_t value);
+
+ protected:
+  friend class RefCounted<FakeUsbDeviceInfo>;
+  virtual ~FakeUsbDeviceInfo();
 
  private:
-  friend class RefCounted<FakeUsbDeviceInfo>;
-  ~FakeUsbDeviceInfo();
   void SetDefault();
-
   mojom::UsbDeviceInfo device_info_;
   base::ObserverList<Observer> observer_list_;
   DISALLOW_COPY_AND_ASSIGN(FakeUsbDeviceInfo);

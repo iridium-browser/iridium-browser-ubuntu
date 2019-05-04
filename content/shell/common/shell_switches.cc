@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/strings/string_split.h"
-#include "content/shell/common/layout_test/layout_test_switches.h"
+#include "content/shell/common/web_test/web_test_switches.h"
 
 namespace switches {
 
@@ -17,16 +17,8 @@ const char kContentShellDataPath[] = "data-path";
 const char kCrashDumpsDir[] = "crash-dumps-dir";
 
 // Exposes the window.internals object to JavaScript for interactive development
-// and debugging of layout tests that rely on it.
+// and debugging of web tests that rely on it.
 const char kExposeInternalsForTesting[] = "expose-internals-for-testing";
-
-// Enable site isolation (--site-per-process style isolation) for a subset of
-// sites. The argument is a wildcard pattern which will be matched against the
-// site URL to determine which sites to isolate. This can be used to isolate
-// just one top-level domain, or just one scheme. Example usages:
-//     --isolate-sites-for-testing=*.com
-//     --isolate-sites-for-testing=https://*
-const char kIsolateSitesForTesting[] = "isolate-sites-for-testing";
 
 // Registers additional font files on Windows (for fonts outside the usual
 // %WINDIR%\Fonts location). Multiple files can be used by separating them

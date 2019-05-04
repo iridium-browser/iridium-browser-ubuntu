@@ -10,9 +10,9 @@
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/loader/chrome_navigation_data.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/page_load_metrics/metrics_web_contents_observer.h"
 #include "chrome/browser/previews/previews_infobar_delegate.h"
 #include "chrome/browser/previews/previews_service.h"
@@ -26,15 +26,20 @@
 #include "components/offline_pages/buildflags/buildflags.h"
 #include "components/offline_pages/core/offline_page_item.h"
 #include "components/previews/content/previews_content_util.h"
+#include "components/previews/content/previews_decider_impl.h"
 #include "components/previews/content/previews_ui_service.h"
 #include "components/previews/core/previews_experiments.h"
 #include "components/previews/core/previews_features.h"
+#include "components/previews/core/previews_lite_page_redirect.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/reload_type.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/http/http_response_headers.h"
+#include "services/network/public/cpp/features.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -84,19 +89,43 @@ bool ShouldShowUIForPreviewsType(previews::PreviewsType type) {
   if (type == previews::PreviewsType::NONE)
     return false;
 
-  // Show the UI for LoFi at commit if the UI is the Android Omnibox.
-  if (type == previews::PreviewsType::LOFI)
-    return previews::params::IsPreviewsOmniboxUiEnabled();
-
+  // Show the UI for LoFi at commit if the UI is the Android Omnibox or when
+  // network-service is enabled.
+  if (type == previews::PreviewsType::LOFI) {
+    return previews::params::IsPreviewsOmniboxUiEnabled() ||
+           base::FeatureList::IsEnabled(network::features::kNetworkService);
+  }
   return true;
+}
+
+void LoadOriginalForLitePageRedirect(content::WebContents* web_contents) {
+  std::string original_url;
+  bool extracted = previews::ExtractOriginalURLFromLitePageRedirectURL(
+      web_contents->GetController().GetLastCommittedEntry()->GetURL(),
+      &original_url);
+  ALLOW_UNUSED_LOCAL(extracted);
+  DCHECK(extracted);
+  content::OpenURLParams url_params(GURL(original_url), content::Referrer(),
+                                    WindowOpenDisposition::CURRENT_TAB,
+                                    ui::PAGE_TRANSITION_RELOAD,
+                                    false /* is_render_initiated */);
+  url_params.user_gesture = true;
+  url_params.started_from_context_menu = false;
+  web_contents->OpenURL(url_params);
 }
 
 }  // namespace
 
-PreviewsUITabHelper::~PreviewsUITabHelper() {}
+PreviewsUITabHelper::~PreviewsUITabHelper() {
+  // Report a non-opt out for the previous page if it was a preview and was not
+  // reloaded without previews.
+  if (!on_dismiss_callback_.is_null()) {
+    std::move(on_dismiss_callback_).Run(false);
+  }
+}
 
 PreviewsUITabHelper::PreviewsUITabHelper(content::WebContents* web_contents)
-    : content::WebContentsObserver(web_contents) {
+    : content::WebContentsObserver(web_contents), weak_factory_(this) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 }
 
@@ -114,6 +143,7 @@ void PreviewsUITabHelper::ShowUIElement(
 
 #if defined(OS_ANDROID)
   if (previews::params::IsPreviewsOmniboxUiEnabled()) {
+    displayed_preview_ui_ = true;
     should_display_android_omnibox_badge_ = true;
     return;
   }
@@ -142,6 +172,7 @@ base::string16 PreviewsUITabHelper::GetStalePreviewTimestampText() {
     NOTREACHED();
     return base::string16();
   }
+  DCHECK_GE(min_staleness_in_minutes, 2);
 
   base::Time network_time;
   if (g_browser_process->network_time_tracker()->GetNetworkTime(&network_time,
@@ -178,6 +209,7 @@ base::string16 PreviewsUITabHelper::GetStalePreviewTimestampText() {
   RecordStaleness(PreviewsStalePreviewTimestamp::kTimestampShown);
 
   if (staleness_in_minutes < 60) {
+    DCHECK_GE(staleness_in_minutes, 2);
     return l10n_util::GetStringFUTF16(
         IDS_PREVIEWS_INFOBAR_TIMESTAMP_MINUTES,
         base::IntToString16(staleness_in_minutes));
@@ -205,7 +237,6 @@ void PreviewsUITabHelper::ReloadWithoutPreviews(
     std::move(on_dismiss_callback_).Run(true);
   switch (previews_type) {
     case previews::PreviewsType::LITE_PAGE:
-    case previews::PreviewsType::LITE_PAGE_REDIRECT:
     case previews::PreviewsType::OFFLINE:
     case previews::PreviewsType::NOSCRIPT:
     case previews::PreviewsType::RESOURCE_LOADING_HINTS:
@@ -216,6 +247,9 @@ void PreviewsUITabHelper::ReloadWithoutPreviews(
       break;
     case previews::PreviewsType::LOFI:
       web_contents()->ReloadLoFiImages();
+      break;
+    case previews::PreviewsType::LITE_PAGE_REDIRECT:
+      LoadOriginalForLitePageRedirect(web_contents());
       break;
     case previews::PreviewsType::NONE:
     case previews::PreviewsType::UNSPECIFIED:
@@ -233,23 +267,66 @@ void PreviewsUITabHelper::SetStalePreviewsStateForTesting(
   is_stale_reload_ = is_reload;
 }
 
+void PreviewsUITabHelper::DidStartNavigation(
+    content::NavigationHandle* navigation_handle) {
+  // If reloads are treated as soft opt outs, and this is a main frame reload
+  // from a preview. Report the Preview reload to the decider.
+  if (!base::FeatureList::IsEnabled(
+          previews::features::kPreviewsReloadsAreSoftOptOuts)) {
+    return;
+  }
+  if (navigation_handle->GetReloadType() == content::ReloadType::NONE)
+    return;
+  if (!navigation_handle->IsInMainFrame())
+    return;
+  if (!previews_user_data_)
+    return;
+
+  PreviewsService* previews_service = PreviewsServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
+  if (previews_service && previews_service->previews_ui_service()) {
+    previews_service->previews_ui_service()
+        ->previews_decider_impl()
+        ->AddPreviewReload();
+  }
+}
+
 void PreviewsUITabHelper::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
+  // Delete Previews information later, so that other DidFinishNavigation
+  // methods can reliably use GetPreviewsUserData regardless of order of
+  // WebContentsObservers.
+  // Note that a lot of Navigations (sub-frames, same document, non-committed,
+  // etc.) might not have PreviewsUserData associated with them, but we reduce
+  // likelihood of future leaks by always trying to remove the data.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&PreviewsUITabHelper::RemovePreviewsUserData,
+                                weak_factory_.GetWeakPtr(),
+                                navigation_handle->GetNavigationId()));
+
   // Only show the ui if this is a full main frame navigation.
   if (!navigation_handle->IsInMainFrame() ||
       !navigation_handle->HasCommitted() || navigation_handle->IsSameDocument())
     return;
+
+  // Report a non-opt out for the previous page if it was a preview and was not
+  // reloaded without previews.
+  if (!on_dismiss_callback_.is_null()) {
+    std::move(on_dismiss_callback_).Run(false);
+  }
 
   previews_freshness_ = base::Time();
   previews_user_data_.reset();
 #if defined(OS_ANDROID)
   should_display_android_omnibox_badge_ = false;
 #endif
+  previews::PreviewsUserData* user_data =
+      GetPreviewsUserData(navigation_handle);
+
   // Store Previews information for this navigation.
-  ChromeNavigationData* nav_data = static_cast<ChromeNavigationData*>(
-      navigation_handle->GetNavigationData());
-  if (nav_data && nav_data->previews_user_data()) {
-    previews_user_data_ = nav_data->previews_user_data()->DeepCopy();
+  if (user_data) {
+    previews_user_data_ =
+        std::make_unique<previews::PreviewsUserData>(*user_data);
   }
 
   uint64_t page_id = (previews_user_data_) ? previews_user_data_->page_id() : 0;
@@ -332,7 +409,36 @@ void PreviewsUITabHelper::DidFinishNavigation(
   }
 }
 
+previews::PreviewsUserData*
+PreviewsUITabHelper::CreatePreviewsUserDataForNavigationHandle(
+    content::NavigationHandle* navigation_handle,
+    int64_t page_id) {
+  inflight_previews_user_datas_.emplace(
+      std::piecewise_construct,
+      std::forward_as_tuple(navigation_handle->GetNavigationId()),
+      std::forward_as_tuple(page_id));
+
+  auto data =
+      inflight_previews_user_datas_.find(navigation_handle->GetNavigationId());
+
+  return data == inflight_previews_user_datas_.end() ? nullptr : &data->second;
+}
+
+previews::PreviewsUserData* PreviewsUITabHelper::GetPreviewsUserData(
+    content::NavigationHandle* navigation_handle) {
+  auto data =
+      inflight_previews_user_datas_.find(navigation_handle->GetNavigationId());
+  return data == inflight_previews_user_datas_.end() ? nullptr
+                                                     : &(data->second);
+}
+
+void PreviewsUITabHelper::RemovePreviewsUserData(int64_t navigation_id) {
+  inflight_previews_user_datas_.erase(navigation_id);
+}
+
 // static
 const void* PreviewsUITabHelper::OptOutEventKey() {
   return &kOptOutEventKey;
 }
+
+WEB_CONTENTS_USER_DATA_KEY_IMPL(PreviewsUITabHelper)

@@ -14,6 +14,7 @@
 #include "GrMesh.h"
 #include "GrTypes.h"
 #include "GrVkPipelineState.h"
+#include "vk/GrVkTypes.h"
 
 class GrVkGpu;
 class GrVkImage;
@@ -74,6 +75,8 @@ public:
     void copy(GrSurface* src, GrSurfaceOrigin srcOrigin, const SkIRect& srcRect,
               const SkIPoint& dstPoint) override;
 
+    void executeDrawable(std::unique_ptr<SkDrawable::GpuDrawHandler>) override;
+
     void set(GrRenderTarget*, GrSurfaceOrigin,
              const GrGpuRTCommandBuffer::LoadAndStoreInfo&,
              const GrGpuRTCommandBuffer::StencilLoadAndStoreInfo&);
@@ -83,6 +86,12 @@ public:
 
 private:
     void init();
+
+    // Called instead of init when we are drawing to a render target that already wraps a secondary
+    // command buffer.
+    void initWrapped();
+
+    bool wrapsSecondaryCommandBuffer() const;
 
     GrGpu* gpu() override;
 
@@ -132,7 +141,7 @@ private:
                                        const GrBuffer* instanceBuffer, int instanceCount,
                                        int baseInstance, GrPrimitiveRestart) final;
 
-    void onClear(const GrFixedClip&, GrColor color) override;
+    void onClear(const GrFixedClip&, const SkPMColor4f& color) override;
 
     void onClearStencilClip(const GrFixedClip&, bool insideStencilMask) override;
 
@@ -199,7 +208,7 @@ private:
     VkAttachmentStoreOp         fVkColorStoreOp;
     VkAttachmentLoadOp          fVkStencilLoadOp;
     VkAttachmentStoreOp         fVkStencilStoreOp;
-    GrColor4f                   fClearColor;
+    SkPMColor4f                 fClearColor;
     GrVkPipelineState*          fLastPipelineState;
 
     typedef GrGpuRTCommandBuffer INHERITED;

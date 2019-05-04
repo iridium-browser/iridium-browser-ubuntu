@@ -116,14 +116,14 @@ def _SLASH_J : CLFlag<"J">, HelpText<"Make char type unsigned">,
 // The _SLASH_O option handles all the /O flags, but we also provide separate
 // aliased options to provide separate help messages.
 def _SLASH_O : CLJoined<"O">,
-  HelpText<"Set multiple /O flags at once; e.g. '/O2y-' is the same as '/O2 /y-'">,
+  HelpText<"Set multiple /O flags at once; e.g. '/O2y-' for '/O2 /Oy-'">,
   MetaVarName<"<flags>">;
 // FIXME: Not sure why we have -O0 here; MSVC doesn't support that.
 def : CLFlag<"O0">, Alias<O0>, HelpText<"Disable optimization">;
 def : CLFlag<"O1">, Alias<_SLASH_O>, AliasArgs<["1"]>,
-  HelpText<"Optimize for size (equivalent to /Og /Os /Oy /Ob2 /GF /Gy)">;
+  HelpText<"Optimize for size  (same as /Og     /Os /Oy /Ob2 /GF /Gy)">;
 def : CLFlag<"O2">, Alias<_SLASH_O>, AliasArgs<["2"]>,
-  HelpText<"Optimize for speed (equivalent to /Og /Oi /Ot /Oy /Ob2 /GF /Gy)">;
+  HelpText<"Optimize for speed (same as /Og /Oi /Ot /Oy /Ob2 /GF /Gy)">;
 def : CLFlag<"Ob0">, Alias<_SLASH_O>, AliasArgs<["b0"]>,
   HelpText<"Disable function inlining">;
 def : CLFlag<"Ob1">, Alias<_SLASH_O>, AliasArgs<["b1"]>,
@@ -143,7 +143,7 @@ def : CLFlag<"Os">, Alias<_SLASH_O>, AliasArgs<["s"]>,
 def : CLFlag<"Ot">, Alias<_SLASH_O>, AliasArgs<["t"]>,
   HelpText<"Optimize for speed">;
 def : CLFlag<"Ox">, Alias<_SLASH_O>, AliasArgs<["x"]>,
-  HelpText<"Deprecated (equivalent to /Og /Oi /Ot /Oy /Ob2); use /O2 instead">;
+  HelpText<"Deprecated (same as /Og /Oi /Ot /Oy /Ob2); use /O2 instead">;
 def : CLFlag<"Oy">, Alias<_SLASH_O>, AliasArgs<["y"]>,
   HelpText<"Enable frame pointer omission (x86 only)">;
 def : CLFlag<"Oy-">, Alias<_SLASH_O>, AliasArgs<["y-"]>,
@@ -158,6 +158,10 @@ def _SLASH_Qvec_ : CLFlag<"Qvec-">,
 def _SLASH_showIncludes : CLFlag<"showIncludes">,
   HelpText<"Print info about included files to stderr">,
   Alias<show_includes>;
+def _SLASH_showFilenames : CLFlag<"showFilenames">,
+  HelpText<"Print the name of each compiled file">;
+def _SLASH_showFilenames_ : CLFlag<"showFilenames-">,
+  HelpText<"Don't print the name of each compiled file (default)">;
 def _SLASH_source_charset : CLCompileJoined<"source-charset:">,
   HelpText<"Source encoding, supports only UTF-8">, Alias<finput_charset_EQ>;
 def _SLASH_execution_charset : CLCompileJoined<"execution-charset:">,
@@ -203,6 +207,12 @@ def _SLASH_Zc_sizedDealloc : CLFlag<"Zc:sizedDealloc">,
 def _SLASH_Zc_sizedDealloc_ : CLFlag<"Zc:sizedDealloc-">,
   HelpText<"Disable C++14 sized global deallocation functions">,
   Alias<fno_sized_deallocation>;
+def _SLASH_Zc_alignedNew : CLFlag<"Zc:alignedNew">,
+  HelpText<"Enable C++17 aligned allocation functions">,
+  Alias<faligned_allocation>;
+def _SLASH_Zc_alignedNew_ : CLFlag<"Zc:alignedNew-">,
+  HelpText<"Disable C++17 aligned allocation functions">,
+  Alias<fno_aligned_allocation>;
 def _SLASH_Zc_strictStrings : CLFlag<"Zc:strictStrings">,
   HelpText<"Treat string literals as const">, Alias<W_Joined>,
   AliasArgs<["error=c++11-compat-deprecated-writable-strings"]>;
@@ -317,6 +327,8 @@ def _SLASH_vmv : CLFlag<"vmv">,
 def _SLASH_volatile_ms  : Option<["/", "-"], "volatile:ms", KIND_FLAG>,
   Group<_SLASH_volatile_Group>, Flags<[CLOption, DriverOption]>,
   HelpText<"Volatile loads and stores have acquire and release semantics">;
+def _SLASH_clang : CLJoined<"clang:">,
+  HelpText<"Pass <arg> to the clang driver">, MetaVarName<"<arg>">;
 def _SLASH_Zl : CLFlag<"Zl">,
   HelpText<"Don't mention any default libraries in the object file">;
 
@@ -329,6 +341,10 @@ def _SLASH_Yu : CLJoined<"Yu">,
   MetaVarName<"<filename>">;
 def _SLASH_Y_ : CLFlag<"Y-">,
   HelpText<"Disable precompiled headers, overrides /Yc and /Yu">;
+def _SLASH_Zc_dllexportInlines : CLFlag<"Zc:dllexportInlines">,
+  HelpText<"dllexport/dllimport inline member functions of dllexport/import classes (default)">;
+def _SLASH_Zc_dllexportInlines_ : CLFlag<"Zc:dllexportInlines-">,
+  HelpText<"Don't dllexport/dllimport inline member functions of dllexport/import classes">;
 def _SLASH_Fp : CLJoined<"Fp">,
   HelpText<"Set pch filename (with /Yc and /Yu)">, MetaVarName<"<filename>">;
 

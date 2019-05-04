@@ -7,14 +7,16 @@
 #include <math.h>
 
 #include <queue>
+#include <unordered_map>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
-#include "content/browser/devtools/render_frame_devtools_agent_host.h"
+#include "content/browser/devtools/devtools_instrumentation.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/navigation_request.h"
 #include "content/browser/frame_host/navigator.h"
@@ -22,7 +24,8 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/frame_messages.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/browser_side_navigation_policy.h"
+#include "content/public/common/content_features.h"
+#include "content/public/common/navigation_policy.h"
 #include "third_party/blink/public/common/frame/sandbox_flags.h"
 #include "third_party/blink/public/common/frame/user_activation_update_type.h"
 
@@ -32,7 +35,7 @@ namespace {
 
 // This is a global map between frame_tree_node_ids and pointers to
 // FrameTreeNodes.
-typedef base::hash_map<int, FrameTreeNode*> FrameTreeNodeIdMap;
+typedef std::unordered_map<int, FrameTreeNode*> FrameTreeNodeIdMap;
 
 base::LazyInstance<FrameTreeNodeIdMap>::DestructorAtExit
     g_frame_tree_node_id_map = LAZY_INSTANCE_INITIALIZER;
@@ -94,7 +97,8 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
                              const std::string& unique_name,
                              bool is_created_by_script,
                              const base::UnguessableToken& devtools_frame_token,
-                             const FrameOwnerProperties& frame_owner_properties)
+                             const FrameOwnerProperties& frame_owner_properties,
+                             blink::FrameOwnerElementType owner_type)
     : frame_tree_(frame_tree),
       navigator_(navigator),
       render_manager_(this, frame_tree->manager_delegate()),
@@ -114,7 +118,8 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
           /* hashes of hosts for insecure request upgrades */,
           false /* is a potentially trustworthy unique origin */,
           false /* has received a user gesture */,
-          false /* has received a user gesture before nav */),
+          false /* has received a user gesture before nav */,
+          owner_type),
       is_created_by_script_(is_created_by_script),
       devtools_frame_token_(devtools_frame_token),
       frame_owner_properties_(frame_owner_properties),
@@ -176,10 +181,6 @@ bool FrameTreeNode::IsMainFrame() const {
   return frame_tree_->root() == this;
 }
 
-void FrameTreeNode::ResetForNewProcess() {
-  current_frame_host()->ResetChildren();
-}
-
 void FrameTreeNode::ResetForNavigation() {
   // Discard any CSP headers from the previous document.
   replication_state_.accumulated_csp_headers.clear();
@@ -188,6 +189,15 @@ void FrameTreeNode::ResetForNavigation() {
   // Clear any CSP-set sandbox flags, and the declared feature policy for the
   // frame.
   UpdateFramePolicyHeaders(blink::WebSandboxFlags::kNone, {});
+
+  // TODO(crbug.com/736415): Clear this bit unconditionally for all frames.
+  if (IsMainFrame()) {
+    // This frame has had its user activation bits cleared in the renderer
+    // before arriving here. We just need to clear them here and in the other
+    // renderer processes that may have a reference to this frame.
+    UpdateUserActivationState(
+        blink::UserActivationUpdateType::kClearActivation);
+  }
 }
 
 void FrameTreeNode::SetOpener(FrameTreeNode* opener) {
@@ -356,8 +366,7 @@ bool FrameTreeNode::CommitPendingFramePolicy() {
 
 void FrameTreeNode::TransferNavigationRequestOwnership(
     RenderFrameHostImpl* render_frame_host) {
-  RenderFrameDevToolsAgentHost::OnResetNavigationRequest(
-      navigation_request_.get());
+  devtools_instrumentation::OnResetNavigationRequest(navigation_request_.get());
   render_frame_host->SetNavigationRequest(std::move(navigation_request_));
 }
 
@@ -401,8 +410,7 @@ void FrameTreeNode::ResetNavigationRequest(bool keep_state,
   if (!navigation_request_)
     return;
 
-  RenderFrameDevToolsAgentHost::OnResetNavigationRequest(
-      navigation_request_.get());
+  devtools_instrumentation::OnResetNavigationRequest(navigation_request_.get());
 
   // The renderer should be informed if the caller allows to do so and the
   // navigation came from a BeginNavigation IPC.
@@ -542,9 +550,31 @@ void FrameTreeNode::BeforeUnloadCanceled() {
 }
 
 bool FrameTreeNode::NotifyUserActivation() {
-  for (FrameTreeNode* node = this; node; node = node->parent())
+  for (FrameTreeNode* node = this; node; node = node->parent()) {
+    if (!node->user_activation_state_.HasBeenActive() &&
+        node->current_frame_host())
+      node->current_frame_host()->DidReceiveFirstUserActivation();
     node->user_activation_state_.Activate();
+  }
   replication_state_.has_received_user_gesture = true;
+
+  // TODO(mustaq): The following block relaxes UAv2 a bit to make it slightly
+  // closer to the old (v1) model, to address a Hangout regression.  We will
+  // remove this after implementing a mechanism to delegate activation to
+  // subframes (https://crbug.com/728334)
+  if (base::FeatureList::IsEnabled(features::kUserActivationV2) &&
+      base::FeatureList::IsEnabled(
+          features::kUserActivationSameOriginVisibility)) {
+    const url::Origin& current_origin =
+        this->current_frame_host()->GetLastCommittedOrigin();
+    for (FrameTreeNode* node : frame_tree()->Nodes()) {
+      if (node->current_frame_host()->GetLastCommittedOrigin().IsSameOriginWith(
+              current_origin)) {
+        node->user_activation_state_.Activate();
+      }
+    }
+  }
+
   return true;
 }
 
@@ -553,6 +583,15 @@ bool FrameTreeNode::ConsumeTransientUserActivation() {
   for (FrameTreeNode* node : frame_tree()->Nodes())
     node->user_activation_state_.ConsumeIfActive();
   return was_active;
+}
+
+bool FrameTreeNode::ClearUserActivation() {
+  // Only received for a new main frame.
+  // TODO(crbug.com/736415): Clear this bit unconditionally for all frames.
+  DCHECK(IsMainFrame());
+  for (FrameTreeNode* node : frame_tree()->SubtreeNodes(this))
+    node->user_activation_state_.Clear();
+  return true;
 }
 
 bool FrameTreeNode::UpdateUserActivationState(
@@ -564,6 +603,9 @@ bool FrameTreeNode::UpdateUserActivationState(
 
     case blink::UserActivationUpdateType::kNotifyActivation:
       return NotifyUserActivation();
+
+    case blink::UserActivationUpdateType::kClearActivation:
+      return ClearUserActivation();
   }
   NOTREACHED() << "Invalid update_type.";
 }
@@ -610,6 +652,19 @@ void FrameTreeNode::UpdateFramePolicyHeaders(
   // Notify any proxies if the policies have been changed.
   if (changed)
     render_manager()->OnDidSetFramePolicyHeaders();
+}
+
+void FrameTreeNode::PruneChildFrameNavigationEntries(
+    NavigationEntryImpl* entry) {
+  for (size_t i = 0; i < current_frame_host()->child_count(); ++i) {
+    FrameTreeNode* child = current_frame_host()->child_at(i);
+    if (child->is_created_by_script_) {
+      entry->RemoveEntryForFrame(child,
+                                 /* only_if_different_position = */ false);
+    } else {
+      child->PruneChildFrameNavigationEntries(entry);
+    }
+  }
 }
 
 }  // namespace content

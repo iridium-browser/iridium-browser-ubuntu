@@ -5,6 +5,7 @@
 #include "ui/accessibility/platform/ax_platform_node_base.h"
 
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -17,21 +18,64 @@
 #include "ui/accessibility/ax_role_properties.h"
 #include "ui/accessibility/ax_tree_data.h"
 #include "ui/accessibility/platform/ax_platform_node_delegate.h"
+#include "ui/accessibility/platform/compute_attributes.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
 namespace ui {
 
 const base::char16 AXPlatformNodeBase::kEmbeddedCharacter = L'\xfffc';
 
+// Map from each AXPlatformNode's unique id to its instance.
+using UniqueIdMap = std::unordered_map<int32_t, AXPlatformNode*>;
+base::LazyInstance<UniqueIdMap>::Leaky g_unique_id_map =
+    LAZY_INSTANCE_INITIALIZER;
+
+#if !BUILDFLAG_INTERNAL_HAS_NATIVE_ACCESSIBILITY()
+// static
+AXPlatformNode* AXPlatformNode::Create(AXPlatformNodeDelegate* delegate) {
+  AXPlatformNodeBase* node = new AXPlatformNodeBase();
+  node->Init(delegate);
+  return node;
+}
+#endif
+
+// static
+AXPlatformNode* AXPlatformNodeBase::GetFromUniqueId(int32_t unique_id) {
+  UniqueIdMap* unique_ids = g_unique_id_map.Pointer();
+  auto iter = unique_ids->find(unique_id);
+  if (iter != unique_ids->end())
+    return iter->second;
+
+  return nullptr;
+}
+
+// static
+size_t AXPlatformNodeBase::GetInstanceCountForTesting() {
+  return g_unique_id_map.Get().size();
+}
+
+AXPlatformNodeBase::AXPlatformNodeBase() = default;
+
+AXPlatformNodeBase::~AXPlatformNodeBase() = default;
+
 void AXPlatformNodeBase::Init(AXPlatformNodeDelegate* delegate) {
   delegate_ = delegate;
+
+  // This must be called after assigning our delegate.
+  g_unique_id_map.Get()[GetUniqueId()] = this;
 }
 
 const AXNodeData& AXPlatformNodeBase::GetData() const {
-  static base::NoDestructor<AXNodeData> empty_data;
+  static const base::NoDestructor<AXNodeData> empty_data;
   if (delegate_)
     return delegate_->GetData();
   return *empty_data;
+}
+
+gfx::NativeViewAccessible AXPlatformNodeBase::GetFocus() {
+  if (delegate_)
+    return delegate_->GetFocus();
+  return nullptr;
 }
 
 gfx::NativeViewAccessible AXPlatformNodeBase::GetParent() {
@@ -52,10 +96,17 @@ gfx::NativeViewAccessible AXPlatformNodeBase::ChildAtIndex(int index) {
   return nullptr;
 }
 
+int AXPlatformNodeBase::GetIndexInParent() {
+  return -1;
+}
+
 // AXPlatformNode overrides.
 
 void AXPlatformNodeBase::Destroy() {
+  g_unique_id_map.Get().erase(GetUniqueId());
+
   AXPlatformNode::Destroy();
+
   delegate_ = nullptr;
   Dispose();
 }
@@ -67,6 +118,13 @@ void AXPlatformNodeBase::Dispose() {
 gfx::NativeViewAccessible AXPlatformNodeBase::GetNativeViewAccessible() {
   return nullptr;
 }
+
+void AXPlatformNodeBase::NotifyAccessibilityEvent(ax::mojom::Event event_type) {
+}
+
+#if defined(OS_MACOSX)
+void AXPlatformNodeBase::AnnounceText(base::string16& text) {}
+#endif
 
 AXPlatformNodeDelegate* AXPlatformNodeBase::GetDelegate() const {
   return delegate_;
@@ -190,9 +248,8 @@ bool AXPlatformNodeBase::HasStringAttribute(
 
 const std::string& AXPlatformNodeBase::GetStringAttribute(
     ax::mojom::StringAttribute attribute) const {
-  static base::NoDestructor<std::string> empty_data;
   if (!delegate_)
-    return *empty_data;
+    return base::EmptyString();
   return GetData().GetStringAttribute(attribute);
 }
 
@@ -228,7 +285,7 @@ bool AXPlatformNodeBase::HasIntListAttribute(
 
 const std::vector<int32_t>& AXPlatformNodeBase::GetIntListAttribute(
     ax::mojom::IntListAttribute attribute) const {
-  static base::NoDestructor<std::vector<int32_t>> empty_data;
+  static const base::NoDestructor<std::vector<int32_t>> empty_data;
   if (!delegate_)
     return *empty_data;
   return GetData().GetIntListAttribute(attribute);
@@ -240,12 +297,6 @@ bool AXPlatformNodeBase::GetIntListAttribute(
   if (!delegate_)
     return false;
   return GetData().GetIntListAttribute(attribute, value);
-}
-
-AXPlatformNodeBase::AXPlatformNodeBase() {
-}
-
-AXPlatformNodeBase::~AXPlatformNodeBase() {
 }
 
 // static
@@ -343,7 +394,7 @@ AXPlatformNodeBase* AXPlatformNodeBase::GetSelectionContainer() const {
     return nullptr;
   AXPlatformNodeBase* container = const_cast<AXPlatformNodeBase*>(this);
   while (container &&
-         !IsContainerWithSelectableChildrenRole(container->GetData().role)) {
+         !IsContainerWithSelectableChildren(container->GetData().role)) {
     gfx::NativeViewAccessible parent_accessible = container->GetParent();
     AXPlatformNodeBase* parent = FromNativeViewAccessible(parent_accessible);
 
@@ -356,7 +407,7 @@ AXPlatformNodeBase* AXPlatformNodeBase::GetTable() const {
   if (!delegate_)
     return nullptr;
   AXPlatformNodeBase* table = const_cast<AXPlatformNodeBase*>(this);
-  while (table && !IsTableLikeRole(table->GetData().role)) {
+  while (table && !IsTableLike(table->GetData().role)) {
     gfx::NativeViewAccessible parent_accessible = table->GetParent();
     AXPlatformNodeBase* parent = FromNativeViewAccessible(parent_accessible);
 
@@ -368,8 +419,7 @@ AXPlatformNodeBase* AXPlatformNodeBase::GetTable() const {
 AXPlatformNodeBase* AXPlatformNodeBase::GetTableCell(int index) const {
   if (!delegate_)
     return nullptr;
-  if (!IsTableLikeRole(GetData().role) &&
-      !IsCellOrTableHeaderRole(GetData().role))
+  if (!IsTableLike(GetData().role) && !IsCellOrTableHeader(GetData().role))
     return nullptr;
 
   AXPlatformNodeBase* table = GetTable();
@@ -382,8 +432,7 @@ AXPlatformNodeBase* AXPlatformNodeBase::GetTableCell(int index) const {
 
 AXPlatformNodeBase* AXPlatformNodeBase::GetTableCell(int row,
                                                      int column) const {
-  if (!IsTableLikeRole(GetData().role) &&
-      !IsCellOrTableHeaderRole(GetData().role))
+  if (!IsTableLike(GetData().role) && !IsCellOrTableHeader(GetData().role))
     return nullptr;
 
   if (row < 0 || row >= GetTableRowCount() || column < 0 ||
@@ -401,14 +450,7 @@ AXPlatformNodeBase* AXPlatformNodeBase::GetTableCell(int row,
 }
 
 int AXPlatformNodeBase::GetTableCellIndex() const {
-  if (!IsCellOrTableHeaderRole(GetData().role))
-    return -1;
-
-  AXPlatformNodeBase* table = GetTable();
-  if (!table)
-    return -1;
-
-  return table->delegate_->CellIdToIndex(GetData().id);
+  return delegate_->GetTableCellIndex();
 }
 
 int AXPlatformNodeBase::GetTableColumn() const {
@@ -424,7 +466,7 @@ int AXPlatformNodeBase::GetTableColumnCount() const {
 }
 
 int AXPlatformNodeBase::GetTableColumnSpan() const {
-  if (!IsCellOrTableHeaderRole(GetData().role))
+  if (!IsCellOrTableHeader(GetData().role))
     return 0;
 
   int column_span;
@@ -447,7 +489,7 @@ int AXPlatformNodeBase::GetTableRowCount() const {
 }
 
 int AXPlatformNodeBase::GetTableRowSpan() const {
-  if (!IsCellOrTableHeaderRole(GetData().role))
+  if (!IsCellOrTableHeader(GetData().role))
     return 0;
 
   int row_span;
@@ -457,6 +499,9 @@ int AXPlatformNodeBase::GetTableRowSpan() const {
 }
 
 bool AXPlatformNodeBase::HasCaret() {
+  if (IsInvisibleOrIgnored())
+    return false;
+
   if (IsPlainTextField() &&
       HasIntAttribute(ax::mojom::IntAttribute::kTextSelStart) &&
       HasIntAttribute(ax::mojom::IntAttribute::kTextSelEnd)) {
@@ -526,6 +571,12 @@ bool AXPlatformNodeBase::IsChildOfLeaf() {
   }
 
   return false;
+}
+
+bool AXPlatformNodeBase::IsInvisibleOrIgnored() const {
+  const AXNodeData& data = GetData();
+  return data.HasState(ax::mojom::State::kInvisible) ||
+         data.role == ax::mojom::Role::kIgnored;
 }
 
 bool AXPlatformNodeBase::IsScrollable() const {
@@ -618,6 +669,9 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
 
   if (HasIntAttribute(ax::mojom::IntAttribute::kCheckedState))
     AddAttributeToList("checkable", "true", attributes);
+
+  if (IsInvisibleOrIgnored())  // Note: NVDA prefers this over INVISIBLE state.
+    AddAttributeToList("hidden", "true", attributes);
 
   // Expose live region attributes.
   AddAttributeToList(ax::mojom::StringAttribute::kLiveStatus, "live",
@@ -717,21 +771,18 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
   }
 
   // Expose table cell index.
-  if (IsCellOrTableHeaderRole(GetData().role)) {
-    AXPlatformNodeBase* table = GetTable();
-    if (table) {
-      int32_t index = table->delegate_->CellIdToIndex(GetData().id);
-      if (index >= 0) {
-        std::string str_index(base::IntToString(index));
-        AddAttributeToList("table-cell-index", str_index, attributes);
-      }
+  if (IsCellOrTableHeader(GetData().role)) {
+    int32_t index = delegate_->GetTableCellIndex();
+    if (index >= 0) {
+      std::string str_index(base::IntToString(index));
+      AddAttributeToList("table-cell-index", str_index, attributes);
     }
   }
   if (GetData().role == ax::mojom::Role::kLayoutTable)
     AddAttributeToList("layout-guess", "true", attributes);
 
   // Expose aria-colcount and aria-rowcount in a table, grid or treegrid.
-  if (IsTableLikeRole(GetData().role)) {
+  if (IsTableLike(GetData().role)) {
     AddAttributeToList(ax::mojom::IntAttribute::kAriaColumnCount, "colcount",
                        attributes);
     AddAttributeToList(ax::mojom::IntAttribute::kAriaRowCount, "rowcount",
@@ -739,7 +790,7 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
   }
 
   // Expose aria-colindex and aria-rowindex in a cell or row.
-  if (IsCellOrTableHeaderRole(GetData().role) ||
+  if (IsCellOrTableHeader(GetData().role) ||
       GetData().role == ax::mojom::Role::kRow) {
     if (GetData().role != ax::mojom::Role::kRow)
       AddAttributeToList(ax::mojom::IntAttribute::kAriaCellColumnIndex,
@@ -786,7 +837,7 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
     }
   }
 
-  if (IsCellOrTableHeaderRole(GetData().role)) {
+  if (IsCellOrTableHeader(GetData().role)) {
     // Expose colspan attribute.
     std::string colspan;
     if (GetData().GetHtmlAttribute("aria-colspan", &colspan)) {
@@ -891,9 +942,10 @@ void AXPlatformNodeBase::AddAttributeToList(
     const char* name,
     PlatformAttributeList* attributes) {
   DCHECK(attributes);
-  int value;
-  if (GetIntAttribute(attribute, &value)) {
-    std::string str_value = base::IntToString(value);
+
+  auto maybe_value = ComputeAttribute(delegate_, attribute);
+  if (maybe_value.has_value()) {
+    std::string str_value = base::IntToString(maybe_value.value());
     AddAttributeToList(name, str_value, attributes);
   }
 }
@@ -952,6 +1004,19 @@ AXHypertext AXPlatformNodeBase::ComputeHypertext() {
   }
   result.hypertext = hypertext;
   return result;
+}
+
+void AXPlatformNodeBase::AddAttributeToList(const char* name,
+                                            const char* value,
+                                            PlatformAttributeList* attributes) {
+}
+
+int32_t AXPlatformNodeBase::GetPosInSet() const {
+  return delegate_->GetPosInSet();
+}
+
+int32_t AXPlatformNodeBase::GetSetSize() const {
+  return delegate_->GetSetSize();
 }
 
 // static

@@ -11,6 +11,8 @@
 
 #if defined(SK_VULKAN)
 
+#include "vk/GrVkVulkan.h"
+
 #include "GrBackendSurface.h"
 #include "GrContextFactory.h"
 #include "GrContextPriv.h"
@@ -62,9 +64,11 @@ public:
             "}";
 
         SkSL::Program::Settings settings;
+        SkSL::String spirv;
         SkSL::Program::Inputs inputs;
         if (!GrCompileVkShaderModule(gpu, vertShaderText, VK_SHADER_STAGE_VERTEX_BIT,
-                                     &fVertShaderModule, &fShaderStageInfo[0], settings, &inputs)) {
+                                     &fVertShaderModule, &fShaderStageInfo[0], settings,
+                                     &spirv, &inputs)) {
             this->destroyResources(gpu);
             REPORTER_ASSERT(reporter, false);
             return;
@@ -72,7 +76,8 @@ public:
         SkASSERT(inputs.isEmpty());
 
         if (!GrCompileVkShaderModule(gpu, fragShaderText, VK_SHADER_STAGE_FRAGMENT_BIT,
-                                     &fFragShaderModule, &fShaderStageInfo[1], settings, &inputs)) {
+                                     &fFragShaderModule, &fShaderStageInfo[1], settings,
+                                     &spirv, &inputs)) {
             this->destroyResources(gpu);
             REPORTER_ASSERT(reporter, false);
             return;

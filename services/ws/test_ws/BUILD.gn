@@ -3,12 +3,11 @@
 # found in the LICENSE file.
 
 import("//mojo/public/tools/bindings/mojom.gni")
-import("//services/service_manager/public/cpp/service.gni")
+import("//services/service_manager/public/cpp/service_executable.gni")
 import("//services/service_manager/public/service_manifest.gni")
 
-service("test_ws") {
+service_executable("test_ws") {
   testonly = true
-
   sources = [
     "test_ws.cc",
   ]
@@ -43,6 +42,7 @@ source_set("lib") {
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/mojom",
     "//services/ws:lib",
+    "//services/ws:test_support",
     "//services/ws/gpu_host",
     "//services/ws/public/cpp",
     "//services/ws/public/cpp/host",

@@ -36,11 +36,6 @@ class DrmGpuDisplayManager {
   // displays is refreshed.
   MovableDisplaySnapshots GetDisplays();
 
-  // Returns all scanout formats for |widget| representing a particular display
-  // controller or default display controller for kNullAcceleratedWidget.
-  void GetScanoutFormats(gfx::AcceleratedWidget widget,
-                         std::vector<gfx::BufferFormat>* scanout_formats);
-
   // Takes/releases the control of the DRM devices.
   bool TakeDisplayControl();
   void RelinquishDisplayControl();
@@ -53,6 +48,8 @@ class DrmGpuDisplayManager {
   bool SetHDCPState(int64_t display_id, display::HDCPState state);
   void SetColorMatrix(int64_t display_id,
                       const std::vector<float>& color_matrix);
+  void SetBackgroundColor(int64_t display_id,
+                          const uint64_t background_color);
   void SetGammaCorrection(
       int64_t display_id,
       const std::vector<display::GammaRampRGBEntry>& degamma_lut,

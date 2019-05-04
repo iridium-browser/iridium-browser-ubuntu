@@ -317,7 +317,7 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // ACTIVE.
   void StartArc();
 
-  // Requests to stop ARC instnace. This resets two persistent flags:
+  // Requests to stop ARC instance. This resets two persistent flags:
   // kArcSignedIn and kArcTermsAccepted, so that, in next enabling,
   // it is started from Terms of Service negotiation.
   // TODO(hidehiko): Introduce STOPPING state, and this function should
@@ -349,6 +349,11 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // chromeos::SessionManagerClient::Observer:
   void EmitLoginPromptVisibleCalled() override;
 
+  // Updates |should_record_legacy_enabled_state_| and |enabled_state_uma_|
+  // whenever |profile_| or |enable_requested_| is changed (except Shutdown()).
+  // TODO(crbug.com/929583): Remove this temporary fix.
+  void UpdatePersistentUMAState();
+
   std::unique_ptr<ArcSessionRunner> arc_session_runner_;
 
   // Unowned pointer. Keeps current profile.
@@ -365,13 +370,6 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   std::unique_ptr<ArcAppLauncher> playstore_launcher_;
   bool reenable_arc_ = false;
   bool provisioning_reported_ = false;
-  // In case ARC is started from OOBE |oobe_start_|, set to true. This flag is
-  // used to remember |IsArcOobeOptInActive| or
-  // |IsArcOptInWizardForAssistantActive| state when ARC start request was made.
-  // |IsArcOobeOptInActive| or |IsArcOptInWizardForAssistantActive| will be
-  // changed by the time when |oobe_or_opa_start_| is checked to prevent the
-  // Play Store auto-launch.
-  bool oobe_or_assistant_wizard_start_ = false;
   bool directly_started_ = false;
   base::OneShotTimer arc_sign_in_timer_;
 
@@ -391,6 +389,13 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // The time when ARC was about to start.
   base::Time arc_start_time_;
   base::Closure attempt_user_exit_callback_;
+
+  // ARC state depends on |profile_| and |enable_requested_| which is reset in
+  // Shutdown(). Since UMA recording happens after Shutdown() on browser
+  // shutdown, here we persist relevant state for UMA recording purposes.
+  // TODO(crbug.com/929583): Remove this temporary fix.
+  bool should_record_legacy_enabled_state_ = false;
+  bool enabled_state_uma_ = false;
 
   // Must be the last member.
   base::WeakPtrFactory<ArcSessionManager> weak_ptr_factory_;

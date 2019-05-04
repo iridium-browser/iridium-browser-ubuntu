@@ -5,8 +5,7 @@
 #include "media/gpu/vaapi/vp8_encoder.h"
 
 #include "base/bits.h"
-
-#define DVLOGF(level) DVLOG(level) << __func__ << "(): "
+#include "media/gpu/macros.h"
 
 namespace media {
 
@@ -156,12 +155,8 @@ void VP8Encoder::InitializeFrameHeader() {
 }
 
 void VP8Encoder::UpdateFrameHeader(bool keyframe) {
-  current_frame_hdr_.frame_type =
-      keyframe ? Vp8FrameHeader::KEYFRAME : Vp8FrameHeader::INTERFRAME;
-}
-
-void VP8Encoder::UpdateReferenceFrames(scoped_refptr<VP8Picture> picture) {
-  if (current_frame_hdr_.IsKeyframe()) {
+  if (keyframe) {
+    current_frame_hdr_.frame_type = Vp8FrameHeader::KEYFRAME;
     current_frame_hdr_.refresh_last = true;
     current_frame_hdr_.refresh_golden_frame = true;
     current_frame_hdr_.refresh_alternate_frame = true;
@@ -170,6 +165,7 @@ void VP8Encoder::UpdateReferenceFrames(scoped_refptr<VP8Picture> picture) {
     current_frame_hdr_.copy_buffer_to_alternate =
         Vp8FrameHeader::NO_ALT_REFRESH;
   } else {
+    current_frame_hdr_.frame_type = Vp8FrameHeader::INTERFRAME;
     // TODO(sprang): Add temporal layer support.
     current_frame_hdr_.refresh_last = true;
     current_frame_hdr_.refresh_golden_frame = false;
@@ -179,7 +175,9 @@ void VP8Encoder::UpdateReferenceFrames(scoped_refptr<VP8Picture> picture) {
     current_frame_hdr_.copy_buffer_to_alternate =
         Vp8FrameHeader::COPY_GOLDEN_TO_ALT;
   }
+}
 
+void VP8Encoder::UpdateReferenceFrames(scoped_refptr<VP8Picture> picture) {
   reference_frames_.Refresh(picture);
 }
 

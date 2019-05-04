@@ -28,15 +28,11 @@ CFFL_FormFiller::~CFFL_FormFiller() {
 
 void CFFL_FormFiller::DestroyWindows() {
   while (!m_Maps.empty()) {
-    std::unique_ptr<CFFL_PrivateData> pData;
-    {
-      auto it = m_Maps.begin();
-      std::unique_ptr<CPWL_Wnd> pWnd = std::move(it->second);
-      pData.reset(static_cast<CFFL_PrivateData*>(pWnd->GetAttachedData()));
-      m_Maps.erase(it);
-      pWnd->InvalidateProvider(this);
-      pWnd->Destroy();
-    }
+    auto it = m_Maps.begin();
+    std::unique_ptr<CPWL_Wnd> pWnd = std::move(it->second);
+    m_Maps.erase(it);
+    pWnd->InvalidateProvider(this);
+    pWnd->Destroy();
   }
 }
 
@@ -65,10 +61,9 @@ void CFFL_FormFiller::OnDraw(CPDFSDK_PageView* pPageView,
                              CPDFSDK_Annot* pAnnot,
                              CFX_RenderDevice* pDevice,
                              const CFX_Matrix& mtUser2Device) {
-  if (CPWL_Wnd* pWnd = GetPDFWindow(pPageView, false)) {
-    CFX_Matrix mt = GetCurMatrix();
-    mt.Concat(mtUser2Device);
-    pWnd->DrawAppearance(pDevice, mt);
+  CPWL_Wnd* pWnd = GetPDFWindow(pPageView, false);
+  if (pWnd) {
+    pWnd->DrawAppearance(pDevice, GetCurMatrix() * mtUser2Device);
     return;
   }
 
@@ -333,7 +328,6 @@ bool CFFL_FormFiller::IsValid() const {
 
 CPWL_Wnd::CreateParams CFFL_FormFiller::GetCreateParam() {
   CPWL_Wnd::CreateParams cp;
-  cp.pParentWnd = nullptr;
   cp.pProvider.Reset(this);
   cp.rcRectWnd = GetPDFWindowRect();
 
@@ -395,8 +389,7 @@ CPWL_Wnd* CFFL_FormFiller::GetPDFWindow(CPDFSDK_PageView* pPageView,
     pPrivateData->pPageView = pPageView;
     pPrivateData->nWidgetAppearanceAge = m_pWidget->GetAppearanceAge();
     pPrivateData->nWidgetValueAge = 0;
-    cp.pAttachedData = pPrivateData.release();
-    m_Maps[pPageView] = NewPDFWindow(cp);
+    m_Maps[pPageView] = NewPWLWindow(cp, std::move(pPrivateData));
     return m_Maps[pPageView].get();
   }
 
@@ -404,7 +397,8 @@ CPWL_Wnd* CFFL_FormFiller::GetPDFWindow(CPDFSDK_PageView* pPageView,
   if (!bNew)
     return pWnd;
 
-  auto* pPrivateData = static_cast<CFFL_PrivateData*>(pWnd->GetAttachedData());
+  const auto* pPrivateData =
+      static_cast<const CFFL_PrivateData*>(pWnd->GetAttachedData());
   if (pPrivateData->nWidgetAppearanceAge == m_pWidget->GetAppearanceAge())
     return pWnd;
 
@@ -417,26 +411,18 @@ void CFFL_FormFiller::DestroyPDFWindow(CPDFSDK_PageView* pPageView) {
   if (it == m_Maps.end())
     return;
 
-  std::unique_ptr<CFFL_PrivateData> pData;
-  {
-    std::unique_ptr<CPWL_Wnd> pWnd = std::move(it->second);
-    m_Maps.erase(it);
-    pData.reset(static_cast<CFFL_PrivateData*>(pWnd->GetAttachedData()));
-    pWnd->Destroy();
-  }
+  std::unique_ptr<CPWL_Wnd> pWnd = std::move(it->second);
+  m_Maps.erase(it);
+  pWnd->Destroy();
 }
 
-CFX_Matrix CFFL_FormFiller::GetWindowMatrix(CPWL_Wnd::PrivateData* pAttached) {
-  CFX_Matrix mt;
-  auto* pPrivateData = static_cast<CFFL_PrivateData*>(pAttached);
+CFX_Matrix CFFL_FormFiller::GetWindowMatrix(
+    const CPWL_Wnd::PrivateData* pAttached) {
+  const auto* pPrivateData = static_cast<const CFFL_PrivateData*>(pAttached);
   if (!pPrivateData || !pPrivateData->pPageView)
-    return mt;
+    return CFX_Matrix();
 
-  CFX_Matrix mtPageView;
-  pPrivateData->pPageView->GetCurrentMatrix(mtPageView);
-  mt = GetCurMatrix();
-  mt.Concat(mtPageView);
-  return mt;
+  return GetCurMatrix() * pPrivateData->pPageView->GetCurrentMatrix();
 }
 
 CFX_Matrix CFFL_FormFiller::GetCurMatrix() {

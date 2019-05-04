@@ -31,9 +31,9 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager_interface.h"
 #include "chrome/common/buildflags.h"
+#include "chrome/common/net/safe_search_util.h"
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
-#include "components/domain_reliability/monitor.h"
 #include "components/variations/net/variations_http_headers.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -62,7 +62,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "chrome/common/chrome_switches.h"
 #endif
 
@@ -77,6 +77,19 @@ using content::ResourceRequestInfo;
 namespace {
 
 bool g_access_to_all_files_enabled = false;
+
+// Gets called when the extensions finish work on the URL. If the extensions
+// did not do a redirect (so |new_url| is empty) then we enforce the
+// SafeSearch parameters. Otherwise we will get called again after the
+// redirect and we enforce SafeSearch then.
+void ForceGoogleSafeSearchCallbackWrapper(net::CompletionOnceCallback callback,
+                                          net::URLRequest* request,
+                                          GURL* new_url,
+                                          int rv) {
+  if (rv == net::OK && new_url->is_empty())
+    safe_search_util::ForceGoogleSafeSearch(request->url(), new_url);
+  std::move(callback).Run(rv);
+}
 
 bool IsAccessAllowedInternal(const base::FilePath& path,
                              const base::FilePath& profile_path) {
@@ -93,6 +106,7 @@ bool IsAccessAllowedInternal(const base::FilePath& path,
   // directories below.
   static const base::FilePath::CharType* const kLocalAccessWhiteList[] = {
       "/home/chronos/user/Downloads",
+      "/home/chronos/user/MyFiles",
       "/home/chronos/user/log",
       "/home/chronos/user/WebRTC Logs",
       "/media",
@@ -114,6 +128,7 @@ bool IsAccessAllowedInternal(const base::FilePath& path,
   if (!profile_path.empty()) {
     const base::FilePath downloads = profile_path.AppendASCII("Downloads");
     whitelist.push_back(downloads);
+    whitelist.push_back(profile_path.AppendASCII("MyFiles"));
     const base::FilePath webrtc_logs = profile_path.AppendASCII("WebRTC Logs");
     whitelist.push_back(webrtc_logs);
   }
@@ -198,8 +213,27 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
     net::CompletionOnceCallback callback,
     GURL* new_url) {
   extensions_delegate_->ForwardStartRequestStatus(request);
-  return extensions_delegate_->NotifyBeforeURLRequest(
-      request, std::move(callback), new_url);
+
+  // The non-redirect case is handled in GoogleURLLoaderThrottle.
+  bool force_safe_search =
+      (force_google_safe_search_ && force_google_safe_search_->GetValue() &&
+       request->is_redirecting());
+
+  net::CompletionOnceCallback wrapped_callback = std::move(callback);
+
+  if (force_safe_search) {
+    wrapped_callback = base::BindOnce(
+        &ForceGoogleSafeSearchCallbackWrapper, std::move(wrapped_callback),
+        base::Unretained(request), base::Unretained(new_url));
+  }
+
+  int rv = extensions_delegate_->NotifyBeforeURLRequest(
+      request, std::move(wrapped_callback), new_url);
+
+  if (force_safe_search && rv == net::OK && new_url->is_empty())
+    safe_search_util::ForceGoogleSafeSearch(request->url(), new_url);
+
+  return rv;
 }
 
 int ChromeNetworkDelegate::OnBeforeStartTransaction(
@@ -229,8 +263,6 @@ int ChromeNetworkDelegate::OnHeadersReceived(
 
 void ChromeNetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
                                              const GURL& new_location) {
-  if (domain_reliability_monitor_)
-    domain_reliability_monitor_->OnBeforeRedirect(request);
   extensions_delegate_->NotifyBeforeRedirect(request, new_location);
   variations::StripVariationHeaderIfNeeded(new_location, request);
 }
@@ -262,8 +294,6 @@ void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
                                         bool started,
                                         int net_error) {
   extensions_delegate_->NotifyCompleted(request, started, net_error);
-  if (domain_reliability_monitor_)
-    domain_reliability_monitor_->OnCompleted(request, started);
   extensions_delegate_->ForwardDoneRequestStatus(request);
 }
 
@@ -343,10 +373,6 @@ bool ChromeNetworkDelegate::IsAccessAllowed(
 // static
 void ChromeNetworkDelegate::EnableAccessToAllFilesForTesting(bool enabled) {
   g_access_to_all_files_enabled = enabled;
-}
-
-bool ChromeNetworkDelegate::OnAreExperimentalCookieFeaturesEnabled() const {
-  return experimental_web_platform_features_enabled_;
 }
 
 bool ChromeNetworkDelegate::OnCancelURLRequestWithPolicyViolatingReferrerHeader(

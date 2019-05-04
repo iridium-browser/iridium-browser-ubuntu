@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/stl_util.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/system/wait.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/bindings/core/v8/sanitize_script_errors.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
@@ -14,7 +16,6 @@
 #include "third_party/blink/renderer/core/mojo/mojo_handle.h"
 #include "third_party/blink/renderer/core/mojo/tests/JsToCpp.mojom-blink.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/loader/fetch/access_control_status.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
@@ -74,7 +75,7 @@ v8::Local<v8::Value> ExecuteScript(const String& script_path,
   scoped_refptr<SharedBuffer> script_src = test::ReadFromFile(script_path);
   return frame.GetScriptController().ExecuteScriptInMainWorldAndReturnValue(
       ScriptSourceCode(String(script_src->Data(), script_src->size())), KURL(),
-      kOpaqueResource);
+      SanitizeScriptErrors::kSanitize);
 }
 
 void CheckDataPipe(mojo::DataPipeConsumerHandle data_pipe_handle) {
@@ -401,7 +402,7 @@ class JsToCppTest : public testing::Test {
              global_proxy, scope.GetIsolate())};
     V8ScriptRunner::CallFunction(start_fn.As<v8::Function>(),
                                  scope.GetExecutionContext(), global_proxy,
-                                 arraysize(args), args, scope.GetIsolate());
+                                 base::size(args), args, scope.GetIsolate());
     test::EnterRunLoop();
   }
 };

@@ -37,12 +37,13 @@ class CORE_EXPORT CustomElementRegistry final : public ScriptWrappable {
  public:
   static CustomElementRegistry* Create(const LocalDOMWindow*);
 
+  CustomElementRegistry(const LocalDOMWindow*);
   ~CustomElementRegistry() override = default;
 
   CustomElementDefinition* define(ScriptState*,
                                   const AtomicString& name,
                                   V8CustomElementConstructor* constructor,
-                                  const ElementDefinitionOptions&,
+                                  const ElementDefinitionOptions*,
                                   ExceptionState&);
 
   ScriptValue get(const AtomicString& name);
@@ -56,7 +57,7 @@ class CORE_EXPORT CustomElementRegistry final : public ScriptWrappable {
 
   // TODO(dominicc): Consider broadening this API when type extensions are
   // implemented.
-  void AddCandidate(Element*);
+  void AddCandidate(Element&);
   ScriptPromise whenDefined(ScriptState*,
                             const AtomicString& name,
                             ExceptionState&);
@@ -64,15 +65,13 @@ class CORE_EXPORT CustomElementRegistry final : public ScriptWrappable {
 
   void Entangle(V0CustomElementRegistrationContext*);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  CustomElementRegistry(const LocalDOMWindow*);
-
   CustomElementDefinition* DefineInternal(ScriptState*,
                                           const AtomicString& name,
                                           CustomElementDefinitionBuilder&,
-                                          const ElementDefinitionOptions&,
+                                          const ElementDefinitionOptions*,
                                           ExceptionState&);
 
   bool V0NameIsDefined(const AtomicString& name);

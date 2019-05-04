@@ -246,7 +246,7 @@ static void combineKnownMetadata(Instruction *ReplInst, Instruction *I) {
       LLVMContext::MD_tbaa,           LLVMContext::MD_alias_scope,
       LLVMContext::MD_noalias,        LLVMContext::MD_range,
       LLVMContext::MD_fpmath,         LLVMContext::MD_invariant_load,
-      LLVMContext::MD_invariant_group};
+      LLVMContext::MD_invariant_group, LLVMContext::MD_access_group};
   combineMetadata(ReplInst, I, KnownIDs, true);
 }
 
@@ -577,7 +577,7 @@ private:
   // Returns the edge via which an instruction in BB will get the values from.
 
   // Returns true when the values are flowing out to each edge.
-  bool valueAnticipable(CHIArgs C, TerminatorInst *TI) const {
+  bool valueAnticipable(CHIArgs C, Instruction *TI) const {
     if (TI->getNumSuccessors() > (unsigned)size(C))
       return false; // Not enough args in this CHI.
 

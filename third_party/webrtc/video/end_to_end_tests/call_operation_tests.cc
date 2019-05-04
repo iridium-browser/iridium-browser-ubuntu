@@ -8,6 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "absl/memory/memory.h"
 #include "api/test/simulated_network.h"
 #include "call/fake_network_pipe.h"
 #include "call/simulated_network.h"
@@ -92,8 +93,6 @@ TEST_P(CallOperationEndToEndTest, RendersSingleDelayedFrame) {
 
   class Renderer : public rtc::VideoSinkInterface<VideoFrame> {
    public:
-    Renderer() : event_(false, false) {}
-
     void OnFrame(const VideoFrame& video_frame) override {
       SleepMs(kRenderDelayMs);
       event_.Set();
@@ -161,8 +160,6 @@ TEST_P(CallOperationEndToEndTest, RendersSingleDelayedFrame) {
 TEST_P(CallOperationEndToEndTest, TransmitsFirstFrame) {
   class Renderer : public rtc::VideoSinkInterface<VideoFrame> {
    public:
-    Renderer() : event_(false, false) {}
-
     void OnFrame(const VideoFrame& video_frame) override { event_.Set(); }
 
     bool Wait() { return event_.Wait(kDefaultTimeoutMs); }

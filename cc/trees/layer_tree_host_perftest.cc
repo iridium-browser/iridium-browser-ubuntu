@@ -148,7 +148,7 @@ class LayerTreeHostPerfTestJsonReader : public LayerTreeHostPerfTest {
   void BuildTree() override {
     gfx::Size viewport = gfx::Size(720, 1038);
     layer_tree_host()->SetViewportSizeAndScale(viewport, 1.f,
-                                               viz::LocalSurfaceId());
+                                               viz::LocalSurfaceIdAllocation());
     scoped_refptr<Layer> root = ParseTreeFromJson(json_,
                                                   &fake_content_layer_client_);
     ASSERT_TRUE(root.get());
@@ -319,7 +319,7 @@ class BrowserCompositorInvalidateLayerTreePerfTest
     gpu_mailbox.SetName(
         reinterpret_cast<const int8_t*>(name_stream.str().c_str()));
     std::unique_ptr<viz::SingleReleaseCallback> callback =
-        viz::SingleReleaseCallback::Create(base::Bind(
+        viz::SingleReleaseCallback::Create(base::BindOnce(
             &BrowserCompositorInvalidateLayerTreePerfTest::ReleaseMailbox,
             base::Unretained(this)));
 

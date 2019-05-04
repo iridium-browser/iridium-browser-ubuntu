@@ -66,10 +66,18 @@ class ProfileNetworkContextService : public KeyedService,
       network::mojom::NetworkContextRequest* network_context_request,
       network::mojom::NetworkContextParamsPtr* network_context_params);
 
+#if defined(OS_CHROMEOS)
+  void UpdateAdditionalCertificates(
+      const net::CertificateList& all_additional_certificates,
+      const net::CertificateList& trust_anchors);
+#endif
+
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // Flushes all pending proxy configuration changes.
   void FlushProxyConfigMonitorForTesting();
+
+  static void SetDiscardDomainReliabilityUploadsForTesting(bool value);
 
  private:
   // Checks |quic_allowed_|, and disables QUIC if needed.
@@ -102,6 +110,10 @@ class ProfileNetworkContextService : public KeyedService,
   // record partitions (e.g. for webview tag).
   network::mojom::NetworkContextParamsPtr CreateNetworkContextParams(
       bool in_memory,
+      const base::FilePath& relative_partition_path);
+
+  // Returns the path for a given storage partition.
+  base::FilePath GetPartitionPath(
       const base::FilePath& relative_partition_path);
 
   // content_settings::Observer:

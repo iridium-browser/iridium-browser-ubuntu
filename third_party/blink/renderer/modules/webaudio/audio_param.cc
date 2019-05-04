@@ -54,7 +54,7 @@ AudioParamHandler::AudioParamHandler(BaseAudioContext& context,
       min_value_(min_value),
       max_value_(max_value),
       summing_bus_(
-          AudioBus::Create(1, AudioUtilities::kRenderQuantumFrames, false)) {
+          AudioBus::Create(1, audio_utilities::kRenderQuantumFrames, false)) {
   // The destination MUST exist because we need the destination handler for the
   // AudioParam.
   CHECK(context.destination());
@@ -167,7 +167,7 @@ float AudioParamHandler::Value() {
 
 void AudioParamHandler::SetIntrinsicValue(float new_value) {
   new_value = clampTo(new_value, min_value_, max_value_);
-  NoBarrierStore(&intrinsic_value_, new_value);
+  intrinsic_value_.store(new_value, std::memory_order_relaxed);
 }
 
 void AudioParamHandler::SetValue(float value) {
@@ -264,7 +264,7 @@ void AudioParamHandler::CalculateFinalValues(float* values,
   // together (unity-gain summing junction).  Note that connections would
   // normally be mono, but we mix down to mono if necessary.
   if (NumberOfRenderingConnections() > 0) {
-    DCHECK_LE(number_of_values, AudioUtilities::kRenderQuantumFrames);
+    DCHECK_LE(number_of_values, audio_utilities::kRenderQuantumFrames);
 
     summing_bus_->SetChannelMemory(0, values, number_of_values);
 
@@ -274,7 +274,7 @@ void AudioParamHandler::CalculateFinalValues(float* values,
 
       // Render audio from this output.
       AudioBus* connection_bus =
-          output->Pull(nullptr, AudioUtilities::kRenderQuantumFrames);
+          output->Pull(nullptr, audio_utilities::kRenderQuantumFrames);
 
       // Sum, with unity-gain.
       summing_bus_->SumFrom(*connection_bus);
@@ -286,7 +286,7 @@ void AudioParamHandler::CalculateTimelineValues(float* values,
                                                 unsigned number_of_values) {
   // Calculate values for this render quantum.  Normally
   // |numberOfValues| will equal to
-  // AudioUtilities::kRenderQuantumFrames (the render quantum size).
+  // audio_utilities::kRenderQuantumFrames (the render quantum size).
   double sample_rate = DestinationHandler().SampleRate();
   size_t start_frame = DestinationHandler().CurrentSampleFrame();
   size_t end_frame = start_frame + number_of_values;
@@ -296,27 +296,6 @@ void AudioParamHandler::CalculateTimelineValues(float* values,
   SetIntrinsicValue(timeline_.ValuesForFrameRange(
       start_frame, end_frame, IntrinsicValue(), values, number_of_values,
       sample_rate, sample_rate, MinValue(), MaxValue()));
-}
-
-void AudioParamHandler::Connect(AudioNodeOutput& output) {
-  GetDeferredTaskHandler().AssertGraphOwner();
-
-  if (outputs_.Contains(&output))
-    return;
-
-  output.AddParam(*this);
-  outputs_.insert(&output);
-  ChangedOutputs();
-}
-
-void AudioParamHandler::Disconnect(AudioNodeOutput& output) {
-  GetDeferredTaskHandler().AssertGraphOwner();
-
-  if (outputs_.Contains(&output)) {
-    outputs_.erase(&output);
-    ChangedOutputs();
-    output.RemoveParam(*this);
-  }
 }
 
 int AudioParamHandler::ComputeQHistogramValue(float new_value) const {
@@ -349,11 +328,11 @@ AudioParam::AudioParam(BaseAudioContext& context,
 AudioParam* AudioParam::Create(BaseAudioContext& context,
                                AudioParamType param_type,
                                double default_value) {
-  return new AudioParam(context, param_type, default_value,
-                        AudioParamHandler::AutomationRate::kAudio,
-                        AudioParamHandler::AutomationRateMode::kVariable,
-                        -std::numeric_limits<float>::max(),
-                        std::numeric_limits<float>::max());
+  return MakeGarbageCollected<AudioParam>(
+      context, param_type, default_value,
+      AudioParamHandler::AutomationRate::kAudio,
+      AudioParamHandler::AutomationRateMode::kVariable,
+      -std::numeric_limits<float>::max(), std::numeric_limits<float>::max());
 }
 
 AudioParam* AudioParam::Create(BaseAudioContext& context,
@@ -365,8 +344,9 @@ AudioParam* AudioParam::Create(BaseAudioContext& context,
                                float max_value) {
   DCHECK_LE(min_value, max_value);
 
-  return new AudioParam(context, param_type, default_value, rate, rate_mode,
-                        min_value, max_value);
+  return MakeGarbageCollected<AudioParam>(context, param_type, default_value,
+                                          rate, rate_mode, min_value,
+                                          max_value);
 }
 
 AudioParam::~AudioParam() {

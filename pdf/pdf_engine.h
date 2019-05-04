@@ -235,9 +235,6 @@ class PDFEngine {
         const base::char16* term,
         bool case_sensitive) = 0;
 
-    // Notifies the client that the engine has painted a page from the document.
-    virtual void DocumentPaintOccurred() {}
-
     // Notifies the client that the document has finished loading.
     virtual void DocumentLoadComplete(const DocumentFeatures& document_features,
                                       uint32_t file_size) {}
@@ -343,9 +340,6 @@ class PDFEngine {
   // Gets the named destination by name.
   virtual base::Optional<PDFEngine::NamedDestination> GetNamedDestination(
       const std::string& destination) = 0;
-  // Transforms an (x, y) point in page coordinates to screen coordinates.
-  virtual gfx::PointF TransformPagePoint(int page_index,
-                                         const gfx::PointF& page_xy) = 0;
   // Gets the index of the most visible page, or -1 if none are visible.
   virtual int GetMostVisiblePage() = 0;
   // Gets the rectangle of the page including shadow.
@@ -415,6 +409,9 @@ class PDFEngine {
 
   // Remove focus from form widgets, consolidating the user input.
   virtual void KillFormFocus() = 0;
+
+  virtual uint32_t GetLoadedByteSize() = 0;
+  virtual bool ReadLoadedBytes(uint32_t length, void* buffer) = 0;
 };
 
 // Interface for exports that wrap the PDF engine.

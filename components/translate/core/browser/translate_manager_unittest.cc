@@ -26,6 +26,7 @@
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
+#include "components/translate/core/common/translate_constants.h"
 #include "components/variations/variations_associated_data.h"
 #include "net/base/network_change_notifier.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -161,7 +162,8 @@ class TranslateManagerTest : public ::testing::Test {
 
   void SetHasLanguageChanged(bool has_language_changed) {
     translate_manager_->GetLanguageState().LanguageDetermined("de", true);
-    translate_manager_->GetLanguageState().DidNavigate(false, true, false);
+    translate_manager_->GetLanguageState().DidNavigate(false, true, false,
+                                                       std::string());
     translate_manager_->GetLanguageState().LanguageDetermined(
         has_language_changed ? "en" : "de", true);
     EXPECT_EQ(has_language_changed,
@@ -662,6 +664,11 @@ TEST_F(TranslateManagerTest,
 
 TEST_F(TranslateManagerTest, DontTranslateOffline) {
   TranslateManager::SetIgnoreMissingKeyForTesting(true);
+
+  TranslateAcceptLanguages accept_languages(&prefs_, accept_languages_prefs);
+  ON_CALL(mock_translate_client_, GetTranslateAcceptLanguages())
+      .WillByDefault(Return(&accept_languages));
+
   translate_manager_.reset(new translate::TranslateManager(
       &mock_translate_client_, &mock_translate_ranker_, &mock_language_model_));
 
@@ -673,19 +680,18 @@ TEST_F(TranslateManagerTest, DontTranslateOffline) {
 
   translate_manager_->GetLanguageState().LanguageDetermined("de", true);
 
-  // In the offline case, Initiate will early-out before even hitting the API
-  // key test.
+  // In the offline case, Initiate won't trigger any translate behavior, so no
+  // UI showing and no auto-translate.
   network_notifier_.SimulateOffline();
   translate_manager_->InitiateTranslation("de");
-  histogram_tester.ExpectTotalCount(kInitiationStatusName, 0);
-
-  // In the online case, InitiateTranslation will proceed past early out tests.
-  network_notifier_.SimulateOnline();
-  translate_manager_->InitiateTranslation("de");
-  histogram_tester.ExpectUniqueSample(
-      kInitiationStatusName,
-      translate::TranslateBrowserMetrics::INITIATION_STATUS_DISABLED_BY_PREFS,
-      1);
+  EXPECT_THAT(histogram_tester.GetAllSamples(kInitiationStatusName),
+              Not(Contains(Bucket(INITIATION_STATUS_SHOW_INFOBAR, 1))));
+  EXPECT_THAT(histogram_tester.GetAllSamples(kInitiationStatusName),
+              Not(Contains(Bucket(INITIATION_STATUS_SHOW_ICON, 1))));
+  EXPECT_THAT(histogram_tester.GetAllSamples(kInitiationStatusName),
+              Not(Contains(Bucket(INITIATION_STATUS_AUTO_BY_CONFIG, 1))));
+  EXPECT_THAT(histogram_tester.GetAllSamples(kInitiationStatusName),
+              Not(Contains(Bucket(INITIATION_STATUS_AUTO_BY_LINK, 1))));
 }
 
 TEST_F(TranslateManagerTest, TestRecordTranslateEvent) {
@@ -917,6 +923,37 @@ TEST_F(TranslateManagerTest, CanManuallyTranslate_TranslatableURL) {
   ON_CALL(mock_translate_client_, IsTranslatableURL(GURL::EmptyGURL()))
       .WillByDefault(Return(true));
   EXPECT_TRUE(translate_manager_->CanManuallyTranslate());
+}
+
+TEST_F(TranslateManagerTest, CanManuallyTranslate_EmptySourceLanguage) {
+  TranslateManager::SetIgnoreMissingKeyForTesting(true);
+  translate_manager_.reset(new translate::TranslateManager(
+      &mock_translate_client_, &mock_translate_ranker_, &mock_language_model_));
+
+  prefs_.SetBoolean(prefs::kOfferTranslateEnabled, true);
+  network_notifier_.SimulateOnline();
+  ON_CALL(mock_translate_client_, IsTranslatableURL(GURL::EmptyGURL()))
+      .WillByDefault(Return(true));
+
+  translate_manager_->GetLanguageState().LanguageDetermined("", true);
+
+  EXPECT_FALSE(translate_manager_->CanManuallyTranslate());
+}
+
+TEST_F(TranslateManagerTest, CanManuallyTranslate_UndefinedSourceLanguage) {
+  TranslateManager::SetIgnoreMissingKeyForTesting(true);
+  translate_manager_.reset(new translate::TranslateManager(
+      &mock_translate_client_, &mock_translate_ranker_, &mock_language_model_));
+
+  prefs_.SetBoolean(prefs::kOfferTranslateEnabled, true);
+  network_notifier_.SimulateOnline();
+  ON_CALL(mock_translate_client_, IsTranslatableURL(GURL::EmptyGURL()))
+      .WillByDefault(Return(true));
+
+  translate_manager_->GetLanguageState().LanguageDetermined(
+      translate::kUnknownLanguageCode, true);
+
+  EXPECT_FALSE(translate_manager_->CanManuallyTranslate());
 }
 
 }  // namespace testing

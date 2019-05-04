@@ -12,6 +12,7 @@
 #include "components/offline_pages/core/background/request_queue_store.h"
 #include "components/offline_pages/core/background/request_queue_task_test_base.h"
 #include "components/offline_pages/core/background/test_request_queue_store.h"
+#include "components/offline_pages/core/offline_clock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace offline_pages {
@@ -86,7 +87,7 @@ void AddRequestTaskTest::InitializeStoreDone(bool success) {
 
 TEST_F(AddRequestTaskTest, AddSingleRequest) {
   InitializeStore(&store_);
-  base::Time creation_time = base::Time::Now();
+  base::Time creation_time = OfflineTimeNow();
   SavePageRequest request_1(kRequestId1, kUrl1, kClientId1, creation_time,
                             true);
   AddRequestTask task(&store_, request_1,
@@ -110,7 +111,7 @@ TEST_F(AddRequestTaskTest, AddSingleRequest) {
 
 TEST_F(AddRequestTaskTest, AddMultipleRequests) {
   InitializeStore(&store_);
-  base::Time creation_time_1 = base::Time::Now();
+  base::Time creation_time_1 = OfflineTimeNow();
   SavePageRequest request_1(kRequestId1, kUrl1, kClientId1, creation_time_1,
                             true);
   AddRequestTask task(&store_, request_1,
@@ -122,7 +123,7 @@ TEST_F(AddRequestTaskTest, AddMultipleRequests) {
   EXPECT_EQ(ItemActionStatus::SUCCESS, last_status());
 
   ClearResults();
-  base::Time creation_time_2 = base::Time::Now();
+  base::Time creation_time_2 = OfflineTimeNow();
   SavePageRequest request_2(kRequestId2, kUrl2, kClientId2, creation_time_2,
                             true);
   AddRequestTask task_2(&store_, request_2,
@@ -149,7 +150,7 @@ TEST_F(AddRequestTaskTest, AddMultipleRequests) {
 
 TEST_F(AddRequestTaskTest, AddDuplicateRequest) {
   InitializeStore(&store_);
-  base::Time creation_time_1 = base::Time::Now();
+  base::Time creation_time_1 = OfflineTimeNow();
   SavePageRequest request_1(kRequestId1, kUrl1, kClientId1, creation_time_1,
                             true);
   AddRequestTask task(&store_, request_1,
@@ -161,7 +162,7 @@ TEST_F(AddRequestTaskTest, AddDuplicateRequest) {
   EXPECT_EQ(ItemActionStatus::SUCCESS, last_status());
 
   ClearResults();
-  base::Time creation_time_2 = base::Time::Now();
+  base::Time creation_time_2 = OfflineTimeNow();
   // This was has the same request ID.
   SavePageRequest request_2(kRequestId1, kUrl2, kClientId2, creation_time_2,
                             true);

@@ -12,18 +12,18 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/sequence_checker.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "base/sys_info.h"
+#include "base/system/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/memory_allocator_dump_guid.h"
@@ -41,7 +41,6 @@
 #include "content/public/common/service_names.mojom.h"
 #include "net/base/net_errors.h"
 #include "services/network/public/cpp/features.h"
-#include "third_party/blink/public/platform/scheduler/child/webthread_base.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_float_point.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
@@ -49,7 +48,6 @@
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/resources/grit/blink_image_resources.h"
 #include "third_party/blink/public/resources/grit/blink_resources.h"
-#include "third_party/blink/public/resources/grit/media_controls_resources.h"
 #include "third_party/zlib/google/compression_utils.h"
 #include "ui/base/layout.h"
 #include "ui/events/gestures/blink/web_gesture_curve_impl.h"
@@ -110,10 +108,10 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_AX_MEDIA_ENTER_PICTURE_IN_PICTURE_BUTTON;
     case WebLocalizedString::kAXMediaExitPictureInPictureButton:
       return IDS_AX_MEDIA_EXIT_PICTURE_IN_PICTURE_BUTTON;
-    case WebLocalizedString::kAXMediaShowClosedCaptionsButton:
-      return IDS_AX_MEDIA_SHOW_CLOSED_CAPTIONS_BUTTON;
-    case WebLocalizedString::kAXMediaHideClosedCaptionsButton:
-      return IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_BUTTON;
+    case WebLocalizedString::kAXMediaShowClosedCaptionsMenuButton:
+      return IDS_AX_MEDIA_SHOW_CLOSED_CAPTIONS_MENU_BUTTON;
+    case WebLocalizedString::kAXMediaHideClosedCaptionsMenuButton:
+      return IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_MENU_BUTTON;
     case WebLocalizedString::kAXMediaCastOffButton:
       return IDS_AX_MEDIA_CAST_OFF_BUTTON;
     case WebLocalizedString::kAXMediaCastOnButton:
@@ -423,21 +421,21 @@ const DataResource kDataResources[] = {
     {"view-source.css", IDR_UASTYLE_VIEW_SOURCE_CSS, ui::SCALE_FACTOR_NONE,
      true},
     // Not limited to Android since it's used for mobile layouts in inspector.
-    {"themeChromiumAndroid.css", IDR_UASTYLE_THEME_CHROMIUM_ANDROID_CSS,
+    {"android.css", IDR_UASTYLE_THEME_CHROMIUM_ANDROID_CSS,
      ui::SCALE_FACTOR_NONE, true},
     // Not limited to Android since it's used for mobile layouts in inspector.
     {"fullscreenAndroid.css", IDR_UASTYLE_FULLSCREEN_ANDROID_CSS,
      ui::SCALE_FACTOR_NONE, true},
     // Not limited to Linux since it's used for mobile layouts in inspector.
-    {"themeChromiumLinux.css", IDR_UASTYLE_THEME_CHROMIUM_LINUX_CSS,
+    {"linux.css", IDR_UASTYLE_THEME_CHROMIUM_LINUX_CSS,
      ui::SCALE_FACTOR_NONE, true},
-    {"themeInputMultipleFields.css",
+    {"input_multiple_fields.css",
      IDR_UASTYLE_THEME_INPUT_MULTIPLE_FIELDS_CSS, ui::SCALE_FACTOR_NONE, true},
 #if defined(OS_MACOSX)
-    {"themeMac.css", IDR_UASTYLE_THEME_MAC_CSS, ui::SCALE_FACTOR_NONE, true},
+    {"mac.css", IDR_UASTYLE_THEME_MAC_CSS, ui::SCALE_FACTOR_NONE, true},
 #endif
-    {"themeWin.css", IDR_UASTYLE_THEME_WIN_CSS, ui::SCALE_FACTOR_NONE, true},
-    {"themeWinQuirks.css", IDR_UASTYLE_THEME_WIN_QUIRKS_CSS,
+    {"win.css", IDR_UASTYLE_THEME_WIN_CSS, ui::SCALE_FACTOR_NONE, true},
+    {"win_quirks.css", IDR_UASTYLE_THEME_WIN_QUIRKS_CSS,
      ui::SCALE_FACTOR_NONE, true},
     {"svg.css", IDR_UASTYLE_SVG_CSS, ui::SCALE_FACTOR_NONE, true},
     {"mathml.css", IDR_UASTYLE_MATHML_CSS, ui::SCALE_FACTOR_NONE, true},
@@ -526,7 +524,7 @@ WebData BlinkPlatformImpl::GetDataResource(const char* name) {
 
   // TODO(flackr): We should use a better than linear search here, a trie would
   // be ideal.
-  for (size_t i = 0; i < arraysize(kDataResources); ++i) {
+  for (size_t i = 0; i < base::size(kDataResources); ++i) {
     if (!strcmp(name, kDataResources[i].name)) {
       base::StringPiece resource = GetContentClient()->GetDataResource(
           kDataResources[i].id, kDataResources[i].scale_factor);

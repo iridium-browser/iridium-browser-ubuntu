@@ -11,10 +11,10 @@ import org.chromium.base.UserData;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.tab.Tab.TabHidingType;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
+import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
-import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
+import org.chromium.chrome.browser.tabmodel.TabSelectionType;
 import org.chromium.net.NetError;
 
 import java.lang.annotation.Retention;
@@ -389,7 +389,7 @@ public class TabUma extends EmptyTabObserver implements UserData {
 
     /** Called when the correspoding tab completes a page load. */
     @Override
-    public void onPageLoadFinished(Tab tab) {
+    public void onPageLoadFinished(Tab tab, String url) {
         // Record only tab restores that the user became aware of. If the restore is triggered
         // speculatively and completes before the user switches to the tab, then this case is
         // reflected in Tab.StatusWhenSwitchedBackToForeground metric.

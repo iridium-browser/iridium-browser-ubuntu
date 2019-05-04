@@ -28,6 +28,7 @@
 #include "util/file/file_io.h"
 #include "util/linux/exception_handler_client.h"
 #include "util/linux/exception_information.h"
+#include "util/linux/scoped_pr_set_dumpable.h"
 #include "util/linux/scoped_pr_set_ptracer.h"
 #include "util/misc/from_pointer_cast.h"
 #include "util/posix/double_fork_and_exec.h"
@@ -56,7 +57,7 @@ std::vector<std::string> BuildAppProcessArgs(
     const std::vector<std::string>& arguments,
     int socket) {
   std::vector<std::string> argv;
-#if defined(ARCH_CPU_64_BIT)
+#if defined(ARCH_CPU_64_BITS)
   argv.push_back("/system/bin/app_process64");
 #else
   argv.push_back("/system/bin/app_process32");
@@ -100,7 +101,7 @@ class LaunchAtCrashHandler {
                                                   &exception_information_));
 
     StringVectorToCStringVector(argv_strings_, &argv_);
-    return Signals::InstallCrashHandlers(HandleCrash, 0, nullptr);
+    return Signals::InstallCrashHandlers(HandleCrash, 0, &old_actions_);
   }
 
   bool HandleCrashNonFatal(int signo, siginfo_t* siginfo, void* context) {
@@ -119,6 +120,7 @@ class LaunchAtCrashHandler {
     exception_information_.thread_id = syscall(SYS_gettid);
 
     ScopedPrSetPtracer set_ptracer(getpid(), /* may_log= */ false);
+    ScopedPrSetDumpable set_dumpable(/* may_log= */ false);
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -144,7 +146,8 @@ class LaunchAtCrashHandler {
     if (enabled_ && HandleCrashNonFatal(signo, siginfo, context)) {
       return;
     }
-    Signals::RestoreHandlerAndReraiseSignalOnReturn(siginfo, nullptr);
+    Signals::RestoreHandlerAndReraiseSignalOnReturn(
+        siginfo, old_actions_.ActionForSignal(signo));
   }
 
   void SetFirstChanceHandler(CrashpadClient::FirstChanceHandler handler) {
@@ -163,6 +166,7 @@ class LaunchAtCrashHandler {
     state->HandleCrashFatal(signo, siginfo, context);
   }
 
+  Signals::OldActions old_actions_ = {};
   std::vector<std::string> argv_strings_;
   std::vector<const char*> argv_;
   std::vector<std::string> envp_strings_;

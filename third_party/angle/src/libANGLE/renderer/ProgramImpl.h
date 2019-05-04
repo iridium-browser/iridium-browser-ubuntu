@@ -21,7 +21,7 @@ namespace gl
 {
 class Context;
 struct ProgramLinkedResources;
-}
+}  // namespace gl
 
 namespace sh
 {
@@ -52,26 +52,35 @@ class LinkEventDone final : public LinkEvent
 {
   public:
     LinkEventDone(angle::Result result) : mResult(result) {}
-    angle::Result wait(const gl::Context *context) override { return mResult; }
-    bool isLinking() override { return false; }
+    angle::Result wait(const gl::Context *context) override;
+    bool isLinking() override;
 
   private:
     angle::Result mResult;
 };
+
+inline angle::Result LinkEventDone::wait(const gl::Context *context)
+{
+    return mResult;
+}
+inline bool LinkEventDone::isLinking()
+{
+    return false;
+}
 
 class ProgramImpl : angle::NonCopyable
 {
   public:
     ProgramImpl(const gl::ProgramState &state) : mState(state) {}
     virtual ~ProgramImpl() {}
-    virtual gl::Error destroy(const gl::Context *context) { return gl::NoError(); }
+    virtual void destroy(const gl::Context *context) {}
 
     virtual angle::Result load(const gl::Context *context,
                                gl::InfoLog &infoLog,
                                gl::BinaryInputStream *stream)                     = 0;
     virtual void save(const gl::Context *context, gl::BinaryOutputStream *stream) = 0;
-    virtual void setBinaryRetrievableHint(bool retrievable) = 0;
-    virtual void setSeparable(bool separable)               = 0;
+    virtual void setBinaryRetrievableHint(bool retrievable)                       = 0;
+    virtual void setSeparable(bool separable)                                     = 0;
 
     virtual std::unique_ptr<LinkEvent> link(const gl::Context *context,
                                             const gl::ProgramLinkedResources &resources,
@@ -82,32 +91,59 @@ class ProgramImpl : angle::NonCopyable
     virtual void setUniform2fv(GLint location, GLsizei count, const GLfloat *v) = 0;
     virtual void setUniform3fv(GLint location, GLsizei count, const GLfloat *v) = 0;
     virtual void setUniform4fv(GLint location, GLsizei count, const GLfloat *v) = 0;
-    virtual void setUniform1iv(GLint location, GLsizei count, const GLint *v) = 0;
-    virtual void setUniform2iv(GLint location, GLsizei count, const GLint *v) = 0;
-    virtual void setUniform3iv(GLint location, GLsizei count, const GLint *v) = 0;
-    virtual void setUniform4iv(GLint location, GLsizei count, const GLint *v) = 0;
+    virtual void setUniform1iv(GLint location, GLsizei count, const GLint *v)   = 0;
+    virtual void setUniform2iv(GLint location, GLsizei count, const GLint *v)   = 0;
+    virtual void setUniform3iv(GLint location, GLsizei count, const GLint *v)   = 0;
+    virtual void setUniform4iv(GLint location, GLsizei count, const GLint *v)   = 0;
     virtual void setUniform1uiv(GLint location, GLsizei count, const GLuint *v) = 0;
     virtual void setUniform2uiv(GLint location, GLsizei count, const GLuint *v) = 0;
     virtual void setUniform3uiv(GLint location, GLsizei count, const GLuint *v) = 0;
     virtual void setUniform4uiv(GLint location, GLsizei count, const GLuint *v) = 0;
-    virtual void setUniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) = 0;
-    virtual void setUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) = 0;
-    virtual void setUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) = 0;
-    virtual void setUniformMatrix2x3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) = 0;
-    virtual void setUniformMatrix3x2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) = 0;
-    virtual void setUniformMatrix2x4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) = 0;
-    virtual void setUniformMatrix4x2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) = 0;
-    virtual void setUniformMatrix3x4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) = 0;
-    virtual void setUniformMatrix4x3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) = 0;
+    virtual void setUniformMatrix2fv(GLint location,
+                                     GLsizei count,
+                                     GLboolean transpose,
+                                     const GLfloat *value)                      = 0;
+    virtual void setUniformMatrix3fv(GLint location,
+                                     GLsizei count,
+                                     GLboolean transpose,
+                                     const GLfloat *value)                      = 0;
+    virtual void setUniformMatrix4fv(GLint location,
+                                     GLsizei count,
+                                     GLboolean transpose,
+                                     const GLfloat *value)                      = 0;
+    virtual void setUniformMatrix2x3fv(GLint location,
+                                       GLsizei count,
+                                       GLboolean transpose,
+                                       const GLfloat *value)                    = 0;
+    virtual void setUniformMatrix3x2fv(GLint location,
+                                       GLsizei count,
+                                       GLboolean transpose,
+                                       const GLfloat *value)                    = 0;
+    virtual void setUniformMatrix2x4fv(GLint location,
+                                       GLsizei count,
+                                       GLboolean transpose,
+                                       const GLfloat *value)                    = 0;
+    virtual void setUniformMatrix4x2fv(GLint location,
+                                       GLsizei count,
+                                       GLboolean transpose,
+                                       const GLfloat *value)                    = 0;
+    virtual void setUniformMatrix3x4fv(GLint location,
+                                       GLsizei count,
+                                       GLboolean transpose,
+                                       const GLfloat *value)                    = 0;
+    virtual void setUniformMatrix4x3fv(GLint location,
+                                       GLsizei count,
+                                       GLboolean transpose,
+                                       const GLfloat *value)                    = 0;
 
     // Done in the back-end to avoid having to keep a system copy of uniform data.
     virtual void getUniformfv(const gl::Context *context,
                               GLint location,
-                              GLfloat *params) const = 0;
+                              GLfloat *params) const                                           = 0;
     virtual void getUniformiv(const gl::Context *context, GLint location, GLint *params) const = 0;
     virtual void getUniformuiv(const gl::Context *context,
                                GLint location,
-                               GLuint *params) const = 0;
+                               GLuint *params) const                                           = 0;
 
     // CHROMIUM_path_rendering
     // Set parameters to control fragment shader input variable interpolation
@@ -122,8 +158,7 @@ class ProgramImpl : angle::NonCopyable
     virtual void markUnusedUniformLocations(std::vector<gl::VariableLocation> *uniformLocations,
                                             std::vector<gl::SamplerBinding> *samplerBindings,
                                             std::vector<gl::ImageBinding> *imageBindings)
-    {
-    }
+    {}
 
     const gl::ProgramState &getState() const { return mState; }
 
@@ -137,9 +172,9 @@ class ProgramImpl : angle::NonCopyable
 inline angle::Result ProgramImpl::syncState(const gl::Context *context,
                                             const gl::Program::DirtyBits &dirtyBits)
 {
-    return angle::Result::Continue();
+    return angle::Result::Continue;
 }
 
 }  // namespace rx
 
-#endif // LIBANGLE_RENDERER_PROGRAMIMPL_H_
+#endif  // LIBANGLE_RENDERER_PROGRAMIMPL_H_

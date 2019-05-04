@@ -25,28 +25,42 @@ class TimeDelta;
 
 namespace omnibox {
 
+extern const base::Feature kHideFileUrlScheme;
+extern const base::Feature kHideSteadyStateUrlScheme;
+extern const base::Feature kHideSteadyStateUrlTrivialSubdomains;
+extern const base::Feature kHideSteadyStateUrlPathQueryAndRef;
+extern const base::Feature kOneClickUnelide;
+extern const base::Feature kSimplifyHttpsIndicator;
 extern const base::Feature kOmniboxRichEntitySuggestions;
 extern const base::Feature kOmniboxNewAnswerLayout;
 extern const base::Feature kOmniboxReverseAnswers;
 extern const base::Feature kOmniboxTailSuggestions;
 extern const base::Feature kOmniboxTabSwitchSuggestions;
+extern const base::Feature kOmniboxReverseTabSwitchLogic;
 extern const base::Feature kExperimentalKeywordMode;
 extern const base::Feature kOmniboxPedalSuggestions;
 extern const base::Feature kEnableClipboardProvider;
+extern const base::Feature kEnableClipboardProviderTextSuggestions;
+extern const base::Feature kEnableClipboardProviderImageSuggestions;
 extern const base::Feature kSearchProviderWarmUpOnFocus;
 extern const base::Feature kZeroSuggestRedirectToChrome;
-extern const base::Feature kZeroSuggestSwapTitleAndUrl;
 extern const base::Feature kDisplayTitleForCurrentUrl;
 extern const base::Feature kQueryInOmnibox;
-extern const base::Feature kUIExperimentElideSuggestionUrlAfterHost;
-extern const base::Feature kUIExperimentJogTextfieldOnPopup;
 extern const base::Feature kUIExperimentMaxAutocompleteMatches;
 extern const base::Feature kUIExperimentShowSuggestionFavicons;
 extern const base::Feature kUIExperimentSwapTitleAndUrl;
 extern const base::Feature kUIExperimentVerticalMargin;
+extern const base::Feature kUIExperimentBlueSearchLoopAndSearchQuery;
+extern const base::Feature kUIExperimentBlueTitlesAndGrayUrlsOnPageSuggestions;
+extern const base::Feature kUIExperimentBlueTitlesOnPageSuggestions;
+extern const base::Feature kUIExperimentShowSuffixOnAllSearchSuggestions;
+extern const base::Feature kUIExperimentBoldUserTextOnSearchSuggestions;
+extern const base::Feature kUIExperimentWhiteBackgroundOnBlur;
+extern const base::Feature kUIExperimentUseGenericSearchEngineIcon;
+extern const base::Feature kUIExperimentUnboldSuggestionText;
 extern const base::Feature kSpeculativeServiceWorkerStartOnQueryInput;
-extern const base::Feature kBreakWordsAtUnderscores;
 extern const base::Feature kDocumentProvider;
+extern const base::Feature kDedupeGoogleDriveURLs;
 extern const base::Feature kOmniboxPopupShortcutIconsInZeroState;
 
 }  // namespace omnibox
@@ -423,14 +437,10 @@ class OmniboxFieldTrial {
       const AutocompleteInput& input);
 
   // ---------------------------------------------------------
-  // For tab switch suggestions related experiments.
+  // For UI experiments.
 
   // Returns true if the rich entities flag is enabled.
   static bool IsRichEntitySuggestionsEnabled();
-
-  // Returns true if either the new answer layout flag or the
-  // #upcoming-ui-features flag is enabled.
-  static bool IsNewAnswerLayoutEnabled();
 
   // Returns true if either the reverse answers flag or the
   // #upcoming-ui-features flag is enabled.
@@ -440,17 +450,26 @@ class OmniboxFieldTrial {
   // #upcoming-ui-features flag is enabled.
   static bool IsTabSwitchSuggestionsEnabled();
 
+  // Returns true if the feature of reversing the tab switch logic is enabled.
+  static bool IsTabSwitchLogicReversed();
+
   // Returns the #omnibox-pedal-suggestions feature's mode parameter as enum.
   static PedalSuggestionMode GetPedalSuggestionMode();
 
-  // Returns true if the jog textfield flag is enabled.
-  static bool IsJogTextfieldOnPopupEnabled();
-
-  // Returns true if either the show suggestion favicons flag or the
+  // Returns true if either the steady-state elision flag for scheme or the
   // #upcoming-ui-features flag is enabled.
-  static bool IsShowSuggestionFaviconsEnabled();
+  static bool IsHideSteadyStateUrlSchemeEnabled();
 
-  // Returns true if the experimental keyword mode is enabled.
+  // Returns true if either the steady-state elision flag for trivial
+  // subdomains or the #upcoming-ui-features flag is enabled.
+  static bool IsHideSteadyStateUrlTrivialSubdomainsEnabled();
+
+  // Returns the size of the vertical margin that should be used in the
+  // suggestion view.
+  static int GetSuggestionVerticalMargin();
+
+  // Simply a convenient wrapper for testing a flag. Used downstream for an
+  // assortment of keyword mode experiments.
   static bool IsExperimentalKeywordModeEnabled();
 
   // ---------------------------------------------------------
@@ -514,6 +533,13 @@ class OmniboxFieldTrial {
   static const char kUIMaxAutocompleteMatchesParam[];
   static const char kUIVerticalMarginParam[];
   static const char kPedalSuggestionModeParam[];
+
+  // Parameter name and values used by the Simplify HTTPS experiment.
+  static const char kSimplifyHttpsIndicatorParameterName[];
+  static const char kSimplifyHttpsIndicatorParameterEvToSecure[];
+  static const char kSimplifyHttpsIndicatorParameterSecureToLock[];
+  static const char kSimplifyHttpsIndicatorParameterBothToLock[];
+  static const char kSimplifyHttpsIndicatorParameterKeepSecureChip[];
 
   // Parameter names used by Zero Suggest Redirect to Chrome.
   static const char kZeroSuggestRedirectToChromeExperimentIdParam[];

@@ -44,12 +44,12 @@ class RegisteredEventListener final {
  public:
   RegisteredEventListener();
   RegisteredEventListener(EventListener* listener,
-                          const AddEventListenerOptionsResolved& options);
+                          const AddEventListenerOptionsResolved* options);
   RegisteredEventListener& operator=(const RegisteredEventListener& that);
 
   void Trace(Visitor* visitor);
 
-  AddEventListenerOptionsResolved Options() const;
+  AddEventListenerOptionsResolved* Options() const;
 
   const EventListener* Callback() const { return callback_; }
 
@@ -78,11 +78,9 @@ class RegisteredEventListener final {
   }
 
   bool Matches(const EventListener* listener,
-               const EventListenerOptions& options) const;
+               const EventListenerOptions* options) const;
 
   bool ShouldFire(const Event&) const;
-
-  bool operator==(const RegisteredEventListener& other) const;
 
  private:
   TraceWrapperMember<EventListener> callback_;
@@ -93,6 +91,8 @@ class RegisteredEventListener final {
   unsigned passive_forced_for_document_target_ : 1;
   unsigned passive_specified_ : 1;
 };
+
+bool operator==(const RegisteredEventListener&, const RegisteredEventListener&);
 
 }  // namespace blink
 

@@ -360,7 +360,7 @@ void GrCCCoverageProcessor::VSImpl::onEmitCode(EmitArgs& args, GrGPArgs* gpArgs)
                            // fallthru.
     v->codeAppend ("}");
 
-    v->codeAppend ("float2 vertex = corner + bloatdir * bloat;");
+    v->codeAppend ("float2 vertex = fma(bloatdir, float2(bloat), corner);");
     gpArgs->fPositionVar.set(kFloat2_GrSLType, "vertex");
 
     // Hulls have a coverage of +1 all around.
@@ -516,9 +516,9 @@ void GrCCCoverageProcessor::initVS(GrResourceProvider* rp) {
     }
     fInstanceAttributes[kInstanceAttribIdx_X] = {"X", xyAttribType, xySLType};
     fInstanceAttributes[kInstanceAttribIdx_Y] = {"Y", xyAttribType, xySLType};
-    this->setInstanceAttributeCnt(2);
+    this->setInstanceAttributes(fInstanceAttributes, 2);
     fVertexAttribute = {"vertexdata", kInt_GrVertexAttribType, kInt_GrSLType};
-    this->setVertexAttributeCnt(1);
+    this->setVertexAttributes(&fVertexAttribute, 1);
 
     if (caps.usePrimitiveRestart()) {
         fVSTriangleType = GrPrimitiveType::kTriangleStrip;

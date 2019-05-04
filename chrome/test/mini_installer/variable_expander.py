@@ -65,7 +65,7 @@ class VariableExpander:
   """Expands variables in strings."""
 
   def __init__(self, mini_installer_path, previous_version_mini_installer_path,
-               chromedriver_path, quiet):
+               chromedriver_path, quiet, output_dir):
     """Constructor.
 
     The constructor initializes a variable dictionary that maps variables to
@@ -94,7 +94,8 @@ class VariableExpander:
         * $CHROME_UPDATE_REGISTRY_SUBKEY_SXS: the registry key, excluding the
             root key, of Chrome SxS for Google Update.
         * $CHROMEDRIVER_PATH: Path to chromedriver.
-        * $QUIET: Supress output
+        * $QUIET: Supress output.
+        * $OUTPUT_DIR: "--output-dir=DIR" or an empty string.
         * $LAUNCHER_UPDATE_REGISTRY_SUBKEY: the registry key, excluding the root
             key, of the app launcher for Google Update if $BRAND is 'Google
         *   Chrome'.
@@ -125,6 +126,10 @@ class VariableExpander:
         * $CHROME_ELEVATOR_CLSID_BETA: Elevator Service CLSID for Chrome Beta.
         * $CHROME_ELEVATOR_CLSID_DEV: Elevator Service CLSID for Chrome Dev.
         * $CHROME_ELEVATOR_CLSID_SXS: Elevator Service CLSID for Chrome SxS.
+        * $CHROME_ELEVATOR_IID: IElevator IID for Chrome.
+        * $CHROME_ELEVATOR_IID_BETA: IElevator IID for Chrome Beta.
+        * $CHROME_ELEVATOR_IID_DEV: IElevator IID for Chrome Dev.
+        * $CHROME_ELEVATOR_IID_SXS: IElevator IID for Chrome SxS.
         * $CHROME_ELEVATION_SERVICE_NAME: Elevation Service Name for Chrome.
         * $CHROME_ELEVATION_SERVICE_NAME_BETA: Elevation Service Name for Chrome
             Beta.
@@ -153,6 +158,7 @@ class VariableExpander:
     self._variable_mapping = {
         'CHROMEDRIVER_PATH': chromedriver_path,
         'QUIET': '-q' if quiet else '',
+        'OUTPUT_DIR': '"--output-dir=%s"' % output_dir if output_dir else '',
         'LOCAL_APPDATA': shell.SHGetFolderPath(0, shellcon.CSIDL_LOCAL_APPDATA,
                                                None, 0),
         'MINI_INSTALLER': mini_installer_abspath,
@@ -232,6 +238,13 @@ class VariableExpander:
             '{DA7FDCA5-2CAA-4637-AA17-0740584DE7DA}'),
           'CHROME_ELEVATOR_CLSID_SXS': (
             '{704C2872-2049-435E-A469-0A534313C42B}'),
+          'CHROME_ELEVATOR_IID': ('{463ABECF-410D-407F-8AF5-0DF35A005CC8}'),
+          'CHROME_ELEVATOR_IID_BETA': (
+            '{A2721D66-376E-4D2F-9F0F-9070E9A42B5F}'),
+          'CHROME_ELEVATOR_IID_DEV': (
+            '{BB2AA26B-343A-4072-8B6F-80557B8CE571}'),
+          'CHROME_ELEVATOR_IID_SXS': (
+            '{4F7CE041-28E9-484F-9DD0-61A8CACEFEE4}'),
           'CHROME_ELEVATION_SERVICE_NAME': (
             'GoogleChromeElevationService'),
           'CHROME_ELEVATION_SERVICE_NAME_BETA': (
@@ -262,6 +275,7 @@ class VariableExpander:
           'CHROME_TOAST_ACTIVATOR_CLSID': (
             '{635EFA6F-08D6-4EC9-BD14-8A0FDE975159}'),
           'CHROME_ELEVATOR_CLSID': ('{D133B120-6DB4-4D6B-8BFE-83BF8CA1B1B0}'),
+          'CHROME_ELEVATOR_IID': ('{B88C45B9-8825-4629-B83E-77CC67D9CEED}'),
           'CHROME_ELEVATION_SERVICE_NAME': 'ChromiumElevationService',
           'CHROME_ELEVATION_SERVICE_DISPLAY_NAME': (
             'Chromium Elevation Service'),

@@ -136,6 +136,7 @@ MessageCenterController::MessageCenterController() {
                                        &kNotificationImageIcon,
                                        &kNotificationInstalledIcon,
                                        &kNotificationLinuxIcon,
+                                       &kNotificationMessagesIcon,
                                        &kNotificationMultiDeviceSetupIcon,
                                        &kNotificationMobileDataIcon,
                                        &kNotificationMobileDataOffIcon,
@@ -251,6 +252,11 @@ void MessageCenterController::GetArcAppIdByPackageName(
     GetAppIdByPackageNameCallback callback) {
   DCHECK(client_.is_bound());
   client_->GetArcAppIdByPackageName(package_name, std::move(callback));
+}
+
+void MessageCenterController::ShowLockScreenNotificationSettings() {
+  DCHECK(client_.is_bound());
+  client_->ShowLockScreenNotificationSettings();
 }
 
 void MessageCenterController::AddNotifierSettingsListener(

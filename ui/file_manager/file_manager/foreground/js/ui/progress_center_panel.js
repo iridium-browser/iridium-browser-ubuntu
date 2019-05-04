@@ -129,8 +129,9 @@ ProgressCenterItemElement.prototype.update = function(item, animated) {
     // Prevent assigning the same width to avoid stopping the animation.
     // animated == false may be intended to cancel the animation, so in that
     // case, the assignment should be done.
-    if (currentWidthRate === nextWidthFrame && animated)
+    if (currentWidthRate === nextWidthFrame && animated) {
       return;
+    }
     this.track_.hidden = false;
     this.track_.style.width = nextWidthFrame + '%';
     this.track_.classList.toggle('animated', animated);
@@ -161,8 +162,9 @@ ProgressCenterItemElement.prototype.reset = function() {
  * @private
  */
 ProgressCenterItemElement.prototype.onTransitionEnd_ = function(event) {
-  if (event.propertyName !== 'width')
+  if (event.propertyName !== 'width') {
     return;
+  }
   this.track_.classList.remove('animated');
   this.dispatchEvent(new Event(
       ProgressCenterItemElement.PROGRESS_ANIMATION_END_EVENT,
@@ -276,8 +278,10 @@ ProgressCenterPanel.getToggleAnimation_ = function(document) {
   for (var i = 0; i < document.styleSheets.length; i++) {
     var styleSheet = document.styleSheets[i];
     for (var j = 0; j < styleSheet.cssRules.length; j++) {
+      // HACK: closure does not define experimental CSSRules.
+      var keyFramesRule = CSSRule.KEYFRAMES_RULE || 7;
       var rule = styleSheet.cssRules[j];
-      if (rule.type === CSSRule.KEYFRAMES_RULE &&
+      if (rule.type === keyFramesRule &&
           rule.name === 'progress-center-toggle') {
         return rule;
       }
@@ -318,8 +322,9 @@ ProgressCenterPanel.prototype.updateItem = function(item) {
     }
     itemElement.update(newItem, targetGroup.isAnimated(item.id));
   } else {
-    if (itemElement)
+    if (itemElement) {
       itemElement.parentNode.removeChild(itemElement);
+    }
   }
 
   // Update the close view.
@@ -341,8 +346,9 @@ ProgressCenterPanel.prototype.onItemAnimationEnd_ = function(event) {
     targetGroup.completeItemAnimation(itemId);
     var newItem = targetGroup.getItem(itemId);
     var itemElement = this.getItemElement_(itemId);
-    if (!newItem && itemElement)
+    if (!newItem && itemElement) {
       itemElement.parentNode.removeChild(itemElement);
+    }
   }
   this.updateCloseView_();
 };
@@ -356,8 +362,9 @@ ProgressCenterPanel.prototype.dismissErrorItem = function(id) {
   this.quietItemGroup_.dismissErrorItem(id);
 
   var element = this.getItemElement_(id);
-  if (element)
+  if (element) {
     this.openView_.removeChild(element);
+  }
   this.updateCloseView_();
 };
 
@@ -454,8 +461,9 @@ ProgressCenterPanel.prototype.onClick_ = function(event) {
   if (event.target.classList.contains('open') ||
       event.target.classList.contains('close')) {
     // If the progress center has already animated, just return.
-    if (this.element_.classList.contains('animated'))
+    if (this.element_.classList.contains('animated')) {
       return;
+    }
 
     // Obtains current and target height.
     var currentHeight;

@@ -586,7 +586,9 @@ MOCK_METHOD4(
 MOCK_METHOD3(GetProgramPipelineiv,
              void(GLuint pipeline, GLenum pname, GLint* params));
 MOCK_METHOD3(GetProgramResourceIndex,
-             void(GLuint program, GLenum programInterface, const GLchar* name));
+             GLuint(GLuint program,
+                    GLenum programInterface,
+                    const GLchar* name));
 MOCK_METHOD8(GetProgramResourceiv,
              void(GLuint program,
                   GLenum programInterface,
@@ -872,6 +874,30 @@ MOCK_METHOD1(MaxShaderCompilerThreadsKHR, void(GLuint count));
 MOCK_METHOD1(MemoryBarrierByRegion, void(GLbitfield barriers));
 MOCK_METHOD1(MemoryBarrierEXT, void(GLbitfield barriers));
 MOCK_METHOD1(MinSampleShading, void(GLfloat value));
+MOCK_METHOD4(MultiDrawArraysANGLE,
+             void(GLenum mode,
+                  const GLint* firsts,
+                  const GLsizei* counts,
+                  GLsizei drawcount));
+MOCK_METHOD5(MultiDrawArraysInstancedANGLE,
+             void(GLenum mode,
+                  const GLint* firsts,
+                  const GLsizei* counts,
+                  const GLsizei* instanceCounts,
+                  GLsizei drawcount));
+MOCK_METHOD5(MultiDrawElementsANGLE,
+             void(GLenum mode,
+                  const GLsizei* counts,
+                  GLenum type,
+                  const GLvoid* const* indices,
+                  GLsizei drawcount));
+MOCK_METHOD6(MultiDrawElementsInstancedANGLE,
+             void(GLenum mode,
+                  const GLsizei* counts,
+                  GLenum type,
+                  const GLvoid* const* indices,
+                  const GLsizei* instanceCounts,
+                  GLsizei drawcount));
 MOCK_METHOD4(
     ObjectLabel,
     void(GLenum identifier, GLuint name, GLsizei length, const char* label));

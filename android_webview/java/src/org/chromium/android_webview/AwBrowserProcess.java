@@ -18,7 +18,6 @@ import org.chromium.android_webview.command_line.CommandLineUtil;
 import org.chromium.android_webview.policy.AwPolicyProvider;
 import org.chromium.android_webview.services.CrashReceiverService;
 import org.chromium.android_webview.services.ICrashReceiverService;
-import org.chromium.base.BuildInfo;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
@@ -105,7 +104,7 @@ public final class AwBrowserProcess {
     public static void start() {
         try (ScopedSysTraceEvent e1 = ScopedSysTraceEvent.scoped("AwBrowserProcess.start")) {
             final Context appContext = ContextUtils.getApplicationContext();
-            tryObtainingDataDirLock();
+            tryObtainingDataDirLock(appContext);
             // We must post to the UI thread to cover the case that the user
             // has invoked Chromium startup by using the (thread-safe)
             // CookieManager rather than creating a WebView.
@@ -134,30 +133,16 @@ public final class AwBrowserProcess {
                     throw new RuntimeException("Cannot initialize WebView", e);
                 }
             });
-
-            // Only run cleanup task on N+ since on earlier versions there are no extra pak files.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                // Cleanup task to remove unnecessary extra pak files (crbug.com/752510).
-                // TODO(zpeng): Remove cleanup code after at least M64 (crbug.com/756580).
-                AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
-                    File extraPaksDir = new File(PathUtils.getDataDirectory(), "paks");
-                    if (extraPaksDir.exists()) {
-                        for (File pakFile : extraPaksDir.listFiles()) {
-                            pakFile.delete();
-                        }
-                        extraPaksDir.delete();
-                    }
-                });
-            }
         }
     }
 
-    private static void tryObtainingDataDirLock() {
+    private static void tryObtainingDataDirLock(final Context appContext) {
         try (ScopedSysTraceEvent e1 =
                         ScopedSysTraceEvent.scoped("AwBrowserProcess.tryObtainingDataDirLock")) {
             // Many existing apps rely on this even though it's known to be unsafe.
             // Make it fatal when on P for apps that target P or higher
-            boolean dieOnFailure = BuildInfo.isAtLeastP() && BuildInfo.targetsAtLeastP();
+            boolean dieOnFailure = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                    && appContext.getApplicationInfo().targetSdkVersion >= Build.VERSION_CODES.P;
 
             StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
             try {

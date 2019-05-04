@@ -25,6 +25,10 @@ class MockIndexedDBFactory : public IndexedDBFactory {
                void(scoped_refptr<IndexedDBCallbacks> callbacks,
                     const url::Origin& origin,
                     const base::FilePath& data_directory));
+  MOCK_METHOD3(GetDatabaseInfo,
+               void(scoped_refptr<IndexedDBCallbacks> callbacks,
+                    const url::Origin& origin,
+                    const base::FilePath& data_directory));
   MOCK_METHOD4(
       OpenProxy,
       void(const base::string16& name,
@@ -99,22 +103,13 @@ class MockIndexedDBFactory : public IndexedDBFactory {
  protected:
   ~MockIndexedDBFactory() override;
 
-  MOCK_METHOD5(OpenBackingStore,
-               scoped_refptr<IndexedDBBackingStore>(
-                   const url::Origin& origin,
-                   const base::FilePath& data_directory,
-                   IndexedDBDataLossInfo* data_loss_info,
-                   bool* disk_full,
-                   leveldb::Status* s));
-
-  MOCK_METHOD6(OpenBackingStoreHelper,
-               scoped_refptr<IndexedDBBackingStore>(
-                   const url::Origin& origin,
-                   const base::FilePath& data_directory,
-                   IndexedDBDataLossInfo* data_loss_info,
-                   bool* disk_full,
-                   bool first_time,
-                   leveldb::Status* s));
+  MOCK_METHOD2(
+      OpenBackingStore,
+      std::tuple<scoped_refptr<IndexedDBBackingStore>,
+                 leveldb::Status,
+                 IndexedDBDataLossInfo,
+                 bool /* disk_full */>(const url::Origin& origin,
+                                       const base::FilePath& data_directory));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockIndexedDBFactory);

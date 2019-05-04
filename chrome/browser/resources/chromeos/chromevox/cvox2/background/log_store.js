@@ -137,6 +137,25 @@ LogStore.logTypes = function() {
 };
 
 /**
+ * Creates logs of type |type| in order.
+ * This is not the best way to create logs fast but
+ * getLogsOfType() is not called often.
+ * @param {!TextLog.LogType} logType
+ * @return {!Array<BaseLog>}
+ */
+LogStore.prototype.getLogsOfType = function(logType) {
+  var returnLogs = [];
+  for (var i = 0; i < LogStore.LOG_LIMIT; i++) {
+    var index = (this.startIndex_ + i) % LogStore.LOG_LIMIT;
+    if (!this.logs_[index])
+      continue;
+    if (this.logs_[index].logType == logType)
+      returnLogs.push(this.logs_[index]);
+  }
+  return returnLogs;
+};
+
+/**
  * Create logs in order.
  * This is not the best way to create logs fast but
  * getLogs() is not called often.
@@ -160,6 +179,9 @@ LogStore.prototype.getLogs = function() {
  * @param {!TextLog.LogType} logType
  */
 LogStore.prototype.writeTextLog = function(logContent, logType) {
+  if (this.shouldSkipOutput_())
+    return;
+
   var log = new TextLog(logContent, logType);
   this.logs_[this.startIndex_] = log;
   this.startIndex_ += 1;
@@ -173,6 +195,9 @@ LogStore.prototype.writeTextLog = function(logContent, logType) {
  * @param {!TreeDumper} logContent
  */
 LogStore.prototype.writeTreeLog = function(logContent) {
+  if (this.shouldSkipOutput_())
+    return;
+
   var log = new TreeLog(logContent);
   this.logs_[this.startIndex_] = log;
   this.startIndex_ += 1;
@@ -187,6 +212,19 @@ LogStore.prototype.writeTreeLog = function(logContent) {
 LogStore.prototype.clearLog = function() {
   this.logs_ = Array(LogStore.LOG_LIMIT);
   this.startIndex_ = 0;
+};
+
+/** @private @return {boolean} */
+LogStore.prototype.shouldSkipOutput_ = function() {
+  var ChromeVoxState = chrome.extension.getBackgroundPage()['ChromeVoxState'];
+  if (ChromeVoxState.instance.currentRange &&
+      ChromeVoxState.instance.currentRange.start &&
+      ChromeVoxState.instance.currentRange.start.node &&
+      ChromeVoxState.instance.currentRange.start.node.root) {
+    return ChromeVoxState.instance.currentRange.start.node.root.docUrl.indexOf(
+               chrome.extension.getURL('cvox2/background/log.html')) == 0;
+  }
+  return false;
 };
 
 /**

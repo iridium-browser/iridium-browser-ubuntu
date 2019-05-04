@@ -92,12 +92,12 @@ class DumpAccessibilityTestBase : public ContentBrowserTest {
   // @WAIT-FOR: directives.
   void ParseHtmlForExtraDirectives(
       const std::string& test_html,
-      std::vector<AccessibilityTreeFormatter::Filter>* filters,
       std::vector<std::string>* wait_for,
       std::vector<std::string>* run_until);
 
   // Create the right AccessibilityTreeFormatter subclass.
-  AccessibilityTreeFormatter* CreateAccessibilityTreeFormatter();
+  std::unique_ptr<AccessibilityTreeFormatter>
+  CreateAccessibilityTreeFormatter();
 
   void RunTestForPlatform(const base::FilePath file_path, const char* file_dir);
 

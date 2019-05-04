@@ -40,7 +40,6 @@ class ThemeProperties {
     COLOR_BACKGROUND_TAB_INCOGNITO_INACTIVE,
     COLOR_TOOLBAR,
     COLOR_TAB_TEXT,
-    COLOR_TAB_TEXT_INACTIVE,
     COLOR_BACKGROUND_TAB_TEXT,
     COLOR_BACKGROUND_TAB_TEXT_INACTIVE,
     COLOR_BACKGROUND_TAB_TEXT_INCOGNITO,
@@ -119,6 +118,11 @@ class ThemeProperties {
     COLOR_DETACHED_BOOKMARK_BAR_BACKGROUND,
     COLOR_DETACHED_BOOKMARK_BAR_SEPARATOR,
 
+    // Color used for various 'shelves' and 'bars'.
+    COLOR_DOWNLOAD_SHELF,
+    COLOR_INFOBAR,
+    COLOR_STATUS_BUBBLE,
+
     // The throbber colors for tabs or anything on a toolbar (currently, only
     // the download shelf). If you're adding a throbber elsewhere, such as in
     // a dialog or bubble, you likely want
@@ -154,31 +158,16 @@ class ThemeProperties {
     COLOR_SUPERVISED_USER_LABEL_BORDER,
 #endif
 
-#if defined(OS_MACOSX)
-    COLOR_FRAME_VIBRANCY_OVERLAY,
-    COLOR_TOOLBAR_INACTIVE,
-    COLOR_TOOLBAR_BEZEL,
-    COLOR_TOOLBAR_STROKE,
-    COLOR_TOOLBAR_STROKE_INACTIVE,
-    COLOR_TOOLBAR_STROKE_THEME,
-    COLOR_TOOLBAR_STROKE_THEME_INACTIVE,
-    // The color of a toolbar button's border.
-    COLOR_TOOLBAR_BUTTON_STROKE,
-    COLOR_TOOLBAR_BUTTON_STROKE_INACTIVE,
-    GRADIENT_TOOLBAR,
-    GRADIENT_TOOLBAR_INACTIVE,
-    GRADIENT_TOOLBAR_BUTTON,
-    GRADIENT_TOOLBAR_BUTTON_INACTIVE,
-    GRADIENT_TOOLBAR_BUTTON_PRESSED,
-    GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE,
-#endif  // OS_MACOSX
-
 #if defined(OS_WIN)
     // The color of the 1px border around the window on Windows 10.
     COLOR_ACCENT_BORDER,
 #endif  // OS_WIN
 
     SHOULD_FILL_BACKGROUND_TAB_COLOR,
+
+    // Colors for in-product help promo bubbles.
+    COLOR_FEATURE_PROMO_BUBBLE_TEXT,
+    COLOR_FEATURE_PROMO_BUBBLE_BACKGROUND,
   };
 
   // Represents the lookup values for a theme property.

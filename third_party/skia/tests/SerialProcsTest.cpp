@@ -182,10 +182,11 @@ static sk_sp<SkPicture> make_picture(sk_sp<SkTypeface> tf0, sk_sp<SkTypeface> tf
     SkPictureRecorder rec;
     SkCanvas* canvas = rec.beginRecording(100, 100);
     SkPaint paint;
-    paint.setTypeface(tf0); canvas->drawText("hello", 5, 0, 0, paint);
-    paint.setTypeface(tf1); canvas->drawText("hello", 5, 0, 0, paint);
-    paint.setTypeface(tf0); canvas->drawText("hello", 5, 0, 0, paint);
-    paint.setTypeface(tf1); canvas->drawText("hello", 5, 0, 0, paint);
+    SkFont font;
+    font.setTypeface(tf0); canvas->drawString("hello", 0, 0, font, paint);
+    font.setTypeface(tf1); canvas->drawString("hello", 0, 0, font, paint);
+    font.setTypeface(tf0); canvas->drawString("hello", 0, 0, font, paint);
+    font.setTypeface(tf1); canvas->drawString("hello", 0, 0, font, paint);
     return rec.finishRecordingAsPicture();
 }
 
@@ -196,16 +197,7 @@ DEF_TEST(serial_typeface, reporter) {
         return; // need two different typefaces for this test to make sense.
     }
 
-#ifdef SK_DEBUG
-    REPORTER_ASSERT(reporter, tf0->getRefCnt() == 1);
-    REPORTER_ASSERT(reporter, tf1->getRefCnt() == 1);
-#endif
     auto pic = make_picture(tf0, tf1);
-#ifdef SK_DEBUG
-    // picture should add 2 more references to each typeface
-    REPORTER_ASSERT(reporter, tf0->getRefCnt() == 3);
-    REPORTER_ASSERT(reporter, tf1->getRefCnt() == 3);
-#endif
 
     int counter = 0;
     SkSerialProcs procs;

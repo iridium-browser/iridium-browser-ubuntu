@@ -46,7 +46,6 @@
 #include "content/renderer/dom_storage/session_web_storage_namespace_impl.h"
 #include "content/renderer/dom_storage/webstoragenamespace_impl.h"
 #include "content/renderer/image_capture/image_capture_frame_grabber.h"
-#include "content/renderer/indexed_db/webidbfactory_impl.h"
 #include "content/renderer/loader/child_url_loader_factory_bundle.h"
 #include "content/renderer/loader/code_cache_loader_impl.h"
 #include "content/renderer/loader/resource_dispatcher.h"
@@ -54,7 +53,6 @@
 #include "content/renderer/loader/web_url_loader_impl.h"
 #include "content/renderer/media/audio/audio_device_factory.h"
 #include "content/renderer/media/audio_decoder.h"
-#include "content/renderer/media/midi/renderer_webmidiaccessor_impl.h"
 #include "content/renderer/media/renderer_webaudiodevice_impl.h"
 #include "content/renderer/media_capture_from_element/canvas_capture_handler.h"
 #include "content/renderer/media_capture_from_element/html_audio_element_capturer_source.h"
@@ -70,7 +68,6 @@
 #include "content/renderer/worker_thread_registry.h"
 #include "device/gamepad/public/cpp/gamepads.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
-#include "gpu/config/gpu_driver_bug_workaround_type.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "media/audio/audio_output_device.h"
@@ -88,12 +85,11 @@
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "services/ws/public/cpp/gpu/context_provider_command_buffer.h"
 #include "storage/common/database/database_identifier.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h"
 #include "third_party/blink/public/platform/blame_context.h"
 #include "third_party/blink/public/platform/file_path_conversion.h"
-#include "third_party/blink/public/platform/modules/webmidi/web_midi_accessor.h"
-#include "third_party/blink/public/platform/scheduler/child/webthread_base.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/public/platform/url_conversion.h"
 #include "third_party/blink/public/platform/web_audio_latency_hint.h"
@@ -113,22 +109,12 @@
 
 #if defined(OS_MACOSX)
 #include "content/child/child_process_sandbox_support_impl_mac.h"
-#include "content/common/mac/font_loader.h"
-#include "third_party/blink/public/platform/mac/web_sandbox_support.h"
+#elif defined(OS_LINUX)
+#include "content/child/child_process_sandbox_support_impl_linux.h"
 #endif
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
-#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
-#include <map>
-#include <string>
-
-#include "base/synchronization/lock.h"
-#include "content/child/child_process_sandbox_support_impl_linux.h"
-#include "third_party/blink/public/platform/linux/out_of_process_font.h"
-#include "third_party/blink/public/platform/linux/web_sandbox_support.h"
-#include "third_party/icu/source/common/unicode/utf16.h"
-#endif
 #endif
 
 #include "content/renderer/media/webrtc/peer_connection_dependency_factory.h"
@@ -141,7 +127,6 @@ using blink::WebAudioLatencyHint;
 using blink::WebBlobRegistry;
 using blink::WebCanvasCaptureHandler;
 using blink::WebDatabaseObserver;
-using blink::WebIDBFactory;
 using blink::WebImageCaptureFrameGrabber;
 using blink::WebMediaPlayer;
 using blink::WebMediaRecorderHandler;
@@ -197,48 +182,6 @@ gpu::ContextType ToGpuContextType(blink::Platform::ContextType type) {
 
 //------------------------------------------------------------------------------
 
-#if !defined(OS_ANDROID) && !defined(OS_WIN) && !defined(OS_FUCHSIA)
-class RendererBlinkPlatformImpl::SandboxSupport
-    : public blink::WebSandboxSupport {
- public:
-#if defined(OS_LINUX)
-  explicit SandboxSupport(sk_sp<font_service::FontLoader> font_loader)
-      : font_loader_(std::move(font_loader)) {}
-#endif
-  ~SandboxSupport() override {}
-
-#if defined(OS_MACOSX)
-  bool LoadFont(CTFontRef src_font,
-                CGFontRef* container,
-                uint32_t* font_id) override;
-#elif defined(OS_LINUX)
-  void GetFallbackFontForCharacter(
-      blink::WebUChar32 character,
-      const char* preferred_locale,
-      blink::OutOfProcessFont* fallbackFont) override;
-  void MatchFontByPostscriptNameOrFullFontName(
-      const char* font_unique_name,
-      blink::OutOfProcessFont* fallback_font) override;
-  void GetWebFontRenderStyleForStrike(const char* family,
-                                      int size,
-                                      bool is_bold,
-                                      bool is_italic,
-                                      float device_scale_factor,
-                                      blink::WebFontRenderStyle* out) override;
-
- private:
-  // WebKit likes to ask us for the correct font family to use for a set of
-  // unicode code points. It needs this information frequently so we cache it
-  // here.
-  base::Lock unicode_font_families_mutex_;
-  std::map<int32_t, blink::OutOfProcessFont> unicode_font_families_;
-  sk_sp<font_service::FontLoader> font_loader_;
-#endif
-};
-#endif  // !defined(OS_ANDROID) && !defined(OS_WIN)
-
-//------------------------------------------------------------------------------
-
 RendererBlinkPlatformImpl::RendererBlinkPlatformImpl(
     blink::scheduler::WebThreadScheduler* main_thread_scheduler)
     : BlinkPlatformImpl(main_thread_scheduler->DefaultTaskRunner(),
@@ -268,13 +211,12 @@ RendererBlinkPlatformImpl::RendererBlinkPlatformImpl(
     connector_ = service_manager::Connector::Create(&request);
   }
 
-#if !defined(OS_ANDROID) && !defined(OS_WIN) && !defined(OS_FUCHSIA)
+#if defined(OS_LINUX) || defined(OS_MACOSX)
   if (g_sandbox_enabled && sandboxEnabled()) {
 #if defined(OS_MACOSX)
-    sandbox_support_.reset(new RendererBlinkPlatformImpl::SandboxSupport());
+    sandbox_support_.reset(new WebSandboxSupportMac(connector_.get()));
 #else
-    sandbox_support_.reset(
-        new RendererBlinkPlatformImpl::SandboxSupport(font_loader_));
+    sandbox_support_.reset(new WebSandboxSupportLinux(font_loader_));
 #endif
   } else {
     DVLOG(1) << "Disabling sandbox support for testing.";
@@ -297,7 +239,7 @@ RendererBlinkPlatformImpl::~RendererBlinkPlatformImpl() {
 }
 
 void RendererBlinkPlatformImpl::Shutdown() {
-#if !defined(OS_ANDROID) && !defined(OS_WIN) && !defined(OS_FUCHSIA)
+#if defined(OS_LINUX) || defined(OS_MACOSX)
   // SandboxSupport contains a map of OutOfProcessFont objects, which hold
   // WebStrings and WebVectors, which become invalidated when blink is shut
   // down. Hence, we need to clear that map now, just before blink::shutdown()
@@ -391,11 +333,11 @@ blink::BlameContext* RendererBlinkPlatformImpl::GetTopLevelBlameContext() {
 }
 
 blink::WebSandboxSupport* RendererBlinkPlatformImpl::GetSandboxSupport() {
-#if defined(OS_ANDROID) || defined(OS_WIN) || defined(OS_FUCHSIA)
-  // These platforms do not require sandbox support.
-  return NULL;
-#else
+#if defined(OS_LINUX) || defined(OS_MACOSX)
   return sandbox_support_.get();
+#else
+  // These platforms do not require sandbox support.
+  return nullptr;
 #endif
 }
 
@@ -451,7 +393,7 @@ void RendererBlinkPlatformImpl::CacheMetadata(
     blink::mojom::CodeCacheType cache_type,
     const blink::WebURL& url,
     base::Time response_time,
-    const char* data,
+    const uint8_t* data,
     size_t size) {
   // Only cache WebAssembly if we have isolated code caches.
   // TODO(bbudge) Remove this check when isolated code caches are on by default.
@@ -483,7 +425,7 @@ void RendererBlinkPlatformImpl::ClearCodeCacheEntry(
 void RendererBlinkPlatformImpl::CacheMetadataInCacheStorage(
     const blink::WebURL& url,
     base::Time response_time,
-    const char* data,
+    const uint8_t* data,
     size_t size,
     const blink::WebSecurityOrigin& cacheStorageOrigin,
     const blink::WebString& cacheStorageCacheName) {
@@ -534,7 +476,7 @@ RendererBlinkPlatformImpl::CreateLocalStorageNamespace() {
 std::unique_ptr<blink::WebStorageNamespace>
 RendererBlinkPlatformImpl::CreateSessionStorageNamespace(
     base::StringPiece namespace_id) {
-  if (base::FeatureList::IsEnabled(features::kMojoSessionStorage)) {
+  if (base::FeatureList::IsEnabled(blink::features::kOnionSoupDOMStorage)) {
     if (!local_storage_cached_areas_) {
       local_storage_cached_areas_.reset(new LocalStorageCachedAreas(
           RenderThreadImpl::current()->GetStoragePartitionService(),
@@ -564,78 +506,11 @@ void RendererBlinkPlatformImpl::CloneSessionStorageNamespace(
 
 //------------------------------------------------------------------------------
 
-std::unique_ptr<blink::WebIDBFactory>
-RendererBlinkPlatformImpl::CreateIdbFactory() {
-  blink::mojom::IDBFactoryPtrInfo web_idb_factory_host_info;
-  GetInterfaceProvider()->GetInterface(
-      mojo::MakeRequest(&web_idb_factory_host_info));
-  return std::make_unique<WebIDBFactoryImpl>(
-      std::move(web_idb_factory_host_info));
-}
-
-//------------------------------------------------------------------------------
-
 WebString RendererBlinkPlatformImpl::FileSystemCreateOriginIdentifier(
     const blink::WebSecurityOrigin& origin) {
   return WebString::FromUTF8(
       storage::GetIdentifierFromOrigin(WebSecurityOriginToGURL(origin)));
 }
-
-//------------------------------------------------------------------------------
-
-#if defined(OS_MACOSX)
-
-bool RendererBlinkPlatformImpl::SandboxSupport::LoadFont(CTFontRef src_font,
-                                                         CGFontRef* out,
-                                                         uint32_t* font_id) {
-  return content::LoadFont(src_font, out, font_id);
-}
-
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
-
-void RendererBlinkPlatformImpl::SandboxSupport::GetFallbackFontForCharacter(
-    blink::WebUChar32 character,
-    const char* preferred_locale,
-    blink::OutOfProcessFont* fallbackFont) {
-  base::AutoLock lock(unicode_font_families_mutex_);
-  const std::map<int32_t, blink::OutOfProcessFont>::const_iterator iter =
-      unicode_font_families_.find(character);
-  if (iter != unicode_font_families_.end()) {
-    fallbackFont->name = iter->second.name;
-    fallbackFont->filename = iter->second.filename;
-    fallbackFont->fontconfig_interface_id =
-        iter->second.fontconfig_interface_id;
-    fallbackFont->ttc_index = iter->second.ttc_index;
-    fallbackFont->is_bold = iter->second.is_bold;
-    fallbackFont->is_italic = iter->second.is_italic;
-    return;
-  }
-
-  content::GetFallbackFontForCharacter(font_loader_, character,
-                                       preferred_locale, fallbackFont);
-  unicode_font_families_.insert(std::make_pair(character, *fallbackFont));
-}
-
-void RendererBlinkPlatformImpl::SandboxSupport::
-    MatchFontByPostscriptNameOrFullFontName(
-        const char* font_unique_name,
-        blink::OutOfProcessFont* fallback_font) {
-  content::MatchFontByPostscriptNameOrFullFontName(
-      font_loader_, font_unique_name, fallback_font);
-}
-
-void RendererBlinkPlatformImpl::SandboxSupport::GetWebFontRenderStyleForStrike(
-    const char* family,
-    int size,
-    bool is_bold,
-    bool is_italic,
-    float device_scale_factor,
-    blink::WebFontRenderStyle* out) {
-  GetRenderStyleForStrike(font_loader_, family, size, is_bold, is_italic,
-                          device_scale_factor, out);
-}
-
-#endif
 
 //------------------------------------------------------------------------------
 
@@ -769,19 +644,6 @@ bool RendererBlinkPlatformImpl::DecodeAudioFileData(
 
 //------------------------------------------------------------------------------
 
-std::unique_ptr<blink::WebMIDIAccessor>
-RendererBlinkPlatformImpl::CreateMIDIAccessor(
-    blink::WebMIDIAccessorClient* client) {
-  std::unique_ptr<blink::WebMIDIAccessor> accessor =
-      GetContentClient()->renderer()->OverrideCreateMIDIAccessor(client);
-  if (accessor)
-    return accessor;
-
-  return std::make_unique<RendererWebMIDIAccessorImpl>(client);
-}
-
-//------------------------------------------------------------------------------
-
 WebBlobRegistry* RendererBlinkPlatformImpl::GetBlobRegistry() {
   // blob_registry_ can be NULL when running some tests.
   return blob_registry_.get();
@@ -870,6 +732,16 @@ RendererBlinkPlatformImpl::CreateWebRtcPortAllocator(
   return rtc_dependency_factory->CreatePortAllocator(frame);
 }
 
+std::unique_ptr<webrtc::AsyncResolverFactory>
+RendererBlinkPlatformImpl::CreateWebRtcAsyncResolverFactory() {
+  RenderThreadImpl* render_thread = RenderThreadImpl::current();
+  DCHECK(render_thread);
+  PeerConnectionDependencyFactory* rtc_dependency_factory =
+      render_thread->GetPeerConnectionDependencyFactory();
+  rtc_dependency_factory->EnsureInitialized();
+  return rtc_dependency_factory->CreateAsyncResolverFactory();
+}
+
 //------------------------------------------------------------------------------
 
 std::unique_ptr<WebCanvasCaptureHandler>
@@ -917,13 +789,18 @@ void RendererBlinkPlatformImpl::CreateHTMLAudioElementCapturer(
           web_media_player);
 
   // Takes ownership of |media_stream_source|.
-  web_media_stream_source.SetExtraData(media_stream_source);
+  web_media_stream_source.SetPlatformSource(
+      base::WrapUnique(media_stream_source));
 
   blink::WebMediaStreamSource::Capabilities capabilities;
   capabilities.device_id = track_id;
   capabilities.echo_cancellation = std::vector<bool>({false});
   capabilities.auto_gain_control = std::vector<bool>({false});
   capabilities.noise_suppression = std::vector<bool>({false});
+  capabilities.sample_size = {
+      media::SampleFormatToBitsPerChannel(media::kSampleFormatS16),  // min
+      media::SampleFormatToBitsPerChannel(media::kSampleFormatS16)   // max
+  };
   web_media_stream_source.SetCapabilities(capabilities);
 
   media_stream_source->ConnectToTrack(web_media_stream_track);
@@ -1040,19 +917,12 @@ RendererBlinkPlatformImpl::CreateOffscreenGraphicsContext3DProvider(
   constexpr bool automatic_flushes = true;
   constexpr bool support_locking = false;
 
-  uint32_t stream_id = kGpuStreamIdDefault;
-  gpu::SchedulingPriority priority = kGpuStreamPriorityDefault;
-  if (gpu_channel_host->gpu_feature_info().IsWorkaroundEnabled(
-          gpu::USE_HIGH_PRIORITY_FOR_WEBGL)) {
-    stream_id = kGpuStreamIdHighPriorityWebGL;
-    priority = kGpuStreamPriorityHighPriorityWebGL;
-  }
-
   scoped_refptr<ws::ContextProviderCommandBuffer> provider(
       new ws::ContextProviderCommandBuffer(
           std::move(gpu_channel_host),
-          RenderThreadImpl::current()->GetGpuMemoryBufferManager(), stream_id,
-          priority, gpu::kNullSurfaceHandle, GURL(top_document_web_url),
+          RenderThreadImpl::current()->GetGpuMemoryBufferManager(),
+          kGpuStreamIdDefault, kGpuStreamPriorityDefault,
+          gpu::kNullSurfaceHandle, GURL(top_document_web_url),
           automatic_flushes, support_locking, web_attributes.support_grcontext,
           gpu::SharedMemoryLimits(), attributes,
           ws::command_buffer_metrics::ContextType::WEBGL));

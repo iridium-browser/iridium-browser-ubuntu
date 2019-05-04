@@ -64,9 +64,8 @@ class TestTargetView : public views::View {
 
  private:
   // views::View:
-  bool GetDropFormats(
-      int* formats,
-      std::set<ui::Clipboard::FormatType>* format_types) override;
+  bool GetDropFormats(int* formats,
+                      std::set<ui::ClipboardFormatType>* format_types) override;
   bool AreDropTypesRequired() override;
   bool CanDrop(const OSExchangeData& data) override;
   void OnDragEntered(const ui::DropTargetEvent& event) override;
@@ -105,7 +104,7 @@ TestTargetView::~TestTargetView() {
 
 bool TestTargetView::GetDropFormats(
     int* formats,
-    std::set<ui::Clipboard::FormatType>* format_types) {
+    std::set<ui::ClipboardFormatType>* format_types) {
   *formats = ui::OSExchangeData::STRING;
   return true;
 }
@@ -155,10 +154,9 @@ class MenuViewDragAndDropTest : public MenuTestBase {
   void BuildMenu(views::MenuItemView* menu) override;
 
   // views::MenuDelegate:
-  bool GetDropFormats(
-      views::MenuItemView* menu,
-      int* formats,
-      std::set<ui::Clipboard::FormatType>* format_types) override;
+  bool GetDropFormats(views::MenuItemView* menu,
+                      int* formats,
+                      std::set<ui::ClipboardFormatType>* format_types) override;
   bool AreDropTypesRequired(views::MenuItemView* menu) override;
   bool CanDrop(views::MenuItemView* menu,
                const ui::OSExchangeData& data) override;
@@ -213,7 +211,7 @@ void MenuViewDragAndDropTest::BuildMenu(views::MenuItemView* menu) {
 bool MenuViewDragAndDropTest::GetDropFormats(
     views::MenuItemView* menu,
     int* formats,
-    std::set<ui::Clipboard::FormatType>* format_types) {
+    std::set<ui::ClipboardFormatType>* format_types) {
   *formats = ui::OSExchangeData::STRING;
   return true;
 }
@@ -345,12 +343,7 @@ void MenuViewDragAndDropTestTestInMenuDrag::Step4() {
 // Disabled for being flaky. Tracked in:
 // TODO(erg): Fix DND tests on linux_aura. http://crbug.com/163931.
 // TODO(tapted): De-flake and run on Mac. http://crbug.com/449058.
-#if defined(OS_WIN)
-#define MAYBE_TestInMenuDrag TestInMenuDrag
-#else
-#define MAYBE_TestInMenuDrag DISABLED_TestInMenuDrag
-#endif
-VIEW_TEST(MenuViewDragAndDropTestTestInMenuDrag, MAYBE_TestInMenuDrag)
+VIEW_TEST(MenuViewDragAndDropTestTestInMenuDrag, DISABLED_TestInMenuDrag)
 
 class MenuViewDragAndDropTestNestedDrag : public MenuViewDragAndDropTest {
  public:

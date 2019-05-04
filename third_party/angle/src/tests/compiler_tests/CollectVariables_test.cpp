@@ -9,10 +9,10 @@
 
 #include <memory>
 
-#include "angle_gl.h"
-#include "gtest/gtest.h"
 #include "GLSLANG/ShaderLang.h"
+#include "angle_gl.h"
 #include "compiler/translator/TranslatorGLSL.h"
+#include "gtest/gtest.h"
 
 using namespace sh;
 
@@ -39,7 +39,7 @@ class CollectVariablesTest : public testing::Test
     {
         ShBuiltInResources resources;
         InitBuiltInResources(&resources);
-        resources.MaxDrawBuffers = 8;
+        resources.MaxDrawBuffers           = 8;
         resources.EXT_blend_func_extended  = true;
         resources.MaxDualSourceDrawBuffers = 1;
 
@@ -56,7 +56,7 @@ class CollectVariablesTest : public testing::Test
     // For use in the gl_DepthRange tests.
     void validateDepthRangeShader(const std::string &shaderString)
     {
-        const char *shaderStrings[] = { shaderString.c_str() };
+        const char *shaderStrings[] = {shaderString.c_str()};
         ASSERT_TRUE(mTranslator->compile(shaderStrings, 1, SH_VARIABLES));
 
         const std::vector<Uniform> &uniforms = mTranslator->getUniforms();
@@ -68,7 +68,7 @@ class CollectVariablesTest : public testing::Test
         ASSERT_EQ(3u, uniform.fields.size());
 
         bool foundNear = false;
-        bool foundFar = false;
+        bool foundFar  = false;
         bool foundDiff = false;
 
         for (const auto &field : uniform.fields)
@@ -152,7 +152,7 @@ class CollectVertexVariablesTest : public CollectVariablesTest
 class CollectFragmentVariablesTest : public CollectVariablesTest
 {
   public:
-      CollectFragmentVariablesTest() : CollectVariablesTest(GL_FRAGMENT_SHADER) {}
+    CollectFragmentVariablesTest() : CollectVariablesTest(GL_FRAGMENT_SHADER) {}
 };
 
 class CollectVariablesTestES31 : public CollectVariablesTest
@@ -174,8 +174,7 @@ class CollectVariablesEXTGeometryShaderTest : public CollectVariablesTestES31
   public:
     CollectVariablesEXTGeometryShaderTest(sh::GLenum shaderType)
         : CollectVariablesTestES31(shaderType)
-    {
-    }
+    {}
 
   protected:
     void SetUp() override
@@ -192,8 +191,7 @@ class CollectGeometryVariablesTest : public CollectVariablesEXTGeometryShaderTes
 {
   public:
     CollectGeometryVariablesTest() : CollectVariablesEXTGeometryShaderTest(GL_GEOMETRY_SHADER_EXT)
-    {
-    }
+    {}
 
   protected:
     void compileGeometryShaderWithInputPrimitive(const std::string &inputPrimitive,
@@ -216,8 +214,7 @@ class CollectFragmentVariablesEXTGeometryShaderTest : public CollectVariablesEXT
   public:
     CollectFragmentVariablesEXTGeometryShaderTest()
         : CollectVariablesEXTGeometryShaderTest(GL_FRAGMENT_SHADER)
-    {
-    }
+    {}
 
   protected:
     void initTranslator(const ShBuiltInResources &resources)
@@ -573,7 +570,8 @@ TEST_F(CollectVertexVariablesTest, DepthRange)
     const std::string &shaderString =
         "attribute vec4 position;\n"
         "void main() {\n"
-        "   gl_Position = position + vec4(gl_DepthRange.near, gl_DepthRange.far, gl_DepthRange.diff, 1.0);\n"
+        "   gl_Position = position + vec4(gl_DepthRange.near, gl_DepthRange.far, "
+        "gl_DepthRange.diff, 1.0);\n"
         "}\n";
 
     validateDepthRangeShader(shaderString);
@@ -624,7 +622,7 @@ TEST_F(CollectFragmentVariablesTest, OutputVarESSL1FragData)
     ShBuiltInResources resources       = mTranslator->getResources();
     resources.EXT_draw_buffers         = 1;
     const unsigned int kMaxDrawBuffers = 3u;
-    resources.MaxDrawBuffers = kMaxDrawBuffers;
+    resources.MaxDrawBuffers           = kMaxDrawBuffers;
     initTranslator(resources);
 
     const OutputVariable *outputVariable = nullptr;
@@ -648,7 +646,7 @@ TEST_F(CollectFragmentVariablesTest, OutputVarESSL1FragDepthMediump)
         "}\n";
 
     ShBuiltInResources resources = mTranslator->getResources();
-    resources.EXT_frag_depth = 1;
+    resources.EXT_frag_depth     = 1;
     initTranslator(resources);
 
     const OutputVariable *outputVariable = nullptr;
@@ -694,7 +692,7 @@ TEST_F(CollectFragmentVariablesTest, OutputVarESSL3FragDepthHighp)
         "}\n";
 
     ShBuiltInResources resources = mTranslator->getResources();
-    resources.EXT_frag_depth = 1;
+    resources.EXT_frag_depth     = 1;
     initTranslator(resources);
 
     const OutputVariable *outputVariable = nullptr;
@@ -2037,6 +2035,37 @@ TEST_F(CollectVertexVariablesTest, StaticallyUsedButNotActiveInstancedInterfaceB
     // See TODO in CollectVariables.cpp about tracking instanced interface block field static use.
     // EXPECT_TRUE(field.staticUse);
     EXPECT_FALSE(field.active);
+}
+
+// Test an interface block member variable that is statically used. The variable is used to call
+// array length method.
+TEST_F(CollectVertexVariablesTest, StaticallyUsedInArrayLengthOp)
+{
+    const std::string &shaderString =
+        R"(#version 300 es
+        uniform b
+        {
+            float f[3];
+        };
+        void main() {
+            if (f.length() > 1)
+            {
+                gl_Position = vec4(1.0);
+            }
+            else
+            {
+                gl_Position = vec4(0.0);
+            }
+        })";
+
+    compile(shaderString);
+
+    const std::vector<InterfaceBlock> &interfaceBlocks = mTranslator->getInterfaceBlocks();
+    ASSERT_EQ(1u, interfaceBlocks.size());
+    const InterfaceBlock &interfaceBlock = interfaceBlocks[0];
+
+    EXPECT_EQ("b", interfaceBlock.name);
+    EXPECT_TRUE(interfaceBlock.staticUse);
 }
 
 // Test a varying that is declared invariant but not otherwise used.
