@@ -1,0 +1,11 @@
+include_rules = [
+  "+content/public/test",
+]
+
+specific_include_rules = {
+  "platform_test_helper_mus.cc": [
+    "+services/catalog/catalog.h",
+    "+services/service_manager/background/background_service_manager.h",
+    "+services/service_manager/public",
+  ]
+}

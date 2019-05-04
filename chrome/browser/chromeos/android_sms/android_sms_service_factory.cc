@@ -1,0 +1,97 @@
+// Copyright 2018 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include "chrome/browser/chromeos/android_sms/android_sms_service_factory.h"
+
+#include "chrome/browser/chromeos/android_sms/pairing_lost_notifier.h"
+#include "chrome/browser/chromeos/multidevice_setup/multidevice_setup_client_factory.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/notifications/notification_display_service_factory.h"
+#include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
+#include "chrome/browser/web_applications/web_app_provider_factory.h"
+#include "chromeos/constants/chromeos_features.h"
+#include "chromeos/services/multidevice_setup/public/cpp/prefs.h"
+#include "chromeos/services/multidevice_setup/public/mojom/multidevice_setup.mojom.h"
+#include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/pref_registry/pref_registry_syncable.h"
+
+namespace chromeos {
+
+namespace android_sms {
+
+namespace {
+
+bool IsFeatureAllowed(content::BrowserContext* context) {
+  return multidevice_setup::IsFeatureAllowed(
+      multidevice_setup::mojom::Feature::kMessages,
+      Profile::FromBrowserContext(context)->GetPrefs());
+}
+
+}  // namespace
+
+// static
+AndroidSmsServiceFactory* AndroidSmsServiceFactory::GetInstance() {
+  static base::NoDestructor<AndroidSmsServiceFactory> factory_instance;
+  return factory_instance.get();
+}
+
+// static
+AndroidSmsService* AndroidSmsServiceFactory::GetForBrowserContext(
+    content::BrowserContext* browser_context) {
+  return static_cast<AndroidSmsService*>(
+      AndroidSmsServiceFactory::GetInstance()->GetServiceForBrowserContext(
+          browser_context, true));
+}
+
+AndroidSmsServiceFactory::AndroidSmsServiceFactory()
+    : BrowserContextKeyedServiceFactory(
+          "AndroidSmsService",
+          BrowserContextDependencyManager::GetInstance()) {
+  DependsOn(app_list::AppListSyncableServiceFactory::GetInstance());
+  DependsOn(HostContentSettingsMapFactory::GetInstance());
+  DependsOn(chromeos::multidevice_setup::MultiDeviceSetupClientFactory::
+                GetInstance());
+  DependsOn(web_app::WebAppProviderFactory::GetInstance());
+  DependsOn(NotificationDisplayServiceFactory::GetInstance());
+}
+
+AndroidSmsServiceFactory::~AndroidSmsServiceFactory() = default;
+
+KeyedService* AndroidSmsServiceFactory::BuildServiceInstanceFor(
+    content::BrowserContext* context) const {
+  if (!IsFeatureAllowed(context) ||
+      !base::FeatureList::IsEnabled(
+          chromeos::features::kAndroidMessagesIntegration)) {
+    return nullptr;
+  }
+
+  Profile* profile = Profile::FromBrowserContext(context);
+  if (ProfileHelper::Get()->GetUserByProfile(profile) == nullptr)
+    return nullptr;
+
+  return new AndroidSmsService(
+      profile, HostContentSettingsMapFactory::GetForProfile(profile),
+      chromeos::multidevice_setup::MultiDeviceSetupClientFactory::GetForProfile(
+          profile),
+      web_app::WebAppProviderFactory::GetForProfile(profile),
+      app_list::AppListSyncableServiceFactory::GetForProfile(profile));
+}
+
+bool AndroidSmsServiceFactory::ServiceIsCreatedWithBrowserContext() const {
+  return true;
+}
+
+bool AndroidSmsServiceFactory::ServiceIsNULLWhileTesting() const {
+  return true;
+}
+
+void AndroidSmsServiceFactory::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
+  PairingLostNotifier::RegisterProfilePrefs(registry);
+}
+
+}  // namespace android_sms
+
+}  // namespace chromeos
