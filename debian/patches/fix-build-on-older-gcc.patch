@@ -693,7 +693,7 @@
                    std::forward_as_tuple(metadata.node_id),
 -                  std::forward_as_tuple(metadata, std::move(pixels_callback)));
 +                  std::forward_as_tuple(std::piecewise_construct,
-+                      std::forward_as_tuple(metadata),
++                      std::forward_as_tuple(std::move(metadata)),
 +                      std::forward_as_tuple(std::move(pixels_callback))));
  }
  
