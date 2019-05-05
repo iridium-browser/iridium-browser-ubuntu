@@ -806,3 +806,82 @@
  }
  
  }  // namespace indexed_db
+--- a/content/browser/indexed_db/indexed_db_factory_impl.cc
++++ b/content/browser/indexed_db/indexed_db_factory_impl.cc
+@@ -692,8 +692,8 @@ IndexedDBFactoryImpl::OpenBackingStore(c
+       backing_store->pre_close_task_queue()->StopForNewConnection();
+       backing_store->SetPreCloseTaskList(nullptr);
+     }
+-    return {std::move(backing_store), leveldb::Status::OK(),
+-            IndexedDBDataLossInfo(), false};
++    return std::make_tuple(std::move(backing_store), leveldb::Status::OK(),
++            IndexedDBDataLossInfo(), false);
+   }
+ 
+   base::FilePath blob_path;
+@@ -704,7 +704,7 @@ IndexedDBFactoryImpl::OpenBackingStore(c
+     std::tie(database_path, blob_path, s) =
+         indexed_db::CreateDatabaseDirectories(data_directory, origin);
+     if (!s.ok())
+-      return {std::move(backing_store), s, IndexedDBDataLossInfo(), false};
++      return std::make_tuple(std::move(backing_store), s, IndexedDBDataLossInfo(), false);
+   }
+   std::unique_ptr<LevelDBDatabase> database;
+   IndexedDBDataLossInfo data_loss_info;
+@@ -714,7 +714,7 @@ IndexedDBFactoryImpl::OpenBackingStore(c
+                                                database_path, leveldb_factory_,
+                                                context_->TaskRunner());
+   if (!s.ok())
+-    return {std::move(backing_store), s, data_loss_info, disk_full};
++    return std::make_tuple(std::move(backing_store), s, data_loss_info, disk_full);
+ 
+   if (data_directory.empty()) {
+     backing_store = base::MakeRefCounted<IndexedDBBackingStore>(
+@@ -742,7 +742,7 @@ IndexedDBFactoryImpl::OpenBackingStore(c
+   // type.
+   DCHECK_EQ(!in_memory_backing_stores_.empty(), database_path.empty());
+   DCHECK(backing_store);
+-  return {std::move(backing_store), s, data_loss_info, disk_full};
++  return std::make_tuple(std::move(backing_store), s, data_loss_info, disk_full);
+ }
+ 
+ scoped_refptr<IndexedDBBackingStore> IndexedDBFactoryImpl::CreateBackingStore(
+--- a/content/browser/indexed_db/leveldb/leveldb_env.cc
++++ b/content/browser/indexed_db/leveldb/leveldb_env.cc
+@@ -82,13 +82,13 @@ DefaultLevelDBFactory::OpenLevelDB(
+       LOG(ERROR) << "Failed to open in-memory LevelDB database: "
+                  << status.ToString();
+       // Must match the other returns in this function for RVO.
+-      return {nullptr, status, false};
++      return std::make_tuple(nullptr, status, false);
+     }
+ 
+-    return {LevelDBState::CreateForInMemoryDB(
++    return std::make_tuple(LevelDBState::CreateForInMemoryDB(
+                 std::move(in_memory_env), ldb_comparator, idb_comparator,
+                 std::move(db), "in-memory-database"),
+-            status, false};
++            status, false);
+   }
+ 
+   leveldb_env::Options options =
+@@ -115,16 +115,16 @@ DefaultLevelDBFactory::OpenLevelDB(
+     LOG(ERROR) << "Failed to open LevelDB database from "
+                << file_name.AsUTF8Unsafe() << "," << status.ToString();
+     // Must match the other returns in this function for RVO.
+-    return {nullptr, status, is_disk_full};
++    return std::make_tuple(nullptr, status, is_disk_full);
+   }
+ 
+   UMA_HISTOGRAM_MEDIUM_TIMES("WebCore.IndexedDB.LevelDB.OpenTime",
+                              base::TimeTicks::Now() - begin_time);
+ 
+   // Must match the other returns in this function for RVO.
+-  return {LevelDBState::CreateForDiskDB(ldb_comparator, idb_comparator,
++  return std::make_tuple(LevelDBState::CreateForDiskDB(ldb_comparator, idb_comparator,
+                                         std::move(db), std::move(file_name)),
+-          status, false};
++          status, false);
+ }
+ 
+ leveldb::Status DefaultLevelDBFactory::DestroyLevelDB(
