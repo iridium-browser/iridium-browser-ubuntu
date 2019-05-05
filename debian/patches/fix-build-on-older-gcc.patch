@@ -837,6 +837,15 @@
  
    if (data_directory.empty()) {
      backing_store = base::MakeRefCounted<IndexedDBBackingStore>(
+@@ -731,7 +731,7 @@ IndexedDBFactoryImpl::OpenBackingStore(c
+       first_open_since_startup);
+   if (!s.ok()) {
+     backing_store.reset();
+-    return {std::move(backing_store), s, data_loss_info, disk_full};
++    return std::make_tuple(std::move(backing_store), s, data_loss_info, disk_full);
+   }
+   // If an in-memory database, bind lifetime to this factory instance.
+   if (database_path.empty())
 @@ -742,7 +742,7 @@ IndexedDBFactoryImpl::OpenBackingStore(c
    // type.
    DCHECK_EQ(!in_memory_backing_stores_.empty(), database_path.empty());
